@@ -93,7 +93,8 @@ fn build_menu(app: &AppHandle, timers: &[Timer]) -> tauri::Result<Menu<Wry>> {
         for timer in running {
             let label = format!("Pause {}", shorten(&timer.label, MAX_LABEL_CHARS));
             builder = builder.item(
-                &MenuItemBuilder::with_id(format!("{PAUSE_PREFIX}{}", timer.id), label).build(app)?,
+                &MenuItemBuilder::with_id(format!("{PAUSE_PREFIX}{}", timer.id), label)
+                    .build(app)?,
             );
         }
     }

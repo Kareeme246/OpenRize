@@ -256,7 +256,9 @@ mod tests {
     #[test]
     fn pause_accumulates_only_the_time_that_ran() {
         let mut store = store("pause");
-        let id = store.create_at("Write the handoff", 1_000).unwrap()[0].id.clone();
+        let id = store.create_at("Write the handoff", 1_000).unwrap()[0]
+            .id
+            .clone();
 
         store.pause_at(&id, 4_500).unwrap();
         let paused = &store.snapshot()[0];
@@ -293,7 +295,9 @@ mod tests {
     fn a_running_timer_survives_a_reload() {
         let dir = temp_dir("reload");
         let mut first = TimerStore::load(&dir);
-        let id = first.create_at("Survive a restart", 1_000).unwrap()[0].id.clone();
+        let id = first.create_at("Survive a restart", 1_000).unwrap()[0]
+            .id
+            .clone();
         first.pause_at(&id, 4_000).unwrap();
 
         let second = TimerStore::load(&dir);

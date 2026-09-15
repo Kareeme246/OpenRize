@@ -6,8 +6,8 @@
 
 use tauri::{AppHandle, Manager};
 
-use crate::tray;
 use crate::timers::Timer;
+use crate::tray;
 use crate::AppState;
 
 type Timers = Result<Vec<Timer>, String>;

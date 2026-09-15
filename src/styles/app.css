@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+@theme {
+  /* Brand tokens — the single place the palette is defined. */
+  --color-ink-950: #050706;
+  --color-ink-900: #0a0d0b;
+  --color-ink-800: #121713;
+  --color-accent: #2aea83;
+  --color-accent-dim: #1fb968;
+  --color-accent-soft: rgba(42, 234, 131, 0.12);
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* The page gradient is one background, not a system of backgrounds, so it is
+   plain CSS rather than a pile of utilities. Tokens are read back as CSS
+   variables so the palette still lives in exactly one place. */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  color: #e8efe9;
+  background-color: var(--color-ink-950);
+  background-image:
+    radial-gradient(1100px 700px at 8% -8%, rgba(42, 234, 131, 0.16), transparent 62%),
+    radial-gradient(760px 520px at 100% 0%, rgba(42, 234, 131, 0.07), transparent 60%),
+    linear-gradient(160deg, #000 0%, var(--color-ink-950) 45%, #08110c 100%);
+  background-attachment: fixed;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}

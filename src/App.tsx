@@ -1,51 +1,27 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { AppHeader } from "./components/AppHeader";
+import { Sidebar } from "./components/Sidebar";
+import { Trackers } from "./pages/Trackers";
+import { elapsedMs } from "./lib/timers";
+import { useTimers } from "./hooks/useTimers";
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+export default function App() {
+  const api = useTimers();
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+  const runningCount = api.timers.filter(
+    (timer) => timer.startedAt !== null,
+  ).length;
+  const totalMs = api.timers.reduce(
+    (sum, timer) => sum + elapsedMs(timer, api.now),
+    0,
+  );
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+    <div className="grid h-full grid-cols-[224px_minmax(0,1fr)]">
+      <Sidebar />
+      <div className="flex min-w-0 flex-col">
+        <AppHeader runningCount={runningCount} totalMs={totalMs} />
+        <Trackers api={api} />
       </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+    </div>
   );
 }
-
-export default App;

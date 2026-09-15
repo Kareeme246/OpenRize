@@ -16,7 +16,15 @@ interface StopwatchCardProps {
  *  and a modal is more surface than this deserves. */
 const CONFIRM_WINDOW_MS = 3000;
 
-export function StopwatchCard({ timer, now, onStart, onPause, onReset, onRename, onDelete }: StopwatchCardProps) {
+export function StopwatchCard({
+  timer,
+  now,
+  onStart,
+  onPause,
+  onReset,
+  onRename,
+  onDelete,
+}: StopwatchCardProps) {
   const running = timer.startedAt !== null;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(timer.label);
@@ -24,7 +32,10 @@ export function StopwatchCard({ timer, now, onStart, onPause, onReset, onRename,
 
   useEffect(() => {
     if (!confirming) return;
-    const handle = window.setTimeout(() => setConfirming(false), CONFIRM_WINDOW_MS);
+    const handle = window.setTimeout(
+      () => setConfirming(false),
+      CONFIRM_WINDOW_MS,
+    );
     return () => window.clearTimeout(handle);
   }, [confirming]);
 
@@ -73,12 +84,16 @@ export function StopwatchCard({ timer, now, onStart, onPause, onReset, onRename,
             {timer.label}
           </button>
         )}
-        <span className={`size-1.75 shrink-0 rounded-full ${running ? "bg-accent shadow-[0_0_0_3px_rgba(42,234,131,0.16)]" : "bg-white/25"}`} />
+        <span
+          className={`size-1.75 shrink-0 rounded-full ${running ? "bg-accent shadow-[0_0_0_3px_rgba(42,234,131,0.16)]" : "bg-white/25"}`}
+        />
       </div>
 
       <div
         className={`font-mono text-[29px] font-semibold tabular-nums leading-none tracking-tight ${
-          running ? "text-accent drop-shadow-[0_0_28px_rgba(42,234,131,0.35)]" : "text-white/45"
+          running
+            ? "text-accent drop-shadow-[0_0_28px_rgba(42,234,131,0.35)]"
+            : "text-white/45"
         }`}
       >
         {formatDuration(elapsedMs(timer, now))}
@@ -89,7 +104,9 @@ export function StopwatchCard({ timer, now, onStart, onPause, onReset, onRename,
           type="button"
           onClick={() => (running ? onPause(timer.id) : onStart(timer.id))}
           className={`flex-1 rounded-lg border py-1.5 text-xs font-semibold ${
-            running ? "border-accent/30 bg-accent-soft text-accent" : "border-white/10 bg-white/5 text-white"
+            running
+              ? "border-accent/30 bg-accent-soft text-accent"
+              : "border-white/10 bg-white/5 text-white"
           }`}
         >
           {running ? "Pause" : "Start"}
@@ -101,7 +118,15 @@ export function StopwatchCard({ timer, now, onStart, onPause, onReset, onRename,
           onClick={() => onReset(timer.id)}
           className="grid w-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-white/55"
         >
-          <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" aria-hidden="true">
+          <svg
+            viewBox="0 0 24 24"
+            className="size-3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2.2}
+            strokeLinecap="round"
+            aria-hidden="true"
+          >
             <path d="M3 11a9 9 0 1 0 3-6.7M3 4v5h5" />
           </svg>
         </button>
@@ -109,9 +134,13 @@ export function StopwatchCard({ timer, now, onStart, onPause, onReset, onRename,
           type="button"
           title={confirming ? "Click again to delete" : "Delete"}
           aria-label={confirming ? "Confirm delete" : "Delete"}
-          onClick={() => (confirming ? onDelete(timer.id) : setConfirming(true))}
+          onClick={() =>
+            confirming ? onDelete(timer.id) : setConfirming(true)
+          }
           className={`grid w-9 shrink-0 place-items-center rounded-lg border text-sm ${
-            confirming ? "border-red-400/50 bg-red-400/10 text-red-300" : "border-white/10 bg-white/5 text-white/55"
+            confirming
+              ? "border-red-400/50 bg-red-400/10 text-red-300"
+              : "border-white/10 bg-white/5 text-white/55"
           }`}
         >
           {confirming ? "!" : "×"}

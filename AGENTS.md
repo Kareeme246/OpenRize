@@ -1,5 +1,6 @@
 This is a TAURI desktop app project. Because of this there are a few considerations to ensure that code quality remains high in this codebase.
 
+- This project uses typescript on the frontend. Always properly type variables and never use the "any" type to get around linter warnings.
 - It is imperative to always ask the user whether or not a feature will live in the src-tauri (rust backend) or src (react frontend) or a combination of both.
 - It is very important that when writing code to ALWAYS ground decisions in the 
 [tauri documentation](https://docs.rs/tauri/2.11.5/tauri) and Rust language documentation.

@@ -12,18 +12,7 @@ interface ConfirmDialogProps {
  * A real <dialog> opened with showModal(), so the browser hands us the top
  * layer, the focus trap and Escape-to-cancel for free. Three details matter:
  *
- * - No padding or background of its own; the panel is the inner div. That makes
- *   the dialog's box exactly the panel's box, so a click whose target *is* the
- *   dialog landed on ::backdrop — i.e. the greyed-out area — and closes it.
- * - `m-auto` is load-bearing. Preflight's `* { margin: 0 }` is an author style
- *   and so beats the UA's `dialog { margin: auto }`, which would otherwise pin
- *   the dialog to the top-left instead of centring it.
- * - Focus is pulled off the buttons onto the dialog itself. showModal() focuses
- *   the first focusable child, which made Cancel look preselected.
- *
- * Deliberately inverted emphasis: Cancel wears the primary accent and the
- * confirming action is plain, so the button the eye lands on is the no-op. Tab
- * order matches — Cancel is first, so returning focus is the lazy default.
+
  */
 export function ConfirmDialog({
   title,

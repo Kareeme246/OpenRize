@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ask } from "@tauri-apps/plugin-dialog";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { HourRing } from "./HourRing";
 import { elapsedMs, formatDuration, type Timer } from "../lib/timers";
 
@@ -26,32 +26,8 @@ export function StopwatchCard({
   const elapsed = elapsedMs(timer, now);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(timer.label);
-
-  /** Reset and delete both destroy real accumulated time, so both ask first.
-   *  The OS alert is used rather than an in-app overlay: the webview's own
-   *  confirm() behaves differently across platforms, and this needs no styling. */
-  const requestReset = async (): Promise<void> => {
-    const confirmed = await ask("Set its time back to 0:00 and stop it.", {
-      title: `Reset "${timer.label}"?`,
-      kind: "warning",
-      okLabel: "Reset",
-      cancelLabel: "Cancel",
-    });
-    if (confirmed) onReset(timer.id);
-  };
-
-  const requestDelete = async (): Promise<void> => {
-    const confirmed = await ask(
-      `This tracker and its ${formatDuration(elapsed)} will be gone.`,
-      {
-        title: `Delete "${timer.label}"?`,
-        kind: "warning",
-        okLabel: "Delete",
-        cancelLabel: "Cancel",
-      },
-    );
-    if (confirmed) onDelete(timer.id);
-  };
+  /** Which confirmation is up, if any. Both destroy real accumulated time. */
+  const [pending, setPending] = useState<"reset" | "delete" | null>(null);
 
   const commitRename = (): void => {
     const next = draft.trim();
@@ -138,7 +114,7 @@ export function StopwatchCard({
           type="button"
           title="Reset to zero and stop"
           aria-label="Reset to zero and stop"
-          onClick={() => void requestReset()}
+          onClick={() => setPending("reset")}
           className="grid w-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-white/55"
         >
           <svg
@@ -157,12 +133,39 @@ export function StopwatchCard({
           type="button"
           title="Delete"
           aria-label="Delete"
-          onClick={() => void requestDelete()}
+          onClick={() => setPending("delete")}
           className="grid w-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-sm text-white/55"
         >
           ×
         </button>
       </div>
+
+      {pending === "reset" && (
+        <ConfirmDialog
+          title={`Reset "${timer.label}"?`}
+          body="Set its time back to 0:00 and stop it."
+          confirmLabel="Reset"
+          onConfirm={() => {
+            setPending(null);
+            onReset(timer.id);
+          }}
+          onCancel={() => setPending(null)}
+        />
+      )}
+
+      {pending === "delete" && (
+        <ConfirmDialog
+          title={`Delete "${timer.label}"?`}
+          body={`This tracker and its ${formatDuration(elapsed)} will be gone.`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={() => {
+            setPending(null);
+            onDelete(timer.id);
+          }}
+          onCancel={() => setPending(null)}
+        />
+      )}
     </div>
   );
 }

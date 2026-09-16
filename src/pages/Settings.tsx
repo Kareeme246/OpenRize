@@ -1,8 +1,7 @@
 import type { ReactNode } from "react";
 
 /*
- * Every control here is a stub. The badge is deliberate: it says "this row
- * exists so the shape of settings is visible, nothing behind it works yet" —
+ * Every control here is a stub. 
  * delete the badge (not the row) when a control lands.
  */
 function SettingRow({

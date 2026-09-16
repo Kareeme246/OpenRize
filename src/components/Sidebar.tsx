@@ -14,9 +14,6 @@ interface NavTabProps {
   children: ReactNode;
 }
 
-/** One nav row shape for every item, present and future: full width of the
- *  sidebar's content box, and the same grey text whether or not it is active —
- *  only the background marks selection. */
 function NavTab({ active, label, onSelect, children }: NavTabProps) {
   return (
     <button

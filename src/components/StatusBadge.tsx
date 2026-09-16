@@ -1,13 +1,15 @@
-export type Status = "not-implemented" | "in-progress";
+export type Status = "not-implemented" | "in-progress" | "live";
 
 const styles: Record<Status, string> = {
   "not-implemented": "border-white/10 bg-white/5 text-white/40",
   "in-progress": "border-accent/30 bg-accent-soft text-accent",
+  live: "border-accent/40 bg-accent-soft text-accent",
 };
 
 const labels: Record<Status, string> = {
   "not-implemented": "Not implemented",
-  "in-progress": "In progress",
+  "in-progress": "Partial",
+  live: "Live",
 };
 
 interface StatusBadgeProps {

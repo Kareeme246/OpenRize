@@ -1,7 +1,7 @@
 import { useState } from "react";
+import { elapsedMs, formatDuration, type Timer } from "../lib/timers";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { HourRing } from "./HourRing";
-import { elapsedMs, formatDuration, type Timer } from "../lib/timers";
 
 interface StopwatchCardProps {
   timer: Timer;
@@ -47,6 +47,7 @@ export function StopwatchCard({
       <div className="flex w-full min-w-0 items-center justify-center">
         {editing ? (
           <input
+            // biome-ignore lint/a11y/noAutofocus: intentional — focuses the rename input the moment editing starts
             autoFocus
             value={draft}
             aria-label="Tracker name"

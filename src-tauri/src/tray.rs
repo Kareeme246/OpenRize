@@ -16,7 +16,22 @@ const MAX_LABEL_CHARS: usize = 32;
 
 /// Template images: black with alpha. macOS uses the alpha as a mask and tints
 /// the glyph for the current menu bar, which is why no brand colour can appear
-/// here. `scripts/make-tray-icons.py` regenerates both files.
+/// here. Both are cut from the Chrono Bloom master, `app-icon.png` — run from
+/// the repo root, replacing the final path with `tray-idle.png` for the second
+/// file and adding `-fill black -draw "circle 512,512 512,362"` after `-level`
+/// to paint out the centre bead:
+///
+/// ```text
+/// magick app-icon.png -fx "g-max(r,b)" -alpha off -level "15%,40%" \
+///   -gravity center -crop 680x680+0+0 +repage -resize 42x42 \
+///   -colorspace sRGB -alpha set -channel A -fx "u.r" +channel \
+///   -channel RGB -evaluate set 0 +channel \
+///   -background none -gravity center -extent 44x44 \
+///   png32:src-tauri/icons/tray-active.png
+/// ```
+///
+/// 44px is deliberate: macOS draws the tray glyph at 18pt, so a 44px bitmap
+/// stays crisp on retina where the old 22px one was blurry.
 fn glyph(active: bool) -> Image<'static> {
     if active {
         tauri::include_image!("icons/tray-active.png")

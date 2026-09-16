@@ -70,7 +70,10 @@ export function formatClock(epochMs: number): string {
   });
 }
 
-export const KIND_STYLES: Record<SessionKind, { dot: string; text: string; label: string }> = {
+export const KIND_STYLES: Record<
+  SessionKind,
+  { dot: string; text: string; label: string }
+> = {
   activity: { dot: "bg-white/35", text: "text-white/70", label: "Activity" },
   focus: { dot: "bg-accent", text: "text-accent", label: "Focus" },
   break: { dot: "bg-sky-400", text: "text-sky-300", label: "Break" },

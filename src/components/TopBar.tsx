@@ -116,9 +116,7 @@ export function TopBar({
         />
       </div>
 
-      <span
-        className="shrink-0 select-none font-mono text-[11.5px] font-semibold tracking-wide text-white/60"
-      >
+      <span className="shrink-0 select-none font-mono text-[11.5px] font-semibold tracking-wide text-white/60">
         OpenRize
       </span>
 

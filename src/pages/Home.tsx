@@ -48,8 +48,14 @@ export function Home() {
               label="Tracked"
               value={formatDuration(snapshot?.trackedMs ?? 0)}
             />
-            <Stat label="Focus" value={formatDuration(snapshot?.focusMs ?? 0)} />
-            <Stat label="Break" value={formatDuration(snapshot?.breakMs ?? 0)} />
+            <Stat
+              label="Focus"
+              value={formatDuration(snapshot?.focusMs ?? 0)}
+            />
+            <Stat
+              label="Break"
+              value={formatDuration(snapshot?.breakMs ?? 0)}
+            />
           </div>
           <CardBody>
             <AppBreakdown segments={segments} now={now} />
@@ -118,8 +124,8 @@ export function Home() {
                   snapshot?.captureEnabled ? "bg-accent" : "bg-white/30"
                 }`}
               />
-              {snapshot?.captureEnabled ? "Capture running" : "Capture paused"} ·
-              idle {formatDuration(snapshot?.idleMs ?? 0)}
+              {snapshot?.captureEnabled ? "Capture running" : "Capture paused"}{" "}
+              · idle {formatDuration(snapshot?.idleMs ?? 0)}
             </div>
           </div>
         </BentoCard>

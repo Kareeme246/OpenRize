@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { HourRing } from "./HourRing";
 import { elapsedMs, formatDuration, type Timer } from "../lib/timers";
 
 interface StopwatchCardProps {
@@ -11,11 +13,6 @@ interface StopwatchCardProps {
   onDelete: (id: string) => void;
 }
 
-/** Deleting a stopwatch throws away real accumulated time, so it takes two
- *  clicks. A native confirm() is one line but its behaviour differs by webview,
- *  and a modal is more surface than this deserves. */
-const CONFIRM_WINDOW_MS = 3000;
-
 export function StopwatchCard({
   timer,
   now,
@@ -26,18 +23,11 @@ export function StopwatchCard({
   onDelete,
 }: StopwatchCardProps) {
   const running = timer.startedAt !== null;
+  const elapsed = elapsedMs(timer, now);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(timer.label);
-  const [confirming, setConfirming] = useState(false);
-
-  useEffect(() => {
-    if (!confirming) return;
-    const handle = window.setTimeout(
-      () => setConfirming(false),
-      CONFIRM_WINDOW_MS,
-    );
-    return () => window.clearTimeout(handle);
-  }, [confirming]);
+  /** Which confirmation is up, if any. Both destroy real accumulated time. */
+  const [pending, setPending] = useState<"reset" | "delete" | null>(null);
 
   const commitRename = (): void => {
     const next = draft.trim();
@@ -84,19 +74,28 @@ export function StopwatchCard({
             {timer.label}
           </button>
         )}
-        <span
-          className={`size-1.75 shrink-0 rounded-full ${running ? "bg-accent shadow-[0_0_0_3px_rgba(42,234,131,0.16)]" : "bg-white/25"}`}
-        />
       </div>
 
-      <div
-        className={`font-mono text-[29px] font-semibold tabular-nums leading-none tracking-tight ${
-          running
-            ? "text-accent drop-shadow-[0_0_28px_rgba(42,234,131,0.35)]"
-            : "text-white/45"
-        }`}
-      >
-        {formatDuration(elapsedMs(timer, now))}
+      <div className="flex min-w-0 items-center gap-3.5">
+        <HourRing elapsed={elapsed} running={running} />
+        <div className="min-w-0">
+          <div
+            className={`truncate font-mono text-[26px] font-semibold tabular-nums leading-none tracking-tight ${
+              running
+                ? "text-accent drop-shadow-[0_0_28px_rgba(42,234,131,0.35)]"
+                : "text-white/45"
+            }`}
+          >
+            {formatDuration(elapsed)}
+          </div>
+          <div
+            className={`mt-1.5 font-mono text-[9.5px] uppercase tracking-wider ${
+              running ? "text-accent/70" : "text-white/30"
+            }`}
+          >
+            {running ? "running" : "paused"}
+          </div>
+        </div>
       </div>
 
       <div className="flex gap-1.5">
@@ -113,9 +112,9 @@ export function StopwatchCard({
         </button>
         <button
           type="button"
-          title="Reset to zero"
-          aria-label="Reset to zero"
-          onClick={() => onReset(timer.id)}
+          title="Reset to zero and stop"
+          aria-label="Reset to zero and stop"
+          onClick={() => setPending("reset")}
           className="grid w-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-white/55"
         >
           <svg
@@ -132,20 +131,40 @@ export function StopwatchCard({
         </button>
         <button
           type="button"
-          title={confirming ? "Click again to delete" : "Delete"}
-          aria-label={confirming ? "Confirm delete" : "Delete"}
-          onClick={() =>
-            confirming ? onDelete(timer.id) : setConfirming(true)
-          }
-          className={`grid w-9 shrink-0 place-items-center rounded-lg border text-sm ${
-            confirming
-              ? "border-red-400/50 bg-red-400/10 text-red-300"
-              : "border-white/10 bg-white/5 text-white/55"
-          }`}
+          title="Delete"
+          aria-label="Delete"
+          onClick={() => setPending("delete")}
+          className="grid w-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-sm text-white/55"
         >
-          {confirming ? "!" : "×"}
+          ×
         </button>
       </div>
+
+      {pending === "reset" && (
+        <ConfirmDialog
+          title={`Reset "${timer.label}"?`}
+          body="Set its time back to 0:00 and stop it."
+          confirmLabel="Reset"
+          onConfirm={() => {
+            setPending(null);
+            onReset(timer.id);
+          }}
+          onCancel={() => setPending(null)}
+        />
+      )}
+
+      {pending === "delete" && (
+        <ConfirmDialog
+          title={`Delete "${timer.label}"?`}
+          body={`This tracker and its ${formatDuration(elapsed)} will be gone.`}
+          confirmLabel="Delete"
+          onConfirm={() => {
+            setPending(null);
+            onDelete(timer.id);
+          }}
+          onCancel={() => setPending(null)}
+        />
+      )}
     </div>
   );
 }

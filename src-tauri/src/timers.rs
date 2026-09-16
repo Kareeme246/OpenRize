@@ -134,13 +134,13 @@ impl TimerStore {
         }
         let id = format!("t{}", self.next_id);
         self.next_id += 1;
-        // Created running: the UI's action is "what are you working on?", and
-        // the point of answering it is to start the clock.
+        // Created idle: naming a tracker is not the same as deciding to bill
+        // time to it, so the card waits for an explicit Start.
         self.timers.push(Timer {
             id,
             label: label.to_string(),
             accumulated_ms: 0,
-            started_at: Some(now),
+            started_at: None,
             created_at: now,
         });
         self.persist()?;
@@ -176,18 +176,9 @@ impl TimerStore {
     }
 
     pub fn reset(&mut self, id: &str) -> Result<Vec<Timer>, String> {
-        let now = self.clock.now_ms();
-        self.reset_at(id, now)
-    }
-
-    /// Zeroes the timer. A running timer keeps running, restarting from zero —
-    /// stopping it would be a surprising side effect of "reset".
-    pub fn reset_at(&mut self, id: &str, now: u64) -> Result<Vec<Timer>, String> {
         let timer = self.find_mut(id)?;
         timer.accumulated_ms = 0;
-        if timer.started_at.is_some() {
-            timer.started_at = Some(now);
-        }
+        timer.started_at = None;
         self.persist()?;
         Ok(self.snapshot())
     }
@@ -259,6 +250,7 @@ mod tests {
         let id = store.create_at("Write the handoff", 1_000).unwrap()[0]
             .id
             .clone();
+        store.start_at(&id, 1_000).unwrap();
 
         store.pause_at(&id, 4_500).unwrap();
         let paused = &store.snapshot()[0];
@@ -271,15 +263,25 @@ mod tests {
     }
 
     #[test]
-    fn reset_zeroes_the_timer_but_leaves_it_running() {
+    fn reset_zeroes_and_stops_the_timer() {
         let mut store = store("reset");
         let id = store.create_at("Reset me", 1_000).unwrap()[0].id.clone();
+        store.start_at(&id, 1_000).unwrap();
 
-        store.reset_at(&id, 2_000).unwrap();
+        store.reset(&id).unwrap();
         let timer = &store.snapshot()[0];
         assert_eq!(timer.accumulated_ms, 0);
-        assert_eq!(timer.started_at, Some(2_000));
-        assert!(timer.is_running());
+        assert_eq!(timer.started_at, None);
+        assert!(!timer.is_running());
+    }
+
+    #[test]
+    fn a_new_tracker_is_created_idle() {
+        let mut store = store("idle-create");
+        let timer = &store.create_at("Not started yet", 1_000).unwrap()[0];
+        assert_eq!(timer.started_at, None);
+        assert!(!timer.is_running());
+        assert_eq!(timer.accumulated_ms, 0);
     }
 
     #[test]
@@ -298,6 +300,7 @@ mod tests {
         let id = first.create_at("Survive a restart", 1_000).unwrap()[0]
             .id
             .clone();
+        first.start_at(&id, 1_000).unwrap();
         first.pause_at(&id, 4_000).unwrap();
 
         let second = TimerStore::load(&dir);

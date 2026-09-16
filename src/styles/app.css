@@ -29,6 +29,6 @@ body {
     radial-gradient(760px 520px at 100% 0%, rgba(42, 234, 131, 0.07), transparent 60%),
     linear-gradient(160deg, #000 0%, var(--color-ink-950) 45%, #08110c 100%);
   background-attachment: fixed;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--font-mono);
   -webkit-font-smoothing: antialiased;
 }

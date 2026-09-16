@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { HourRing } from "./HourRing";
 import { elapsedMs, formatDuration, type Timer } from "../lib/timers";
 
@@ -11,11 +12,6 @@ interface StopwatchCardProps {
   onRename: (id: string, label: string) => void;
   onDelete: (id: string) => void;
 }
-
-/** Deleting a stopwatch throws away real accumulated time, so it takes two
- *  clicks. A native confirm() is one line but its behaviour differs by webview,
- *  and a modal is more surface than this deserves. */
-const CONFIRM_WINDOW_MS = 3000;
 
 export function StopwatchCard({
   timer,
@@ -30,16 +26,32 @@ export function StopwatchCard({
   const elapsed = elapsedMs(timer, now);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(timer.label);
-  const [confirming, setConfirming] = useState(false);
 
-  useEffect(() => {
-    if (!confirming) return;
-    const handle = window.setTimeout(
-      () => setConfirming(false),
-      CONFIRM_WINDOW_MS,
+  /** Reset and delete both destroy real accumulated time, so both ask first.
+   *  The OS alert is used rather than an in-app overlay: the webview's own
+   *  confirm() behaves differently across platforms, and this needs no styling. */
+  const requestReset = async (): Promise<void> => {
+    const confirmed = await ask("Set its time back to 0:00 and stop it.", {
+      title: `Reset "${timer.label}"?`,
+      kind: "warning",
+      okLabel: "Reset",
+      cancelLabel: "Cancel",
+    });
+    if (confirmed) onReset(timer.id);
+  };
+
+  const requestDelete = async (): Promise<void> => {
+    const confirmed = await ask(
+      `This tracker and its ${formatDuration(elapsed)} will be gone.`,
+      {
+        title: `Delete "${timer.label}"?`,
+        kind: "warning",
+        okLabel: "Delete",
+        cancelLabel: "Cancel",
+      },
     );
-    return () => window.clearTimeout(handle);
-  }, [confirming]);
+    if (confirmed) onDelete(timer.id);
+  };
 
   const commitRename = (): void => {
     const next = draft.trim();
@@ -124,9 +136,9 @@ export function StopwatchCard({
         </button>
         <button
           type="button"
-          title="Reset to zero"
-          aria-label="Reset to zero"
-          onClick={() => onReset(timer.id)}
+          title="Reset to zero and stop"
+          aria-label="Reset to zero and stop"
+          onClick={() => void requestReset()}
           className="grid w-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-white/55"
         >
           <svg
@@ -143,18 +155,12 @@ export function StopwatchCard({
         </button>
         <button
           type="button"
-          title={confirming ? "Click again to delete" : "Delete"}
-          aria-label={confirming ? "Confirm delete" : "Delete"}
-          onClick={() =>
-            confirming ? onDelete(timer.id) : setConfirming(true)
-          }
-          className={`grid w-9 shrink-0 place-items-center rounded-lg border text-sm ${
-            confirming
-              ? "border-red-400/50 bg-red-400/10 text-red-300"
-              : "border-white/10 bg-white/5 text-white/55"
-          }`}
+          title="Delete"
+          aria-label="Delete"
+          onClick={() => void requestDelete()}
+          className="grid w-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-sm text-white/55"
         >
-          {confirming ? "!" : "×"}
+          ×
         </button>
       </div>
     </div>

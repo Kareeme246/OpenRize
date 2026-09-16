@@ -79,6 +79,17 @@ export function Settings() {
         <SettingRow title="Export trackers" description="Download every tracker and its time" />
         <SettingRow title="Reset all data" description="Delete every tracker and start clean" />
       </SettingGroup>
+
+      <SettingGroup title="Work hours">
+        <SettingRow
+          title="Expected hours"
+          description="Your baseline work week, used for utilization and capacity metrics"
+        />
+        <SettingRow
+          title="Count toward Work Hours"
+          description="Choose which categories count as work rather than personal time"
+        />
+      </SettingGroup>
     </main>
   );
 }

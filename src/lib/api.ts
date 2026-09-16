@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Timer } from "./timers";
 import type { ActivitySnapshot, SessionKind } from "./activity";
+import type { Timer } from "./timers";
 
 /** Rust emits this after every mutation; see useTimers. */
 export const TIMERS_CHANGED = "timers-changed";
@@ -48,30 +48,27 @@ export function deleteTimer(id: string): Promise<Timer[]> {
 // --- activity capture -------------------------------------------------
 
 export function activitySnapshot(sinceMs: number): Promise<ActivitySnapshot> {
- return invoke<ActivitySnapshot>("activity_snapshot", { sinceMs });
+  return invoke<ActivitySnapshot>("activity_snapshot", { sinceMs });
 }
 
 export function setCaptureEnabled(enabled: boolean): Promise<void> {
- return invoke<void>("set_capture_enabled", { enabled });
+  return invoke<void>("set_capture_enabled", { enabled });
 }
 
 export function setIdleThreshold(minutes: number): Promise<void> {
- return invoke<void>("set_idle_threshold", { minutes });
+  return invoke<void>("set_idle_threshold", { minutes });
 }
 
-export function startSession(
- kind: SessionKind,
- label?: string,
-): Promise<void> {
- return invoke<void>("start_session", { kind, label: label ?? null });
+export function startSession(kind: SessionKind, label?: string): Promise<void> {
+  return invoke<void>("start_session", { kind, label: label ?? null });
 }
 
 export function stopSession(): Promise<void> {
- return invoke<void>("stop_session");
+  return invoke<void>("stop_session");
 }
 
 export function markSegmentReviewed(id: number): Promise<void> {
- return invoke<void>("mark_segment_reviewed", { id });
+  return invoke<void>("mark_segment_reviewed", { id });
 }
 
 /** Tauri rejects with a string; React errors are Error objects. Handle both. */

@@ -141,7 +141,8 @@ impl ActivityStore {
         // tracking, never the database.
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
             .map_err(|error| error.to_string())?;
-        conn.execute_batch(SCHEMA).map_err(|error| error.to_string())?;
+        conn.execute_batch(SCHEMA)
+            .map_err(|error| error.to_string())?;
 
         let mut store = Self {
             conn,
@@ -209,10 +210,14 @@ impl ActivityStore {
         }
 
         let idle = idle_ms >= self.idle_threshold_ms;
-        let current = self
-            .current
-            .as_ref()
-            .map(|cur| (cur.app.clone(), cur.title.clone(), cur.kind.clone(), cur.label.clone()));
+        let current = self.current.as_ref().map(|cur| {
+            (
+                cur.app.clone(),
+                cur.title.clone(),
+                cur.kind.clone(),
+                cur.label.clone(),
+            )
+        });
 
         match current {
             None => {
@@ -268,7 +273,12 @@ impl ActivityStore {
 
     /// Manual Start Focus / Start Break. Whatever was open closes first; the
     /// `start_session` command rejects any other kind.
-    pub fn start_session(&mut self, kind: &str, label: Option<&str>, now: u64) -> Result<bool, String> {
+    pub fn start_session(
+        &mut self,
+        kind: &str,
+        label: Option<&str>,
+        now: u64,
+    ) -> Result<bool, String> {
         if kind != KIND_FOCUS && kind != KIND_BREAK {
             return Err(format!("cannot start a session of kind {kind}"));
         }
@@ -297,7 +307,10 @@ impl ActivityStore {
 
     pub fn mark_reviewed(&mut self, id: i64) -> Result<(), String> {
         self.conn
-            .execute("UPDATE segments SET reviewed = 1 WHERE id = ?1", params![id])
+            .execute(
+                "UPDATE segments SET reviewed = 1 WHERE id = ?1",
+                params![id],
+            )
             .map(|_| ())
             .map_err(|error| error.to_string())
     }
@@ -465,7 +478,8 @@ mod tests {
     use super::*;
 
     fn store() -> ActivityStore {
-        ActivityStore::from_conn(Connection::open_in_memory().expect("in-memory db")).expect("schema")
+        ActivityStore::from_conn(Connection::open_in_memory().expect("in-memory db"))
+            .expect("schema")
     }
 
     fn sample(app: &str, title: &str) -> Option<WindowSample> {
@@ -479,7 +493,7 @@ mod tests {
     fn a_window_switch_closes_one_segment_and_opens_another() {
         let mut store = store();
         store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
-        assert!(store.tick(sample("Code", "main.rs"), 0, 4_000).unwrap() == false);
+        assert!(!store.tick(sample("Code", "main.rs"), 0, 4_000).unwrap());
         assert!(store.tick(sample("Slack", "#general"), 0, 7_000).unwrap());
 
         let snapshot = store.snapshot(0, 7_000).unwrap();
@@ -498,8 +512,13 @@ mod tests {
         store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
 
         // 90s idle: close activity, open the auto break.
-        store.tick(sample("Code", "main.rs"), 90_000, 100_000).unwrap();
-        assert_eq!(store.snapshot(0, 100_000).unwrap().current.unwrap().kind, KIND_BREAK);
+        store
+            .tick(sample("Code", "main.rs"), 90_000, 100_000)
+            .unwrap();
+        assert_eq!(
+            store.snapshot(0, 100_000).unwrap().current.unwrap().kind,
+            KIND_BREAK
+        );
 
         // User is back: the break ends and a fresh activity segment starts.
         store.tick(sample("Code", "main.rs"), 0, 130_000).unwrap();
@@ -512,7 +531,9 @@ mod tests {
     #[test]
     fn a_manual_focus_is_not_interrupted_by_capture() {
         let mut store = store();
-        store.start_session(KIND_FOCUS, Some("Deep work"), 1_000).unwrap();
+        store
+            .start_session(KIND_FOCUS, Some("Deep work"), 1_000)
+            .unwrap();
         store.tick(sample("Slack", "#random"), 0, 2_000).unwrap();
 
         let snapshot = store.snapshot(0, 2_000).unwrap();
@@ -551,9 +572,13 @@ mod tests {
     fn idle_does_not_interrupt_a_manual_focus() {
         let mut store = store();
         store.set_idle_threshold_ms(60_000).unwrap();
-        store.start_session(KIND_FOCUS, Some("Deep work"), 1_000).unwrap();
+        store
+            .start_session(KIND_FOCUS, Some("Deep work"), 1_000)
+            .unwrap();
 
-        store.tick(sample("Code", "main.rs"), 120_000, 121_000).unwrap();
+        store
+            .tick(sample("Code", "main.rs"), 120_000, 121_000)
+            .unwrap();
         let snapshot = store.snapshot(0, 121_000).unwrap();
         assert_eq!(snapshot.current.unwrap().kind, KIND_FOCUS);
         assert_eq!(snapshot.break_ms, 0);

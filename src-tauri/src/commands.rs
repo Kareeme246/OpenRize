@@ -137,11 +137,7 @@ pub fn set_idle_threshold(app: AppHandle, minutes: u64) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn start_session(
-    app: AppHandle,
-    kind: String,
-    label: Option<String>,
-) -> Result<(), String> {
+pub fn start_session(app: AppHandle, kind: String, label: Option<String>) -> Result<(), String> {
     {
         let state = app.state::<AppState>();
         let mut store = state.activity.lock().map_err(|error| error.to_string())?;

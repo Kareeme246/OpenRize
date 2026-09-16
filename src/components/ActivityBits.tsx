@@ -1,13 +1,13 @@
 import type { ReactNode } from "react";
-import { formatDuration } from "../lib/timers";
 import {
-  KIND_STYLES,
+  type ActivitySegment,
   formatClock,
+  KIND_STYLES,
+  type SessionKind,
   segmentDuration,
   timeByApp,
-  type ActivitySegment,
-  type SessionKind,
 } from "../lib/activity";
+import { formatDuration } from "../lib/timers";
 
 /** A label + big number, the unit every summary card is built from. */
 export function Stat({
@@ -120,7 +120,9 @@ export function SegmentList({
         const selected = selectedId === segment.id;
         const body = (
           <>
-            <span className={`size-2 shrink-0 rounded-full ${KIND_STYLES[segment.kind].dot}`} />
+            <span
+              className={`size-2 shrink-0 rounded-full ${KIND_STYLES[segment.kind].dot}`}
+            />
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline justify-between gap-2">
                 <span className="min-w-0 truncate text-[12.5px] font-medium text-white/80">
@@ -133,7 +135,9 @@ export function SegmentList({
               <div className="flex items-center gap-2">
                 <span className="font-mono text-[10.5px] text-white/35">
                   {formatClock(segment.startedAt)}–
-                  {segment.endedAt === null ? "now" : formatClock(segment.endedAt)}
+                  {segment.endedAt === null
+                    ? "now"
+                    : formatClock(segment.endedAt)}
                 </span>
                 {segment.title.length > 0 && (
                   <span className="min-w-0 truncate text-[10.5px] text-white/35">

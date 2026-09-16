@@ -1,4 +1,9 @@
-import { CardBody, KindBadge, SegmentList, Stat } from "../components/ActivityBits";
+import {
+  CardBody,
+  KindBadge,
+  SegmentList,
+  Stat,
+} from "../components/ActivityBits";
 import { BentoCard, BentoGrid, PageHeader } from "../components/Bento";
 import { useNotImplemented } from "../components/NotImplemented";
 import { useActivity } from "../hooks/useActivity";

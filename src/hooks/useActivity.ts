@@ -1,8 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type ActivitySnapshot,
+  type SessionKind,
+  startOfToday,
+} from "../lib/activity";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
-import { startOfToday, type ActivitySnapshot, type SessionKind } from "../lib/activity";
 
 export interface ActivityApi {
   /** Null until the first load lands; Rust owns the state either way. */
@@ -63,12 +67,9 @@ export function useActivity(): ActivityApi {
 
   // Mutations are fire-and-forget: Rust answers with an event that triggers
   // refresh above, so there is exactly one path that writes state.
-  const run = useCallback(
-    (action: Promise<void>): void => {
-      action.catch((cause: unknown) => setError(describeError(cause)));
-    },
-    [],
-  );
+  const run = useCallback((action: Promise<void>): void => {
+    action.catch((cause: unknown) => setError(describeError(cause)));
+  }, []);
 
   const setCaptureEnabled = useCallback(
     (enabled: boolean) => run(api.setCaptureEnabled(enabled)),

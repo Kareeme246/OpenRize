@@ -27,6 +27,7 @@ export function StopwatchCard({
   onDelete,
 }: StopwatchCardProps) {
   const running = timer.startedAt !== null;
+  const elapsed = elapsedMs(timer, now);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(timer.label);
   const [confirming, setConfirming] = useState(false);
@@ -88,7 +89,7 @@ export function StopwatchCard({
       </div>
 
       <div className="flex min-w-0 items-center gap-3.5">
-        <HourRing now={now} running={running} />
+        <HourRing elapsed={elapsed} running={running} />
         <div className="min-w-0">
           <div
             className={`truncate font-mono text-[26px] font-semibold tabular-nums leading-none tracking-tight ${
@@ -97,7 +98,7 @@ export function StopwatchCard({
                 : "text-white/45"
             }`}
           >
-            {formatDuration(elapsedMs(timer, now))}
+            {formatDuration(elapsed)}
           </div>
           <div
             className={`mt-1.5 font-mono text-[9.5px] uppercase tracking-wider ${

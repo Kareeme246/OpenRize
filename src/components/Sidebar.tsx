@@ -14,17 +14,17 @@ interface NavTabProps {
   children: ReactNode;
 }
 
-/** A nav tab carries no border in either state — selection is the tint alone. */
+/** One nav row shape for every item, present and future: full width of the
+ *  sidebar's content box, and the same grey text whether or not it is active —
+ *  only the background marks selection. */
 function NavTab({ active, label, onSelect, children }: NavTabProps) {
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-current={active ? "page" : undefined}
-      className={`flex items-center gap-2.5 rounded-[9px] px-2.5 py-2.5 text-left text-[13.5px] transition-colors ${
-        active
-          ? "bg-accent-soft text-accent"
-          : "text-white/55 hover:bg-white/5 hover:text-white/85"
+      className={`flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2.5 text-left text-[13.5px] text-white/55 transition-colors ${
+        active ? "bg-accent-soft" : "hover:bg-white/5"
       }`}
     >
       <svg
@@ -47,7 +47,9 @@ function NavTab({ active, label, onSelect, children }: NavTabProps) {
 export function Sidebar({ view, onSelect }: SidebarProps) {
   return (
     <aside className="flex min-h-0 flex-col border-r border-white/10 bg-black/35 px-3.5 py-4.5">
-      <nav className="flex flex-col gap-1">
+      {/* The only scrolling region. Its own box, so a long nav never moves the
+          main page, and the page never moves the nav. */}
+      <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
         <NavTab
           active={view === "trackers"}
           label="Trackers"
@@ -58,7 +60,7 @@ export function Sidebar({ view, onSelect }: SidebarProps) {
         </NavTab>
       </nav>
 
-      <div className="mt-auto pt-3">
+      <div className="mt-auto flex shrink-0 flex-col gap-1 pt-3">
         <NavTab
           active={view === "settings"}
           label="Settings"

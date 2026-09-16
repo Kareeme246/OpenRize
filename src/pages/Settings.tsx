@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 /*
- * Every control here is a stub. 
+ * Every control here is a stub.
  * delete the badge (not the row) when a control lands.
  */
 function SettingRow({
@@ -54,17 +54,29 @@ export function Settings() {
       </header>
 
       <SettingGroup title="Appearance">
-        <SettingRow title="Theme" description="Dark, light, or follow the system" />
-        <SettingRow title="Accent colour" description="Recolour highlights across the app" />
+        <SettingRow
+          title="Theme"
+          description="Dark, light, or follow the system"
+        />
+        <SettingRow
+          title="Accent colour"
+          description="Recolour highlights across the app"
+        />
       </SettingGroup>
 
       <SettingGroup title="General">
-        <SettingRow title="Launch at login" description="Start OpenRize when you log in" />
+        <SettingRow
+          title="Launch at login"
+          description="Start OpenRize when you log in"
+        />
         <SettingRow
           title="Global shortcut"
           description="Open OpenRize from any app (the ⌘, shortcut above works in-app only)"
         />
-        <SettingRow title="Menu bar" description="Keep a tray icon with quick controls" />
+        <SettingRow
+          title="Menu bar"
+          description="Keep a tray icon with quick controls"
+        />
       </SettingGroup>
 
       <SettingGroup title="Notifications">
@@ -75,9 +87,18 @@ export function Settings() {
       </SettingGroup>
 
       <SettingGroup title="Data">
-        <SettingRow title="Storage location" description="Where trackers.json lives on disk" />
-        <SettingRow title="Export trackers" description="Download every tracker and its time" />
-        <SettingRow title="Reset all data" description="Delete every tracker and start clean" />
+        <SettingRow
+          title="Storage location"
+          description="Where trackers.json lives on disk"
+        />
+        <SettingRow
+          title="Export trackers"
+          description="Download every tracker and its time"
+        />
+        <SettingRow
+          title="Reset all data"
+          description="Delete every tracker and start clean"
+        />
       </SettingGroup>
 
       <SettingGroup title="Work hours">

@@ -34,6 +34,7 @@ export function ConfirmDialog({
   }, []);
 
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: backdrop click-to-cancel; native onCancel (Escape) already provides the keyboard equivalent
     <dialog
       ref={ref}
       tabIndex={-1}

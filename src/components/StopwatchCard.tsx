@@ -38,13 +38,13 @@ export function StopwatchCard({
 
   return (
     <div
-      className={`flex min-w-0 flex-col gap-3 rounded-xl border p-4 ${
+      className={`flex min-w-0 flex-col items-center gap-3 rounded-xl border p-4 ${
         running
           ? "border-accent/30 bg-linear-to-b from-accent/10 to-accent/2"
           : "border-white/10 bg-linear-to-b from-white/5 to-white/1"
       }`}
     >
-      <div className="flex min-w-0 items-center justify-between gap-2.5">
+      <div className="flex w-full min-w-0 items-center justify-center">
         {editing ? (
           <input
             autoFocus
@@ -59,7 +59,7 @@ export function StopwatchCard({
                 setEditing(false);
               }
             }}
-            className="min-w-0 flex-1 rounded-md border border-accent/30 bg-black/50 px-2 py-1 text-[13px] text-white outline-none"
+            className="w-full min-w-0 rounded-md border border-accent/30 bg-black/50 px-2 py-1 text-center text-[13px] text-white outline-none"
           />
         ) : (
           <button
@@ -69,47 +69,30 @@ export function StopwatchCard({
               setDraft(timer.label);
               setEditing(true);
             }}
-            className="min-w-0 flex-1 truncate text-left text-[13px] font-semibold"
+            className="min-w-0 max-w-full truncate text-center text-[13px] font-semibold"
           >
             {timer.label}
           </button>
         )}
       </div>
 
-      <div className="flex min-w-0 items-center gap-3.5">
-        <HourRing elapsed={elapsed} running={running} />
-        <div className="min-w-0">
-          <div
-            className={`truncate font-mono text-[26px] font-semibold tabular-nums leading-none tracking-tight ${
-              running
-                ? "text-accent drop-shadow-[0_0_28px_rgba(42,234,131,0.35)]"
-                : "text-white/45"
-            }`}
-          >
-            {formatDuration(elapsed)}
-          </div>
-          <div
-            className={`mt-1.5 font-mono text-[9.5px] uppercase tracking-wider ${
-              running ? "text-accent/70" : "text-white/30"
-            }`}
-          >
-            {running ? "running" : "paused"}
-          </div>
-        </div>
+      <HourRing
+        elapsed={elapsed}
+        running={running}
+        onToggle={() => (running ? onPause(timer.id) : onStart(timer.id))}
+      />
+
+      <div
+        className={`font-mono text-[26px] font-semibold tabular-nums leading-none tracking-tight ${
+          running
+            ? "text-accent drop-shadow-[0_0_28px_rgba(42,234,131,0.35)]"
+            : "text-white/45"
+        }`}
+      >
+        {formatDuration(elapsed)}
       </div>
 
       <div className="flex gap-1.5">
-        <button
-          type="button"
-          onClick={() => (running ? onPause(timer.id) : onStart(timer.id))}
-          className={`flex-1 rounded-lg border py-1.5 text-xs font-semibold ${
-            running
-              ? "border-accent/30 bg-accent-soft text-accent"
-              : "border-white/10 bg-white/5 text-white"
-          }`}
-        >
-          {running ? "Pause" : "Start"}
-        </button>
         <button
           type="button"
           title="Reset to zero and stop"

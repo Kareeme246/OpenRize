@@ -24,9 +24,9 @@ export default function App() {
   }, []);
 
   return (
-    <div className="grid h-full grid-cols-[224px_minmax(0,1fr)]">
+    <div className="grid h-full min-h-0 grid-cols-[224px_minmax(0,1fr)] overflow-hidden">
       <Sidebar view={view} onSelect={setView} />
-      <div className="flex min-w-0 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-col">
         {view === "trackers" ? <Trackers api={api} /> : <Settings />}
       </div>
     </div>

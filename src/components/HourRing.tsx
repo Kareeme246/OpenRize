@@ -4,29 +4,33 @@ const RADIUS = (SIZE - STROKE) / 2;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 const CENTRE = SIZE / 2;
 
+/** The dial's cycle: one full turn per tracked hour, then it wraps. */
+const HOUR_MS = 3_600_000;
+
 interface HourRingProps {
-  now: number;
+  /** This tracker's own elapsed time in ms — not the wall clock. */
+  elapsed: number;
   running: boolean;
 }
 
-/** How far the wall clock has moved through the current hour, 0–1. */
-export function hourProgress(now: number): number {
-  const date = new Date(now);
-  return (date.getMinutes() * 60 + date.getSeconds()) / 3600;
+/** Fraction of the current tracked hour that has passed, 0–1. Zero at 0:00,
+ *  a quarter at 15:00, wrapping back to zero at 1:00:00. */
+export function hourProgress(elapsed: number): number {
+  return (elapsed % HOUR_MS) / HOUR_MS;
 }
 
-/** A clock-style dial: the arc sweeps once per hour, whether or not the
- *  tracker is running — it reads the wall clock, not the timer. */
-export function HourRing({ now, running }: HourRingProps) {
-  const progress = hourProgress(now);
-  const minutes = new Date(now).getMinutes();
+/** A dial that sweeps once per tracked hour. Its arc follows the timer, so a
+ *  fresh tracker starts empty and the fill survives pause/resume. */
+export function HourRing({ elapsed, running }: HourRingProps) {
+  const progress = hourProgress(elapsed);
+  const minutes = Math.floor((elapsed % HOUR_MS) / 60_000);
 
   return (
     <svg
       viewBox={`0 0 ${SIZE} ${SIZE}`}
       className="size-17 shrink-0"
       role="img"
-      aria-label={`${minutes} minutes into the current hour`}
+      aria-label={`${minutes} minutes into this tracker's current hour`}
     >
       <circle
         cx={CENTRE}

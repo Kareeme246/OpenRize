@@ -158,7 +158,6 @@ export function StopwatchCard({
           title={`Delete "${timer.label}"?`}
           body={`This tracker and its ${formatDuration(elapsed)} will be gone.`}
           confirmLabel="Delete"
-          danger
           onConfirm={() => {
             setPending(null);
             onDelete(timer.id);

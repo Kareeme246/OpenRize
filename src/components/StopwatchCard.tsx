@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { HourRing } from "./HourRing";
 import { elapsedMs, formatDuration, type Timer } from "../lib/timers";
 
 interface StopwatchCardProps {
@@ -84,19 +85,28 @@ export function StopwatchCard({
             {timer.label}
           </button>
         )}
-        <span
-          className={`size-1.75 shrink-0 rounded-full ${running ? "bg-accent shadow-[0_0_0_3px_rgba(42,234,131,0.16)]" : "bg-white/25"}`}
-        />
       </div>
 
-      <div
-        className={`font-mono text-[29px] font-semibold tabular-nums leading-none tracking-tight ${
-          running
-            ? "text-accent drop-shadow-[0_0_28px_rgba(42,234,131,0.35)]"
-            : "text-white/45"
-        }`}
-      >
-        {formatDuration(elapsedMs(timer, now))}
+      <div className="flex min-w-0 items-center gap-3.5">
+        <HourRing now={now} running={running} />
+        <div className="min-w-0">
+          <div
+            className={`truncate font-mono text-[26px] font-semibold tabular-nums leading-none tracking-tight ${
+              running
+                ? "text-accent drop-shadow-[0_0_28px_rgba(42,234,131,0.35)]"
+                : "text-white/45"
+            }`}
+          >
+            {formatDuration(elapsedMs(timer, now))}
+          </div>
+          <div
+            className={`mt-1.5 font-mono text-[9.5px] uppercase tracking-wider ${
+              running ? "text-accent/70" : "text-white/30"
+            }`}
+          >
+            {running ? "running" : "paused"}
+          </div>
+        </div>
       </div>
 
       <div className="flex gap-1.5">

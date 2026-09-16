@@ -175,10 +175,6 @@ impl TimerStore {
         Ok(self.snapshot())
     }
 
-    /// Zeroes the timer and stops it. Reset is the "start this tracker over"
-    /// action, and a tracker that silently keeps burning time after you just
-    /// asked for a fresh start is the surprising version. No `_at` twin: with
-    /// no clock involved there is nothing for a test to inject.
     pub fn reset(&mut self, id: &str) -> Result<Vec<Timer>, String> {
         let timer = self.find_mut(id)?;
         timer.accumulated_ms = 0;

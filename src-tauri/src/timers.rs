@@ -175,19 +175,14 @@ impl TimerStore {
         Ok(self.snapshot())
     }
 
+    /// Zeroes the timer and stops it. Reset is the "start this tracker over"
+    /// action, and a tracker that silently keeps burning time after you just
+    /// asked for a fresh start is the surprising version. No `_at` twin: with
+    /// no clock involved there is nothing for a test to inject.
     pub fn reset(&mut self, id: &str) -> Result<Vec<Timer>, String> {
-        let now = self.clock.now_ms();
-        self.reset_at(id, now)
-    }
-
-    /// Zeroes the timer. A running timer keeps running, restarting from zero —
-    /// stopping it would be a surprising side effect of "reset".
-    pub fn reset_at(&mut self, id: &str, now: u64) -> Result<Vec<Timer>, String> {
         let timer = self.find_mut(id)?;
         timer.accumulated_ms = 0;
-        if timer.started_at.is_some() {
-            timer.started_at = Some(now);
-        }
+        timer.started_at = None;
         self.persist()?;
         Ok(self.snapshot())
     }
@@ -272,16 +267,16 @@ mod tests {
     }
 
     #[test]
-    fn reset_zeroes_the_timer_but_leaves_it_running() {
+    fn reset_zeroes_and_stops_the_timer() {
         let mut store = store("reset");
         let id = store.create_at("Reset me", 1_000).unwrap()[0].id.clone();
         store.start_at(&id, 1_000).unwrap();
 
-        store.reset_at(&id, 2_000).unwrap();
+        store.reset(&id).unwrap();
         let timer = &store.snapshot()[0];
         assert_eq!(timer.accumulated_ms, 0);
-        assert_eq!(timer.started_at, Some(2_000));
-        assert!(timer.is_running());
+        assert_eq!(timer.started_at, None);
+        assert!(!timer.is_running());
     }
 
     #[test]

@@ -50,7 +50,7 @@ export function Trackers({ api }: TrackersProps) {
 
       {api.timers.length === 0 ? (
         <p className="rounded-xl border border-dashed border-white/10 px-4 py-10 text-center text-[13.5px] text-white/40">
-          No trackers yet. Name one above and it starts counting immediately.
+          No trackers yet. Name one above, then hit Start to begin counting.
         </p>
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">

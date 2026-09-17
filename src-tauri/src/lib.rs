@@ -1,15 +1,18 @@
 mod activity;
 mod commands;
+mod settings;
 mod timers;
 mod tray;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use rusqlite::Connection;
 use tauri::{Manager, RunEvent, WindowEvent};
 
 use activity::ActivityStore;
+use settings::{CloseBehavior, Settings, SettingsStore};
 use timers::TimerStore;
 
 /// Emitted after every timer mutation so the frontend can adopt the snapshot
@@ -25,6 +28,10 @@ pub const EVENT_ACTIVITY_CHANGED: &str = "activity-changed";
 /// nothing structural has changed. Carries the lighter `ActivityTick`.
 pub const EVENT_ACTIVITY_TICK: &str = "activity-tick";
 
+/// Emitted whenever preferences change, so any open view (and the tray) can
+/// re-read them without polling.
+pub const EVENT_SETTINGS_CHANGED: &str = "settings-changed";
+
 /// Shared application state. `Mutex` rather than `RwLock`: mutations are the
 /// common case and the critical sections are microseconds long.
 pub struct AppState {
@@ -37,6 +44,18 @@ pub struct AppState {
     /// Whether the OpenRize window itself is focused. Drives the push
     /// cadence to the frontend; the underlying sampling rate is unaffected.
     pub foreground: AtomicBool,
+    pub settings: Mutex<SettingsStore>,
+}
+
+impl AppState {
+    /// Preferences are read from a poisoned lock too: a panic while writing a
+    /// preference must not brick the close button.
+    pub fn settings_snapshot(&self) -> Settings {
+        self.settings
+            .lock()
+            .map(|store| store.snapshot())
+            .unwrap_or_default()
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -51,23 +70,43 @@ pub fn run() {
             let timers = store.snapshot()?;
             let activity = ActivityStore::load(&dir)?;
             let activity_reader = ActivityStore::open_reader(&dir)?;
+            let settings = SettingsStore::load(&settings::config_dir())
+                .map_err(|error| -> Box<dyn std::error::Error> { error.into() })?;
+            let preferences = settings.snapshot();
+
             app.manage(AppState {
                 store: Mutex::new(store),
                 activity: Mutex::new(activity),
                 activity_reader: Mutex::new(activity_reader),
                 foreground: AtomicBool::new(true),
+                settings: Mutex::new(settings),
             });
 
-            tray::init(app.handle(), &timers)?;
+            if preferences.tray_enabled {
+                tray::init(app.handle(), &timers)?;
+            }
             activity::spawn_sampler(app.handle().clone());
+            spawn_retention_sweeper(app.handle().clone());
+            // One sweep on startup, so a long-dormant install is cleaned before
+            // the first hour-long wait elapses.
+            if let Err(error) = commands::sweep_retention(app.handle()) {
+                eprintln!("retention sweep failed: {error}");
+            }
             Ok(())
         })
         .on_window_event(|window, event| match event {
-            // Closing the window must not end a background tracker. Hide it;
-            // the tray's "Quit OpenRize" is the deliberate exit.
+            // Closing is a preference: either end the app, or hide to the menu
+            // bar so a background tracker keeps running. With the tray off a
+            // hidden window would be unreachable, so that combination quits.
             WindowEvent::CloseRequested { api, .. } => {
+                let app = window.app_handle();
+                let preferences = app.state::<AppState>().settings_snapshot();
                 api.prevent_close();
-                let _ = window.hide();
+                if preferences.tray_enabled && preferences.close_behavior == CloseBehavior::Hide {
+                    let _ = window.hide();
+                } else {
+                    app.exit(0);
+                }
             }
             // Drives the activity push cadence (1Hz focused / 30s
             // backgrounded — see activity.rs) and fires an immediate
@@ -95,6 +134,9 @@ pub fn run() {
             commands::start_session,
             commands::stop_session,
             commands::mark_segment_reviewed,
+            commands::get_settings,
+            commands::update_settings,
+            commands::storage_paths,
         ])
         .build(tauri::generate_context!())
         .expect("error while building OpenRize")
@@ -106,4 +148,15 @@ pub fn run() {
                 tray::show_main_window(app);
             }
         });
+}
+
+/// Deletes activity history past the retention window once an hour. Startup
+/// does the first pass; this keeps a process that runs for weeks honest.
+fn spawn_retention_sweeper(app: tauri::AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(3600));
+        if let Err(error) = commands::sweep_retention(&app) {
+            eprintln!("retention sweep failed: {error}");
+        }
+    });
 }

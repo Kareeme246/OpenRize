@@ -55,6 +55,21 @@ pub fn init(app: &AppHandle, timers: &[Timer]) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Adds or removes the menu-bar icon to match the preference. Idempotent: a
+/// redundant call is a no-op, so the settings command does not have to track
+/// whether the tray is already mounted.
+pub fn set_enabled(app: &AppHandle, enabled: bool, timers: &[Timer]) -> tauri::Result<()> {
+    let mounted = app.tray_by_id(TRAY_ID).is_some();
+    match (enabled, mounted) {
+        (true, false) => init(app, timers),
+        (false, true) => {
+            app.remove_tray_by_id(TRAY_ID);
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 /// Repaints the tray from a snapshot, then tells the frontend what changed.
 /// Called on every mutation, never on a timer: a native menu is expensive to
 /// rebuild and nothing here is clock-driven.

@@ -30,7 +30,7 @@ export function TopBar({
   return (
     <header
       data-tauri-drag-region="deep"
-      className={`flex h-11 shrink-0 items-center gap-2 border-b border-white/10 bg-black/30 pr-3 ${
+      className={`flex h-11 shrink-0 items-center gap-2 border-b border-line bg-bar pr-3 ${
         isMac ? "pl-[84px]" : "pl-3"
       }`}
     >
@@ -40,7 +40,7 @@ export function TopBar({
           onClick={() => setTeamsOpen((open) => !open)}
           aria-haspopup="menu"
           aria-expanded={teamsOpen}
-          className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[12.5px] font-medium text-white/75 hover:bg-white/10"
+          className="flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[12.5px] font-medium text-fg-muted hover:bg-surface-strong"
         >
           <svg
             viewBox="0 0 24 24"
@@ -58,7 +58,7 @@ export function TopBar({
           Teams
           <svg
             viewBox="0 0 24 24"
-            className="size-3 text-white/45"
+            className="size-3 text-fg-soft"
             fill="none"
             stroke="currentColor"
             strokeWidth={2.2}
@@ -82,7 +82,7 @@ export function TopBar({
             />
             <div
               role="menu"
-              className="absolute left-0 top-full z-50 mt-1 w-48 overflow-hidden rounded-xl border border-white/10 bg-ink-900 py-1 shadow-2xl"
+              className="absolute left-0 top-full z-50 mt-1 w-48 overflow-hidden rounded-xl border border-line bg-panel py-1 shadow-2xl"
             >
               {teamItems.map((item) => (
                 <button
@@ -93,7 +93,7 @@ export function TopBar({
                     setTeamsOpen(false);
                     show(item);
                   }}
-                  className="block w-full px-3 py-1.5 text-left text-[12.5px] text-white/70 hover:bg-white/5"
+                  className="block w-full px-3 py-1.5 text-left text-[12.5px] text-fg-muted hover:bg-surface"
                 >
                   {item}
                 </button>
@@ -116,7 +116,7 @@ export function TopBar({
         />
       </div>
 
-      <span className="shrink-0 select-none font-mono text-[11.5px] font-semibold tracking-wide text-white/60">
+      <span className="shrink-0 select-none font-mono text-[11.5px] font-semibold tracking-wide text-fg-soft">
         OpenRize
       </span>
 
@@ -124,7 +124,7 @@ export function TopBar({
         <button
           type="button"
           onClick={() => show("Refer friends")}
-          className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[12.5px] font-medium text-white/75 hover:bg-white/10"
+          className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[12.5px] font-medium text-fg-muted hover:bg-surface-strong"
         >
           Refer friends
         </button>
@@ -151,7 +151,7 @@ function NavArrow({
       aria-label={label}
       disabled={!enabled}
       onClick={onClick}
-      className="grid size-7 shrink-0 place-items-center rounded-lg text-white/60 hover:bg-white/10 disabled:pointer-events-none disabled:text-white/20"
+      className="grid size-7 shrink-0 place-items-center rounded-lg text-fg-soft hover:bg-surface-strong disabled:pointer-events-none disabled:text-fg-ghost"
     >
       <svg
         viewBox="0 0 24 24"

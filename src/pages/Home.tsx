@@ -30,7 +30,7 @@ export function Home() {
       {activity.error !== null && (
         <p
           role="alert"
-          className="rounded-[10px] border border-red-400/40 bg-red-400/10 px-3.5 py-2.5 text-[13px] text-red-200"
+          className="rounded-[10px] border border-danger/40 bg-danger-soft px-3.5 py-2.5 text-[13px] text-danger"
         >
           {activity.error}
         </p>
@@ -69,7 +69,7 @@ export function Home() {
           status="live"
         >
           {unreviewed.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-white/10 px-3 py-6 text-center text-[12px] text-white/35">
+            <p className="rounded-lg border border-dashed border-line px-3 py-6 text-center text-[12px] text-fg-faint">
               Everything is reviewed.
             </p>
           ) : (
@@ -78,20 +78,20 @@ export function Home() {
                 {unreviewed.slice(0, 10).map((segment) => (
                   <div
                     key={segment.id}
-                    className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-white/5"
+                    className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-surface"
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[12.5px] text-white/80">
+                      <div className="truncate text-[12.5px] text-fg">
                         {segment.title.length > 0 ? segment.title : segment.app}
                       </div>
-                      <div className="font-mono text-[10.5px] text-white/35">
+                      <div className="font-mono text-[10.5px] text-fg-faint">
                         {formatDuration(segmentDuration(segment, now))}
                       </div>
                     </div>
                     <button
                       type="button"
                       onClick={() => activity.markReviewed(segment.id)}
-                      className="shrink-0 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-white/65 hover:bg-white/10"
+                      className="shrink-0 rounded-md border border-line bg-surface px-2 py-1 text-[11px] text-fg-muted hover:bg-surface-strong"
                     >
                       Review
                     </button>
@@ -118,10 +118,10 @@ export function Home() {
                   : "No window title captured"
               }
             />
-            <div className="flex items-center gap-2 font-mono text-[10.5px] text-white/40">
+            <div className="flex items-center gap-2 font-mono text-[10.5px] text-fg-faint">
               <span
                 className={`size-1.5 rounded-full ${
-                  snapshot?.captureEnabled ? "bg-accent" : "bg-white/30"
+                  snapshot?.captureEnabled ? "bg-accent" : "bg-fg-ghost"
                 }`}
               />
               {snapshot?.captureEnabled ? "Capture running" : "Capture paused"}{" "}
@@ -138,7 +138,7 @@ export function Home() {
           <button
             type="button"
             onClick={() => show("Workspace hours")}
-            className="self-start rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[12px] text-white/70 hover:bg-white/10"
+            className="self-start rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] text-fg-muted hover:bg-surface-strong"
           >
             Open workspaces
           </button>

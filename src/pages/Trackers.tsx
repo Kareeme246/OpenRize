@@ -27,13 +27,13 @@ export function Trackers({ api }: TrackersProps) {
           onKeyDown={(event) => {
             if (event.key === "Enter") submit();
           }}
-          className="min-w-0 flex-1 rounded-[10px] border border-white/10 bg-black/40 px-3.5 py-2.5 text-[13.5px] text-white placeholder:text-white/30 outline-none focus:border-accent/30"
+          className="min-w-0 flex-1 rounded-[10px] border border-line bg-inset px-3.5 py-2.5 text-[13.5px] text-fg-strong placeholder:text-fg-ghost outline-none focus:border-accent/30"
         />
         <button
           type="button"
           onClick={submit}
           disabled={trimmed.length === 0}
-          className="shrink-0 rounded-[10px] border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-4 py-2.5 text-[13px] font-semibold text-[#04160c] disabled:opacity-40"
+          className="shrink-0 rounded-[10px] border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-4 py-2.5 text-[13px] font-semibold text-accent-fg disabled:opacity-40"
         >
           New tracker
         </button>
@@ -42,14 +42,14 @@ export function Trackers({ api }: TrackersProps) {
       {api.error !== null && (
         <p
           role="alert"
-          className="rounded-[10px] border border-red-400/40 bg-red-400/10 px-3.5 py-2.5 text-[13px] text-red-200"
+          className="rounded-[10px] border border-danger/40 bg-danger-soft px-3.5 py-2.5 text-[13px] text-danger"
         >
           {api.error}
         </p>
       )}
 
       {api.timers.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-white/10 px-4 py-10 text-center text-[13.5px] text-white/40">
+        <p className="rounded-xl border border-dashed border-line px-4 py-10 text-center text-[13.5px] text-fg-faint">
           No trackers yet. Name one above, then hit Start to begin counting.
         </p>
       ) : (

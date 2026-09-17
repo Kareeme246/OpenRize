@@ -42,25 +42,25 @@ export function ConfirmDialog({
       onClick={(event) => {
         if (event.target === event.currentTarget) onCancel();
       }}
-      className="m-auto rounded-2xl bg-transparent p-0 text-white outline-none backdrop:bg-black/65"
+      className="m-auto rounded-2xl bg-transparent p-0 text-fg-strong outline-none backdrop:bg-scrim"
     >
-      <div className="w-[340px] max-w-[calc(100vw-2rem)] rounded-2xl border border-white/10 bg-ink-900 p-4 shadow-2xl">
+      <div className="w-[340px] max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-panel p-4 shadow-2xl">
         <h2 className="text-[13.5px] font-semibold">{title}</h2>
-        <p className="mt-1.5 text-[12.5px] leading-relaxed text-white/50">
+        <p className="mt-1.5 text-[12.5px] leading-relaxed text-fg-soft">
           {body}
         </p>
         <div className="mt-4 flex justify-end gap-2">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-lg border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-3 py-1.5 text-[12.5px] font-semibold text-[#04160c]"
+            className="rounded-lg border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-3 py-1.5 text-[12.5px] font-semibold text-accent-fg"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[12.5px] font-medium text-white/70 hover:bg-white/10"
+            className="rounded-lg border border-line bg-surface px-3 py-1.5 text-[12.5px] font-medium text-fg-muted hover:bg-surface-strong"
           >
             {confirmLabel}
           </button>

@@ -40,7 +40,7 @@ export function Breaks() {
       {activity.error !== null && (
         <p
           role="alert"
-          className="rounded-[10px] border border-red-400/40 bg-red-400/10 px-3.5 py-2.5 text-[13px] text-red-200"
+          className="rounded-[10px] border border-danger/40 bg-danger-soft px-3.5 py-2.5 text-[13px] text-danger"
         >
           {activity.error}
         </p>
@@ -67,9 +67,9 @@ export function Breaks() {
             <Stat label="Longest" value={formatDuration(longest)} />
           </div>
           <div className="flex flex-col gap-1.5">
-            <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
+            <div className="h-1.5 overflow-hidden rounded-full bg-surface">
               <div
-                className="h-full rounded-full bg-sky-400/70"
+                className="h-full rounded-full bg-break/70"
                 style={{
                   width: `${Math.min(
                     100,
@@ -80,7 +80,7 @@ export function Breaks() {
                 }}
               />
             </div>
-            <p className="font-mono text-[10.5px] text-white/35">
+            <p className="font-mono text-[10.5px] text-fg-faint">
               {Math.round(totalMs / 60_000)} of{" "}
               {Math.round(BREAK_TARGET_MS / 60_000)} target minutes today
             </p>
@@ -101,8 +101,8 @@ export function Breaks() {
           status="live"
         >
           <div className="flex items-center gap-2">
-            <span className="size-2 rounded-full bg-sky-400" />
-            <span className="text-[12.5px] text-white/75">
+            <span className="size-2 rounded-full bg-break" />
+            <span className="text-[12.5px] text-fg-muted">
               Fires after{" "}
               {Math.round((snapshot?.idleThresholdMs ?? 0) / 60_000)} min idle
             </span>
@@ -123,14 +123,14 @@ export function Breaks() {
           <button
             type="button"
             onClick={() => activity.startSession("break", "Break")}
-            className="self-start rounded-lg border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-3 py-1.5 text-[12px] font-semibold text-[#04160c]"
+            className="self-start rounded-lg border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-3 py-1.5 text-[12px] font-semibold text-accent-fg"
           >
             Start Break
           </button>
           {snapshot?.current?.kind === "break" && (
             <div className="flex items-center gap-2">
               <KindBadge kind="break" />
-              <span className="text-[12px] text-white/70">Running</span>
+              <span className="text-[12px] text-fg-muted">Running</span>
             </div>
           )}
         </BentoCard>
@@ -143,7 +143,7 @@ export function Breaks() {
           <button
             type="button"
             onClick={() => show("Guided meditation")}
-            className="self-start rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[12px] text-white/70 hover:bg-white/10"
+            className="self-start rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] text-fg-muted hover:bg-surface-strong"
           >
             Browse sessions
           </button>

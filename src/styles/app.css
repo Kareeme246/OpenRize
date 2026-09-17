@@ -1,13 +1,120 @@
 @import "tailwindcss";
 
+/*
+ * Semantic tokens. Components never name a raw colour: they use utilities
+ * generated from these names (`text-fg-muted`, `border-line`, `bg-surface`, ...)
+ * so light/dark is a variable swap, not a component rewrite.
+ *
+ * Dark is the default. `[data-theme="light"]` (set by applyAppearance in
+ * src/lib/settings.ts) overrides the same names. Accent tokens are written at
+ * runtime by that same function from the palette in src/lib/settings.ts.
+ */
+:root {
+  --bg-canvas: #050706;
+  --bg-rail: rgba(0, 0, 0, 0.35);
+  --bg-bar: rgba(0, 0, 0, 0.3);
+  --bg-panel: #0a0d0b;
+  --bg-surface-1: rgba(255, 255, 255, 0.05);
+  --bg-surface-2: rgba(255, 255, 255, 0.1);
+  --bg-inset: rgba(0, 0, 0, 0.4);
+  --bg-inset-soft: rgba(0, 0, 0, 0.2);
+  --bg-scrim: rgba(0, 0, 0, 0.65);
+
+  --fg-strong: #ffffff;
+  --fg: #e8efe9;
+  --fg-muted: rgba(255, 255, 255, 0.72);
+  --fg-soft: rgba(255, 255, 255, 0.5);
+  --fg-faint: rgba(255, 255, 255, 0.36);
+  --fg-ghost: rgba(255, 255, 255, 0.2);
+
+  --line: rgba(255, 255, 255, 0.1);
+  --line-soft: rgba(255, 255, 255, 0.05);
+
+  /* Categorical colours that sit beside the accent without competing with it. */
+  --break: #38bdf8;
+  --review: #fbbf24;
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.1);
+
+  /* Accent defaults; overwritten inline from the chosen palette. */
+  --accent: #2aea83;
+  --accent-dim: #1fb968;
+  --accent-soft: rgba(42, 234, 131, 0.15);
+  --accent-rgb: 42, 234, 131;
+  --accent-fg: #04160c;
+
+  /* Canvas gradient stops, also accent-aware. */
+  --glow-1: rgba(var(--accent-rgb), 0.16);
+  --glow-2: rgba(var(--accent-rgb), 0.07);
+  --canvas-1: #000000;
+  --canvas-2: #050706;
+  --canvas-3: #08110c;
+}
+
+:root[data-theme="light"] {
+  --bg-canvas: #f4f6f5;
+  --bg-rail: rgba(255, 255, 255, 0.72);
+  --bg-bar: rgba(255, 255, 255, 0.6);
+  --bg-panel: #ffffff;
+  --bg-surface-1: rgba(15, 23, 18, 0.04);
+  --bg-surface-2: rgba(15, 23, 18, 0.08);
+  --bg-inset: rgba(15, 23, 18, 0.05);
+  --bg-inset-soft: rgba(15, 23, 18, 0.03);
+  --bg-scrim: rgba(0, 0, 0, 0.35);
+
+  --fg-strong: #0b100d;
+  --fg: #1b211d;
+  --fg-muted: rgba(15, 23, 18, 0.68);
+  --fg-soft: rgba(15, 23, 18, 0.5);
+  --fg-faint: rgba(15, 23, 18, 0.42);
+  --fg-ghost: rgba(15, 23, 18, 0.2);
+
+  --line: rgba(15, 23, 18, 0.12);
+  --line-soft: rgba(15, 23, 18, 0.06);
+
+  --break: #0284c7;
+  --review: #b45309;
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.09);
+
+  --glow-1: rgba(var(--accent-rgb), 0.1);
+  --glow-2: rgba(var(--accent-rgb), 0.05);
+  --canvas-1: #ffffff;
+  --canvas-2: #f4f6f5;
+  --canvas-3: #eef2ef;
+}
+
 @theme {
-  /* Brand tokens — the single place the palette is defined. */
-  --color-ink-950: #050706;
-  --color-ink-900: #0a0d0b;
-  --color-ink-800: #121713;
-  --color-accent: #2aea83;
-  --color-accent-dim: #1fb968;
-  --color-accent-soft: rgba(42, 234, 131, 0.12);
+  --color-canvas: var(--bg-canvas);
+  --color-rail: var(--bg-rail);
+  --color-bar: var(--bg-bar);
+  --color-panel: var(--bg-panel);
+  --color-surface: var(--bg-surface-1);
+  --color-surface-strong: var(--bg-surface-2);
+  --color-inset: var(--bg-inset);
+  --color-inset-soft: var(--bg-inset-soft);
+  --color-scrim: var(--bg-scrim);
+
+  --color-fg: var(--fg);
+  --color-fg-strong: var(--fg-strong);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-soft: var(--fg-soft);
+  --color-fg-faint: var(--fg-faint);
+  --color-fg-ghost: var(--fg-ghost);
+
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+
+  --color-break: var(--break);
+  --color-review: var(--review);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+
+  --color-accent: var(--accent);
+  --color-accent-dim: var(--accent-dim);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-fg: var(--accent-fg);
+
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -22,12 +129,17 @@ body,
 
 body {
   margin: 0;
-  color: #e8efe9;
-  background-color: var(--color-ink-950);
+  color: var(--fg);
+  background-color: var(--bg-canvas);
   background-image:
-    radial-gradient(1100px 700px at 8% -8%, rgba(42, 234, 131, 0.16), transparent 62%),
-    radial-gradient(760px 520px at 100% 0%, rgba(42, 234, 131, 0.07), transparent 60%),
-    linear-gradient(160deg, #000 0%, var(--color-ink-950) 45%, #08110c 100%);
+    radial-gradient(1100px 700px at 8% -8%, var(--glow-1), transparent 62%),
+    radial-gradient(760px 520px at 100% 0%, var(--glow-2), transparent 60%),
+    linear-gradient(
+      160deg,
+      var(--canvas-1) 0%,
+      var(--canvas-2) 45%,
+      var(--canvas-3) 100%
+    );
   background-attachment: fixed;
   font-family: var(--font-mono);
   -webkit-font-smoothing: antialiased;

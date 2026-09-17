@@ -21,14 +21,14 @@ export function Stat({
 }) {
   return (
     <div className="min-w-0">
-      <div className="font-mono text-[10px] uppercase tracking-wider text-white/35">
+      <div className="font-mono text-[10px] uppercase tracking-wider text-fg-faint">
         {label}
       </div>
-      <div className="mt-0.5 font-mono text-[20px] font-semibold tabular-nums leading-none text-white">
+      <div className="mt-0.5 font-mono text-[20px] font-semibold tabular-nums leading-none text-fg-strong">
         {value}
       </div>
       {hint !== undefined && (
-        <div className="mt-1 text-[11px] text-white/40">{hint}</div>
+        <div className="mt-1 text-[11px] text-fg-faint">{hint}</div>
       )}
     </div>
   );
@@ -37,7 +37,7 @@ export function Stat({
 export function KindBadge({ kind }: { kind: SessionKind }) {
   const style = KIND_STYLES[kind];
   return (
-    <span className="flex shrink-0 items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-white/45">
+    <span className="flex shrink-0 items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-fg-soft">
       <span className={`size-1.5 rounded-full ${style.dot}`} />
       {style.label}
     </span>
@@ -58,7 +58,7 @@ export function AppBreakdown({
   const longest = totals[0]?.ms ?? 0;
   if (totals.length === 0) {
     return (
-      <p className="text-[11.5px] text-white/35">Nothing captured yet today.</p>
+      <p className="text-[11.5px] text-fg-faint">Nothing captured yet today.</p>
     );
   }
   return (
@@ -66,14 +66,14 @@ export function AppBreakdown({
       {totals.map((entry) => (
         <div key={entry.app} className="min-w-0">
           <div className="flex items-baseline justify-between gap-2">
-            <span className="min-w-0 truncate text-[12px] text-white/75">
+            <span className="min-w-0 truncate text-[12px] text-fg-muted">
               {entry.app}
             </span>
-            <span className="shrink-0 font-mono text-[11px] tabular-nums text-white/45">
+            <span className="shrink-0 font-mono text-[11px] tabular-nums text-fg-soft">
               {formatDuration(entry.ms)}
             </span>
           </div>
-          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/5">
+          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface">
             <div
               className="h-full rounded-full bg-accent/70"
               style={{
@@ -107,7 +107,7 @@ export function SegmentList({
 }) {
   if (segments.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-white/10 px-3 py-6 text-center text-[12px] text-white/35">
+      <p className="rounded-lg border border-dashed border-line px-3 py-6 text-center text-[12px] text-fg-faint">
         {emptyHint}
       </p>
     );
@@ -125,27 +125,27 @@ export function SegmentList({
             />
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline justify-between gap-2">
-                <span className="min-w-0 truncate text-[12.5px] font-medium text-white/80">
+                <span className="min-w-0 truncate text-[12.5px] font-medium text-fg">
                   {segment.title.length > 0 ? segment.title : segment.app}
                 </span>
-                <span className="shrink-0 font-mono text-[11px] tabular-nums text-white/45">
+                <span className="shrink-0 font-mono text-[11px] tabular-nums text-fg-soft">
                   {formatDuration(duration)}
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[10.5px] text-white/35">
+                <span className="font-mono text-[10.5px] text-fg-faint">
                   {formatClock(segment.startedAt)}–
                   {segment.endedAt === null
                     ? "now"
                     : formatClock(segment.endedAt)}
                 </span>
                 {segment.title.length > 0 && (
-                  <span className="min-w-0 truncate text-[10.5px] text-white/35">
+                  <span className="min-w-0 truncate text-[10.5px] text-fg-faint">
                     {segment.app}
                   </span>
                 )}
                 {!segment.reviewed && segment.kind === "activity" && (
-                  <span className="shrink-0 font-mono text-[9.5px] uppercase tracking-wider text-amber-300/70">
+                  <span className="shrink-0 font-mono text-[9.5px] uppercase tracking-wider text-review/70">
                     Review
                   </span>
                 )}
@@ -157,7 +157,7 @@ export function SegmentList({
         const className = `flex w-full items-start gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors ${
           selected
             ? "border-accent/40 bg-accent-soft"
-            : "border-transparent hover:bg-white/5"
+            : "border-transparent hover:bg-surface"
         }`;
 
         return onSelect === undefined ? (

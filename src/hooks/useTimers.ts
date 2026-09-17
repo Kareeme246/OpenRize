@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { useCallback, useEffect, useState } from "react";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
 import type { Timer } from "../lib/timers";

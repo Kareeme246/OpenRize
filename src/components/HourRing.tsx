@@ -64,8 +64,22 @@ export function HourRing({ elapsed, running, onToggle }: HourRingProps) {
         />
         {running ? (
           <>
-            <rect x={CENTRE - 10} y={CENTRE - 14} width="6" height="28" rx="2" className="fill-accent" />
-            <rect x={CENTRE + 4} y={CENTRE - 14} width="6" height="28" rx="2" className="fill-accent" />
+            <rect
+              x={CENTRE - 10}
+              y={CENTRE - 14}
+              width="6"
+              height="28"
+              rx="2"
+              className="fill-accent"
+            />
+            <rect
+              x={CENTRE + 4}
+              y={CENTRE - 14}
+              width="6"
+              height="28"
+              rx="2"
+              className="fill-accent"
+            />
           </>
         ) : (
           <path

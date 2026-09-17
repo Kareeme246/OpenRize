@@ -33,6 +33,14 @@ export interface ActivitySnapshot {
   captureEnabled: boolean;
 }
 
+/**
+ * The lightweight push (1Hz focused / 30s heartbeat backgrounded) — same
+ * numbers as `ActivitySnapshot`, minus `segments`. A structural change
+ * always arrives as a full `ActivitySnapshot` instead, so the segment list
+ * only ever comes from that path.
+ */
+export type ActivityTick = Omit<ActivitySnapshot, "segments">;
+
 export function segmentDuration(segment: ActivitySegment, now: number): number {
   return Math.max(0, (segment.endedAt ?? now) - segment.startedAt);
 }

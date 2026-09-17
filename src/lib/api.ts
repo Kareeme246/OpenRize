@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ActivitySnapshot, SessionKind } from "./activity";
+import type { Settings, StoragePaths } from "./settings";
 import type { Timer } from "./timers";
 
 /** Rust emits this after every mutation; see useTimers. */
@@ -18,6 +19,9 @@ export const ACTIVITY_CHANGED = "activity-changed";
  * `ActivityTick` (same numbers, no segment list).
  */
 export const ACTIVITY_TICK = "activity-tick";
+
+/** Rust emits this after a preference change so every view adopts it. */
+export const SETTINGS_CHANGED = "settings-changed";
 
 /*
  * One typed wrapper per #[tauri::command]. Every command returns the complete
@@ -76,6 +80,21 @@ export function stopSession(): Promise<void> {
 
 export function markSegmentReviewed(id: number): Promise<void> {
   return invoke<void>("mark_segment_reviewed", { id });
+}
+
+// --- preferences ------------------------------------------------------
+
+export function getSettings(): Promise<Settings> {
+  return invoke<Settings>("get_settings");
+}
+
+/** Replaces the whole preference set; Rust answers with the stored values. */
+export function updateSettings(settings: Settings): Promise<Settings> {
+  return invoke<Settings>("update_settings", { settings });
+}
+
+export function storagePaths(): Promise<StoragePaths> {
+  return invoke<StoragePaths>("storage_paths");
 }
 
 /** Tauri rejects with a string; React errors are Error objects. Handle both. */

@@ -82,7 +82,7 @@ export const KIND_STYLES: Record<
   SessionKind,
   { dot: string; text: string; label: string }
 > = {
-  activity: { dot: "bg-white/35", text: "text-white/70", label: "Activity" },
+  activity: { dot: "bg-fg-faint", text: "text-fg-muted", label: "Activity" },
   focus: { dot: "bg-accent", text: "text-accent", label: "Focus" },
-  break: { dot: "bg-sky-400", text: "text-sky-300", label: "Break" },
+  break: { dot: "bg-break", text: "text-break", label: "Break" },
 };

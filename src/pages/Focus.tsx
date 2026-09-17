@@ -41,7 +41,7 @@ export function Focus() {
       {activity.error !== null && (
         <p
           role="alert"
-          className="rounded-[10px] border border-red-400/40 bg-red-400/10 px-3.5 py-2.5 text-[13px] text-red-200"
+          className="rounded-[10px] border border-danger/40 bg-danger-soft px-3.5 py-2.5 text-[13px] text-danger"
         >
           {activity.error}
         </p>
@@ -62,14 +62,14 @@ export function Focus() {
             <Stat label="Sessions" value={String(focusSegments.length)} />
             <Stat label="Longest" value={formatDuration(longest)} />
           </div>
-          <div className="flex flex-col gap-1 rounded-lg border border-white/5 bg-black/20 px-2.5 py-2">
+          <div className="flex flex-col gap-1 rounded-lg border border-line-soft bg-inset-soft px-2.5 py-2">
             <div className="flex items-baseline justify-between gap-2">
-              <span className="text-[12px] text-white/70">Window switches</span>
-              <span className="font-mono text-[13px] tabular-nums text-white">
+              <span className="text-[12px] text-fg-muted">Window switches</span>
+              <span className="font-mono text-[13px] tabular-nums text-fg-strong">
                 {switches}
               </span>
             </div>
-            <p className="text-[10.5px] leading-snug text-white/35">
+            <p className="text-[10.5px] leading-snug text-fg-faint">
               The full 20+ attribute quality score needs tracking rules, so only
               this switch count is real today.
             </p>
@@ -92,14 +92,14 @@ export function Focus() {
           <button
             type="button"
             onClick={() => activity.startSession("focus", "Deep work")}
-            className="self-start rounded-lg border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-3 py-1.5 text-[12px] font-semibold text-[#04160c]"
+            className="self-start rounded-lg border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-3 py-1.5 text-[12px] font-semibold text-accent-fg"
           >
             Start Focus
           </button>
           {snapshot?.current?.kind === "focus" && (
             <div className="flex items-center gap-2">
               <KindBadge kind="focus" />
-              <span className="text-[12px] text-white/70">Running</span>
+              <span className="text-[12px] text-fg-muted">Running</span>
             </div>
           )}
         </BentoCard>
@@ -112,7 +112,7 @@ export function Focus() {
           <button
             type="button"
             onClick={() => show("Automatic Focus trigger")}
-            className="self-start rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[12px] text-white/70 hover:bg-white/10"
+            className="self-start rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] text-fg-muted hover:bg-surface-strong"
           >
             Configure rules
           </button>
@@ -126,7 +126,7 @@ export function Focus() {
           <button
             type="button"
             onClick={() => show("Focus rules")}
-            className="self-start rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[12px] text-white/70 hover:bg-white/10"
+            className="self-start rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] text-fg-muted hover:bg-surface-strong"
           >
             Edit rules
           </button>
@@ -140,7 +140,7 @@ export function Focus() {
           <button
             type="button"
             onClick={() => show("Calendar keyword trigger")}
-            className="self-start rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[12px] text-white/70 hover:bg-white/10"
+            className="self-start rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] text-fg-muted hover:bg-surface-strong"
           >
             Set keywords
           </button>

@@ -33,8 +33,8 @@ function NavTab({ active, label, onSelect, children }: NavTabProps) {
       title={label}
       onClick={onSelect}
       aria-current={active ? "page" : undefined}
-      className={`flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2.5 text-left text-[13.5px] text-white/55 transition-colors ${
-        active ? "bg-accent-soft" : "hover:bg-white/5"
+      className={`flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2.5 text-left text-[13.5px] text-fg-soft transition-colors ${
+        active ? "bg-accent-soft" : "hover:bg-surface"
       }`}
     >
       <svg
@@ -161,7 +161,7 @@ const coreNav: NavItem[] = [
 
 export function Sidebar({ view, onSelect }: SidebarProps) {
   return (
-    <aside className="flex min-h-0 flex-col border-r border-white/10 bg-black/35 px-3.5 py-4.5">
+    <aside className="flex min-h-0 flex-col border-r border-line bg-rail px-3.5 py-4.5">
       {/* The only scrolling region. Its own box, so a long nav never moves the
           main page, and the page never moves the nav. */}
       <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
@@ -179,7 +179,7 @@ export function Sidebar({ view, onSelect }: SidebarProps) {
         {/* Manual Trackers is a separate feature from automatic Sessions
             tracking above it, not a step in that pipeline — the divider
             marks that split rather than implying an order. */}
-        <div className="my-1.5 border-t border-white/10" />
+        <div className="my-1.5 border-t border-line" />
 
         <NavTab
           active={view === "trackers"}

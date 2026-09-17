@@ -1,7 +1,7 @@
 export type Status = "not-implemented" | "in-progress" | "live";
 
 const styles: Record<Status, string> = {
-  "not-implemented": "border-white/10 bg-white/5 text-white/40",
+  "not-implemented": "border-line bg-surface text-fg-faint",
   "in-progress": "border-accent/30 bg-accent-soft text-accent",
   live: "border-accent/40 bg-accent-soft text-accent",
 };

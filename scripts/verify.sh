@@ -28,6 +28,10 @@ else
 fi
 
 echo "==> cargo clippy (backend)"
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+if $FIX; then
+  cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --fix --allow-dirty --allow-staged -- -D warnings
+else
+  cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+fi
 
 echo "verify: all checks passed"

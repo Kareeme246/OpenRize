@@ -11,16 +11,20 @@ When it comes to React frontend code, you can generally trust your instincts and
 Before calling a task done, run:
 
 ```
+pnpm fix
 pnpm verify
 ```
 
-This is the single canonical check — it runs Biome (lint + format check) and
-`tsc --noEmit` on the frontend, then `cargo fmt --check` and
-`cargo clippy -- -D warnings` on the backend. Do not invent ad hoc
-`biome`/`cargo fmt`/`cargo clippy` invocations of your own; use this script so
-checks stay consistent across agents and humans. `pnpm fix` runs the same
-checks but applies safe auto-fixes (Biome `--write`, `cargo fmt`) instead of
-just reporting them.
+`pnpm fix` applies every safe auto-fix available (Biome `--write`, `cargo
+fmt`, `cargo clippy --fix` for machine-applicable lints) and `pnpm verify` is
+the single canonical check — it runs Biome (lint + format check) and `tsc
+--noEmit` on the frontend, then `cargo fmt --check` and `cargo clippy -- -D
+warnings` on the backend. Running `fix` first means the easy, mechanical
+stuff (formatting, trivial lints) never shows up as a `verify` failure to
+puzzle over — `verify` failing should mean something actually needs a
+judgment call. Do not invent ad hoc `biome`/`cargo fmt`/`cargo clippy`
+invocations of your own; use these scripts so checks stay consistent across
+agents and humans.
 
 Do not run `cargo build`, `cargo check`, or `pnpm build` speculatively "just
 to check" — `pnpm verify` already covers correctness. Reserve full builds for

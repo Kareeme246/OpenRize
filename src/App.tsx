@@ -2,6 +2,7 @@ import { type ReactElement, useCallback, useEffect, useState } from "react";
 import { NotImplementedProvider } from "./components/NotImplemented";
 import { Sidebar, type SidebarView } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
+import { SettingsProvider } from "./hooks/useSettings";
 import { useTimers } from "./hooks/useTimers";
 import { AiAgent } from "./pages/AiAgent";
 import { Breaks } from "./pages/Breaks";
@@ -96,19 +97,21 @@ export default function App() {
   };
 
   return (
-    <NotImplementedProvider>
-      <div className="flex h-full min-h-0 flex-col overflow-hidden">
-        <TopBar
-          canGoBack={nav.cursor > 0}
-          canGoForward={nav.cursor < nav.entries.length - 1}
-          onBack={back}
-          onForward={forward}
-        />
-        <div className="grid min-h-0 flex-1 grid-cols-[224px_minmax(0,1fr)] overflow-hidden">
-          <Sidebar view={view} onSelect={select} />
-          <div className="flex min-h-0 min-w-0 flex-col">{renderView()}</div>
+    <SettingsProvider>
+      <NotImplementedProvider>
+        <div className="flex h-full min-h-0 flex-col overflow-hidden">
+          <TopBar
+            canGoBack={nav.cursor > 0}
+            canGoForward={nav.cursor < nav.entries.length - 1}
+            onBack={back}
+            onForward={forward}
+          />
+          <div className="grid min-h-0 flex-1 grid-cols-[224px_minmax(0,1fr)] overflow-hidden">
+            <Sidebar view={view} onSelect={select} />
+            <div className="flex min-h-0 min-w-0 flex-col">{renderView()}</div>
+          </div>
         </div>
-      </div>
-    </NotImplementedProvider>
+      </NotImplementedProvider>
+    </SettingsProvider>
   );
 }

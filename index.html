@@ -8,6 +8,16 @@
 
   <body>
     <div id="root"></div>
+    <!-- Pre-paint theme hint: set the system scheme before styles run so a
+         light-mode user never sees a dark flash. Rust stays the source of
+         truth - applyAppearance overwrites this as soon as settings load. -->
+    <script>
+      document.documentElement.dataset.theme = window.matchMedia(
+        "(prefers-color-scheme: light)",
+      ).matches
+        ? "light"
+        : "dark";
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

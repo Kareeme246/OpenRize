@@ -48,7 +48,7 @@ export function HourRing({ elapsed, running, onToggle }: HourRingProps) {
           r={RADIUS}
           fill="none"
           strokeWidth={STROKE}
-          className="stroke-white/10"
+          className="stroke-line"
         />
         <circle
           cx={CENTRE}
@@ -60,7 +60,7 @@ export function HourRing({ elapsed, running, onToggle }: HourRingProps) {
           strokeDasharray={CIRCUMFERENCE}
           strokeDashoffset={CIRCUMFERENCE * (1 - progress)}
           transform={`rotate(-90 ${CENTRE} ${CENTRE})`}
-          className={running ? "stroke-accent" : "stroke-white/35"}
+          className={running ? "stroke-accent" : "stroke-fg-faint"}
         />
         {running ? (
           <>
@@ -84,7 +84,7 @@ export function HourRing({ elapsed, running, onToggle }: HourRingProps) {
         ) : (
           <path
             d={`M${CENTRE - 8},${CENTRE - 16} L${CENTRE - 8},${CENTRE + 16} L${CENTRE + 16},${CENTRE} Z`}
-            className="fill-white/70"
+            className="fill-fg-muted"
           />
         )}
       </svg>

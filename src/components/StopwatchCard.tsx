@@ -41,7 +41,7 @@ export function StopwatchCard({
       className={`flex min-w-0 flex-col items-center gap-3 rounded-xl border p-4 ${
         running
           ? "border-accent/30 bg-linear-to-b from-accent/10 to-accent/2"
-          : "border-white/10 bg-linear-to-b from-white/5 to-white/1"
+          : "border-line bg-linear-to-b from-surface to-transparent"
       }`}
     >
       <div className="flex w-full min-w-0 items-center justify-center">
@@ -60,7 +60,7 @@ export function StopwatchCard({
                 setEditing(false);
               }
             }}
-            className="w-full min-w-0 rounded-md border border-accent/30 bg-black/50 px-2 py-1 text-center text-[13px] text-white outline-none"
+            className="w-full min-w-0 rounded-md border border-accent/30 bg-inset px-2 py-1 text-center text-[13px] text-fg-strong outline-none"
           />
         ) : (
           <button
@@ -87,7 +87,7 @@ export function StopwatchCard({
         className={`font-mono text-[26px] font-semibold tabular-nums leading-none tracking-tight ${
           running
             ? "text-accent drop-shadow-[0_0_28px_rgba(42,234,131,0.35)]"
-            : "text-white/45"
+            : "text-fg-soft"
         }`}
       >
         {formatDuration(elapsed)}
@@ -99,7 +99,7 @@ export function StopwatchCard({
           title="Reset to zero and stop"
           aria-label="Reset to zero and stop"
           onClick={() => setPending("reset")}
-          className="grid w-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-white/55"
+          className="grid w-9 shrink-0 place-items-center rounded-lg border border-line bg-surface text-fg-soft"
         >
           <svg
             viewBox="0 0 24 24"
@@ -118,7 +118,7 @@ export function StopwatchCard({
           title="Delete"
           aria-label="Delete"
           onClick={() => setPending("delete")}
-          className="grid w-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-sm text-white/55"
+          className="grid w-9 shrink-0 place-items-center rounded-lg border border-line bg-surface text-sm text-fg-soft"
         >
           ×
         </button>

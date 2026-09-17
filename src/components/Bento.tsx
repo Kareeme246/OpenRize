@@ -25,7 +25,7 @@ export function PageHeader({ title, description, status }: PageHeaderProps) {
     <header className="flex items-start justify-between gap-4">
       <div className="min-w-0">
         <h1 className="text-[15px] font-semibold">{title}</h1>
-        <div className="font-mono text-[10.5px] text-white/35">
+        <div className="font-mono text-[10.5px] text-fg-faint">
           {description}
         </div>
       </div>
@@ -59,18 +59,18 @@ export function BentoCard({
 }: BentoCardProps) {
   return (
     <div
-      className={`flex min-w-0 flex-col gap-2 overflow-hidden rounded-xl border border-white/10 bg-linear-to-b from-white/5 to-white/1 p-4 ${spanClasses[span]}`}
+      className={`flex min-w-0 flex-col gap-2 overflow-hidden rounded-xl border border-line bg-linear-to-b from-surface to-transparent p-4 ${spanClasses[span]}`}
     >
       <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 items-start gap-2 text-white/70">
+        <div className="flex min-w-0 items-start gap-2 text-fg-muted">
           {icon}
-          <h3 className="text-[13px] font-semibold leading-snug text-white">
+          <h3 className="text-[13px] font-semibold leading-snug text-fg-strong">
             {title}
           </h3>
         </div>
         <StatusBadge status={status} className="mt-0.5" />
       </div>
-      <p className="text-[11.5px] leading-snug text-white/40">{description}</p>
+      <p className="text-[11.5px] leading-snug text-fg-faint">{description}</p>
       {children}
     </div>
   );

@@ -463,6 +463,36 @@ impl ActivityStore {
         Ok(())
     }
 
+    /// Deletes closed segments older than `days`, along with the daily rollups
+    /// that summarise those days. `0` means keep forever, and an open segment
+    /// is never touched because it has no end to compare against.
+    ///
+    /// `daily_rollups` is normally additive-only (decision A7), but a
+    /// user-chosen retention window is a deliberate "forget this" that has to
+    /// cover the aggregates too - otherwise a purged day would still be summed
+    /// into reports.
+    pub fn purge_older_than(&mut self, days: u32, now: u64) -> Result<u64, String> {
+        if days == 0 {
+            return Ok(0);
+        }
+        let cutoff = now.saturating_sub(u64::from(days) * ONE_DAY_MS);
+        let transaction = self.conn.transaction().map_err(|error| error.to_string())?;
+        let removed = transaction
+            .execute(
+                "DELETE FROM segments WHERE ended_at IS NOT NULL AND ended_at < ?1",
+                params![cutoff as i64],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "DELETE FROM daily_rollups WHERE day_epoch < ?1",
+                params![(cutoff / ONE_DAY_MS) as i64],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())?;
+        Ok(removed as u64)
+    }
+
     // --- reads -------------------------------------------------------------
     // These use `self.conn` (the writer connection) directly, which is fine
     // for tests and any other in-process caller: the read/write split that
@@ -982,5 +1012,43 @@ mod tests {
         // Raw segment is untouched.
         let snapshot = store.snapshot(0, far_future).unwrap();
         assert_eq!(snapshot.segments.len(), 1);
+    }
+
+    #[test]
+    fn retention_purges_old_segments_and_rollups_but_keeps_open_ones() {
+        let day = ONE_DAY_MS;
+        let mut store = store();
+        // Closed long ago, closed recently, and still open.
+        store
+            .open("Code", "old", KIND_ACTIVITY, None, 1_000)
+            .unwrap();
+        store.close_current(2_000).unwrap();
+        store
+            .open("Code", "new", KIND_ACTIVITY, None, 40 * day)
+            .unwrap();
+        store.close_current(41 * day).unwrap();
+        store
+            .open("Code", "live", KIND_ACTIVITY, None, 42 * day)
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO daily_rollups (day_epoch, kind, total_ms) VALUES (0, ?1, 5_000)",
+                params![KIND_ACTIVITY],
+            )
+            .unwrap();
+
+        // 0 means forever: nothing goes.
+        assert_eq!(store.purge_older_than(0, 43 * day).unwrap(), 0);
+        // A 30-day window drops the ancient segment and its rollup only.
+        assert_eq!(store.purge_older_than(30, 43 * day).unwrap(), 1);
+        let rollups: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM daily_rollups", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(rollups, 0);
+        // The recent closed segment and the open one survive.
+        let snapshot = store.snapshot(0, 43 * day).unwrap();
+        assert_eq!(snapshot.segments.len(), 2);
     }
 }

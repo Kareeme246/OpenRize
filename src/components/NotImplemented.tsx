@@ -69,16 +69,16 @@ function NotImplementedDialog({
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
-      className="m-auto rounded-2xl bg-transparent p-0 text-white outline-none backdrop:bg-black/65"
+      className="m-auto rounded-2xl bg-transparent p-0 text-fg-strong outline-none backdrop:bg-scrim"
     >
-      <div className="w-[340px] max-w-[calc(100vw-2rem)] rounded-2xl border border-white/10 bg-ink-900 p-4 shadow-2xl">
+      <div className="w-[340px] max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-panel p-4 shadow-2xl">
         <div className="flex items-center gap-2">
-          <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[9.5px] uppercase tracking-wider text-white/40">
+          <span className="rounded-full border border-line bg-surface px-2 py-0.5 font-mono text-[9.5px] uppercase tracking-wider text-fg-faint">
             Not implemented
           </span>
         </div>
         <h2 className="mt-2.5 text-[13.5px] font-semibold">{feature}</h2>
-        <p className="mt-1.5 text-[12.5px] leading-relaxed text-white/50">
+        <p className="mt-1.5 text-[12.5px] leading-relaxed text-fg-soft">
           This isn&rsquo;t built yet. It&rsquo;s a stub for a later pass, so
           nothing happened when you clicked.
         </p>
@@ -86,7 +86,7 @@ function NotImplementedDialog({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-3 py-1.5 text-[12.5px] font-semibold text-[#04160c]"
+            className="rounded-lg border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-3 py-1.5 text-[12.5px] font-semibold text-accent-fg"
           >
             Got it
           </button>

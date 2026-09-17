@@ -58,7 +58,7 @@ export function Sessions() {
       {activity.error !== null && (
         <p
           role="alert"
-          className="rounded-[10px] border border-red-400/40 bg-red-400/10 px-3.5 py-2.5 text-[13px] text-red-200"
+          className="rounded-[10px] border border-danger/40 bg-danger-soft px-3.5 py-2.5 text-[13px] text-danger"
         >
           {activity.error}
         </p>
@@ -80,7 +80,7 @@ export function Sessions() {
                 className={`rounded-md px-2 py-1 font-mono text-[10.5px] uppercase tracking-wider ${
                   scale === option
                     ? "bg-accent-soft text-accent"
-                    : "text-white/40 hover:bg-white/5"
+                    : "text-fg-faint hover:bg-surface"
                 }`}
               >
                 {scaleLabels[option]}
@@ -113,7 +113,7 @@ export function Sessions() {
                 />
                 <div className="min-w-0">
                   <KindBadge kind={current.kind} />
-                  <div className="mt-1 truncate text-[13px] font-semibold text-white">
+                  <div className="mt-1 truncate text-[13px] font-semibold text-fg-strong">
                     {current.title}
                   </div>
                   <div className="font-mono text-[20px] tabular-nums text-accent">
@@ -122,7 +122,7 @@ export function Sessions() {
                   <button
                     type="button"
                     onClick={activity.stopSession}
-                    className="mt-1 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-white/70 hover:bg-white/10"
+                    className="mt-1 rounded-md border border-line bg-surface px-2 py-1 text-[11px] text-fg-muted hover:bg-surface-strong"
                   >
                     Stop session
                   </button>
@@ -131,14 +131,14 @@ export function Sessions() {
             ) : (
               <div className="min-w-0">
                 <KindBadge kind="activity" />
-                <div className="mt-1 truncate text-[13px] text-white/70">
+                <div className="mt-1 truncate text-[13px] text-fg-muted">
                   {current === null
                     ? "No session running"
                     : current.title.length > 0
                       ? current.title
                       : current.app}
                 </div>
-                <div className="font-mono text-[11px] text-white/40">
+                <div className="font-mono text-[11px] text-fg-faint">
                   Tracking automatically — start Focus or Break to take over.
                 </div>
               </div>
@@ -148,14 +148,14 @@ export function Sessions() {
             <button
               type="button"
               onClick={() => activity.startSession("focus", "Deep work")}
-              className="rounded-lg border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-3 py-1.5 text-[12px] font-semibold text-[#04160c]"
+              className="rounded-lg border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-3 py-1.5 text-[12px] font-semibold text-accent-fg"
             >
               Start Focus
             </button>
             <button
               type="button"
               onClick={() => activity.startSession("break", "Break")}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[12px] text-white/75 hover:bg-white/10"
+              className="rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] text-fg-muted hover:bg-surface-strong"
             >
               Start Break
             </button>
@@ -171,10 +171,10 @@ export function Sessions() {
           <div className="flex items-center gap-2">
             <span
               className={`size-2 rounded-full ${
-                snapshot?.captureEnabled ? "bg-accent" : "bg-white/30"
+                snapshot?.captureEnabled ? "bg-accent" : "bg-fg-ghost"
               }`}
             />
-            <span className="text-[12.5px] text-white/75">
+            <span className="text-[12.5px] text-fg-muted">
               {snapshot?.captureEnabled ? "Capture running" : "Capture paused"}
             </span>
             <button
@@ -182,20 +182,20 @@ export function Sessions() {
               onClick={() =>
                 activity.setCaptureEnabled(!(snapshot?.captureEnabled ?? false))
               }
-              className="ml-auto rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[12px] text-white/75 hover:bg-white/10"
+              className="ml-auto rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] text-fg-muted hover:bg-surface-strong"
             >
               {snapshot?.captureEnabled ? "Pause" : "Resume"}
             </button>
           </div>
-          <div className="min-w-0 rounded-lg border border-white/5 bg-black/20 px-2.5 py-2">
-            <div className="truncate text-[12.5px] text-white/80">
+          <div className="min-w-0 rounded-lg border border-line-soft bg-inset-soft px-2.5 py-2">
+            <div className="truncate text-[12.5px] text-fg">
               {current?.title.length ? current.title : (current?.app ?? "—")}
             </div>
-            <div className="font-mono text-[10.5px] text-white/35">
+            <div className="font-mono text-[10.5px] text-fg-faint">
               current window
             </div>
           </div>
-          <p className="text-[10.5px] leading-snug text-white/35">
+          <p className="text-[10.5px] leading-snug text-fg-faint">
             macOS captures app names out of the box; window titles need Screen
             Recording permission for OpenRize.
           </p>
@@ -208,14 +208,14 @@ export function Sessions() {
           status="live"
         >
           {selected === null ? (
-            <p className="rounded-lg border border-dashed border-white/10 px-3 py-6 text-center text-[12px] text-white/35">
+            <p className="rounded-lg border border-dashed border-line px-3 py-6 text-center text-[12px] text-fg-faint">
               Select a block on the timeline.
             </p>
           ) : (
             <div className="flex min-h-0 flex-col gap-2">
               <div className="flex items-center justify-between gap-2">
                 <KindBadge kind={selected.kind} />
-                <span className="font-mono text-[11px] tabular-nums text-white/45">
+                <span className="font-mono text-[11px] tabular-nums text-fg-soft">
                   {formatClock(selected.startedAt)}–
                   {selected.endedAt === null
                     ? "now"
@@ -223,10 +223,10 @@ export function Sessions() {
                 </span>
               </div>
               <div className="min-w-0">
-                <div className="truncate text-[13px] font-semibold text-white">
+                <div className="truncate text-[13px] font-semibold text-fg-strong">
                   {selected.title.length > 0 ? selected.title : selected.app}
                 </div>
-                <div className="truncate text-[11px] text-white/45">
+                <div className="truncate text-[11px] text-fg-soft">
                   {selected.app}
                 </div>
               </div>
@@ -234,7 +234,7 @@ export function Sessions() {
                 type="button"
                 disabled={selected.reviewed}
                 onClick={() => activity.markReviewed(selected.id)}
-                className="self-start rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[12px] text-white/75 hover:bg-white/10 disabled:opacity-40"
+                className="self-start rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] text-fg-muted hover:bg-surface-strong disabled:opacity-40"
               >
                 {selected.reviewed ? "Reviewed" : "Mark reviewed"}
               </button>
@@ -242,14 +242,14 @@ export function Sessions() {
                 <button
                   type="button"
                   onClick={() => show("AI category suggestions")}
-                  className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11.5px] text-white/65 hover:bg-white/10"
+                  className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[11.5px] text-fg-muted hover:bg-surface-strong"
                 >
                   Suggest category
                 </button>
                 <button
                   type="button"
                   onClick={() => show("Create task")}
-                  className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11.5px] text-white/65 hover:bg-white/10"
+                  className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[11.5px] text-fg-muted hover:bg-surface-strong"
                 >
                   Create task
                 </button>
@@ -266,7 +266,7 @@ export function Sessions() {
         >
           <div className="flex items-end gap-2">
             <label className="flex flex-col gap-1">
-              <span className="font-mono text-[10px] uppercase tracking-wider text-white/35">
+              <span className="font-mono text-[10px] uppercase tracking-wider text-fg-faint">
                 Minutes
               </span>
               <input
@@ -285,7 +285,7 @@ export function Sessions() {
                 onKeyDown={(event) => {
                   if (event.key === "Enter") event.currentTarget.blur();
                 }}
-                className="w-16 rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[12.5px] text-white outline-none focus:border-accent/30"
+                className="w-16 rounded-md border border-line bg-inset px-2 py-1 text-[12.5px] text-fg-strong outline-none focus:border-accent/30"
               />
             </label>
             <Stat

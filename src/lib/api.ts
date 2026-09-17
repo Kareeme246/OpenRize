@@ -6,11 +6,18 @@ import type { Timer } from "./timers";
 export const TIMERS_CHANGED = "timers-changed";
 
 /**
- * Rust emits this after every activity sample (every few seconds while capture
- * runs). The payload is empty on purpose: the frontend re-queries with its own
- * local-midnight bound, which Rust cannot compute without a timezone database.
+ * Rust emits this whenever a segment actually opens or closes, and once more
+ * immediately when the OpenRize window regains focus (a reconciliation).
+ * Carries the full `ActivitySnapshot` directly — no follow-up call needed.
  */
 export const ACTIVITY_CHANGED = "activity-changed";
+
+/**
+ * Rust emits this at 1Hz while the OpenRize window is focused, or every 30s
+ * while it isn't and nothing structural has changed. Carries the lighter
+ * `ActivityTick` (same numbers, no segment list).
+ */
+export const ACTIVITY_TICK = "activity-tick";
 
 /*
  * One typed wrapper per #[tauri::command]. Every command returns the complete

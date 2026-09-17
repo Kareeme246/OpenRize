@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type ActivitySnapshot,
+  type ActivityTick,
   type SessionKind,
   startOfToday,
 } from "../lib/activity";
@@ -58,12 +59,33 @@ export function useActivity(): ActivityApi {
     return () => window.clearInterval(handle);
   }, []);
 
+  // A structural change (segment opened/closed) or a focus-regained
+  // reconciliation carries the full snapshot directly — adopt it, same
+  // pattern useTimers already uses for timers-changed. No follow-up call.
   useEffect(() => {
-    const pending = listen(api.ACTIVITY_CHANGED, refresh);
+    const pending = listen<ActivitySnapshot>(api.ACTIVITY_CHANGED, (event) => {
+      setSnapshot(event.payload);
+      setError(null);
+    });
     return () => {
       void pending.then((unlisten) => unlisten());
     };
-  }, [refresh]);
+  }, []);
+
+  // The lightweight push (1Hz while OpenRize is focused, a 30s heartbeat
+  // otherwise) carries the same numbers minus the segment list — merge them
+  // in without touching `segments`, which only ever changes on the event
+  // above.
+  useEffect(() => {
+    const pending = listen<ActivityTick>(api.ACTIVITY_TICK, (event) => {
+      setSnapshot((previous) =>
+        previous === null ? previous : { ...previous, ...event.payload },
+      );
+    });
+    return () => {
+      void pending.then((unlisten) => unlisten());
+    };
+  }, []);
 
   // Mutations are fire-and-forget: Rust answers with an event that triggers
   // refresh above, so there is exactly one path that writes state.

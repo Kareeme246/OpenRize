@@ -4,9 +4,9 @@
 //! Each one takes `AppHandle` (not `State`) so the tray's own event handler can
 //! call the same helper — one code path for "mutate, persist, refresh".
 
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
-use crate::activity::ActivitySnapshot;
+use crate::activity::{self, ActivitySnapshot};
 use crate::timers::{now_epoch_ms, Timer};
 use crate::tray;
 use crate::AppState;
@@ -25,7 +25,7 @@ fn refresh_tray(app: &AppHandle, timers: &[Timer]) {
 pub fn list_timers(app: AppHandle) -> Timers {
     let state = app.state::<AppState>();
     let store = state.store.lock().map_err(|error| error.to_string())?;
-    Ok(store.snapshot())
+    store.snapshot()
 }
 
 #[tauri::command]
@@ -101,17 +101,16 @@ pub fn delete_timer(app: AppHandle, id: String) -> Timers {
 
 // --- activity capture --------------------------------------------------
 //
-// The read command takes the caller's local-midnight bound; mutations are
-// fire-and-forget and announce themselves with EVENT_ACTIVITY_CHANGED, which
-// every open view (and the tray) already listens for. Returning a snapshot from
-// a mutation would mean inventing a range here, and Rust cannot compute local
-// midnight.
+// The read command takes the caller's local-midnight bound and also caches it
+// on the writer, so the sampler's tick/heartbeat pushes know what range to
+// aggregate (see activity.rs's `snapshot_for`). Mutations broadcast the full
+// snapshot on EVENT_ACTIVITY_CHANGED via `activity::emit_full` — the same
+// path the sampler uses for a structural change — so every view and the tray
+// adopt it directly instead of round-tripping another `invoke`.
 
 #[tauri::command]
 pub fn activity_snapshot(app: AppHandle, since_ms: u64) -> Result<ActivitySnapshot, String> {
-    let state = app.state::<AppState>();
-    let store = state.activity.lock().map_err(|error| error.to_string())?;
-    store.snapshot(since_ms, now_epoch_ms())
+    activity::snapshot_for(&app, since_ms)
 }
 
 #[tauri::command]
@@ -121,7 +120,7 @@ pub fn set_capture_enabled(app: AppHandle, enabled: bool) -> Result<(), String> 
         let mut store = state.activity.lock().map_err(|error| error.to_string())?;
         store.set_capture_enabled(enabled)?;
     }
-    let _ = app.emit(crate::EVENT_ACTIVITY_CHANGED, ());
+    activity::emit_full(&app);
     Ok(())
 }
 
@@ -132,7 +131,7 @@ pub fn set_idle_threshold(app: AppHandle, minutes: u64) -> Result<(), String> {
         let mut store = state.activity.lock().map_err(|error| error.to_string())?;
         store.set_idle_threshold_ms(minutes.saturating_mul(60_000))?;
     }
-    let _ = app.emit(crate::EVENT_ACTIVITY_CHANGED, ());
+    activity::emit_full(&app);
     Ok(())
 }
 
@@ -143,7 +142,7 @@ pub fn start_session(app: AppHandle, kind: String, label: Option<String>) -> Res
         let mut store = state.activity.lock().map_err(|error| error.to_string())?;
         store.start_session(&kind, label.as_deref(), now_epoch_ms())?;
     }
-    let _ = app.emit(crate::EVENT_ACTIVITY_CHANGED, ());
+    activity::emit_full(&app);
     Ok(())
 }
 
@@ -154,7 +153,7 @@ pub fn stop_session(app: AppHandle) -> Result<(), String> {
         let mut store = state.activity.lock().map_err(|error| error.to_string())?;
         store.stop_session(now_epoch_ms())?;
     }
-    let _ = app.emit(crate::EVENT_ACTIVITY_CHANGED, ());
+    activity::emit_full(&app);
     Ok(())
 }
 
@@ -165,6 +164,6 @@ pub fn mark_segment_reviewed(app: AppHandle, id: i64) -> Result<(), String> {
         let mut store = state.activity.lock().map_err(|error| error.to_string())?;
         store.mark_reviewed(id)?;
     }
-    let _ = app.emit(crate::EVENT_ACTIVITY_CHANGED, ());
+    activity::emit_full(&app);
     Ok(())
 }

@@ -1,5 +1,10 @@
 import { useState } from "react";
-import { CardBody, KindBadge, SegmentList, Stat } from "../components/ActivityBits";
+import {
+  CardBody,
+  KindBadge,
+  SegmentList,
+  Stat,
+} from "../components/ActivityBits";
 import { BentoCard, BentoGrid, PageHeader } from "../components/Bento";
 import { HourRing } from "../components/HourRing";
 import { useNotImplemented } from "../components/NotImplemented";
@@ -26,7 +31,8 @@ export function Sessions() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [scale, setScale] = useState<Scale>("day");
 
-  const selected = segments.find((segment) => segment.id === selectedId) ?? null;
+  const selected =
+    segments.find((segment) => segment.id === selectedId) ?? null;
   const current = snapshot?.current ?? null;
   // Only a Focus/Break is a "session" the user controls; plain activity is the
   // automatic capture doing its job.
@@ -211,7 +217,9 @@ export function Sessions() {
                 <KindBadge kind={selected.kind} />
                 <span className="font-mono text-[11px] tabular-nums text-white/45">
                   {formatClock(selected.startedAt)}–
-                  {selected.endedAt === null ? "now" : formatClock(selected.endedAt)}
+                  {selected.endedAt === null
+                    ? "now"
+                    : formatClock(selected.endedAt)}
                 </span>
               </div>
               <div className="min-w-0">
@@ -265,7 +273,9 @@ export function Sessions() {
                 type="number"
                 min={1}
                 key={snapshot?.idleThresholdMs ?? 0}
-                defaultValue={Math.round((snapshot?.idleThresholdMs ?? 0) / 60_000)}
+                defaultValue={Math.round(
+                  (snapshot?.idleThresholdMs ?? 0) / 60_000,
+                )}
                 onBlur={(event) => {
                   const minutes = Number(event.target.value);
                   if (Number.isFinite(minutes) && minutes >= 1) {
@@ -278,7 +288,10 @@ export function Sessions() {
                 className="w-16 rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[12.5px] text-white outline-none focus:border-accent/30"
               />
             </label>
-            <Stat label="Idle now" value={formatDuration(snapshot?.idleMs ?? 0)} />
+            <Stat
+              label="Idle now"
+              value={formatDuration(snapshot?.idleMs ?? 0)}
+            />
           </div>
         </BentoCard>
       </BentoGrid>

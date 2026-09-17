@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { StatusBadge, type Status } from "./StatusBadge";
+import { type Status, StatusBadge } from "./StatusBadge";
 
 /** Bento card sizes. Kept as literal class strings (not built from template
  * pieces) so Tailwind's source scanner can see every utility it needs to
@@ -25,7 +25,9 @@ export function PageHeader({ title, description, status }: PageHeaderProps) {
     <header className="flex items-start justify-between gap-4">
       <div className="min-w-0">
         <h1 className="text-[15px] font-semibold">{title}</h1>
-        <div className="font-mono text-[10.5px] text-white/35">{description}</div>
+        <div className="font-mono text-[10.5px] text-white/35">
+          {description}
+        </div>
       </div>
       <StatusBadge status={status} className="mt-0.5" />
     </header>
@@ -62,7 +64,9 @@ export function BentoCard({
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-start gap-2 text-white/70">
           {icon}
-          <h3 className="text-[13px] font-semibold leading-snug text-white">{title}</h3>
+          <h3 className="text-[13px] font-semibold leading-snug text-white">
+            {title}
+          </h3>
         </div>
         <StatusBadge status={status} className="mt-0.5" />
       </div>

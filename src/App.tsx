@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { type ReactElement, useCallback, useEffect, useState } from "react";
 import { NotImplementedProvider } from "./components/NotImplemented";
 import { Sidebar, type SidebarView } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
+import { useTimers } from "./hooks/useTimers";
 import { AiAgent } from "./pages/AiAgent";
 import { Breaks } from "./pages/Breaks";
 import { Categorization } from "./pages/Categorization";
@@ -14,7 +15,6 @@ import { Reports } from "./pages/Reports";
 import { Sessions } from "./pages/Sessions";
 import { Settings } from "./pages/Settings";
 import { Trackers } from "./pages/Trackers";
-import { useTimers } from "./hooks/useTimers";
 
 /** Browser-style history: a stack plus where the user is standing in it. */
 interface NavState {

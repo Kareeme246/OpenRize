@@ -139,7 +139,6 @@ impl SettingsStore {
         Ok(self.snapshot())
     }
 
-    /// Atomic write: a crash mid-write leaves the previous file intact.
     fn persist(&self) -> Result<(), String> {
         let json = serde_json::to_vec_pretty(&self.settings).map_err(|e| e.to_string())?;
         let temp = self.path.with_extension("json.tmp");

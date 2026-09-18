@@ -6,35 +6,19 @@
 //! startup epoch, so a system-clock change mid-session cannot corrupt a running
 //! stopwatch.
 //!
-//! Persistence policy (decision A8/opt 7): timers live in a `timers` table in
+//! Persistence policy: timers live in a `timers` table in
 //! the same SQLite file activity capture already uses (`activity.db`), each
-//! store through its own connection — WAL permits that, and it means one
-//! backup artifact covers both instead of a JSON file and a database. This
-//! used to be a synchronous whole-file JSON rewrite per mutation; that was a
-//! reasonable choice while this was the only persisted store; it stopped
-//! being one the moment there was already a database file sitting right next
-//! to it with no shared story between the two. Timers still mutate at human
+//! store through its own connection Timers still mutate at human
 //! rate, so there's no contention concern moving to row-level SQL statements.
-//!
-//! A store that finds a legacy `timers.json` on disk imports it once (see
-//! `migrate_from_json`) and quarantines the file rather than deleting it —
-//! same "don't destroy, set aside" policy this module already used for a
-//! corrupt file.
 
 use std::fs;
 use std::path::Path;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, Row};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::activity::DB_FILE;
-
-/// The legacy on-disk format this module migrates away from. Only used to
-/// parse a pre-existing `timers.json`, if one is found. `version` is carried
-/// through for shape compatibility but was never validated even when this
-/// was the live format, so there's nothing to check on the way in either.
-const FILE_NAME: &str = "timers.json";
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS timers (
@@ -50,7 +34,7 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 ";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Timer {
     pub id: String,
@@ -96,22 +80,13 @@ impl Clock {
     }
 }
 
-/// Only used to parse a legacy `timers.json` during migration.
-#[derive(Debug, Serialize, Deserialize)]
-struct TimersFile {
-    version: u32,
-    next_id: u64,
-    timers: Vec<Timer>,
-}
-
 pub struct TimerStore {
     clock: Clock,
     conn: Connection,
 }
 
 impl TimerStore {
-    /// Opens the shared database, creates the `timers` table if needed, and
-    /// imports a legacy `timers.json` the first time one is found.
+    /// Opens the shared database and creates the `timers` table if needed.
     pub fn load(dir: &Path) -> Result<Self, String> {
         fs::create_dir_all(dir).map_err(|error| format!("could not create data dir: {error}"))?;
         let path = dir.join(DB_FILE);
@@ -120,7 +95,6 @@ impl TimerStore {
             .map_err(|error| error.to_string())?;
         conn.execute_batch(SCHEMA)
             .map_err(|error| error.to_string())?;
-        migrate_from_json(&conn, dir)?;
         Ok(Self {
             clock: Clock::new(),
             conn,
@@ -305,62 +279,6 @@ fn unknown(id: &str) -> String {
     format!("no tracker with id {id}")
 }
 
-/// One-time import of a legacy `timers.json`, if one exists and the `timers`
-/// table is still empty (never overwrites rows already in SQLite). The JSON
-/// file is quarantined afterward, matching the corrupt-file policy below —
-/// data is set aside, never destroyed.
-fn migrate_from_json(conn: &Connection, dir: &Path) -> Result<(), String> {
-    let path = dir.join(FILE_NAME);
-    if !path.exists() {
-        return Ok(());
-    }
-
-    let existing: i64 = conn
-        .query_row("SELECT COUNT(*) FROM timers", [], |row| row.get(0))
-        .map_err(|error| error.to_string())?;
-    if existing > 0 {
-        return Ok(());
-    }
-
-    let bytes = fs::read(&path).map_err(|error| error.to_string())?;
-    match serde_json::from_slice::<TimersFile>(&bytes) {
-        Ok(file) => {
-            for timer in &file.timers {
-                conn.execute(
-                    "INSERT INTO timers (id, label, accumulated_ms, started_at, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![
-                        timer.id,
-                        timer.label,
-                        timer.accumulated_ms as i64,
-                        timer.started_at.map(|value| value as i64),
-                        timer.created_at as i64,
-                    ],
-                )
-                .map_err(|error| error.to_string())?;
-            }
-            conn.execute(
-                "INSERT INTO settings (key, value) VALUES ('timer_next_id', ?1)
-                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                params![file.next_id.to_string()],
-            )
-            .map_err(|error| error.to_string())?;
-
-            let quarantine = path.with_extension(format!("json.migrated-{}", now_epoch_ms()));
-            let _ = fs::rename(&path, &quarantine);
-        }
-        Err(_) => {
-            let quarantine = path.with_extension(format!("corrupt-{}", now_epoch_ms()));
-            let _ = fs::rename(&path, &quarantine);
-            eprintln!(
-                "timers.json was unreadable; moved to {}",
-                quarantine.display()
-            );
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -440,43 +358,5 @@ mod tests {
         assert_eq!(timers[0].label, "Survive a restart");
         assert_eq!(timers[0].accumulated_ms, 3_000);
         assert_eq!(timers.len(), 1);
-    }
-
-    #[test]
-    fn a_legacy_json_file_is_migrated_once_and_quarantined() {
-        let dir = temp_dir("migrate");
-        let legacy = TimersFile {
-            version: 1,
-            next_id: 2,
-            timers: vec![Timer {
-                id: "t1".to_string(),
-                label: "Legacy timer".to_string(),
-                accumulated_ms: 5_000,
-                started_at: None,
-                created_at: 1_000,
-            }],
-        };
-        fs::write(
-            dir.join(FILE_NAME),
-            serde_json::to_vec(&legacy).expect("serialize legacy file"),
-        )
-        .expect("write legacy file");
-
-        let mut store = TimerStore::load(&dir).expect("timer store");
-        let timers = store.snapshot().unwrap();
-        assert_eq!(timers.len(), 1);
-        assert_eq!(timers[0].label, "Legacy timer");
-        assert_eq!(timers[0].accumulated_ms, 5_000);
-
-        // The next id picks up from the migrated counter, not from scratch.
-        let after_create = store.create_at("New one", 2_000).unwrap();
-        assert_eq!(after_create[1].id, "t2");
-
-        assert!(!dir.join(FILE_NAME).exists());
-        let quarantined = fs::read_dir(&dir)
-            .unwrap()
-            .filter_map(|entry| entry.ok())
-            .any(|entry| entry.file_name().to_string_lossy().contains("migrated"));
-        assert!(quarantined, "expected a quarantined copy of timers.json");
     }
 }

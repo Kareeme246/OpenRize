@@ -32,8 +32,7 @@ pub const EVENT_ACTIVITY_TICK: &str = "activity-tick";
 /// re-read them without polling.
 pub const EVENT_SETTINGS_CHANGED: &str = "settings-changed";
 
-/// Shared application state. `Mutex` rather than `RwLock`: mutations are the
-/// common case and the critical sections are microseconds long.
+/// Shared application state.
 pub struct AppState {
     pub store: Mutex<TimerStore>,
     pub activity: Mutex<ActivityStore>,
@@ -48,8 +47,6 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Preferences are read from a poisoned lock too: a panic while writing a
-    /// preference must not brick the close button.
     pub fn settings_snapshot(&self) -> Settings {
         self.settings
             .lock()
@@ -109,8 +106,7 @@ pub fn run() {
                 }
             }
             // Drives the activity push cadence (1Hz focused / 30s
-            // backgrounded — see activity.rs) and fires an immediate
-            // reconciliation the instant OpenRize regains focus.
+            // backgrounded — see activity.rs)
             WindowEvent::Focused(is_focused) => {
                 let state = window.state::<AppState>();
                 let was_foreground = state.foreground.swap(*is_focused, Ordering::SeqCst);
@@ -142,8 +138,6 @@ pub fn run() {
         .expect("error while building OpenRize")
         .run(|app, event| {
             // macOS: clicking the dock icon with no visible window reopens it.
-            // If this proves unreliable on some macOS versions, the tray's
-            // "Open OpenRize" item is the guaranteed path — do not rabbit-hole.
             if let RunEvent::Reopen { .. } = event {
                 tray::show_main_window(app);
             }
@@ -151,7 +145,7 @@ pub fn run() {
 }
 
 /// Deletes activity history past the retention window once an hour. Startup
-/// does the first pass; this keeps a process that runs for weeks honest.
+/// does the first pass; this keeps a process open.
 fn spawn_retention_sweeper(app: tauri::AppHandle) {
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_secs(3600));

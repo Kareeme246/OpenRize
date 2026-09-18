@@ -4,7 +4,7 @@
 #
 # Safe to run from multiple agents at the same time: each run gets its own
 # free port (so Vite dev servers never collide) and its own Tauri app
-# `identifier` (so app-data storage never collides with your real trackers.json
+# `identifier` (so app-data storage never collides with your real app data
 # or with another concurrent run). macOS only — screenshotting relies on
 # System Events + screencapture, and there is no supported Tauri WebDriver
 # backend for macOS to drive the window instead.

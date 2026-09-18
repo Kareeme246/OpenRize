@@ -2,7 +2,7 @@ This is a TAURI desktop app project. Because of this there are a few considerati
 
 - This project uses typescript on the frontend. Always properly type variables and never use the "any" type to get around linter warnings.
 - It is imperative to always ask the user whether or not a feature will live in the src-tauri (rust backend) or src (react frontend) or a combination of both.
-- It is very important that when writing code to ALWAYS ground decisions in the 
+- It is very important that when writing code to ALWAYS ground decisions in the
 [tauri documentation](https://docs.rs/tauri/2.11.5/tauri) and Rust language documentation.
 When it comes to React frontend code, you can generally trust your instincts and don't need to go to documentation unless the problem is difficult or user requests you to do so.
 
@@ -47,7 +47,7 @@ pnpm dev:screenshot
 
 This launches an isolated `tauri dev` instance on a randomly chosen port with
 its own Tauri app `identifier` (so its app-data storage never collides with
-the real `trackers.json` or with another agent's concurrent run), waits for
+the real app data or with another agent's concurrent run), waits for
 the window, repositions it on-screen, screenshots it, tears the whole process
 tree down, and prints the PNG path — read that file to look at the result.
 

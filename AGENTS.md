@@ -1,5 +1,7 @@
 This is a TAURI desktop app project. Because of this there are a few considerations to ensure that code quality remains high in this codebase.
 
+Never directly edit `CLAUDE.md` - it is a symlink to this file; make all agent-instruction changes here in `AGENTS.md`.
+
 - This project uses typescript on the frontend. Always properly type variables and never use the "any" type to get around linter warnings.
 - It is imperative to always ask the user whether or not a feature will live in the src-tauri (rust backend) or src (react frontend) or a combination of both.
 - It is very important that when writing code to ALWAYS ground decisions in the
@@ -31,9 +33,9 @@ to check" — `pnpm verify` already covers correctness. Reserve full builds for
 when release/bundle behavior specifically needs testing.
 
 Do not add test frameworks, CI workflows, or git hooks on your own
-initiative. Verification for this project is deliberately just these two
-scripts (`pnpm verify` and `pnpm dev:screenshot` below) — that is a decision,
-not an oversight.
+initiative. Verification for this project is deliberately just these scripts
+(`pnpm verify`, `pnpm dev:screenshot`, and `pnpm dev:drive` below) — that
+is a decision, not an oversight.
 
 ## Visually verifying UI changes
 

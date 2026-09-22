@@ -10,7 +10,8 @@
     "tauri": "tauri",
     "verify": "bash scripts/verify.sh",
     "fix": "bash scripts/verify.sh --fix",
-    "dev:screenshot": "bash scripts/dev-screenshot.sh"
+    "dev:screenshot": "bash scripts/dev-screenshot.sh",
+    "dev:drive": "bash scripts/app-drive.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

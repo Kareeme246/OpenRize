@@ -59,18 +59,3 @@ tree down, and prints the PNG path — read that file to look at the result.
   Tauri backend on this platform.
 - macOS only. If you are not on macOS, state that visual verification isn't
   available in this environment rather than attempting a workaround.
-
-## Actually using the app
-
-A screenshot shows the app painted; it does not show it works. To click through
-the real webview UI, type into real fields, read state back and tear the
-instance down, follow `.agents/skills/drive-app/SKILL.md` (`scripts/app-drive.sh`,
-also aliased as `pnpm dev:drive`). Several agents can each run their own isolated
-instance at the same time.
-
-## Maintaining this file
-
-Keep this file for knowledge useful to almost every future agent session in this project.
-Do not repeat what the codebase already shows; point to the authoritative file or command instead.
-Prefer rewriting or pruning existing entries over appending new ones.
-When updating this file, preserve this bar for all agents and keep entries concise.

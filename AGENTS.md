@@ -32,7 +32,7 @@ when release/bundle behavior specifically needs testing.
 
 Do not add test frameworks, CI workflows, or git hooks on your own
 initiative. Verification for this project is deliberately just these scripts
-(`pnpm verify`, `pnpm dev:screenshot`, and `scripts/app-drive.sh` below) — that
+(`pnpm verify`, `pnpm dev:screenshot`, and `pnpm dev:drive` below) — that
 is a decision, not an oversight.
 
 ## Visually verifying UI changes

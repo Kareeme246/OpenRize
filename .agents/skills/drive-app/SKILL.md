@@ -5,7 +5,7 @@ description: Launch an isolated OpenRize instance, click through the real Tauri 
 
 # Driving the real OpenRize app
 
-the app paints. Neither proves the app *works*. This skill is how you use it:
+This skill is how you use it:
 launch your own isolated instance, click real controls, type into real fields,
 and read the result back out of the running app.
 

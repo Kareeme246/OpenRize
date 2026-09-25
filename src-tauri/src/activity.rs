@@ -1,50 +1,9 @@
 //! Activity capture — the automatic tracker.
 //!
-//! A background thread samples the OS foreground window (`active-win-pos-rs`)
+//! Samples the OS foreground window via macOS Accessibility API (`AXUIElement`)
 //! and user idle time (`user-idle3`) every second and folds consecutive
 //! samples into *segments*: one row per contiguous run of the same app + window
-//! title. Segments are the unit Home, Sessions, Focus, and Breaks all read.
-//!
-//! Why segments and not raw samples (decision A2): raw samples would mean one
-//! write every second forever, which is a machine-rate problem that wants a
-//! dedicated time-series store. Folding at the source means a write only when
-//! the user actually switches windows — human rate — so plain SQLite stays
-//! comfortable and a day of tracking is a few hundred rows.
-//!
-//! Sampling vs. pushing (decision A4): the sampler itself always runs at
-//! `SAMPLE_SECS` — that is what determines tracking accuracy for whatever app
-//! the user is actually using, and it must not degrade just because
-//! OpenRize's own window isn't focused (it almost never is; that's the whole
-//! point of a background tracker). What *does* adapt to OpenRize's own focus
-//! state is how often the result gets pushed to the frontend: every tick
-//! while focused, a 30s heartbeat while backgrounded, plus an immediate
-//! reconciliation push the instant focus returns (see `spawn_sampler` and
-//! `lib.rs`'s `WindowEvent::Focused` handling). A structural change (a
-//! segment actually opening or closing) always pushes immediately regardless
-//! of focus, since that is a real state transition, not a clock tick.
-//!
-//! Push payloads carry data (decision A5), the same pattern `timers-changed`
-//! already uses: `EVENT_ACTIVITY_CHANGED` carries the full `ActivitySnapshot`
-//! and `EVENT_ACTIVITY_TICK` carries the lighter `ActivityTick` (same numbers,
-//! no segment list) so the frontend never has to round-trip an `invoke` just
-//! to learn what the push already told it.
-//!
-//! Reads don't share the writer's lock (decision A6): `AppState` keeps a
-//! second, read-only `Connection` to the same WAL-mode database, behind its
-//! own mutex. That is the entire fix for "a query blocks behind the
-//! sampler's tick" — WAL already lets one writer and readers coexist, but a
-//! single shared `Mutex<Connection>` used for everything defeats that. A
-//! pool is unnecessary here: this app is single-window/single-user, so two
-//! reads competing for the one reader connection is a rare, brief thing, not
-//! a bottleneck.
-//!
-//! Clock policy matches `timers.rs`: everything persisted is wall-clock epoch
-//! milliseconds. `now_epoch_ms` is reused from there so there is one definition.
-//!
-//! Idle policy (decision A3): crossing the idle threshold closes the current
-//! segment and opens an automatic Break. Coming back closes that Break and
-//! resumes capture. Manual Focus/Break sessions are *not* interrupted by
-//! capture — while one is open, automatic segment creation is paused.
+//! title + url.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -52,76 +11,33 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use rusqlite::{params, Connection, Row};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::capture::WindowSample;
+use crate::models::{
+    AppContribution, AppRecord, Category, Client, EntryDetail, EntryEvent, NewCategory, NewClient,
+    NewProject, NewTimeEntry, Project, TimeEntry, TitleItem, UpdateCategory, UpdateClient,
+    UpdateProject, UpdateTimeEntry,
+};
 use crate::timers::now_epoch_ms;
 
-/// How often the sampler runs. Always this fast, regardless of whether
-/// OpenRize's own window is focused — see decision A4 above. What adapts to
-/// focus is the *push* cadence in `spawn_sampler`, not this.
 pub const SAMPLE_SECS: u64 = 1;
-
-/// How often the frontend gets a push while OpenRize is backgrounded and
-/// nothing structural has changed. Focused, every tick pushes instead.
 const HEARTBEAT_MS: u64 = 30_000;
-
-/// Idle before an automatic Break. Rize cites 5 minutes as the per-category
-/// default; one global value until per-category settings exist.
 pub const DEFAULT_IDLE_THRESHOLD_MS: u64 = 5 * 60 * 1000;
-
-/// Shared with `timers.rs` (decision A8/opt 7): both stores live in the same
-/// WAL-mode file, each through its own connection — SQLite is fine with
-/// that, and it means one backup artifact covers both.
 pub(crate) const DB_FILE: &str = "activity.db";
 
-/// Rollup granularity and retention window for decision A7 (below). A plain
-/// UTC-day bucket, not the user's local day: this table is an internal
-/// acceleration cache for old data, never shown to the user with day-precision,
-/// so it doesn't need the local-midnight machinery `since_ms` callers rely on.
 const ONE_DAY_MS: u64 = 24 * 60 * 60 * 1000;
 const RETENTION_DAYS: u64 = 90;
 const RETENTION_MS: u64 = RETENTION_DAYS * ONE_DAY_MS;
 
-/// Session kinds, stored as text so the DB stays readable and a future kind
-/// (Meeting) is a value change, not a migration.
 pub const KIND_ACTIVITY: &str = "activity";
 pub const KIND_FOCUS: &str = "focus";
 pub const KIND_BREAK: &str = "break";
 
-/// Label carried by the idle-generated Break, so `tick` can tell an automatic
-/// break (safe to end when the user returns) from a manual one (leave alone).
 const IDLE_LABEL: &str = "Idle";
 
-const SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS segments (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  app        TEXT    NOT NULL,
-  title      TEXT    NOT NULL,
-  kind       TEXT    NOT NULL,
-  label      TEXT,
-  started_at INTEGER NOT NULL,
-  ended_at   INTEGER,
-  reviewed   INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_segments_started_at ON segments (started_at);
-CREATE INDEX IF NOT EXISTS idx_segments_ended_at ON segments (ended_at);
-CREATE TABLE IF NOT EXISTS settings (
-  key   TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
--- Decision A7: additive-only acceleration cache for old-date aggregates.
--- Raw segments are never deleted; this table is purely a fast path for
--- summing days far enough in the past that they will never change again.
-CREATE TABLE IF NOT EXISTS daily_rollups (
-  day_epoch INTEGER NOT NULL,
-  kind      TEXT    NOT NULL,
-  total_ms  INTEGER NOT NULL,
-  PRIMARY KEY (day_epoch, kind)
-);
-";
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivitySegment {
     pub id: i64,
@@ -132,19 +48,18 @@ pub struct ActivitySegment {
     pub started_at: u64,
     pub ended_at: Option<u64>,
     pub reviewed: bool,
+    pub app_id: Option<String>,
+    pub bundle_id: Option<String>,
+    pub url: Option<String>,
+    pub domain: Option<String>,
+    pub entry_id: Option<String>,
 }
 
-/// Everything the dashboard needs from one round trip, aggregated over a
-/// caller-supplied range. The range is passed in (not computed here) because
-/// "today" is a *local* midnight and Rust has no timezone off the standard
-/// library — the frontend already knows its own offset.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivitySnapshot {
     pub current: Option<ActivitySegment>,
     pub segments: Vec<ActivitySegment>,
-    /// Activity + Focus; Break is reported separately so a lunch hour does not
-    /// inflate the working total.
     pub tracked_ms: u64,
     pub focus_ms: u64,
     pub break_ms: u64,
@@ -154,11 +69,6 @@ pub struct ActivitySnapshot {
     pub capture_enabled: bool,
 }
 
-/// The lightweight push used for the 1Hz-focused / 30s-heartbeat cadence
-/// (decision A5): the same numbers as `ActivitySnapshot`, minus the segment
-/// list, so a per-second push doesn't re-serialize the whole day every time.
-/// The segment list only ever changes at a structural change, which always
-/// pushes a full `ActivitySnapshot` instead.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityTick {
@@ -172,14 +82,6 @@ pub struct ActivityTick {
     pub capture_enabled: bool,
 }
 
-/// The subset of `ActiveWindow` this module cares about, so the state machine
-/// is testable without a real desktop.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WindowSample {
-    pub app: String,
-    pub title: String,
-}
-
 #[derive(Debug, Clone)]
 struct Current {
     id: i64,
@@ -189,6 +91,11 @@ struct Current {
     label: Option<String>,
     started_at: u64,
     reviewed: bool,
+    app_id: Option<String>,
+    bundle_id: Option<String>,
+    url: Option<String>,
+    domain: Option<String>,
+    entry_id: Option<String>,
 }
 
 impl Current {
@@ -202,14 +109,16 @@ impl Current {
             started_at: self.started_at,
             ended_at: None,
             reviewed: self.reviewed,
+            app_id: self.app_id.clone(),
+            bundle_id: self.bundle_id.clone(),
+            url: self.url.clone(),
+            domain: self.domain.clone(),
+            entry_id: self.entry_id.clone(),
         }
     }
 }
 
-/// The handful of in-memory fields a read needs, copied out from behind the
-/// writer's mutex before the (potentially slower) query runs against the
-/// separate reader connection — see decision A6.
-struct LiveState {
+pub struct LiveState {
     current: Option<Current>,
     capture_enabled: bool,
     idle_threshold_ms: u64,
@@ -230,11 +139,6 @@ pub struct ActivityStore {
     capture_enabled: bool,
     idle_threshold_ms: u64,
     last_idle_ms: u64,
-    /// The day boundary the frontend last asked about, cached so the sampler
-    /// thread (which has no timezone information of its own) knows what
-    /// range to aggregate for the tick/heartbeat pushes. Refreshed on every
-    /// `activity_snapshot` call, which also naturally handles local-midnight
-    /// rollover since the frontend recomputes it fresh each time.
     watch_since_ms: Option<u64>,
 }
 
@@ -246,25 +150,17 @@ impl ActivityStore {
         Self::from_conn(conn)
     }
 
-    /// Opens a second, read-only-by-convention connection to the same
-    /// database for `AppState`'s reader mutex (decision A6). Must be called
-    /// after `load` has created the file and its schema.
     pub fn open_reader(dir: &Path) -> Result<Connection, String> {
         let path = dir.join(DB_FILE);
         Connection::open(&path).map_err(|error| error.to_string())
     }
 
-    fn from_conn(conn: Connection) -> Result<Self, String> {
-        // WAL survives an unclean shutdown better and keeps the reader (the
-        // commands) from blocking the writer (the sampler). synchronous=NORMAL
-        // is the standard WAL trade: a crash can lose the last few seconds of
-        // tracking, never the database. PRAGMA optimize is SQLite's own
-        // recommendation to run at least once per connection lifetime so the
-        // query planner's statistics don't go stale as the table grows.
+    pub fn from_conn(mut conn: Connection) -> Result<Self, String> {
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA optimize;")
             .map_err(|error| error.to_string())?;
-        conn.execute_batch(SCHEMA)
-            .map_err(|error| error.to_string())?;
+
+        // Replace raw schema block with versioned migration runner
+        crate::migrations::run_migrations(&mut conn).map_err(|error| error.to_string())?;
 
         let mut store = Self {
             conn,
@@ -282,9 +178,7 @@ impl ActivityStore {
             .read_setting("idle_threshold_ms")
             .and_then(|value| value.parse().ok())
             .unwrap_or(DEFAULT_IDLE_THRESHOLD_MS);
-        // A segment left open by a crash/kill has no end and would read as
-        // "still active" forever. Stamp it ended at its own start: honest
-        // zero-length, not a fake hours-long session.
+
         store
             .conn
             .execute(
@@ -317,9 +211,6 @@ impl ActivityStore {
             .map_err(|error| error.to_string())
     }
 
-    /// Decision A7: rolls whole UTC days older than the retention window into
-    /// `daily_rollups`. Additive and idempotent (re-running just overwrites
-    /// with the same numbers) — raw segments are never touched or deleted.
     fn rollup_old_segments(&mut self, now: u64) -> Result<(), String> {
         let cutoff = now.saturating_sub(RETENTION_MS);
         self.conn
@@ -336,10 +227,6 @@ impl ActivityStore {
         Ok(())
     }
 
-    // --- capture state machine ------------------------------------------
-
-    /// Folds one sample into the segment log. Returns whether the open segment
-    /// changed, so the caller can decide if the frontend needs telling.
     pub fn tick(
         &mut self,
         sample: Option<WindowSample>,
@@ -359,63 +246,103 @@ impl ActivityStore {
                 cur.title.clone(),
                 cur.kind.clone(),
                 cur.label.clone(),
+                cur.bundle_id.clone(),
+                cur.url.clone(),
             )
         });
 
         match current {
             None => {
                 if idle {
-                    self.open("Idle", "No activity", KIND_BREAK, Some(IDLE_LABEL), now)
+                    self.open(
+                        "Idle",
+                        "No activity",
+                        KIND_BREAK,
+                        Some(IDLE_LABEL),
+                        now,
+                        None,
+                        None,
+                        None,
+                    )
                 } else if let Some(sample) = sample {
-                    self.open(&sample.app, &sample.title, KIND_ACTIVITY, None, now)
+                    self.open(
+                        &sample.app,
+                        &sample.title,
+                        KIND_ACTIVITY,
+                        None,
+                        now,
+                        sample.bundle_id.as_deref(),
+                        sample.url.as_deref(),
+                        sample.domain.as_deref(),
+                    )
                 } else {
                     Ok(false)
                 }
             }
-            Some((app, title, kind, label)) => {
+            Some((app, title, kind, label, bundle_id, url)) => {
                 if idle {
-                    // A manual Focus/Break is not interrupted by idle: no
-                    // keyboard input is not the same as not working (reading
-                    // is still focus). Only automatic capture yields to idle.
                     if kind != KIND_ACTIVITY {
                         return Ok(false);
                     }
                     self.close_current(now)?;
-                    return self.open("Idle", "No activity", KIND_BREAK, Some(IDLE_LABEL), now);
+                    return self.open(
+                        "Idle",
+                        "No activity",
+                        KIND_BREAK,
+                        Some(IDLE_LABEL),
+                        now,
+                        None,
+                        None,
+                        None,
+                    );
                 }
 
                 if kind == KIND_BREAK && label.as_deref() == Some(IDLE_LABEL) {
-                    // The user is back. End the automatic break and resume.
                     self.close_current(now)?;
                     return match sample {
-                        Some(sample) => {
-                            self.open(&sample.app, &sample.title, KIND_ACTIVITY, None, now)
-                        }
+                        Some(sample) => self.open(
+                            &sample.app,
+                            &sample.title,
+                            KIND_ACTIVITY,
+                            None,
+                            now,
+                            sample.bundle_id.as_deref(),
+                            sample.url.as_deref(),
+                            sample.domain.as_deref(),
+                        ),
                         None => Ok(true),
                     };
                 }
 
                 if kind != KIND_ACTIVITY {
-                    // A manual Focus/Break owns the timeline; capture is paused.
                     return Ok(false);
                 }
 
                 match sample {
-                    Some(sample) if sample.app != app || sample.title != title => {
+                    Some(sample)
+                        if sample.app != app
+                            || sample.title != title
+                            || sample.url != url
+                            || sample.bundle_id != bundle_id =>
+                    {
                         self.close_current(now)?;
-                        self.open(&sample.app, &sample.title, KIND_ACTIVITY, None, now)
+                        self.open(
+                            &sample.app,
+                            &sample.title,
+                            KIND_ACTIVITY,
+                            None,
+                            now,
+                            sample.bundle_id.as_deref(),
+                            sample.url.as_deref(),
+                            sample.domain.as_deref(),
+                        )
                     }
-                    // Same window, or the sample failed on this tick — keep the
-                    // segment running rather than splitting it on a transient
-                    // error.
                     _ => Ok(false),
                 }
             }
         }
     }
 
-    /// Manual Start Focus / Start Break. Whatever was open closes first; the
-    /// `start_session` command rejects any other kind.
     pub fn start_session(
         &mut self,
         kind: &str,
@@ -429,10 +356,14 @@ impl ActivityStore {
         let display = label.map(str::trim).filter(|text| !text.is_empty());
         let app = if kind == KIND_FOCUS { "Focus" } else { "Break" };
         let title = display.unwrap_or(app);
-        self.open(app, title, kind, display, now)
+        self.open(app, title, kind, display, now, None, None, None)
     }
 
     pub fn stop_session(&mut self, now: u64) -> Result<bool, String> {
+        self.close_current(now)
+    }
+
+    pub fn close_active_segment(&mut self, now: u64) -> Result<bool, String> {
         self.close_current(now)
     }
 
@@ -442,8 +373,6 @@ impl ActivityStore {
     }
 
     pub fn set_idle_threshold_ms(&mut self, ms: u64) -> Result<(), String> {
-        // Guard the floor: a threshold under the sample interval would flap
-        // between Break and Activity every tick.
         self.idle_threshold_ms = ms.max(SAMPLE_SECS * 1000);
         self.write_setting("idle_threshold_ms", &self.idle_threshold_ms.to_string())
     }
@@ -463,14 +392,6 @@ impl ActivityStore {
         Ok(())
     }
 
-    /// Deletes closed segments older than `days`, along with the daily rollups
-    /// that summarise those days. `0` means keep forever, and an open segment
-    /// is never touched because it has no end to compare against.
-    ///
-    /// `daily_rollups` is normally additive-only (decision A7), but a
-    /// user-chosen retention window is a deliberate "forget this" that has to
-    /// cover the aggregates too - otherwise a purged day would still be summed
-    /// into reports.
     pub fn purge_older_than(&mut self, days: u32, now: u64) -> Result<u64, String> {
         if days == 0 {
             return Ok(0);
@@ -493,13 +414,7 @@ impl ActivityStore {
         Ok(removed as u64)
     }
 
-    // --- reads -------------------------------------------------------------
-    // These use `self.conn` (the writer connection) directly, which is fine
-    // for tests and any other in-process caller: the read/write split that
-    // matters for concurrency is the separate `activity_reader` connection
-    // in `AppState`, used by `snapshot_for`/`emit_full`/`emit_tick` below.
-
-    fn live_state(&self) -> LiveState {
+    pub fn live_state(&self) -> LiveState {
         LiveState {
             current: self.current.clone(),
             capture_enabled: self.capture_enabled,
@@ -509,22 +424,17 @@ impl ActivityStore {
         }
     }
 
-    /// Segments overlapping `[since_ms, now]`, oldest first, plus the rollups
-    /// the dashboard draws. An ongoing segment is clipped to `now`.
     pub fn snapshot(&self, since_ms: u64, now: u64) -> Result<ActivitySnapshot, String> {
         build_snapshot(&self.conn, &self.live_state(), since_ms, now)
     }
 
-    /// The lightweight equivalent of `snapshot`, for tests exercising
-    /// `ActivityTick` without needing `AppState` plumbing.
     pub fn tick_summary(&self, now: u64) -> Result<ActivityTick, String> {
         let live = self.live_state();
         let since_ms = live.watch_since_ms.unwrap_or(0);
         build_tick(&self.conn, &live, since_ms, now)
     }
 
-    // --- segment primitives ---------------------------------------------
-
+    #[allow(clippy::too_many_arguments)]
     fn open(
         &mut self,
         app: &str,
@@ -532,14 +442,31 @@ impl ActivityStore {
         kind: &str,
         label: Option<&str>,
         now: u64,
+        bundle_id: Option<&str>,
+        url: Option<&str>,
+        domain: Option<&str>,
     ) -> Result<bool, String> {
         self.conn
             .execute(
-                "INSERT INTO segments (app, title, kind, label, started_at, ended_at, reviewed)
-                 VALUES (?1, ?2, ?3, ?4, ?5, NULL, 0)",
-                params![app, title, kind, label, now as i64],
+                "INSERT INTO segments (app, title, kind, label, started_at, ended_at, reviewed, bundle_id, url, domain)
+                 VALUES (?1, ?2, ?3, ?4, ?5, NULL, 0, ?6, ?7, ?8)",
+                params![app, title, kind, label, now as i64, bundle_id, url, domain],
             )
             .map_err(|error| error.to_string())?;
+
+        // Keep apps table updated
+        if kind == KIND_ACTIVITY {
+            let identifier = domain.unwrap_or(bundle_id.unwrap_or(app));
+            let app_kind = if domain.is_some() { "site" } else { "app" };
+            let app_id = uuid::Uuid::now_v7().to_string();
+            let _ = self.conn.execute(
+                "INSERT INTO apps (id, kind, identifier, display_name, excluded, first_seen, last_seen, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 0, ?5, ?5, ?5, ?5)
+                 ON CONFLICT(identifier) DO UPDATE SET last_seen = ?5, updated_at = ?5;",
+                params![app_id, app_kind, identifier, app, now as i64],
+            );
+        }
+
         self.current = Some(Current {
             id: self.conn.last_insert_rowid(),
             app: app.to_string(),
@@ -548,6 +475,11 @@ impl ActivityStore {
             label: label.map(str::to_string),
             started_at: now,
             reviewed: false,
+            app_id: None,
+            bundle_id: bundle_id.map(str::to_string),
+            url: url.map(str::to_string),
+            domain: domain.map(str::to_string),
+            entry_id: None,
         });
         Ok(true)
     }
@@ -564,9 +496,1131 @@ impl ActivityStore {
             .map_err(|error| error.to_string())?;
         Ok(true)
     }
+
+    // --- P1: Categories CRUD --------------------------------------------
+
+    pub fn list_categories(&self) -> Result<Vec<Category>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, name, color, description, ai_prompt, billable_default, counts_as_work, archived, sort, created_at, updated_at, deleted_at
+                 FROM categories
+                 WHERE deleted_at IS NULL
+                 ORDER BY sort ASC, name ASC;",
+            )
+            .map_err(|e| e.to_string())?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(Category {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    color: row.get(2)?,
+                    description: row.get(3)?,
+                    ai_prompt: row.get(4)?,
+                    billable_default: row.get::<_, i64>(5)? != 0,
+                    counts_as_work: row.get::<_, i64>(6)? != 0,
+                    archived: row.get::<_, i64>(7)? != 0,
+                    sort: row.get(8)?,
+                    created_at: row.get::<_, i64>(9)? as u64,
+                    updated_at: row.get::<_, i64>(10)? as u64,
+                    deleted_at: row.get::<_, Option<i64>>(11)?.map(|v| v as u64),
+                })
+            })
+            .map_err(|e| e.to_string())?;
+
+        let mut list = Vec::new();
+        for cat in rows {
+            list.push(cat.map_err(|e| e.to_string())?);
+        }
+        Ok(list)
+    }
+
+    pub fn create_category(&mut self, cat: NewCategory, now: u64) -> Result<Category, String> {
+        let id = uuid::Uuid::now_v7().to_string();
+        let billable = cat.billable_default.unwrap_or(false) as i64;
+        let counts = cat.counts_as_work.unwrap_or(true) as i64;
+        let sort = cat.sort.unwrap_or(0);
+
+        self.conn
+            .execute(
+                "INSERT INTO categories (id, name, color, description, ai_prompt, billable_default, counts_as_work, archived, sort, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9, ?9);",
+                params![id, cat.name, cat.color, cat.description, cat.ai_prompt, billable, counts, sort, now as i64],
+            )
+            .map_err(|e| e.to_string())?;
+
+        Ok(Category {
+            id,
+            name: cat.name,
+            color: cat.color,
+            description: cat.description,
+            ai_prompt: cat.ai_prompt,
+            billable_default: billable != 0,
+            counts_as_work: counts != 0,
+            archived: false,
+            sort,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        })
+    }
+
+    pub fn update_category(
+        &mut self,
+        id: &str,
+        patch: UpdateCategory,
+        now: u64,
+    ) -> Result<Category, String> {
+        let mut cat = self.get_category(id)?;
+        if let Some(name) = patch.name {
+            cat.name = name;
+        }
+        if let Some(color) = patch.color {
+            cat.color = color;
+        }
+        if let Some(desc) = patch.description {
+            cat.description = Some(desc);
+        }
+        if let Some(prompt) = patch.ai_prompt {
+            cat.ai_prompt = Some(prompt);
+        }
+        if let Some(b) = patch.billable_default {
+            cat.billable_default = b;
+        }
+        if let Some(c) = patch.counts_as_work {
+            cat.counts_as_work = c;
+        }
+        if let Some(a) = patch.archived {
+            cat.archived = a;
+        }
+        if let Some(s) = patch.sort {
+            cat.sort = s;
+        }
+        cat.updated_at = now;
+
+        self.conn
+            .execute(
+                "UPDATE categories SET name = ?1, color = ?2, description = ?3, ai_prompt = ?4, billable_default = ?5, counts_as_work = ?6, archived = ?7, sort = ?8, updated_at = ?9
+                 WHERE id = ?10;",
+                params![
+                    cat.name,
+                    cat.color,
+                    cat.description,
+                    cat.ai_prompt,
+                    cat.billable_default as i64,
+                    cat.counts_as_work as i64,
+                    cat.archived as i64,
+                    cat.sort,
+                    now as i64,
+                    id,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+
+        Ok(cat)
+    }
+
+    pub fn delete_category(&mut self, id: &str, now: u64) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE categories SET deleted_at = ?1, archived = 1, updated_at = ?1 WHERE id = ?2;",
+                params![now as i64, id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    fn get_category(&self, id: &str) -> Result<Category, String> {
+        self.conn
+            .query_row(
+                "SELECT id, name, color, description, ai_prompt, billable_default, counts_as_work, archived, sort, created_at, updated_at, deleted_at
+                 FROM categories WHERE id = ?1;",
+                params![id],
+                |row| {
+                    Ok(Category {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        color: row.get(2)?,
+                        description: row.get(3)?,
+                        ai_prompt: row.get(4)?,
+                        billable_default: row.get::<_, i64>(5)? != 0,
+                        counts_as_work: row.get::<_, i64>(6)? != 0,
+                        archived: row.get::<_, i64>(7)? != 0,
+                        sort: row.get(8)?,
+                        created_at: row.get::<_, i64>(9)? as u64,
+                        updated_at: row.get::<_, i64>(10)? as u64,
+                        deleted_at: row.get::<_, Option<i64>>(11)?.map(|v| v as u64),
+                    })
+                },
+            )
+            .map_err(|e| e.to_string())
+    }
+
+    // --- P1: Projects CRUD ----------------------------------------------
+
+    pub fn list_projects(&self) -> Result<Vec<Project>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, client_id, name, color, description, ai_hints, status, due_date, budget_kind, budget_value, budget_period, billable_default, hourly_rate, created_at, updated_at, deleted_at
+                 FROM projects
+                 WHERE deleted_at IS NULL
+                 ORDER BY name ASC;",
+            )
+            .map_err(|e| e.to_string())?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(Project {
+                    id: row.get(0)?,
+                    client_id: row.get(1)?,
+                    name: row.get(2)?,
+                    color: row.get(3)?,
+                    description: row.get(4)?,
+                    ai_hints: row.get(5)?,
+                    status: row.get(6)?,
+                    due_date: row.get::<_, Option<i64>>(7)?.map(|v| v as u64),
+                    budget_kind: row.get(8)?,
+                    budget_value: row.get(9)?,
+                    budget_period: row.get(10)?,
+                    billable_default: row.get::<_, i64>(11)? != 0,
+                    hourly_rate: row.get(12)?,
+                    created_at: row.get::<_, i64>(13)? as u64,
+                    updated_at: row.get::<_, i64>(14)? as u64,
+                    deleted_at: row.get::<_, Option<i64>>(15)?.map(|v| v as u64),
+                })
+            })
+            .map_err(|e| e.to_string())?;
+
+        let mut list = Vec::new();
+        for p in rows {
+            list.push(p.map_err(|e| e.to_string())?);
+        }
+        Ok(list)
+    }
+
+    pub fn create_project(&mut self, proj: NewProject, now: u64) -> Result<Project, String> {
+        let id = uuid::Uuid::now_v7().to_string();
+        let status = proj.status.unwrap_or_else(|| "active".to_string());
+        let budget_kind = proj.budget_kind.unwrap_or_else(|| "none".to_string());
+        let budget_period = proj.budget_period.unwrap_or_else(|| "total".to_string());
+        let billable = proj.billable_default.unwrap_or(false) as i64;
+
+        self.conn.execute(
+            "INSERT INTO projects (id, client_id, name, color, description, ai_hints, status, due_date, budget_kind, budget_value, budget_period, billable_default, hourly_rate, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14);",
+            params![
+                id,
+                proj.client_id,
+                proj.name,
+                proj.color,
+                proj.description,
+                proj.ai_hints,
+                status,
+                proj.due_date.map(|v| v as i64),
+                budget_kind,
+                proj.budget_value,
+                budget_period,
+                billable,
+                proj.hourly_rate,
+                now as i64,
+            ],
+        ).map_err(|e| e.to_string())?;
+
+        Ok(Project {
+            id,
+            client_id: proj.client_id,
+            name: proj.name,
+            color: proj.color,
+            description: proj.description,
+            ai_hints: proj.ai_hints,
+            status,
+            due_date: proj.due_date,
+            budget_kind,
+            budget_value: proj.budget_value,
+            budget_period,
+            billable_default: billable != 0,
+            hourly_rate: proj.hourly_rate,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        })
+    }
+
+    pub fn update_project(
+        &mut self,
+        id: &str,
+        patch: UpdateProject,
+        now: u64,
+    ) -> Result<Project, String> {
+        let mut proj = self.get_project(id)?;
+        if let Some(client_id) = patch.client_id {
+            proj.client_id = Some(client_id);
+        }
+        if let Some(name) = patch.name {
+            proj.name = name;
+        }
+        if let Some(color) = patch.color {
+            proj.color = color;
+        }
+        if let Some(desc) = patch.description {
+            proj.description = Some(desc);
+        }
+        if let Some(hints) = patch.ai_hints {
+            proj.ai_hints = Some(hints);
+        }
+        if let Some(status) = patch.status {
+            proj.status = status;
+        }
+        if let Some(due) = patch.due_date {
+            proj.due_date = Some(due);
+        }
+        if let Some(bk) = patch.budget_kind {
+            proj.budget_kind = bk;
+        }
+        if let Some(bv) = patch.budget_value {
+            proj.budget_value = Some(bv);
+        }
+        if let Some(bp) = patch.budget_period {
+            proj.budget_period = bp;
+        }
+        if let Some(b) = patch.billable_default {
+            proj.billable_default = b;
+        }
+        if let Some(rate) = patch.hourly_rate {
+            proj.hourly_rate = Some(rate);
+        }
+        proj.updated_at = now;
+
+        self.conn.execute(
+            "UPDATE projects SET client_id = ?1, name = ?2, color = ?3, description = ?4, ai_hints = ?5, status = ?6, due_date = ?7, budget_kind = ?8, budget_value = ?9, budget_period = ?10, billable_default = ?11, hourly_rate = ?12, updated_at = ?13
+             WHERE id = ?14;",
+            params![
+                proj.client_id,
+                proj.name,
+                proj.color,
+                proj.description,
+                proj.ai_hints,
+                proj.status,
+                proj.due_date.map(|v| v as i64),
+                proj.budget_kind,
+                proj.budget_value,
+                proj.budget_period,
+                proj.billable_default as i64,
+                proj.hourly_rate,
+                now as i64,
+                id,
+            ],
+        ).map_err(|e| e.to_string())?;
+
+        Ok(proj)
+    }
+
+    pub fn delete_project(&mut self, id: &str, now: u64) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE projects SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2;",
+                params![now as i64, id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    fn get_project(&self, id: &str) -> Result<Project, String> {
+        self.conn.query_row(
+            "SELECT id, client_id, name, color, description, ai_hints, status, due_date, budget_kind, budget_value, budget_period, billable_default, hourly_rate, created_at, updated_at, deleted_at
+             FROM projects WHERE id = ?1;",
+            params![id],
+            |row| {
+                Ok(Project {
+                    id: row.get(0)?,
+                    client_id: row.get(1)?,
+                    name: row.get(2)?,
+                    color: row.get(3)?,
+                    description: row.get(4)?,
+                    ai_hints: row.get(5)?,
+                    status: row.get(6)?,
+                    due_date: row.get::<_, Option<i64>>(7)?.map(|v| v as u64),
+                    budget_kind: row.get(8)?,
+                    budget_value: row.get(9)?,
+                    budget_period: row.get(10)?,
+                    billable_default: row.get::<_, i64>(11)? != 0,
+                    hourly_rate: row.get(12)?,
+                    created_at: row.get::<_, i64>(13)? as u64,
+                    updated_at: row.get::<_, i64>(14)? as u64,
+                    deleted_at: row.get::<_, Option<i64>>(15)?.map(|v| v as u64),
+                })
+            },
+        ).map_err(|e| e.to_string())
+    }
+
+    // --- P1: Clients CRUD -----------------------------------------------
+
+    pub fn list_clients(&self) -> Result<Vec<Client>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, name, email, address, default_rate, currency, created_at, updated_at, deleted_at
+                 FROM clients
+                 WHERE deleted_at IS NULL
+                 ORDER BY name ASC;",
+            )
+            .map_err(|e| e.to_string())?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(Client {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    email: row.get(2)?,
+                    address: row.get(3)?,
+                    default_rate: row.get(4)?,
+                    currency: row.get(5)?,
+                    created_at: row.get::<_, i64>(6)? as u64,
+                    updated_at: row.get::<_, i64>(7)? as u64,
+                    deleted_at: row.get::<_, Option<i64>>(8)?.map(|v| v as u64),
+                })
+            })
+            .map_err(|e| e.to_string())?;
+
+        let mut list = Vec::new();
+        for c in rows {
+            list.push(c.map_err(|e| e.to_string())?);
+        }
+        Ok(list)
+    }
+
+    pub fn create_client(&mut self, client: NewClient, now: u64) -> Result<Client, String> {
+        let id = uuid::Uuid::now_v7().to_string();
+        self.conn.execute(
+            "INSERT INTO clients (id, name, email, address, default_rate, currency, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7);",
+            params![id, client.name, client.email, client.address, client.default_rate, client.currency, now as i64],
+        ).map_err(|e| e.to_string())?;
+
+        Ok(Client {
+            id,
+            name: client.name,
+            email: client.email,
+            address: client.address,
+            default_rate: client.default_rate,
+            currency: client.currency,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        })
+    }
+
+    pub fn update_client(
+        &mut self,
+        id: &str,
+        patch: UpdateClient,
+        now: u64,
+    ) -> Result<Client, String> {
+        let mut client = self.get_client(id)?;
+        if let Some(name) = patch.name {
+            client.name = name;
+        }
+        if let Some(email) = patch.email {
+            client.email = Some(email);
+        }
+        if let Some(addr) = patch.address {
+            client.address = Some(addr);
+        }
+        if let Some(rate) = patch.default_rate {
+            client.default_rate = Some(rate);
+        }
+        if let Some(curr) = patch.currency {
+            client.currency = Some(curr);
+        }
+        client.updated_at = now;
+
+        self.conn.execute(
+            "UPDATE clients SET name = ?1, email = ?2, address = ?3, default_rate = ?4, currency = ?5, updated_at = ?6
+             WHERE id = ?7;",
+            params![
+                client.name,
+                client.email,
+                client.address,
+                client.default_rate,
+                client.currency,
+                now as i64,
+                id,
+            ],
+        ).map_err(|e| e.to_string())?;
+
+        Ok(client)
+    }
+
+    pub fn delete_client(&mut self, id: &str, now: u64) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE clients SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2;",
+                params![now as i64, id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    fn get_client(&self, id: &str) -> Result<Client, String> {
+        self.conn.query_row(
+            "SELECT id, name, email, address, default_rate, currency, created_at, updated_at, deleted_at
+             FROM clients WHERE id = ?1;",
+            params![id],
+            |row| {
+                Ok(Client {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    email: row.get(2)?,
+                    address: row.get(3)?,
+                    default_rate: row.get(4)?,
+                    currency: row.get(5)?,
+                    created_at: row.get::<_, i64>(6)? as u64,
+                    updated_at: row.get::<_, i64>(7)? as u64,
+                    deleted_at: row.get::<_, Option<i64>>(8)?.map(|v| v as u64),
+                })
+            },
+        ).map_err(|e| e.to_string())
+    }
+
+    // --- P1: Time Entries -----------------------------------------------
+
+    pub fn list_time_entries(&self, start_ms: u64, end_ms: u64) -> Result<Vec<TimeEntry>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at
+                 FROM time_entries
+                 WHERE deleted_at IS NULL AND ended_at >= ?1 AND started_at <= ?2
+                 ORDER BY started_at ASC;",
+            )
+            .map_err(|e| e.to_string())?;
+
+        let rows = stmt
+            .query_map(params![start_ms as i64, end_ms as i64], |row| {
+                Ok(TimeEntry {
+                    id: row.get(0)?,
+                    started_at: row.get::<_, i64>(1)? as u64,
+                    ended_at: row.get::<_, i64>(2)? as u64,
+                    description: row.get(3)?,
+                    category_id: row.get(4)?,
+                    project_id: row.get(5)?,
+                    status: row.get(6)?,
+                    approved_by: row.get(7)?,
+                    source: row.get(8)?,
+                    billable: row.get::<_, i64>(9)? != 0,
+                    invoice_id: row.get(10)?,
+                    created_at: row.get::<_, i64>(11)? as u64,
+                    updated_at: row.get::<_, i64>(12)? as u64,
+                    deleted_at: row.get::<_, Option<i64>>(13)?.map(|v| v as u64),
+                })
+            })
+            .map_err(|e| e.to_string())?;
+
+        let mut list = Vec::new();
+        for entry in rows {
+            list.push(entry.map_err(|e| e.to_string())?);
+        }
+        Ok(list)
+    }
+
+    pub fn get_entry_detail(&self, id: &str) -> Result<EntryDetail, String> {
+        let entry = self.conn.query_row(
+            "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at
+             FROM time_entries WHERE id = ?1;",
+            params![id],
+            |row| {
+                Ok(TimeEntry {
+                    id: row.get(0)?,
+                    started_at: row.get::<_, i64>(1)? as u64,
+                    ended_at: row.get::<_, i64>(2)? as u64,
+                    description: row.get(3)?,
+                    category_id: row.get(4)?,
+                    project_id: row.get(5)?,
+                    status: row.get(6)?,
+                    approved_by: row.get(7)?,
+                    source: row.get(8)?,
+                    billable: row.get::<_, i64>(9)? != 0,
+                    invoice_id: row.get(10)?,
+                    created_at: row.get::<_, i64>(11)? as u64,
+                    updated_at: row.get::<_, i64>(12)? as u64,
+                    deleted_at: row.get::<_, Option<i64>>(13)?.map(|v| v as u64),
+                })
+            },
+        ).map_err(|e| e.to_string())?;
+
+        let mut stmt = self.conn.prepare(
+            "SELECT id, app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id
+             FROM segments
+             WHERE entry_id = ?1 OR (entry_id IS NULL AND started_at >= ?2 AND ended_at <= ?3 AND kind != 'break')
+             ORDER BY started_at ASC;",
+        ).map_err(|e| e.to_string())?;
+
+        let segment_rows = stmt
+            .query_map(
+                params![id, entry.started_at as i64, entry.ended_at as i64],
+                segment_from_row,
+            )
+            .map_err(|e| e.to_string())?;
+
+        let mut segments = Vec::new();
+        let mut app_duration: std::collections::HashMap<String, u64> =
+            std::collections::HashMap::new();
+        let mut title_duration: std::collections::HashMap<(String, String), (u64, u64)> =
+            std::collections::HashMap::new();
+        let mut total_work_ms = 0u64;
+
+        for s in segment_rows {
+            let seg = s.map_err(|e| e.to_string())?;
+            if seg.kind != "break" {
+                let dur = seg
+                    .ended_at
+                    .unwrap_or(entry.ended_at)
+                    .saturating_sub(seg.started_at);
+                *app_duration.entry(seg.app.clone()).or_insert(0) += dur;
+                total_work_ms += dur;
+
+                let key = (seg.title.clone(), seg.app.clone());
+                let entry_td = title_duration.entry(key).or_insert((seg.started_at, 0));
+                entry_td.1 += dur;
+            }
+            segments.push(seg);
+        }
+
+        let mut apps = Vec::new();
+        for (app, dur) in app_duration {
+            let percentage = if total_work_ms > 0 {
+                (dur as f64 / total_work_ms as f64) * 100.0
+            } else {
+                0.0
+            };
+            apps.push(AppContribution {
+                app,
+                duration_ms: dur,
+                percentage,
+            });
+        }
+        apps.sort_by_key(|a| std::cmp::Reverse(a.duration_ms));
+
+        let mut titles = Vec::new();
+        for ((title, app), (started_at, dur)) in title_duration {
+            titles.push(TitleItem {
+                title,
+                app,
+                started_at,
+                duration_ms: dur,
+            });
+        }
+        titles.sort_by_key(|a| std::cmp::Reverse(a.duration_ms));
+
+        let mut evt_stmt = self
+            .conn
+            .prepare(
+                "SELECT id, entry_id, kind, actor, payload, at
+                 FROM entry_events
+                 WHERE entry_id = ?1
+                 ORDER BY at ASC;",
+            )
+            .map_err(|e| e.to_string())?;
+
+        let event_rows = evt_stmt
+            .query_map(params![id], |row| {
+                Ok(EntryEvent {
+                    id: row.get(0)?,
+                    entry_id: row.get(1)?,
+                    kind: row.get(2)?,
+                    actor: row.get(3)?,
+                    payload: row.get(4)?,
+                    at: row.get::<_, i64>(5)? as u64,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+
+        let mut events = Vec::new();
+        for evt in event_rows {
+            events.push(evt.map_err(|e| e.to_string())?);
+        }
+
+        Ok(EntryDetail {
+            entry,
+            segments,
+            apps,
+            titles,
+            events,
+        })
+    }
+
+    pub fn update_time_entry(
+        &mut self,
+        id: &str,
+        patch: UpdateTimeEntry,
+        now: u64,
+    ) -> Result<TimeEntry, String> {
+        let mut entry = self.conn.query_row(
+            "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at
+             FROM time_entries WHERE id = ?1;",
+            params![id],
+            |row| {
+                Ok(TimeEntry {
+                    id: row.get(0)?,
+                    started_at: row.get::<_, i64>(1)? as u64,
+                    ended_at: row.get::<_, i64>(2)? as u64,
+                    description: row.get(3)?,
+                    category_id: row.get(4)?,
+                    project_id: row.get(5)?,
+                    status: row.get(6)?,
+                    approved_by: row.get(7)?,
+                    source: row.get(8)?,
+                    billable: row.get::<_, i64>(9)? != 0,
+                    invoice_id: row.get(10)?,
+                    created_at: row.get::<_, i64>(11)? as u64,
+                    updated_at: row.get::<_, i64>(12)? as u64,
+                    deleted_at: row.get::<_, Option<i64>>(13)?.map(|v| v as u64),
+                })
+            },
+        ).map_err(|e| e.to_string())?;
+
+        if let Some(desc) = patch.description {
+            entry.description = desc;
+        }
+        if let Some(cat) = patch.category_id {
+            entry.category_id = if cat.is_empty() { None } else { Some(cat) };
+        }
+        if let Some(proj) = patch.project_id {
+            entry.project_id = if proj.is_empty() { None } else { Some(proj) };
+        }
+        if let Some(s) = patch.started_at {
+            entry.started_at = s;
+        }
+        if let Some(e) = patch.ended_at {
+            entry.ended_at = e;
+        }
+        if let Some(st) = patch.status {
+            entry.status = st;
+        }
+        if let Some(b) = patch.billable {
+            entry.billable = b;
+        }
+        entry.updated_at = now;
+
+        self.conn.execute(
+            "UPDATE time_entries SET started_at = ?1, ended_at = ?2, description = ?3, category_id = ?4, project_id = ?5, status = ?6, billable = ?7, updated_at = ?8
+             WHERE id = ?9;",
+            params![
+                entry.started_at as i64,
+                entry.ended_at as i64,
+                entry.description,
+                entry.category_id,
+                entry.project_id,
+                entry.status,
+                entry.billable as i64,
+                now as i64,
+                id,
+            ],
+        ).map_err(|e| e.to_string())?;
+
+        let event_id = uuid::Uuid::now_v7().to_string();
+        let _ = self.conn.execute(
+            "INSERT INTO entry_events (id, entry_id, kind, actor, payload, at) VALUES (?1, ?2, 'edited', 'user', NULL, ?3);",
+            params![event_id, id, now as i64],
+        );
+
+        Ok(entry)
+    }
+
+    pub fn approve_time_entries(
+        &mut self,
+        ids: &[String],
+        approved_by: &str,
+        now: u64,
+    ) -> Result<(), String> {
+        for id in ids {
+            self.conn.execute(
+                "UPDATE time_entries SET status = 'approved', approved_by = ?1, updated_at = ?2 WHERE id = ?3;",
+                params![approved_by, now as i64, id],
+            ).map_err(|e| e.to_string())?;
+
+            let event_id = uuid::Uuid::now_v7().to_string();
+            let _ = self.conn.execute(
+                "INSERT INTO entry_events (id, entry_id, kind, actor, payload, at) VALUES (?1, ?2, 'accepted', ?3, NULL, ?4);",
+                params![event_id, id, approved_by, now as i64],
+            );
+        }
+        Ok(())
+    }
+
+    pub fn reject_time_entry(&mut self, id: &str, now: u64) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE time_entries SET category_id = NULL, status = 'pending', updated_at = ?1 WHERE id = ?2;",
+                params![now as i64, id],
+            )
+            .map_err(|e| e.to_string())?;
+
+        let event_id = uuid::Uuid::now_v7().to_string();
+        let _ = self.conn.execute(
+            "INSERT INTO entry_events (id, entry_id, kind, actor, payload, at) VALUES (?1, ?2, 'rejected', 'user', NULL, ?3);",
+            params![event_id, id, now as i64],
+        );
+
+        Ok(())
+    }
+
+    pub fn split_time_entry(
+        &mut self,
+        id: &str,
+        at_ms: u64,
+        now: u64,
+    ) -> Result<(TimeEntry, TimeEntry), String> {
+        let original = self.conn.query_row(
+            "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at
+             FROM time_entries WHERE id = ?1;",
+            params![id],
+            |row| {
+                Ok(TimeEntry {
+                    id: row.get(0)?,
+                    started_at: row.get::<_, i64>(1)? as u64,
+                    ended_at: row.get::<_, i64>(2)? as u64,
+                    description: row.get(3)?,
+                    category_id: row.get(4)?,
+                    project_id: row.get(5)?,
+                    status: row.get(6)?,
+                    approved_by: row.get(7)?,
+                    source: row.get(8)?,
+                    billable: row.get::<_, i64>(9)? != 0,
+                    invoice_id: row.get(10)?,
+                    created_at: row.get::<_, i64>(11)? as u64,
+                    updated_at: row.get::<_, i64>(12)? as u64,
+                    deleted_at: row.get::<_, Option<i64>>(13)?.map(|v| v as u64),
+                })
+            },
+        ).map_err(|e| e.to_string())?;
+
+        if at_ms <= original.started_at || at_ms >= original.ended_at {
+            return Err("Split point must be strictly inside the entry duration".to_string());
+        }
+
+        // Update first half
+        self.conn
+            .execute(
+                "UPDATE time_entries SET ended_at = ?1, updated_at = ?2 WHERE id = ?3;",
+                params![at_ms as i64, now as i64, id],
+            )
+            .map_err(|e| e.to_string())?;
+
+        let first = TimeEntry {
+            ended_at: at_ms,
+            updated_at: now,
+            ..original.clone()
+        };
+
+        // Create second half
+        let new_id = uuid::Uuid::now_v7().to_string();
+        self.conn.execute(
+            "INSERT INTO time_entries (id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12);",
+            params![
+                new_id,
+                at_ms as i64,
+                original.ended_at as i64,
+                original.description,
+                original.category_id,
+                original.project_id,
+                original.status,
+                original.approved_by,
+                original.source,
+                original.billable as i64,
+                original.invoice_id,
+                now as i64,
+            ],
+        ).map_err(|e| e.to_string())?;
+
+        // Reassign segments that start after split point to new entry
+        self.conn
+            .execute(
+                "UPDATE segments SET entry_id = ?1 WHERE entry_id = ?2 AND started_at >= ?3;",
+                params![new_id, id, at_ms as i64],
+            )
+            .map_err(|e| e.to_string())?;
+
+        let second = TimeEntry {
+            id: new_id.clone(),
+            started_at: at_ms,
+            ended_at: original.ended_at,
+            created_at: now,
+            updated_at: now,
+            ..original
+        };
+
+        let event_id = uuid::Uuid::now_v7().to_string();
+        let _ = self.conn.execute(
+            "INSERT INTO entry_events (id, entry_id, kind, actor, payload, at) VALUES (?1, ?2, 'split', 'user', NULL, ?3);",
+            params![event_id, id, now as i64],
+        );
+
+        Ok((first, second))
+    }
+
+    pub fn delete_time_entry(&mut self, id: &str, now: u64) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE time_entries SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2;",
+                params![now as i64, id],
+            )
+            .map_err(|e| e.to_string())?;
+
+        // Unlink segments so time becomes unassigned activity
+        self.conn
+            .execute(
+                "UPDATE segments SET entry_id = NULL WHERE entry_id = ?1;",
+                params![id],
+            )
+            .map_err(|e| e.to_string())?;
+
+        Ok(())
+    }
+
+    pub fn create_manual_entry(
+        &mut self,
+        new_entry: NewTimeEntry,
+        now: u64,
+    ) -> Result<TimeEntry, String> {
+        let id = uuid::Uuid::now_v7().to_string();
+        let billable = new_entry.billable.unwrap_or(false) as i64;
+
+        self.conn.execute(
+            "INSERT INTO time_entries (id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'approved', 'user', 'manual', ?7, ?8, ?8);",
+            params![
+                id,
+                new_entry.started_at as i64,
+                new_entry.ended_at as i64,
+                new_entry.description,
+                new_entry.category_id,
+                new_entry.project_id,
+                billable,
+                now as i64,
+            ],
+        ).map_err(|e| e.to_string())?;
+
+        let event_id = uuid::Uuid::now_v7().to_string();
+        let _ = self.conn.execute(
+            "INSERT INTO entry_events (id, entry_id, kind, actor, payload, at) VALUES (?1, ?2, 'created', 'user', NULL, ?3);",
+            params![event_id, id, now as i64],
+        );
+
+        Ok(TimeEntry {
+            id,
+            started_at: new_entry.started_at,
+            ended_at: new_entry.ended_at,
+            description: new_entry.description,
+            category_id: new_entry.category_id,
+            project_id: new_entry.project_id,
+            status: "approved".to_string(),
+            approved_by: Some("user".to_string()),
+            source: "manual".to_string(),
+            billable: billable != 0,
+            invoice_id: None,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        })
+    }
+
+    pub fn rebuild_time_entries_in_range(
+        &mut self,
+        start_ms: u64,
+        end_ms: u64,
+        now: u64,
+    ) -> Result<Vec<TimeEntry>, String> {
+        // Fetch raw segments in range
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, app, title, kind, label, started_at, ended_at, entry_id
+             FROM segments
+             WHERE started_at >= ?1 AND started_at <= ?2
+             ORDER BY started_at ASC;",
+            )
+            .map_err(|e| e.to_string())?;
+
+        let segment_rows = stmt
+            .query_map(params![start_ms as i64, end_ms as i64], |row| {
+                Ok(crate::entry_builder::SegmentInput {
+                    id: row.get(0)?,
+                    app: row.get(1)?,
+                    title: row.get(2)?,
+                    kind: row.get(3)?,
+                    label: row.get(4)?,
+                    started_at: row.get::<_, i64>(5)? as u64,
+                    ended_at: row.get::<_, Option<i64>>(6)?.map(|v| v as u64),
+                    entry_id: row.get(7)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+
+        let mut seg_inputs = Vec::new();
+        for s in segment_rows {
+            seg_inputs.push(s.map_err(|e| e.to_string())?);
+        }
+
+        // Fetch frozen/approved entries
+        let existing = self.list_time_entries(start_ms, end_ms)?;
+        let frozen: Vec<crate::entry_builder::BuiltTimeEntry> = existing
+            .into_iter()
+            .filter(|e| e.status == "approved")
+            .map(|e| crate::entry_builder::BuiltTimeEntry {
+                id: e.id,
+                started_at: e.started_at,
+                ended_at: e.ended_at,
+                description: e.description,
+                category_id: e.category_id,
+                project_id: e.project_id,
+                status: e.status,
+                approved_by: e.approved_by,
+                source: e.source,
+                billable: e.billable,
+                invoice_id: e.invoice_id,
+                created_at: e.created_at,
+                updated_at: e.updated_at,
+                deleted_at: e.deleted_at,
+                segment_ids: Vec::new(),
+            })
+            .collect();
+
+        let built = crate::entry_builder::build_entries(
+            &seg_inputs,
+            &frozen,
+            &crate::entry_builder::EntrySettings::default(),
+            now,
+        );
+
+        // Save newly built non-frozen entries to DB
+        for be in &built {
+            if be.status != "approved" {
+                self.conn.execute(
+                    "INSERT INTO time_entries (id, started_at, ended_at, description, category_id, project_id, status, source, billable, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'auto', 0, ?8, ?8)
+                     ON CONFLICT(id) DO UPDATE SET ended_at = excluded.ended_at, description = excluded.description, updated_at = excluded.updated_at;",
+                    params![
+                        be.id,
+                        be.started_at as i64,
+                        be.ended_at as i64,
+                        be.description,
+                        be.category_id,
+                        be.project_id,
+                        be.status,
+                        now as i64,
+                    ],
+                ).map_err(|e| e.to_string())?;
+
+                for sid in &be.segment_ids {
+                    let _ = self.conn.execute(
+                        "UPDATE segments SET entry_id = ?1 WHERE id = ?2;",
+                        params![be.id, sid],
+                    );
+                }
+            }
+        }
+
+        self.list_time_entries(start_ms, end_ms)
+    }
+
+    // --- P1: Apps -------------------------------------------------------
+
+    pub fn list_apps(&self) -> Result<Vec<AppRecord>, String> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, kind, identifier, display_name, default_category_id, default_project_id, excluded, first_seen, last_seen, created_at, updated_at, deleted_at
+             FROM apps
+             WHERE deleted_at IS NULL
+             ORDER BY last_seen DESC;",
+        ).map_err(|e| e.to_string())?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(AppRecord {
+                    id: row.get(0)?,
+                    kind: row.get(1)?,
+                    identifier: row.get(2)?,
+                    display_name: row.get(3)?,
+                    default_category_id: row.get(4)?,
+                    default_project_id: row.get(5)?,
+                    excluded: row.get::<_, i64>(6)? != 0,
+                    first_seen: row.get::<_, i64>(7)? as u64,
+                    last_seen: row.get::<_, i64>(8)? as u64,
+                    created_at: row.get::<_, i64>(9)? as u64,
+                    updated_at: row.get::<_, i64>(10)? as u64,
+                    deleted_at: row.get::<_, Option<i64>>(11)?.map(|v| v as u64),
+                })
+            })
+            .map_err(|e| e.to_string())?;
+
+        let mut list = Vec::new();
+        for a in rows {
+            list.push(a.map_err(|e| e.to_string())?);
+        }
+        Ok(list)
+    }
+
+    pub fn update_app(
+        &mut self,
+        id: &str,
+        default_category_id: Option<String>,
+        default_project_id: Option<String>,
+        excluded: Option<bool>,
+        now: u64,
+    ) -> Result<AppRecord, String> {
+        if let Some(cat) = default_category_id.as_deref() {
+            self.conn
+                .execute(
+                    "UPDATE apps SET default_category_id = ?1, updated_at = ?2 WHERE id = ?3;",
+                    params![cat, now as i64, id],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        if let Some(proj) = default_project_id.as_deref() {
+            self.conn
+                .execute(
+                    "UPDATE apps SET default_project_id = ?1, updated_at = ?2 WHERE id = ?3;",
+                    params![proj, now as i64, id],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        if let Some(exc) = excluded {
+            self.conn
+                .execute(
+                    "UPDATE apps SET excluded = ?1, updated_at = ?2 WHERE id = ?3;",
+                    params![exc as i64, now as i64, id],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+
+        self.conn.query_row(
+            "SELECT id, kind, identifier, display_name, default_category_id, default_project_id, excluded, first_seen, last_seen, created_at, updated_at, deleted_at
+             FROM apps WHERE id = ?1;",
+            params![id],
+            |row| {
+                Ok(AppRecord {
+                    id: row.get(0)?,
+                    kind: row.get(1)?,
+                    identifier: row.get(2)?,
+                    display_name: row.get(3)?,
+                    default_category_id: row.get(4)?,
+                    default_project_id: row.get(5)?,
+                    excluded: row.get::<_, i64>(6)? != 0,
+                    first_seen: row.get::<_, i64>(7)? as u64,
+                    last_seen: row.get::<_, i64>(8)? as u64,
+                    created_at: row.get::<_, i64>(9)? as u64,
+                    updated_at: row.get::<_, i64>(10)? as u64,
+                    deleted_at: row.get::<_, Option<i64>>(11)?.map(|v| v as u64),
+                })
+            },
+        ).map_err(|e| e.to_string())
+    }
 }
 
-fn segment_from_row(row: &Row<'_>) -> rusqlite::Result<ActivitySegment> {
+pub(crate) fn segment_from_row(row: &Row<'_>) -> rusqlite::Result<ActivitySegment> {
     Ok(ActivitySegment {
         id: row.get(0)?,
         app: row.get(1)?,
@@ -576,14 +1630,14 @@ fn segment_from_row(row: &Row<'_>) -> rusqlite::Result<ActivitySegment> {
         started_at: row.get::<_, i64>(5)? as u64,
         ended_at: row.get::<_, Option<i64>>(6)?.map(|ms| ms as u64),
         reviewed: row.get::<_, i64>(7)? != 0,
+        app_id: row.get(8).ok(),
+        bundle_id: row.get(9).ok(),
+        url: row.get(10).ok(),
+        domain: row.get(11).ok(),
+        entry_id: row.get(12).ok(),
     })
 }
 
-/// SQL-side aggregation (decision A4/opt 4): sums *closed* segments by kind
-/// in one query instead of fetching every row and summing in Rust. The
-/// currently open segment (`ended_at IS NULL`) is deliberately excluded here
-/// and folded in afterward by `add_current`, from the in-memory `Current` —
-/// no query needed for that part.
 fn compute_totals(conn: &Connection, since_ms: u64, now: u64) -> Result<Totals, String> {
     let mut statement = conn
         .prepare(
@@ -602,51 +1656,123 @@ fn compute_totals(conn: &Connection, since_ms: u64, now: u64) -> Result<Totals, 
         break_ms: 0,
         unreviewed: 0,
     };
+
     let rows = statement
         .query_map(params![since_ms as i64, now as i64], |row| {
-            let kind: String = row.get(0)?;
-            let total_ms: i64 = row.get(1)?;
-            let unreviewed: i64 = row.get(2)?;
-            Ok((kind, total_ms as u64, unreviewed as u64))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)? as u64,
+                row.get::<_, i64>(2)? as u64,
+            ))
         })
         .map_err(|error| error.to_string())?;
+
     for row in rows {
-        let (kind, total_ms, unreviewed) = row.map_err(|error| error.to_string())?;
+        let (kind, duration_ms, unreviewed) = row.map_err(|error| error.to_string())?;
         match kind.as_str() {
-            KIND_FOCUS => totals.focus_ms += total_ms,
-            KIND_BREAK => totals.break_ms += total_ms,
-            _ => totals.tracked_ms += total_ms,
+            KIND_ACTIVITY => {
+                totals.tracked_ms += duration_ms;
+                totals.unreviewed += unreviewed;
+            }
+            KIND_FOCUS => {
+                totals.tracked_ms += duration_ms;
+                totals.focus_ms += duration_ms;
+            }
+            KIND_BREAK => {
+                totals.break_ms += duration_ms;
+            }
+            _ => {}
         }
-        totals.unreviewed += unreviewed;
     }
     Ok(totals)
 }
 
-/// Folds the currently-open segment's elapsed time into `totals`, matching
-/// the clipping the old manual loop did: `[max(started_at, since), now]`.
-fn add_current(totals: &mut Totals, current: &Current, since_ms: u64, now: u64) {
-    let start = current.started_at.max(since_ms);
-    let elapsed = now.saturating_sub(start);
-    match current.kind.as_str() {
-        KIND_FOCUS => totals.focus_ms += elapsed,
-        KIND_BREAK => totals.break_ms += elapsed,
-        _ => totals.tracked_ms += elapsed,
+fn fetch_segments(
+    conn: &Connection,
+    since_ms: u64,
+    now: u64,
+) -> Result<Vec<ActivitySegment>, String> {
+    let mut statement = conn
+        .prepare(
+            "SELECT id, app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id
+             FROM segments
+             WHERE ended_at IS NULL OR (ended_at >= ?1 AND started_at < ?2)
+             ORDER BY started_at ASC",
+        )
+        .map_err(|error| error.to_string())?;
+
+    let rows = statement
+        .query_map(params![since_ms as i64, now as i64], segment_from_row)
+        .map_err(|error| error.to_string())?;
+
+    let mut segments = Vec::new();
+    for row in rows {
+        segments.push(row.map_err(|error| error.to_string())?);
     }
-    if !current.reviewed {
-        totals.unreviewed += 1;
+    Ok(segments)
+}
+
+fn add_current(totals: &mut Totals, current: Option<&Current>, since_ms: u64, now: u64) {
+    if let Some(current) = current {
+        let effective_start = current.started_at.max(since_ms);
+        let active_ms = now.saturating_sub(effective_start);
+        match current.kind.as_str() {
+            KIND_ACTIVITY => {
+                totals.tracked_ms += active_ms;
+                if !current.reviewed {
+                    totals.unreviewed += 1;
+                }
+            }
+            KIND_FOCUS => {
+                totals.tracked_ms += active_ms;
+                totals.focus_ms += active_ms;
+            }
+            KIND_BREAK => {
+                totals.break_ms += active_ms;
+            }
+            _ => {}
+        }
     }
 }
 
-fn build_tick(
+fn build_snapshot(
+    conn: &Connection,
+    live: &LiveState,
+    since_ms: u64,
+    now: u64,
+) -> Result<ActivitySnapshot, String> {
+    let mut totals = compute_totals(conn, since_ms, now)?;
+    add_current(&mut totals, live.current.as_ref(), since_ms, now);
+
+    let mut segments = fetch_segments(conn, since_ms, now)?;
+    if let Some(current) = &live.current {
+        if !segments.iter().any(|s| s.id == current.id) {
+            segments.push(current.as_segment());
+        }
+    }
+
+    Ok(ActivitySnapshot {
+        current: live.current.as_ref().map(Current::as_segment),
+        segments,
+        tracked_ms: totals.tracked_ms,
+        focus_ms: totals.focus_ms,
+        break_ms: totals.break_ms,
+        unreviewed: totals.unreviewed,
+        idle_ms: live.last_idle_ms,
+        idle_threshold_ms: live.idle_threshold_ms,
+        capture_enabled: live.capture_enabled,
+    })
+}
+
+pub fn build_tick(
     conn: &Connection,
     live: &LiveState,
     since_ms: u64,
     now: u64,
 ) -> Result<ActivityTick, String> {
     let mut totals = compute_totals(conn, since_ms, now)?;
-    if let Some(current) = &live.current {
-        add_current(&mut totals, current, since_ms, now);
-    }
+    add_current(&mut totals, live.current.as_ref(), since_ms, now);
+
     Ok(ActivityTick {
         current: live.current.as_ref().map(Current::as_segment),
         tracked_ms: totals.tracked_ms,
@@ -659,56 +1785,9 @@ fn build_tick(
     })
 }
 
-fn build_snapshot(
-    conn: &Connection,
-    live: &LiveState,
-    since_ms: u64,
-    now: u64,
-) -> Result<ActivitySnapshot, String> {
-    let mut statement = conn
-        .prepare(
-            "SELECT id, app, title, kind, label, started_at, ended_at, reviewed
-             FROM segments
-             WHERE ended_at IS NULL OR ended_at >= ?1
-             ORDER BY started_at ASC",
-        )
-        .map_err(|error| error.to_string())?;
-
-    // SQLite has no unsigned integer, so epoch milliseconds cross the
-    // boundary as i64. That overflows in year 292 million.
-    let segments: Vec<ActivitySegment> = statement
-        .query_map(params![since_ms as i64], segment_from_row)
-        .map_err(|error| error.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
-
-    let mut totals = compute_totals(conn, since_ms, now)?;
-    if let Some(current) = &live.current {
-        add_current(&mut totals, current, since_ms, now);
-    }
-
-    Ok(ActivitySnapshot {
-        current: segments
-            .iter()
-            .find(|segment| segment.ended_at.is_none())
-            .cloned(),
-        segments,
-        tracked_ms: totals.tracked_ms,
-        focus_ms: totals.focus_ms,
-        break_ms: totals.break_ms,
-        unreviewed: totals.unreviewed,
-        idle_ms: live.last_idle_ms,
-        idle_threshold_ms: live.idle_threshold_ms,
-        capture_enabled: live.capture_enabled,
-    })
-}
-
-/// The read path for `commands::activity_snapshot`: caches `since_ms` on the
-/// writer (so the sampler's ticks/heartbeats know the boundary going
-/// forward), then runs the actual query against the separate reader
-/// connection — see decision A6.
 pub fn snapshot_for(app: &AppHandle, since_ms: u64) -> Result<ActivitySnapshot, String> {
     let state = app.state::<crate::AppState>();
+    let now = now_epoch_ms();
     let live = {
         let mut store = state
             .activity
@@ -721,14 +1800,12 @@ pub fn snapshot_for(app: &AppHandle, since_ms: u64) -> Result<ActivitySnapshot, 
         .activity_reader
         .lock()
         .map_err(|_| "activity reader lock poisoned".to_string())?;
-    build_snapshot(&reader, &live, since_ms, now_epoch_ms())
+    build_snapshot(&reader, &live, since_ms, now)
 }
 
-/// Recomputes the full snapshot and broadcasts it on `EVENT_ACTIVITY_CHANGED`.
-/// Used both for structural changes (a segment opened/closed) and for the
-/// reconciliation push when OpenRize's window regains focus.
 pub fn emit_full(app: &AppHandle) {
     let state = app.state::<crate::AppState>();
+    let now = now_epoch_ms();
     let result = (|| -> Result<ActivitySnapshot, String> {
         let live = {
             let store = state
@@ -742,7 +1819,7 @@ pub fn emit_full(app: &AppHandle) {
             .activity_reader
             .lock()
             .map_err(|_| "activity reader lock poisoned".to_string())?;
-        build_snapshot(&reader, &live, since_ms, now_epoch_ms())
+        build_snapshot(&reader, &live, since_ms, now)
     })();
     match result {
         Ok(snapshot) => {
@@ -777,44 +1854,39 @@ fn emit_tick(app: &AppHandle, now: u64) {
     }
 }
 
-/// Reads the OS foreground window. Failure (no foreground window, permission
-/// not granted) is reported as `None`, not an error: capture simply has nothing
-/// to record this tick.
-fn read_active_window() -> Option<WindowSample> {
-    match active_win_pos_rs::get_active_window() {
-        Ok(window) if !window.app_name.is_empty() => Some(WindowSample {
-            app: window.app_name,
-            title: window.title,
-        }),
-        _ => None,
-    }
-}
-
 fn read_idle_ms() -> u64 {
     user_idle3::UserIdle::get_time()
         .map(|idle| idle.duration().as_millis() as u64)
         .unwrap_or(0)
 }
 
-/// Starts the sampler thread. Runs for the life of the process, including while
-/// the window is hidden — that is the whole point of a background tracker.
-///
-/// Sampling always runs at `SAMPLE_SECS`. Pushing to the frontend is what
-/// adapts to OpenRize's own focus state (decision A4): a structural change
-/// (segment open/close) always pushes a full snapshot immediately; otherwise,
-/// a lightweight tick pushes every iteration while focused, or only once the
-/// 30s heartbeat window has elapsed while backgrounded.
 pub fn spawn_sampler(app: AppHandle) {
     std::thread::spawn(move || {
+        // App Nap assertion: prevents throttling while capture runs in background
+        let _app_nap =
+            crate::capture::AppNapAssertion::begin("OpenRize background activity capture");
+
         let mut last_push_at: u64 = 0;
+        let mut last_sample_time: u64 = 0;
+
         loop {
             std::thread::sleep(Duration::from_secs(SAMPLE_SECS));
 
-            let sample = read_active_window();
-            let idle_ms = read_idle_ms();
             let now = now_epoch_ms();
+            let sample = crate::capture::read_active_window();
+            let idle_ms = read_idle_ms();
 
             let state = app.state::<crate::AppState>();
+
+            // Sleep / lid-close defense: if a gap of >10s occurred between 1s ticks,
+            // close active segment at last_sample_time + 1000 so sleep time is not counted.
+            if last_sample_time > 0 && now.saturating_sub(last_sample_time) > 10_000 {
+                if let Ok(mut store) = state.activity.lock() {
+                    let _ = store.close_active_segment(last_sample_time + 1000);
+                }
+            }
+            last_sample_time = now;
+
             let tick_result = state
                 .activity
                 .lock()
@@ -852,6 +1924,9 @@ mod tests {
         Some(WindowSample {
             app: app.to_string(),
             title: title.to_string(),
+            bundle_id: None,
+            url: None,
+            domain: None,
         })
     }
 
@@ -877,7 +1952,6 @@ mod tests {
         store.set_idle_threshold_ms(60_000).unwrap();
         store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
 
-        // 90s idle: close activity, open the auto break.
         store
             .tick(sample("Code", "main.rs"), 90_000, 100_000)
             .unwrap();
@@ -886,7 +1960,6 @@ mod tests {
             KIND_BREAK
         );
 
-        // User is back: the break ends and a fresh activity segment starts.
         store.tick(sample("Code", "main.rs"), 0, 130_000).unwrap();
         let snapshot = store.snapshot(0, 130_000).unwrap();
         let current = snapshot.current.unwrap();
@@ -988,67 +2061,89 @@ mod tests {
     }
 
     #[test]
-    fn old_closed_segments_are_rolled_up_without_deleting_raw_rows() {
+    fn categories_crud_works() {
         let mut store = store();
-        store
-            .open("Code", "main.rs", KIND_ACTIVITY, None, 1_000)
-            .unwrap();
-        store.close_current(61_000).unwrap();
+        let cats = store.list_categories().unwrap();
+        assert_eq!(cats.len(), 12); // Seeded default 12 categories
 
-        let far_future = 1_000 + RETENTION_MS + ONE_DAY_MS;
-        store.rollup_old_segments(far_future).unwrap();
-
-        let day_epoch = 1_000u64 / ONE_DAY_MS;
-        let total_ms: i64 = store
-            .conn
-            .query_row(
-                "SELECT total_ms FROM daily_rollups WHERE day_epoch = ?1 AND kind = ?2",
-                params![day_epoch as i64, KIND_ACTIVITY],
-                |row| row.get(0),
+        let created = store
+            .create_category(
+                NewCategory {
+                    name: "Custom Category".to_string(),
+                    color: "#123456".to_string(),
+                    description: Some("Custom desc".to_string()),
+                    ai_prompt: None,
+                    billable_default: Some(true),
+                    counts_as_work: Some(true),
+                    sort: Some(13),
+                },
+                1_000,
             )
             .unwrap();
-        assert_eq!(total_ms, 60_000);
+        assert_eq!(created.name, "Custom Category");
 
-        // Raw segment is untouched.
-        let snapshot = store.snapshot(0, far_future).unwrap();
-        assert_eq!(snapshot.segments.len(), 1);
+        let updated = store
+            .update_category(
+                &created.id,
+                UpdateCategory {
+                    name: Some("Renamed Category".to_string()),
+                    color: None,
+                    description: None,
+                    ai_prompt: None,
+                    billable_default: None,
+                    counts_as_work: None,
+                    archived: None,
+                    sort: None,
+                },
+                2_000,
+            )
+            .unwrap();
+        assert_eq!(updated.name, "Renamed Category");
+
+        store.delete_category(&created.id, 3_000).unwrap();
+        let remaining = store.list_categories().unwrap();
+        assert_eq!(remaining.len(), 12);
     }
 
     #[test]
-    fn retention_purges_old_segments_and_rollups_but_keeps_open_ones() {
-        let day = ONE_DAY_MS;
+    fn projects_and_clients_crud_works() {
         let mut store = store();
-        // Closed long ago, closed recently, and still open.
-        store
-            .open("Code", "old", KIND_ACTIVITY, None, 1_000)
-            .unwrap();
-        store.close_current(2_000).unwrap();
-        store
-            .open("Code", "new", KIND_ACTIVITY, None, 40 * day)
-            .unwrap();
-        store.close_current(41 * day).unwrap();
-        store
-            .open("Code", "live", KIND_ACTIVITY, None, 42 * day)
-            .unwrap();
-        store
-            .conn
-            .execute(
-                "INSERT INTO daily_rollups (day_epoch, kind, total_ms) VALUES (0, ?1, 5_000)",
-                params![KIND_ACTIVITY],
+        let client = store
+            .create_client(
+                NewClient {
+                    name: "Acme Corp".to_string(),
+                    email: Some("contact@acme.com".to_string()),
+                    address: None,
+                    default_rate: Some(120.0),
+                    currency: Some("USD".to_string()),
+                },
+                1_000,
             )
             .unwrap();
+        assert_eq!(client.name, "Acme Corp");
 
-        // 0 means forever: nothing goes.
-        assert_eq!(store.purge_older_than(0, 43 * day).unwrap(), 0);
-        // A 30-day window drops the ancient segment and its rollup only.
-        assert_eq!(store.purge_older_than(30, 43 * day).unwrap(), 1);
-        let rollups: i64 = store
-            .conn
-            .query_row("SELECT COUNT(*) FROM daily_rollups", [], |row| row.get(0))
+        let proj = store
+            .create_project(
+                NewProject {
+                    client_id: Some(client.id.clone()),
+                    name: "Acme Web".to_string(),
+                    color: "#75a4e5".to_string(),
+                    description: Some("Web platform".to_string()),
+                    ai_hints: Some("acme, web".to_string()),
+                    status: Some("active".to_string()),
+                    due_date: None,
+                    budget_kind: Some("hours".to_string()),
+                    budget_value: Some(50.0),
+                    budget_period: Some("total".to_string()),
+                    billable_default: Some(true),
+                    hourly_rate: Some(120.0),
+                },
+                2_000,
+            )
             .unwrap();
-        assert_eq!(rollups, 0);
-        // The recent closed segment and the open one survive.
-        let snapshot = store.snapshot(0, 43 * day).unwrap();
-        assert_eq!(snapshot.segments.len(), 2);
+        assert_eq!(proj.name, "Acme Web");
+
+        let projects = store.list_projects().unwrap();
+        assert_eq!(projects.len(), 1);
     }
 }

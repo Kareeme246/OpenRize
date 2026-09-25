@@ -1,38 +1,43 @@
+import { listen } from "@tauri-apps/api/event";
 import { type ReactElement, useCallback, useEffect, useState } from "react";
 import { NotImplementedProvider } from "./components/NotImplemented";
-import { Sidebar, type SidebarView } from "./components/Sidebar";
+import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { SettingsProvider } from "./hooks/useSettings";
-import { useTimers } from "./hooks/useTimers";
-import { AiAgent } from "./pages/AiAgent";
-import { Breaks } from "./pages/Breaks";
-import { Categorization } from "./pages/Categorization";
-import { DistractionBlocker } from "./pages/DistractionBlocker";
-import { Focus } from "./pages/Focus";
-import { Home } from "./pages/Home";
-import { Integrations } from "./pages/Integrations";
-import { Meetings } from "./pages/Meetings";
-import { Reports } from "./pages/Reports";
-import { Sessions } from "./pages/Sessions";
+import * as api from "./lib/api";
+import type { ActivitySnapshot, ActivityTick, Route } from "./lib/types";
+import { Apps } from "./pages/Apps";
+import { Calendar } from "./pages/Calendar";
+import { Invoices } from "./pages/Invoices";
+import { MyTimesheet } from "./pages/MyTimesheet";
+import { Projects } from "./pages/Projects";
 import { Settings } from "./pages/Settings";
-import { Trackers } from "./pages/Trackers";
+import { TimeEntries } from "./pages/TimeEntries";
+import { Timesheets } from "./pages/Timesheets";
 
 /** Browser-style history: a stack plus where the user is standing in it. */
 interface NavState {
-  entries: SidebarView[];
+  entries: Route[];
   cursor: number;
 }
 
 export default function App() {
-  const api = useTimers();
-  const [nav, setNav] = useState<NavState>({ entries: ["home"], cursor: 0 });
-  const view = nav.entries[nav.cursor];
+  const [nav, setNav] = useState<NavState>({
+    entries: [{ name: "calendar" }],
+    cursor: 0,
+  });
+  const currentRoute = nav.entries[nav.cursor] || { name: "calendar" };
 
-  const select = useCallback((next: SidebarView): void => {
+  const [captureEnabled, setCaptureEnabledState] = useState(true);
+  const [currentApp, setCurrentApp] = useState<string | undefined>(undefined);
+  const [pendingCount, setPendingCount] = useState(0);
+
+  const navigate = useCallback((next: Route): void => {
     setNav((previous) => {
-      if (previous.entries[previous.cursor] === next) return previous;
-      // Selecting from the middle of history discards the forward branch, the
-      // same way a browser does.
+      const current = previous.entries[previous.cursor];
+      if (current && JSON.stringify(current) === JSON.stringify(next)) {
+        return previous;
+      }
       const entries = [...previous.entries.slice(0, previous.cursor + 1), next];
       return { entries, cursor: entries.length - 1 };
     });
@@ -52,45 +57,111 @@ export default function App() {
     }));
   }, []);
 
-  /* ⌘, — the macOS Settings convention. No native app menu is built (see
-     src-tauri/src/lib.rs), so nothing swallows the keystroke before the
-     webview sees it. */
+  /* ⌘, — the macOS Settings convention. */
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (!event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.key === ",") {
         event.preventDefault();
-        select("settings");
+        navigate({ name: "settings" });
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [select]);
+  }, [navigate]);
+
+  // Initial load & capture events
+  useEffect(() => {
+    // Load initial snapshot
+    api
+      .fetchActivitySnapshot(0)
+      .then((snapshot) => {
+        setCaptureEnabledState(snapshot.captureEnabled);
+        if (snapshot.current) {
+          setCurrentApp(snapshot.current.app);
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to load activity snapshot", err);
+      });
+
+    // Listen to tick events
+    const unlistenTick = listen<ActivityTick>(api.ACTIVITY_TICK, (event) => {
+      setCaptureEnabledState(event.payload.captureEnabled);
+      if (event.payload.current) {
+        setCurrentApp(event.payload.current.app);
+      }
+    });
+
+    // Listen to activity changed events
+    const unlistenActivity = listen<ActivitySnapshot>(
+      api.ACTIVITY_CHANGED,
+      (event) => {
+        setCaptureEnabledState(event.payload.captureEnabled);
+        if (event.payload.current) {
+          setCurrentApp(event.payload.current.app);
+        }
+      },
+    );
+
+    return () => {
+      void unlistenTick.then((u) => u());
+      void unlistenActivity.then((u) => u());
+    };
+  }, []);
+
+  // Compute pending count (suggested / unapproved entries for today)
+  useEffect(() => {
+    const updatePending = async () => {
+      try {
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+        const entries = await api.listTimeEntries(
+          startOfDay.getTime(),
+          Date.now(),
+        );
+        const count = entries.filter(
+          (e) => e.status === "suggested" || e.status === "draft",
+        ).length;
+        setPendingCount(count);
+      } catch (err) {
+        console.error("Failed to load pending entries count", err);
+      }
+    };
+
+    updatePending();
+    const unlistenEntries = listen(api.ENTRIES_CHANGED, updatePending);
+    return () => {
+      void unlistenEntries.then((u) => u());
+    };
+  }, []);
+
+  const handleToggleCapture = async () => {
+    try {
+      const next = !captureEnabled;
+      await api.setCaptureEnabled(next);
+      setCaptureEnabledState(next);
+    } catch (err) {
+      console.error("Failed to toggle capture", err);
+    }
+  };
 
   const renderView = (): ReactElement => {
-    switch (view) {
-      case "home":
-        return <Home />;
-      case "sessions":
-        return <Sessions />;
-      case "focus":
-        return <Focus />;
-      case "meetings":
-        return <Meetings />;
-      case "breaks":
-        return <Breaks />;
-      case "categorization":
-        return <Categorization />;
-      case "distraction-blocker":
-        return <DistractionBlocker />;
-      case "reports":
-        return <Reports />;
-      case "ai-agent":
-        return <AiAgent />;
-      case "integrations":
-        return <Integrations />;
-      case "trackers":
-        return <Trackers api={api} />;
+    switch (currentRoute.name) {
+      case "calendar":
+        return <Calendar />;
+      case "timesheet":
+        return <MyTimesheet />;
+      case "apps":
+        return <Apps />;
+      case "entries":
+        return <TimeEntries />;
+      case "timesheets":
+        return <Timesheets />;
+      case "projects":
+        return <Projects />;
+      case "invoices":
+        return <Invoices />;
       case "settings":
         return <Settings />;
     }
@@ -107,7 +178,14 @@ export default function App() {
             onForward={forward}
           />
           <div className="grid min-h-0 flex-1 grid-cols-[224px_minmax(0,1fr)] overflow-hidden">
-            <Sidebar view={view} onSelect={select} />
+            <Sidebar
+              currentRoute={currentRoute}
+              onNavigate={navigate}
+              pendingCount={pendingCount}
+              currentApp={currentApp}
+              captureEnabled={captureEnabled}
+              onToggleCapture={handleToggleCapture}
+            />
             <div className="flex min-h-0 min-w-0 flex-col">{renderView()}</div>
           </div>
         </div>

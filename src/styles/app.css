@@ -10,78 +10,111 @@
  * runtime by that same function from the palette in src/lib/settings.ts.
  */
 :root {
-  --bg-canvas: #050706;
-  --bg-rail: rgba(0, 0, 0, 0.35);
-  --bg-bar: rgba(0, 0, 0, 0.3);
-  --bg-panel: #0a0d0b;
+  --bg-canvas: #1d201f;
+  --bg-rail: #191c1b;
+  --bg-bar: #161817;
+  --bg-panel: #252827;
   --bg-surface-1: rgba(255, 255, 255, 0.05);
-  --bg-surface-2: rgba(255, 255, 255, 0.1);
-  --bg-inset: rgba(0, 0, 0, 0.4);
-  --bg-inset-soft: rgba(0, 0, 0, 0.2);
-  --bg-scrim: rgba(0, 0, 0, 0.65);
+  --bg-surface-2: rgba(255, 255, 255, 0.09);
+  --bg-inset: rgba(0, 0, 0, 0.35);
+  --bg-inset-soft: rgba(0, 0, 0, 0.18);
+  --bg-scrim: rgba(0, 0, 0, 0.6);
 
-  --fg-strong: #ffffff;
-  --fg: #e8efe9;
-  --fg-muted: rgba(255, 255, 255, 0.72);
-  --fg-soft: rgba(255, 255, 255, 0.5);
-  --fg-faint: rgba(255, 255, 255, 0.36);
-  --fg-ghost: rgba(255, 255, 255, 0.2);
+  --fg-strong: #eef1ef;
+  --fg: #dde2df;
+  --fg-muted: rgba(238, 241, 239, 0.72);
+  --fg-soft: rgba(238, 241, 239, 0.52);
+  --fg-faint: rgba(238, 241, 239, 0.36);
+  --fg-ghost: rgba(238, 241, 239, 0.2);
 
-  --line: rgba(255, 255, 255, 0.1);
-  --line-soft: rgba(255, 255, 255, 0.05);
+  --line: rgba(255, 255, 255, 0.08);
+  --line-soft: rgba(255, 255, 255, 0.04);
 
   /* Categorical colours that sit beside the accent without competing with it. */
-  --break: #38bdf8;
-  --review: #fbbf24;
-  --danger: #f87171;
-  --danger-soft: rgba(248, 113, 113, 0.1);
+  --break: #66b1df;
+  --review: #e7b447;
+  --danger: #e97e7b;
+  --danger-soft: rgba(233, 126, 123, 0.12);
 
   /* Accent defaults; overwritten inline from the chosen palette. */
-  --accent: #2aea83;
-  --accent-dim: #1fb968;
-  --accent-soft: rgba(42, 234, 131, 0.15);
-  --accent-rgb: 42, 234, 131;
-  --accent-fg: #04160c;
+  --accent: #5bcf8f;
+  --accent-dim: #48ab74;
+  --accent-soft: rgba(91, 207, 143, 0.15);
+  --accent-rgb: 91, 207, 143;
+  --accent-fg: #10261a;
 
   /* Canvas gradient stops, also accent-aware. */
-  --glow-1: rgba(var(--accent-rgb), 0.16);
-  --glow-2: rgba(var(--accent-rgb), 0.07);
-  --canvas-1: #000000;
-  --canvas-2: #050706;
-  --canvas-3: #08110c;
+  --glow-1: rgba(var(--accent-rgb), 0.05);
+  --glow-2: rgba(var(--accent-rgb), 0.02);
+  --canvas-1: #191c1b;
+  --canvas-2: #1d201f;
+  --canvas-3: #222624;
+
+  /* Muted category palette tokens */
+  --cat-1: #75a4e5;
+  --cat-2: #56c2b1;
+  --cat-3: #e5995c;
+  --cat-4: #df84b5;
+  --cat-5: #e4817d;
+  --cat-6: #9aa6b4;
+  --cat-7: #bfa181;
+  --cat-8: #e7b447;
+  --cat-9: #66b1df;
+  --cat-10: #9b87df;
+  --cat-11: #e97e7b;
+  --cat-12: #64748b;
 }
 
 :root[data-theme="light"] {
-  --bg-canvas: #f4f6f5;
-  --bg-rail: rgba(255, 255, 255, 0.72);
-  --bg-bar: rgba(255, 255, 255, 0.6);
-  --bg-panel: #ffffff;
-  --bg-surface-1: rgba(15, 23, 18, 0.04);
-  --bg-surface-2: rgba(15, 23, 18, 0.08);
-  --bg-inset: rgba(15, 23, 18, 0.05);
-  --bg-inset-soft: rgba(15, 23, 18, 0.03);
+  --bg-canvas: #f2f1ed;
+  --bg-rail: #ebeae5;
+  --bg-bar: #e5e4df;
+  --bg-panel: #fbfaf7;
+  --bg-surface-1: rgba(30, 34, 32, 0.04);
+  --bg-surface-2: rgba(30, 34, 32, 0.08);
+  --bg-inset: rgba(30, 34, 32, 0.05);
+  --bg-inset-soft: rgba(30, 34, 32, 0.03);
   --bg-scrim: rgba(0, 0, 0, 0.35);
 
-  --fg-strong: #0b100d;
-  --fg: #1b211d;
-  --fg-muted: rgba(15, 23, 18, 0.68);
-  --fg-soft: rgba(15, 23, 18, 0.5);
-  --fg-faint: rgba(15, 23, 18, 0.42);
-  --fg-ghost: rgba(15, 23, 18, 0.2);
+  --fg-strong: #1e2220;
+  --fg: #2b2f2d;
+  --fg-muted: rgba(30, 34, 32, 0.7);
+  --fg-soft: rgba(30, 34, 32, 0.52);
+  --fg-faint: rgba(30, 34, 32, 0.38);
+  --fg-ghost: rgba(30, 34, 32, 0.2);
 
-  --line: rgba(15, 23, 18, 0.12);
-  --line-soft: rgba(15, 23, 18, 0.06);
+  --line: rgba(30, 34, 32, 0.11);
+  --line-soft: rgba(30, 34, 32, 0.06);
 
-  --break: #0284c7;
-  --review: #b45309;
-  --danger: #dc2626;
-  --danger-soft: rgba(220, 38, 38, 0.09);
+  --break: #2580b8;
+  --review: #a76114;
+  --danger: #c83d39;
+  --danger-soft: rgba(200, 61, 57, 0.1);
 
-  --glow-1: rgba(var(--accent-rgb), 0.1);
-  --glow-2: rgba(var(--accent-rgb), 0.05);
-  --canvas-1: #ffffff;
-  --canvas-2: #f4f6f5;
-  --canvas-3: #eef2ef;
+  --accent: #237f4e;
+  --accent-dim: #1a643c;
+  --accent-soft: rgba(35, 127, 78, 0.15);
+  --accent-rgb: 35, 127, 78;
+  --accent-fg: #ffffff;
+
+  --glow-1: rgba(var(--accent-rgb), 0.04);
+  --glow-2: rgba(var(--accent-rgb), 0.02);
+  --canvas-1: #faf9f6;
+  --canvas-2: #f2f1ed;
+  --canvas-3: #ebeae5;
+
+  --cat-1: #366acb;
+  --cat-2: #1f7e72;
+  --cat-3: #b85a20;
+  --cat-4: #bc417f;
+  --cat-5: #c3413d;
+  --cat-6: #687585;
+  --cat-7: #8c6c4f;
+  --cat-8: #a76114;
+  --cat-9: #2580b8;
+  --cat-10: #6b52c0;
+  --cat-11: #c83d39;
+  --cat-12: #475569;
 }
 
 @theme {
@@ -118,9 +151,6 @@
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
-/* The page gradient is one background, not a system of backgrounds, so it is
-   plain CSS rather than a pile of utilities. Tokens are read back as CSS
-   variables so the palette still lives in exactly one place. */
 html,
 body,
 #root {

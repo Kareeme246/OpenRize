@@ -1,13 +1,13 @@
-//! IPC surface. Every command returns the complete timer list so the frontend
-//! never has to guess at state it did not just write.
-//!
-//! Each one takes `AppHandle` (not `State`) so the tray's own event handler can
-//! call the same helper — one code path for "mutate, persist, refresh".
+//! IPC surface.
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::activity::{self, ActivitySnapshot};
+use crate::models::{
+    AppRecord, Category, Client, EntryDetail, NewCategory, NewClient, NewProject, NewTimeEntry,
+    Project, TimeEntry, UpdateCategory, UpdateClient, UpdateProject, UpdateTimeEntry,
+};
 use crate::settings::Settings;
 use crate::timers::{now_epoch_ms, Timer};
 use crate::tray;
@@ -15,13 +15,13 @@ use crate::AppState;
 
 type Timers = Result<Vec<Timer>, String>;
 
-/// The tray is a mirror, not a source of truth: if redrawing it fails, the
-/// mutation already succeeded and must not be reported as a failure. Log it.
 fn refresh_tray(app: &AppHandle, timers: &[Timer]) {
     if let Err(error) = tray::refresh(app, timers) {
         eprintln!("tray refresh failed: {error}");
     }
 }
+
+// --- Timers -------------------------------------------------------------
 
 #[tauri::command]
 pub fn list_timers(app: AppHandle) -> Timers {
@@ -57,7 +57,6 @@ pub fn pause_timer(app: AppHandle, id: String) -> Timers {
     pause_timer_by_id(&app, &id)
 }
 
-/// Shared by the command above and the tray's "Pause <label>" menu items.
 pub fn pause_timer_by_id(app: &AppHandle, id: &str) -> Timers {
     let timers = {
         let state = app.state::<AppState>();
@@ -101,14 +100,7 @@ pub fn delete_timer(app: AppHandle, id: String) -> Timers {
     Ok(timers)
 }
 
-// --- activity capture --------------------------------------------------
-//
-// The read command takes the caller's local-midnight bound and also caches it
-// on the writer, so the sampler's tick/heartbeat pushes know what range to
-// aggregate (see activity.rs's `snapshot_for`). Mutations broadcast the full
-// snapshot on EVENT_ACTIVITY_CHANGED via `activity::emit_full` — the same
-// path the sampler uses for a structural change — so every view and the tray
-// adopt it directly instead of round-tripping another `invoke`.
+// --- Activity capture ---------------------------------------------------
 
 #[tauri::command]
 pub fn activity_snapshot(app: AppHandle, since_ms: u64) -> Result<ActivitySnapshot, String> {
@@ -170,20 +162,255 @@ pub fn mark_segment_reviewed(app: AppHandle, id: i64) -> Result<(), String> {
     Ok(())
 }
 
-// --- preferences -------------------------------------------------------
+// --- P1: Categories -----------------------------------------------------
+
+#[tauri::command]
+pub fn list_categories(app: AppHandle) -> Result<Vec<Category>, String> {
+    let state = app.state::<AppState>();
+    let store = state.activity.lock().map_err(|e| e.to_string())?;
+    store.list_categories()
+}
+
+#[tauri::command]
+pub fn create_category(app: AppHandle, category: NewCategory) -> Result<Category, String> {
+    let now = now_epoch_ms();
+    let state = app.state::<AppState>();
+    let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+    store.create_category(category, now)
+}
+
+#[tauri::command]
+pub fn update_category(
+    app: AppHandle,
+    id: String,
+    patch: UpdateCategory,
+) -> Result<Category, String> {
+    let now = now_epoch_ms();
+    let state = app.state::<AppState>();
+    let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+    store.update_category(&id, patch, now)
+}
+
+#[tauri::command]
+pub fn delete_category(app: AppHandle, id: String) -> Result<(), String> {
+    let now = now_epoch_ms();
+    let state = app.state::<AppState>();
+    let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+    store.delete_category(&id, now)
+}
+
+// --- P1: Projects -------------------------------------------------------
+
+#[tauri::command]
+pub fn list_projects(app: AppHandle) -> Result<Vec<Project>, String> {
+    let state = app.state::<AppState>();
+    let store = state.activity.lock().map_err(|e| e.to_string())?;
+    store.list_projects()
+}
+
+#[tauri::command]
+pub fn create_project(app: AppHandle, project: NewProject) -> Result<Project, String> {
+    let now = now_epoch_ms();
+    let state = app.state::<AppState>();
+    let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+    store.create_project(project, now)
+}
+
+#[tauri::command]
+pub fn update_project(app: AppHandle, id: String, patch: UpdateProject) -> Result<Project, String> {
+    let now = now_epoch_ms();
+    let state = app.state::<AppState>();
+    let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+    store.update_project(&id, patch, now)
+}
+
+#[tauri::command]
+pub fn delete_project(app: AppHandle, id: String) -> Result<(), String> {
+    let now = now_epoch_ms();
+    let state = app.state::<AppState>();
+    let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+    store.delete_project(&id, now)
+}
+
+// --- P1: Clients --------------------------------------------------------
+
+#[tauri::command]
+pub fn list_clients(app: AppHandle) -> Result<Vec<Client>, String> {
+    let state = app.state::<AppState>();
+    let store = state.activity.lock().map_err(|e| e.to_string())?;
+    store.list_clients()
+}
+
+#[tauri::command]
+pub fn create_client(app: AppHandle, client: NewClient) -> Result<Client, String> {
+    let now = now_epoch_ms();
+    let state = app.state::<AppState>();
+    let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+    store.create_client(client, now)
+}
+
+#[tauri::command]
+pub fn update_client(app: AppHandle, id: String, patch: UpdateClient) -> Result<Client, String> {
+    let now = now_epoch_ms();
+    let state = app.state::<AppState>();
+    let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+    store.update_client(&id, patch, now)
+}
+
+#[tauri::command]
+pub fn delete_client(app: AppHandle, id: String) -> Result<(), String> {
+    let now = now_epoch_ms();
+    let state = app.state::<AppState>();
+    let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+    store.delete_client(&id, now)
+}
+
+// --- P1: Time Entries ---------------------------------------------------
+
+#[tauri::command]
+pub fn list_time_entries(
+    app: AppHandle,
+    start_ms: u64,
+    end_ms: u64,
+) -> Result<Vec<TimeEntry>, String> {
+    let state = app.state::<AppState>();
+    let store = state.activity.lock().map_err(|e| e.to_string())?;
+    store.list_time_entries(start_ms, end_ms)
+}
+
+#[tauri::command]
+pub fn get_entry_detail(app: AppHandle, id: String) -> Result<EntryDetail, String> {
+    let state = app.state::<AppState>();
+    let store = state.activity.lock().map_err(|e| e.to_string())?;
+    store.get_entry_detail(&id)
+}
+
+#[tauri::command]
+pub fn update_time_entry(
+    app: AppHandle,
+    id: String,
+    patch: UpdateTimeEntry,
+) -> Result<TimeEntry, String> {
+    let now = now_epoch_ms();
+    let entry = {
+        let state = app.state::<AppState>();
+        let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+        store.update_time_entry(&id, patch, now)?
+    };
+    let _ = app.emit(crate::EVENT_ENTRIES_CHANGED, ());
+    Ok(entry)
+}
+
+#[tauri::command]
+pub fn approve_time_entries(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    let now = now_epoch_ms();
+    {
+        let state = app.state::<AppState>();
+        let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+        store.approve_time_entries(&ids, "user", now)?;
+    }
+    let _ = app.emit(crate::EVENT_ENTRIES_CHANGED, ());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn reject_time_entry(app: AppHandle, id: String) -> Result<(), String> {
+    let now = now_epoch_ms();
+    {
+        let state = app.state::<AppState>();
+        let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+        store.reject_time_entry(&id, now)?;
+    }
+    let _ = app.emit(crate::EVENT_ENTRIES_CHANGED, ());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn split_time_entry(
+    app: AppHandle,
+    id: String,
+    at_ms: u64,
+) -> Result<(TimeEntry, TimeEntry), String> {
+    let now = now_epoch_ms();
+    let res = {
+        let state = app.state::<AppState>();
+        let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+        store.split_time_entry(&id, at_ms, now)?
+    };
+    let _ = app.emit(crate::EVENT_ENTRIES_CHANGED, ());
+    Ok(res)
+}
+
+#[tauri::command]
+pub fn delete_time_entry(app: AppHandle, id: String) -> Result<(), String> {
+    let now = now_epoch_ms();
+    {
+        let state = app.state::<AppState>();
+        let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+        store.delete_time_entry(&id, now)?;
+    }
+    let _ = app.emit(crate::EVENT_ENTRIES_CHANGED, ());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn create_time_entry(app: AppHandle, entry: NewTimeEntry) -> Result<TimeEntry, String> {
+    let now = now_epoch_ms();
+    let created = {
+        let state = app.state::<AppState>();
+        let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+        store.create_manual_entry(entry, now)?
+    };
+    let _ = app.emit(crate::EVENT_ENTRIES_CHANGED, ());
+    Ok(created)
+}
+
+#[tauri::command]
+pub fn rebuild_time_entries(
+    app: AppHandle,
+    start_ms: u64,
+    end_ms: u64,
+) -> Result<Vec<TimeEntry>, String> {
+    let now = now_epoch_ms();
+    let entries = {
+        let state = app.state::<AppState>();
+        let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+        store.rebuild_time_entries_in_range(start_ms, end_ms, now)?
+    };
+    let _ = app.emit(crate::EVENT_ENTRIES_CHANGED, ());
+    Ok(entries)
+}
+
+// --- P1: Apps -----------------------------------------------------------
+
+#[tauri::command]
+pub fn list_apps(app: AppHandle) -> Result<Vec<AppRecord>, String> {
+    let state = app.state::<AppState>();
+    let store = state.activity.lock().map_err(|e| e.to_string())?;
+    store.list_apps()
+}
+
+#[tauri::command]
+pub fn update_app(
+    app: AppHandle,
+    id: String,
+    default_category_id: Option<String>,
+    default_project_id: Option<String>,
+    excluded: Option<bool>,
+) -> Result<AppRecord, String> {
+    let now = now_epoch_ms();
+    let state = app.state::<AppState>();
+    let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+    store.update_app(&id, default_category_id, default_project_id, excluded, now)
+}
+
+// --- Preferences -------------------------------------------------------
 
 #[tauri::command]
 pub fn get_settings(app: AppHandle) -> Settings {
     app.state::<AppState>().settings_snapshot()
 }
 
-/// Replaces the whole preference set. A full object (rather than per-field
-/// setters) keeps the two sides in lockstep: a new preference is a struct field
-/// and a default, not a new command.
-///
-/// Side effects that live outside the file are applied here so there is one
-/// path that reacts to a change: the tray is added/removed, and retention is
-/// swept immediately when the window shrinks.
 #[tauri::command]
 pub fn update_settings(app: AppHandle, settings: Settings) -> Result<Settings, String> {
     let (previous, next) = {
@@ -218,9 +445,6 @@ pub fn update_settings(app: AppHandle, settings: Settings) -> Result<Settings, S
     Ok(next)
 }
 
-/// Deletes activity history past the retention window, including the rollup
-/// aggregates for those days. Returns how many raw rows went, so callers can
-/// decide whether a UI refresh is warranted.
 pub fn sweep_retention(app: &AppHandle) -> Result<u64, String> {
     let days = app.state::<AppState>().settings_snapshot().retention_days;
     let removed = {
@@ -229,18 +453,11 @@ pub fn sweep_retention(app: &AppHandle) -> Result<u64, String> {
         store.purge_older_than(days, now_epoch_ms())?
     };
     if removed > 0 {
-        // A structural change to the segment set: push the full snapshot the
-        // same way the sampler does, not a bare ping.
         activity::emit_full(app);
     }
     Ok(removed)
 }
 
-/// Where things live on disk, for the Settings page. Paths are absolute and
-/// sent as strings because the webview has no path type.
-///
-/// There is no separate timers file any more: trackers and activity share
-/// `activity.db` (decision A8), so `database_file` is what to point at.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoragePaths {

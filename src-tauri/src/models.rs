@@ -148,6 +148,22 @@ pub struct TimeEntry {
     pub created_at: u64,
     pub updated_at: u64,
     pub deleted_at: Option<u64>,
+    /// `template` (entry builder), `ai` (Foundation Model sentence), or
+    /// `user`. The builder only ever rewrites template text.
+    pub description_origin: String,
+    /// Classification state and headline confidences, for list views. Only
+    /// `list_time_entries` fills it; single-entry mutations return `None`.
+    pub ai: Option<EntryAi>,
+}
+
+/// What a Calendar block needs to know about an entry's AI suggestion.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryAi {
+    /// The classify job: queued | running | done | failed.
+    pub state: Option<String>,
+    pub category_confidence: Option<f64>,
+    pub project_confidence: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,4 +242,83 @@ pub struct EntryDetail {
     pub apps: Vec<AppContribution>,
     pub titles: Vec<TitleItem>,
     pub events: Vec<EntryEvent>,
+    /// The latest suggestion per field (category, then project).
+    pub suggestions: Vec<FieldSuggestion>,
+    /// "Always categorize figma.com as Design?", after 3+ consistent
+    /// corrections for the entry's dominant app or domain.
+    pub rule_suggestion: Option<RuleSuggestion>,
+    pub job: Option<ClassifyJob>,
+}
+
+/// One piece of evidence behind a suggestion. The "Why" line is built only
+/// from signals that actually fired, never from the model's own rationale.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Signal {
+    /// dominant | rule | knn | personal | llm | mention
+    pub kind: String,
+    pub text: String,
+}
+
+/// The app or domain that took most of an entry's active time. Rule
+/// suggestions are keyed on it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Dominant {
+    /// `app` or `domain`, matching the rule `match_kind` it would create.
+    pub kind: String,
+    pub key: String,
+    pub label: String,
+    pub share: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Alternative {
+    /// `None` on the project field means "No project".
+    pub value_id: Option<String>,
+    pub confidence: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldSuggestion {
+    pub id: String,
+    pub entry_id: String,
+    /// `category` or `project`.
+    pub field: String,
+    pub value_id: Option<String>,
+    pub confidence: f64,
+    /// The "Why" line, joined from `signals`.
+    pub rationale: String,
+    pub signals: Vec<Signal>,
+    pub dominant: Option<Dominant>,
+    pub alternatives: Vec<Alternative>,
+    /// rules | full | fallback
+    pub engine: String,
+    pub model_version: Option<String>,
+    /// accepted | changed | rejected | auto, or `None` while undecided.
+    pub outcome: Option<String>,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleSuggestion {
+    pub field: String,
+    pub match_kind: String,
+    pub pattern: String,
+    /// Human label for the pattern (app name or domain).
+    pub label: String,
+    pub value_id: Option<String>,
+    /// How many consistent corrections back this suggestion.
+    pub corrections: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClassifyJob {
+    pub state: String,
+    pub attempts: u32,
+    pub last_error: Option<String>,
 }

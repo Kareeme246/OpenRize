@@ -37,6 +37,13 @@ pub const KIND_BREAK: &str = "break";
 
 const IDLE_LABEL: &str = "Idle";
 
+/// How long a statement waits on another connection's write lock. The AI
+/// worker reads on its own connection, so contention is brief but real.
+const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The window the background worker keeps rebuilt (see ai/worker.rs).
+pub const REBUILD_WINDOW_MS: u64 = ONE_DAY_MS;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivitySegment {
@@ -152,11 +159,16 @@ impl ActivityStore {
 
     pub fn open_reader(dir: &Path) -> Result<Connection, String> {
         let path = dir.join(DB_FILE);
-        Connection::open(&path).map_err(|error| error.to_string())
+        let conn = Connection::open(&path).map_err(|error| error.to_string())?;
+        conn.busy_timeout(BUSY_TIMEOUT)
+            .map_err(|error| error.to_string())?;
+        Ok(conn)
     }
 
     pub fn from_conn(mut conn: Connection) -> Result<Self, String> {
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA optimize;")
+            .map_err(|error| error.to_string())?;
+        conn.busy_timeout(BUSY_TIMEOUT)
             .map_err(|error| error.to_string())?;
 
         // Replace raw schema block with versioned migration runner
@@ -188,6 +200,11 @@ impl ActivityStore {
             .map_err(|error| error.to_string())?;
         store.rollup_old_segments(now_epoch_ms())?;
         Ok(store)
+    }
+
+    /// The writer connection, for the AI worker's writes (see ai/store.rs).
+    pub(crate) fn conn(&self) -> &Connection {
+        &self.conn
     }
 
     fn read_setting(&self, key: &str) -> Option<String> {
@@ -990,7 +1007,7 @@ impl ActivityStore {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at
+                "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at, description_origin
                  FROM time_entries
                  WHERE deleted_at IS NULL AND ended_at >= ?1 AND started_at <= ?2
                  ORDER BY started_at ASC;",
@@ -998,56 +1015,44 @@ impl ActivityStore {
             .map_err(|e| e.to_string())?;
 
         let rows = stmt
-            .query_map(params![start_ms as i64, end_ms as i64], |row| {
-                Ok(TimeEntry {
-                    id: row.get(0)?,
-                    started_at: row.get::<_, i64>(1)? as u64,
-                    ended_at: row.get::<_, i64>(2)? as u64,
-                    description: row.get(3)?,
-                    category_id: row.get(4)?,
-                    project_id: row.get(5)?,
-                    status: row.get(6)?,
-                    approved_by: row.get(7)?,
-                    source: row.get(8)?,
-                    billable: row.get::<_, i64>(9)? != 0,
-                    invoice_id: row.get(10)?,
-                    created_at: row.get::<_, i64>(11)? as u64,
-                    updated_at: row.get::<_, i64>(12)? as u64,
-                    deleted_at: row.get::<_, Option<i64>>(13)?.map(|v| v as u64),
-                })
-            })
+            .query_map(params![start_ms as i64, end_ms as i64], time_entry_from_row)
             .map_err(|e| e.to_string())?;
 
+        let mut ai = crate::ai::store::summaries(&self.conn, start_ms, end_ms)?;
         let mut list = Vec::new();
         for entry in rows {
-            list.push(entry.map_err(|e| e.to_string())?);
+            let mut entry = entry.map_err(|e| e.to_string())?;
+            entry.ai = ai.remove(&entry.id);
+            list.push(entry);
         }
         Ok(list)
     }
 
+    fn time_entry(&self, id: &str) -> Result<TimeEntry, String> {
+        self.conn
+            .query_row(
+                "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at, description_origin
+                 FROM time_entries WHERE id = ?1;",
+                params![id],
+                time_entry_from_row,
+            )
+            .map_err(|e| e.to_string())
+    }
+
+    fn log_event(&self, entry_id: &str, kind: &str, actor: &str, payload: Option<&str>, now: u64) {
+        let event_id = uuid::Uuid::now_v7().to_string();
+        let _ = self.conn.execute(
+            "INSERT INTO entry_events (id, entry_id, kind, actor, payload, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6);",
+            params![event_id, entry_id, kind, actor, payload, now as i64],
+        );
+    }
+
     pub fn get_entry_detail(&self, id: &str) -> Result<EntryDetail, String> {
         let entry = self.conn.query_row(
-            "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at
+            "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at, description_origin
              FROM time_entries WHERE id = ?1;",
             params![id],
-            |row| {
-                Ok(TimeEntry {
-                    id: row.get(0)?,
-                    started_at: row.get::<_, i64>(1)? as u64,
-                    ended_at: row.get::<_, i64>(2)? as u64,
-                    description: row.get(3)?,
-                    category_id: row.get(4)?,
-                    project_id: row.get(5)?,
-                    status: row.get(6)?,
-                    approved_by: row.get(7)?,
-                    source: row.get(8)?,
-                    billable: row.get::<_, i64>(9)? != 0,
-                    invoice_id: row.get(10)?,
-                    created_at: row.get::<_, i64>(11)? as u64,
-                    updated_at: row.get::<_, i64>(12)? as u64,
-                    deleted_at: row.get::<_, Option<i64>>(13)?.map(|v| v as u64),
-                })
-            },
+            time_entry_from_row,
         ).map_err(|e| e.to_string())?;
 
         let mut stmt = self.conn.prepare(
@@ -1142,12 +1147,25 @@ impl ActivityStore {
             events.push(evt.map_err(|e| e.to_string())?);
         }
 
+        let suggestions = crate::ai::store::latest_suggestions(&self.conn, id)?;
+        let rule_suggestion = crate::ai::store::rule_suggestion(
+            &self.conn,
+            id,
+            entry.category_id.as_deref(),
+            entry.project_id.as_deref(),
+            &suggestions,
+        )?;
+        let job = crate::ai::store::job_for(&self.conn, id)?;
+
         Ok(EntryDetail {
             entry,
             segments,
             apps,
             titles,
             events,
+            suggestions,
+            rule_suggestion,
+            job,
         })
     }
 
@@ -1158,30 +1176,16 @@ impl ActivityStore {
         now: u64,
     ) -> Result<TimeEntry, String> {
         let mut entry = self.conn.query_row(
-            "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at
+            "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at, description_origin
              FROM time_entries WHERE id = ?1;",
             params![id],
-            |row| {
-                Ok(TimeEntry {
-                    id: row.get(0)?,
-                    started_at: row.get::<_, i64>(1)? as u64,
-                    ended_at: row.get::<_, i64>(2)? as u64,
-                    description: row.get(3)?,
-                    category_id: row.get(4)?,
-                    project_id: row.get(5)?,
-                    status: row.get(6)?,
-                    approved_by: row.get(7)?,
-                    source: row.get(8)?,
-                    billable: row.get::<_, i64>(9)? != 0,
-                    invoice_id: row.get(10)?,
-                    created_at: row.get::<_, i64>(11)? as u64,
-                    updated_at: row.get::<_, i64>(12)? as u64,
-                    deleted_at: row.get::<_, Option<i64>>(13)?.map(|v| v as u64),
-                })
-            },
+            time_entry_from_row,
         ).map_err(|e| e.to_string())?;
 
         if let Some(desc) = patch.description {
+            if desc != entry.description {
+                entry.description_origin = "user".to_string();
+            }
             entry.description = desc;
         }
         if let Some(cat) = patch.category_id {
@@ -1205,8 +1209,8 @@ impl ActivityStore {
         entry.updated_at = now;
 
         self.conn.execute(
-            "UPDATE time_entries SET started_at = ?1, ended_at = ?2, description = ?3, category_id = ?4, project_id = ?5, status = ?6, billable = ?7, updated_at = ?8
-             WHERE id = ?9;",
+            "UPDATE time_entries SET started_at = ?1, ended_at = ?2, description = ?3, category_id = ?4, project_id = ?5, status = ?6, billable = ?7, updated_at = ?8, description_origin = ?9
+             WHERE id = ?10;",
             params![
                 entry.started_at as i64,
                 entry.ended_at as i64,
@@ -1216,15 +1220,12 @@ impl ActivityStore {
                 entry.status,
                 entry.billable as i64,
                 now as i64,
+                entry.description_origin,
                 id,
             ],
         ).map_err(|e| e.to_string())?;
 
-        let event_id = uuid::Uuid::now_v7().to_string();
-        let _ = self.conn.execute(
-            "INSERT INTO entry_events (id, entry_id, kind, actor, payload, at) VALUES (?1, ?2, 'edited', 'user', NULL, ?3);",
-            params![event_id, id, now as i64],
-        );
+        self.log_event(id, "edited", "user", None, now);
 
         Ok(entry)
     }
@@ -1236,34 +1237,102 @@ impl ActivityStore {
         now: u64,
     ) -> Result<(), String> {
         for id in ids {
+            let entry = self.time_entry(id)?;
             self.conn.execute(
                 "UPDATE time_entries SET status = 'approved', approved_by = ?1, updated_at = ?2 WHERE id = ?3;",
                 params![approved_by, now as i64, id],
             ).map_err(|e| e.to_string())?;
 
-            let event_id = uuid::Uuid::now_v7().to_string();
-            let _ = self.conn.execute(
-                "INSERT INTO entry_events (id, entry_id, kind, actor, payload, at) VALUES (?1, ?2, 'accepted', ?3, NULL, ?4);",
-                params![event_id, id, approved_by, now as i64],
-            );
+            // Feedback loop: the suggestion's outcome (accepted or changed)
+            // feeds calibration and rule suggestions, and the entry joins the
+            // kNN store as soon as it has a vector.
+            crate::ai::store::record_approval(
+                &self.conn,
+                id,
+                entry.category_id.as_deref(),
+                entry.project_id.as_deref(),
+                now,
+            )?;
+            let has_vector: bool = self
+                .conn
+                .query_row(
+                    "SELECT EXISTS (SELECT 1 FROM entry_embeddings WHERE entry_id = ?1);",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            if !has_vector {
+                crate::ai::store::enqueue(&self.conn, id, crate::ai::store::JOB_EMBED, now)?;
+            }
+
+            self.log_event(id, "accepted", approved_by, None, now);
         }
         Ok(())
     }
 
+    /// Reject clears the suggestion and leaves the entry pending with no
+    /// category, recording negative feedback. A project the AI pre-filled is
+    /// cleared too; one the user picked stays.
     pub fn reject_time_entry(&mut self, id: &str, now: u64) -> Result<(), String> {
+        let entry = self.time_entry(id)?;
+        let rejected = crate::ai::store::record_rejection(&self.conn, id, now)?;
+        let prefilled_project = rejected.iter().any(|s| {
+            s.field == crate::ai::FIELD_PROJECT
+                && s.value_id.is_some()
+                && s.value_id == entry.project_id
+        });
         self.conn
             .execute(
-                "UPDATE time_entries SET category_id = NULL, status = 'pending', updated_at = ?1 WHERE id = ?2;",
-                params![now as i64, id],
+                "UPDATE time_entries SET category_id = NULL,
+                   project_id = CASE WHEN ?3 THEN NULL ELSE project_id END,
+                   status = 'pending', approved_by = NULL, updated_at = ?1
+                 WHERE id = ?2;",
+                params![now as i64, id, prefilled_project],
             )
             .map_err(|e| e.to_string())?;
 
-        let event_id = uuid::Uuid::now_v7().to_string();
-        let _ = self.conn.execute(
-            "INSERT INTO entry_events (id, entry_id, kind, actor, payload, at) VALUES (?1, ?2, 'rejected', 'user', NULL, ?3);",
-            params![event_id, id, now as i64],
-        );
+        self.log_event(id, "rejected", "user", None, now);
+        Ok(())
+    }
 
+    /// Queues an entry for (re)classification, e.g. "Couldn't categorize ·
+    /// Retry".
+    pub fn queue_classification(&mut self, id: &str, now: u64) -> Result<(), String> {
+        let entry = self.time_entry(id)?;
+        if entry.status == "approved" {
+            return Err("approved entries are frozen".to_string());
+        }
+        crate::ai::store::enqueue(&self.conn, id, crate::ai::store::JOB_CLASSIFY, now)
+    }
+
+    /// Accepts or dismisses an inline rule suggestion. Accepting creates a
+    /// `suggested` rule; dismissing stores a disabled one so the same prompt
+    /// never comes back.
+    pub fn resolve_rule_suggestion(
+        &mut self,
+        suggestion: &crate::models::RuleSuggestion,
+        accept: bool,
+        now: u64,
+    ) -> Result<(), String> {
+        let field = crate::ai::Field::parse(&suggestion.field)?;
+        if !matches!(suggestion.match_kind.as_str(), "app" | "domain") {
+            return Err(format!("unsupported rule kind {}", suggestion.match_kind));
+        }
+        let value = suggestion.value_id.as_deref();
+        let (category, project) = match field {
+            crate::ai::Field::Category => (value, None),
+            crate::ai::Field::Project => (None, value),
+        };
+        crate::ai::store::create_rule(
+            &self.conn,
+            &suggestion.match_kind,
+            &suggestion.pattern,
+            category,
+            project,
+            if accept { "suggested" } else { "dismissed" },
+            accept,
+            now,
+        )?;
         Ok(())
     }
 
@@ -1274,27 +1343,10 @@ impl ActivityStore {
         now: u64,
     ) -> Result<(TimeEntry, TimeEntry), String> {
         let original = self.conn.query_row(
-            "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at
+            "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at, description_origin
              FROM time_entries WHERE id = ?1;",
             params![id],
-            |row| {
-                Ok(TimeEntry {
-                    id: row.get(0)?,
-                    started_at: row.get::<_, i64>(1)? as u64,
-                    ended_at: row.get::<_, i64>(2)? as u64,
-                    description: row.get(3)?,
-                    category_id: row.get(4)?,
-                    project_id: row.get(5)?,
-                    status: row.get(6)?,
-                    approved_by: row.get(7)?,
-                    source: row.get(8)?,
-                    billable: row.get::<_, i64>(9)? != 0,
-                    invoice_id: row.get(10)?,
-                    created_at: row.get::<_, i64>(11)? as u64,
-                    updated_at: row.get::<_, i64>(12)? as u64,
-                    deleted_at: row.get::<_, Option<i64>>(13)?.map(|v| v as u64),
-                })
-            },
+            time_entry_from_row,
         ).map_err(|e| e.to_string())?;
 
         if at_ms <= original.started_at || at_ms >= original.ended_at {
@@ -1318,8 +1370,8 @@ impl ActivityStore {
         // Create second half
         let new_id = uuid::Uuid::now_v7().to_string();
         self.conn.execute(
-            "INSERT INTO time_entries (id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12);",
+            "INSERT INTO time_entries (id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, description_origin)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13);",
             params![
                 new_id,
                 at_ms as i64,
@@ -1333,6 +1385,7 @@ impl ActivityStore {
                 original.billable as i64,
                 original.invoice_id,
                 now as i64,
+                original.description_origin,
             ],
         ).map_err(|e| e.to_string())?;
 
@@ -1353,11 +1406,7 @@ impl ActivityStore {
             ..original
         };
 
-        let event_id = uuid::Uuid::now_v7().to_string();
-        let _ = self.conn.execute(
-            "INSERT INTO entry_events (id, entry_id, kind, actor, payload, at) VALUES (?1, ?2, 'split', 'user', NULL, ?3);",
-            params![event_id, id, now as i64],
-        );
+        self.log_event(id, "split", "user", None, now);
 
         Ok((first, second))
     }
@@ -1390,8 +1439,8 @@ impl ActivityStore {
         let billable = new_entry.billable.unwrap_or(false) as i64;
 
         self.conn.execute(
-            "INSERT INTO time_entries (id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'approved', 'user', 'manual', ?7, ?8, ?8);",
+            "INSERT INTO time_entries (id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, created_at, updated_at, description_origin)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'approved', 'user', 'manual', ?7, ?8, ?8, 'user');",
             params![
                 id,
                 new_entry.started_at as i64,
@@ -1404,11 +1453,9 @@ impl ActivityStore {
             ],
         ).map_err(|e| e.to_string())?;
 
-        let event_id = uuid::Uuid::now_v7().to_string();
-        let _ = self.conn.execute(
-            "INSERT INTO entry_events (id, entry_id, kind, actor, payload, at) VALUES (?1, ?2, 'created', 'user', NULL, ?3);",
-            params![event_id, id, now as i64],
-        );
+        self.log_event(&id, "created", "user", None, now);
+        // A hand-made entry is a labeled example: give it a vector for kNN.
+        crate::ai::store::enqueue(&self.conn, &id, crate::ai::store::JOB_EMBED, now)?;
 
         Ok(TimeEntry {
             id,
@@ -1425,6 +1472,8 @@ impl ActivityStore {
             created_at: now,
             updated_at: now,
             deleted_at: None,
+            description_origin: "user".to_string(),
+            ai: None,
         })
     }
 
@@ -1434,97 +1483,148 @@ impl ActivityStore {
         end_ms: u64,
         now: u64,
     ) -> Result<Vec<TimeEntry>, String> {
-        // Fetch raw segments in range
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT id, app, title, kind, label, started_at, ended_at, entry_id
-             FROM segments
-             WHERE started_at >= ?1 AND started_at <= ?2
-             ORDER BY started_at ASC;",
-            )
-            .map_err(|e| e.to_string())?;
+        self.rebuild_range(start_ms, end_ms, now)?;
+        self.list_time_entries(start_ms, end_ms)
+    }
 
-        let segment_rows = stmt
-            .query_map(params![start_ms as i64, end_ms as i64], |row| {
-                Ok(crate::entry_builder::SegmentInput {
-                    id: row.get(0)?,
-                    app: row.get(1)?,
-                    title: row.get(2)?,
-                    kind: row.get(3)?,
-                    label: row.get(4)?,
-                    started_at: row.get::<_, i64>(5)? as u64,
-                    ended_at: row.get::<_, Option<i64>>(6)?.map(|v| v as u64),
-                    entry_id: row.get(7)?,
+    /// Re-runs the entry builder over the range and saves the result.
+    ///
+    /// Only the open (`building`) entry is re-segmented; every closed entry is
+    /// frozen, so its id, suggestion, and edits survive. An entry that has
+    /// just closed is queued for classification. Returns whether anything a
+    /// view shows changed (an entry closed, appeared, or went away), as
+    /// opposed to the open entry merely growing.
+    pub fn rebuild_range(&mut self, start_ms: u64, end_ms: u64, now: u64) -> Result<bool, String> {
+        use crate::entry_builder::{build_entries, BuiltTimeEntry, EntrySettings, SegmentInput};
+
+        let tx = self.conn.transaction().map_err(|e| e.to_string())?;
+
+        let segments: Vec<SegmentInput> = {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT id, app, title, kind, label, started_at, ended_at, entry_id
+                     FROM segments
+                     WHERE started_at >= ?1 AND started_at <= ?2
+                     ORDER BY started_at ASC;",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(params![start_ms as i64, end_ms as i64], |row| {
+                    Ok(SegmentInput {
+                        id: row.get(0)?,
+                        app: row.get(1)?,
+                        title: row.get(2)?,
+                        kind: row.get(3)?,
+                        label: row.get(4)?,
+                        started_at: row.get::<_, i64>(5)? as u64,
+                        ended_at: row.get::<_, Option<i64>>(6)?.map(|v| v as u64),
+                        entry_id: row.get(7)?,
+                    })
                 })
-            })
-            .map_err(|e| e.to_string())?;
+                .map_err(|e| e.to_string())?;
+            rows.collect::<rusqlite::Result<_>>()
+                .map_err(|e| e.to_string())?
+        };
 
-        let mut seg_inputs = Vec::new();
-        for s in segment_rows {
-            seg_inputs.push(s.map_err(|e| e.to_string())?);
-        }
-
-        // Fetch frozen/approved entries
-        let existing = self.list_time_entries(start_ms, end_ms)?;
-        let frozen: Vec<crate::entry_builder::BuiltTimeEntry> = existing
-            .into_iter()
-            .filter(|e| e.status == "approved")
-            .map(|e| crate::entry_builder::BuiltTimeEntry {
-                id: e.id,
+        // Every entry touching the range, deleted ones included: a deleted
+        // entry's time stays unassigned instead of being rebuilt.
+        let existing: Vec<TimeEntry> = {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at, description_origin
+                     FROM time_entries
+                     WHERE ended_at >= ?1 AND started_at <= ?2;",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(params![start_ms as i64, end_ms as i64], time_entry_from_row)
+                .map_err(|e| e.to_string())?;
+            rows.collect::<rusqlite::Result<_>>()
+                .map_err(|e| e.to_string())?
+        };
+        let is_open = |e: &TimeEntry| e.deleted_at.is_none() && e.status == "building";
+        let frozen: Vec<BuiltTimeEntry> = existing
+            .iter()
+            .filter(|e| !is_open(e))
+            .map(|e| BuiltTimeEntry {
+                id: e.id.clone(),
                 started_at: e.started_at,
                 ended_at: e.ended_at,
-                description: e.description,
-                category_id: e.category_id,
-                project_id: e.project_id,
-                status: e.status,
-                approved_by: e.approved_by,
-                source: e.source,
+                description: e.description.clone(),
+                category_id: e.category_id.clone(),
+                project_id: e.project_id.clone(),
+                status: e.status.clone(),
+                approved_by: e.approved_by.clone(),
+                source: e.source.clone(),
                 billable: e.billable,
-                invoice_id: e.invoice_id,
+                invoice_id: e.invoice_id.clone(),
                 created_at: e.created_at,
                 updated_at: e.updated_at,
                 deleted_at: e.deleted_at,
                 segment_ids: Vec::new(),
             })
             .collect();
+        let frozen_ids: std::collections::HashSet<&str> =
+            frozen.iter().map(|e| e.id.as_str()).collect();
 
-        let built = crate::entry_builder::build_entries(
-            &seg_inputs,
-            &frozen,
-            &crate::entry_builder::EntrySettings::default(),
-            now,
-        );
+        let built = build_entries(&segments, &frozen, &EntrySettings::default(), now);
 
-        // Save newly built non-frozen entries to DB
-        for be in &built {
-            if be.status != "approved" {
-                self.conn.execute(
-                    "INSERT INTO time_entries (id, started_at, ended_at, description, category_id, project_id, status, source, billable, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'auto', 0, ?8, ?8)
-                     ON CONFLICT(id) DO UPDATE SET ended_at = excluded.ended_at, description = excluded.description, updated_at = excluded.updated_at;",
-                    params![
-                        be.id,
-                        be.started_at as i64,
-                        be.ended_at as i64,
-                        be.description,
-                        be.category_id,
-                        be.project_id,
-                        be.status,
-                        now as i64,
-                    ],
-                ).map_err(|e| e.to_string())?;
+        let mut changed = false;
+        let mut kept = std::collections::HashSet::new();
+        for entry in built.iter().filter(|e| !frozen_ids.contains(e.id.as_str())) {
+            kept.insert(entry.id.clone());
+            let before = existing.iter().find(|e| e.id == entry.id);
+            tx.execute(
+                "INSERT INTO time_entries (id, started_at, ended_at, description, category_id, project_id, status, source, billable, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, NULL, NULL, ?5, 'auto', 0, ?6, ?6)
+                 ON CONFLICT(id) DO UPDATE SET
+                   started_at = excluded.started_at,
+                   ended_at = excluded.ended_at,
+                   status = excluded.status,
+                   description = CASE WHEN time_entries.description_origin = 'template'
+                                      THEN excluded.description ELSE time_entries.description END,
+                   updated_at = excluded.updated_at;",
+                params![
+                    entry.id,
+                    entry.started_at as i64,
+                    entry.ended_at as i64,
+                    entry.description,
+                    entry.status,
+                    now as i64,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+            for segment_id in &entry.segment_ids {
+                tx.execute(
+                    "UPDATE segments SET entry_id = ?1 WHERE id = ?2;",
+                    params![entry.id, segment_id],
+                )
+                .map_err(|e| e.to_string())?;
+            }
 
-                for sid in &be.segment_ids {
-                    let _ = self.conn.execute(
-                        "UPDATE segments SET entry_id = ?1 WHERE id = ?2;",
-                        params![be.id, sid],
-                    );
-                }
+            let status_changed = before.map(|e| e.status.as_str()) != Some(entry.status.as_str());
+            changed |= status_changed;
+            if status_changed && entry.status == "pending" {
+                crate::ai::store::enqueue(&tx, &entry.id, crate::ai::store::JOB_CLASSIFY, now)?;
             }
         }
 
-        self.list_time_entries(start_ms, end_ms)
+        // An open entry whose segments all moved elsewhere no longer exists.
+        for stale in existing.iter().filter(|e| is_open(e) && !kept.contains(&e.id)) {
+            tx.execute(
+                "UPDATE time_entries SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2;",
+                params![now as i64, stale.id],
+            )
+            .map_err(|e| e.to_string())?;
+            changed = true;
+        }
+
+        // Entries from before the AI pipeline existed (or whose job was lost)
+        // get classified the first time their day is rebuilt.
+        changed |= crate::ai::store::enqueue_unclassified(&tx, start_ms, end_ms, now)? > 0;
+
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(changed)
     }
 
     // --- P1: Apps -------------------------------------------------------
@@ -1618,6 +1718,29 @@ impl ActivityStore {
             },
         ).map_err(|e| e.to_string())
     }
+}
+
+/// Maps the `time_entries` column list used throughout this module (the 14
+/// P1 columns plus `description_origin`).
+pub(crate) fn time_entry_from_row(row: &Row<'_>) -> rusqlite::Result<TimeEntry> {
+    Ok(TimeEntry {
+        id: row.get(0)?,
+        started_at: row.get::<_, i64>(1)? as u64,
+        ended_at: row.get::<_, i64>(2)? as u64,
+        description: row.get(3)?,
+        category_id: row.get(4)?,
+        project_id: row.get(5)?,
+        status: row.get(6)?,
+        approved_by: row.get(7)?,
+        source: row.get(8)?,
+        billable: row.get::<_, i64>(9)? != 0,
+        invoice_id: row.get(10)?,
+        created_at: row.get::<_, i64>(11)? as u64,
+        updated_at: row.get::<_, i64>(12)? as u64,
+        deleted_at: row.get::<_, Option<i64>>(13)?.map(|v| v as u64),
+        description_origin: row.get(14)?,
+        ai: None,
+    })
 }
 
 pub(crate) fn segment_from_row(row: &Row<'_>) -> rusqlite::Result<ActivitySegment> {
@@ -1896,6 +2019,9 @@ pub fn spawn_sampler(app: AppHandle) {
             match tick_result {
                 Ok(true) => {
                     emit_full(&app);
+                    // A segment opened or closed, so an entry may have just
+                    // closed: let the AI worker rebuild and classify it.
+                    crate::ai::nudge(&app);
                     last_push_at = now;
                 }
                 Ok(false) => {
@@ -2145,5 +2271,207 @@ mod tests {
 
         let projects = store.list_projects().unwrap();
         assert_eq!(projects.len(), 1);
+    }
+
+    const MIN: u64 = 60_000;
+
+    /// Code for 20 min, Slack for 15 min, then a switch back to Code: the
+    /// first two blocks close (target 30 min reached on an app switch).
+    fn tracked_morning(store: &mut ActivityStore) {
+        store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
+        store.tick(sample("Slack", "#general"), 0, 20 * MIN).unwrap();
+        store.tick(sample("Code", "main.rs"), 0, 35 * MIN).unwrap();
+    }
+
+    fn live_entries(store: &ActivityStore) -> Vec<TimeEntry> {
+        store.list_time_entries(0, u64::MAX / 2).unwrap()
+    }
+
+    #[test]
+    fn rebuilding_the_same_day_never_duplicates_entries() {
+        let mut store = store();
+        tracked_morning(&mut store);
+        let first = store
+            .rebuild_time_entries_in_range(0, 60 * MIN, 36 * MIN)
+            .unwrap();
+        let second = store
+            .rebuild_time_entries_in_range(0, 60 * MIN, 37 * MIN)
+            .unwrap();
+        let third = store
+            .rebuild_time_entries_in_range(0, 60 * MIN, 38 * MIN)
+            .unwrap();
+        assert_eq!(first.len(), 2);
+        let ids = |list: &[TimeEntry]| list.iter().map(|e| e.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&first), ids(&second));
+        assert_eq!(ids(&second), ids(&third));
+        // The open block kept its id while it grew.
+        assert_eq!(third[1].status, "building");
+        assert_eq!(third[1].ended_at, 38 * MIN);
+    }
+
+    #[test]
+    fn a_closed_entry_is_queued_for_classification() {
+        let mut store = store();
+        tracked_morning(&mut store);
+        store.rebuild_range(0, 60 * MIN, 36 * MIN).unwrap();
+        let entries = live_entries(&store);
+        assert_eq!(entries[0].status, "processing");
+        assert_eq!(
+            entries[0].ai.as_ref().and_then(|ai| ai.state.as_deref()),
+            Some("queued")
+        );
+        assert_eq!(entries[1].status, "building");
+        assert_eq!(crate::ai::store::queued_count(&store.conn).unwrap(), 1);
+    }
+
+    #[test]
+    fn an_edited_description_survives_a_rebuild() {
+        let mut store = store();
+        store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
+        store.rebuild_range(0, 60 * MIN, 5 * MIN).unwrap();
+        let id = live_entries(&store)[0].id.clone();
+        store
+            .update_time_entry(
+                &id,
+                UpdateTimeEntry {
+                    description: Some("Fixed the rebuild".into()),
+                    category_id: None,
+                    project_id: None,
+                    started_at: None,
+                    ended_at: None,
+                    status: None,
+                    billable: None,
+                },
+                6 * MIN,
+            )
+            .unwrap();
+        store.rebuild_range(0, 60 * MIN, 7 * MIN).unwrap();
+        let entry = &live_entries(&store)[0];
+        assert_eq!(entry.id, id);
+        assert_eq!(entry.description, "Fixed the rebuild");
+        assert_eq!(entry.ended_at, 7 * MIN);
+    }
+
+    /// Seeds a pending entry with a suggestion, as the worker would.
+    fn suggested_entry(
+        store: &mut ActivityStore,
+        started: u64,
+        value: &str,
+        dominant_key: &str,
+    ) -> String {
+        let id = uuid::Uuid::now_v7().to_string();
+        store
+            .conn
+            .execute(
+                "INSERT INTO time_entries (id, started_at, ended_at, description, category_id, status, source, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'Figma', ?4, 'pending', 'auto', 0, 0);",
+                params![id, started as i64, (started + 30 * MIN) as i64, value],
+            )
+            .unwrap();
+        let decision = crate::ai::arbiter::Decision {
+            value: Some(value.to_string()),
+            confidence: 0.7,
+            alternatives: vec![],
+            signals: vec![],
+            engine: "full",
+        };
+        let dominant = crate::models::Dominant {
+            kind: "domain".into(),
+            key: dominant_key.into(),
+            label: dominant_key.into(),
+            share: 0.9,
+        };
+        crate::ai::store::insert_suggestion(
+            &store.conn,
+            &id,
+            crate::ai::Field::Category,
+            &decision,
+            Some(&dominant),
+            "test",
+            None,
+            started,
+        )
+        .unwrap();
+        id
+    }
+
+    fn set_category(store: &mut ActivityStore, id: &str, category: &str) {
+        store
+            .update_time_entry(
+                id,
+                UpdateTimeEntry {
+                    description: None,
+                    category_id: Some(category.into()),
+                    project_id: None,
+                    started_at: None,
+                    ended_at: None,
+                    status: None,
+                    billable: None,
+                },
+                1,
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn approval_records_whether_the_suggestion_was_kept() {
+        let mut store = store();
+        let kept = suggested_entry(&mut store, 0, "coding", "github.com");
+        let changed = suggested_entry(&mut store, 40 * MIN, "coding", "github.com");
+        set_category(&mut store, &changed, "review");
+        store
+            .approve_time_entries(&[kept.clone(), changed.clone()], "user", 2)
+            .unwrap();
+
+        let outcome = |id: &str| {
+            crate::ai::store::latest_suggestions(&store.conn, id).unwrap()[0]
+                .outcome
+                .clone()
+        };
+        assert_eq!(outcome(&kept).as_deref(), Some("accepted"));
+        assert_eq!(outcome(&changed).as_deref(), Some("changed"));
+        // Both now wait for a vector so they can join the kNN store.
+        assert_eq!(crate::ai::store::queued_count(&store.conn).unwrap(), 2);
+    }
+
+    #[test]
+    fn reject_clears_the_prefilled_category_and_records_it() {
+        let mut store = store();
+        let id = suggested_entry(&mut store, 0, "coding", "github.com");
+        store.reject_time_entry(&id, 5).unwrap();
+        let detail = store.get_entry_detail(&id).unwrap();
+        assert_eq!(detail.entry.category_id, None);
+        assert_eq!(detail.entry.status, "pending");
+        assert_eq!(detail.suggestions[0].outcome.as_deref(), Some("rejected"));
+        let ai = live_entries(&store)[0].ai.clone();
+        assert_eq!(ai.and_then(|ai| ai.category_confidence), None);
+    }
+
+    #[test]
+    fn three_consistent_corrections_offer_a_rule_once() {
+        let mut store = store();
+        for i in 0..2 {
+            let id = suggested_entry(&mut store, i * 40 * MIN, "coding", "figma.com");
+            set_category(&mut store, &id, "design");
+            store.approve_time_entries(&[id], "user", 2).unwrap();
+        }
+        let third = suggested_entry(&mut store, 200 * MIN, "coding", "figma.com");
+        assert!(store.get_entry_detail(&third).unwrap().rule_suggestion.is_none());
+
+        set_category(&mut store, &third, "design");
+        let offer = store
+            .get_entry_detail(&third)
+            .unwrap()
+            .rule_suggestion
+            .expect("a rule suggestion after the third correction");
+        assert_eq!(offer.pattern, "figma.com");
+        assert_eq!(offer.value_id.as_deref(), Some("design"));
+        assert_eq!(offer.corrections, 3);
+
+        store.resolve_rule_suggestion(&offer, false, 3).unwrap();
+        assert!(store.get_entry_detail(&third).unwrap().rule_suggestion.is_none());
+        // A dismissed suggestion is stored disabled, so T0 never applies it.
+        let rules = crate::ai::store::load_rules(&store.conn).unwrap();
+        assert!(rules.is_empty());
     }
 }

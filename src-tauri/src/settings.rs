@@ -48,6 +48,21 @@ pub enum CloseBehavior {
     Hide,
 }
 
+/// What the AI suggests for each entry (Rize's "Suggestion level").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum AiSuggest {
+    Category,
+    #[default]
+    CategoryProject,
+}
+
+/// Auto-accept thresholds below this would approve too many wrong entries to
+/// be useful; the UI offers 85-99.
+pub const MIN_AUTO_ACCEPT_PERCENT: u8 = 50;
+pub const MAX_AUTO_ACCEPT_PERCENT: u8 = 100;
+const MAX_CUSTOM_PROMPT_CHARS: usize = 1_000;
+
 /// Every field is `#[serde(default)]`, so a settings file written by an older
 /// build loads with new fields defaulted instead of failing to parse.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,6 +75,13 @@ pub struct Settings {
     pub tray_enabled: bool,
     /// Activity history older than this many days is deleted. 0 = forever.
     pub retention_days: u32,
+    pub ai_suggest: AiSuggest,
+    /// Approve an entry without review when every suggested field clears
+    /// `auto_accept_percent`.
+    pub auto_accept: bool,
+    pub auto_accept_percent: u8,
+    /// Appended to the Foundation Model's instructions.
+    pub ai_custom_prompt: String,
 }
 
 impl Default for Settings {
@@ -70,6 +92,10 @@ impl Default for Settings {
             close_behavior: CloseBehavior::Hide,
             tray_enabled: true,
             retention_days: 0,
+            ai_suggest: AiSuggest::CategoryProject,
+            auto_accept: true,
+            auto_accept_percent: 95,
+            ai_custom_prompt: String::new(),
         }
     }
 }
@@ -79,6 +105,16 @@ impl Settings {
     /// in one spot so a command can never write something unloadable.
     fn normalized(mut self) -> Self {
         self.retention_days = self.retention_days.min(MAX_RETENTION_DAYS);
+        self.auto_accept_percent = self
+            .auto_accept_percent
+            .clamp(MIN_AUTO_ACCEPT_PERCENT, MAX_AUTO_ACCEPT_PERCENT);
+        if self.ai_custom_prompt.chars().count() > MAX_CUSTOM_PROMPT_CHARS {
+            self.ai_custom_prompt = self
+                .ai_custom_prompt
+                .chars()
+                .take(MAX_CUSTOM_PROMPT_CHARS)
+                .collect();
+        }
         self
     }
 }
@@ -177,6 +213,10 @@ mod tests {
                     close_behavior: CloseBehavior::Quit,
                     tray_enabled: false,
                     retention_days: 30,
+                    ai_suggest: AiSuggest::Category,
+                    auto_accept: false,
+                    auto_accept_percent: 90,
+                    ai_custom_prompt: "OpenRize is Coding".to_string(),
                 })
                 .unwrap();
         }
@@ -186,6 +226,23 @@ mod tests {
         assert_eq!(reloaded.close_behavior, CloseBehavior::Quit);
         assert!(!reloaded.tray_enabled);
         assert_eq!(reloaded.retention_days, 30);
+        assert_eq!(reloaded.ai_suggest, AiSuggest::Category);
+        assert!(!reloaded.auto_accept);
+        assert_eq!(reloaded.auto_accept_percent, 90);
+        assert_eq!(reloaded.ai_custom_prompt, "OpenRize is Coding");
+    }
+
+    #[test]
+    fn auto_accept_threshold_is_clamped() {
+        let dir = temp_dir("threshold");
+        let mut store = SettingsStore::load(&dir).unwrap();
+        let saved = store
+            .set(Settings {
+                auto_accept_percent: 5,
+                ..Settings::default()
+            })
+            .unwrap();
+        assert_eq!(saved.auto_accept_percent, MIN_AUTO_ACCEPT_PERCENT);
     }
 
     #[test]

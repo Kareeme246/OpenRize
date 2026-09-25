@@ -73,6 +73,11 @@ impl Sidecar {
         self.process.is_some()
     }
 
+    /// The PID of the running child process, if any.
+    pub fn pid(&self) -> Option<u32> {
+        self.process.as_ref().map(|p| p.child.id())
+    }
+
     /// The last capabilities probe, refreshed on every (re)start.
     pub fn capabilities(&self) -> Option<&Capabilities> {
         self.capabilities.as_ref()

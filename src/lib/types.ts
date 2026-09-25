@@ -528,3 +528,35 @@ export interface ImportSummary {
   clientsCreated: number;
   skipped: string[];
 }
+
+export type EnergyImpactLevel = "low" | "medium" | "high";
+
+export interface EnergySample {
+  id: number;
+  sampledAt: number;
+  durationMs: number;
+  cpuTimeMs: number;
+  energyNj: number;
+  powerWatts: number;
+  impactLevel: EnergyImpactLevel;
+  aiActive: boolean;
+  onBattery: boolean;
+  batteryLevel?: number | null;
+}
+
+export interface EnergySummary {
+  currentImpact: EnergyImpactLevel;
+  currentPowerWatts: number;
+  baselinePowerWatts: number;
+  peakPowerWatts: number;
+  impactDescription: string;
+  batteryUsedPct: number;
+  batteryUsedMwh: number;
+  totalEnergyJoules: number;
+  totalCpuTimeMs: number;
+  aiEnergyPct: number;
+  onBattery: boolean;
+  currentBatteryPct?: number | null;
+  samplesCount: number;
+  windowDays: number;
+}

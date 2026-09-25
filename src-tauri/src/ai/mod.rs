@@ -141,6 +141,8 @@ pub struct AiRuntime {
     wake: Mutex<bool>,
     wake_signal: Condvar,
     retrain_requested: AtomicBool,
+    is_busy: AtomicBool,
+    sidecar_pid: std::sync::atomic::AtomicU32,
 }
 
 impl AiRuntime {
@@ -149,6 +151,29 @@ impl AiRuntime {
             .lock()
             .map(|status| status.clone())
             .unwrap_or_default()
+    }
+
+    /// Whether on-device AI inference or model retraining is actively running.
+    pub fn is_busy(&self) -> bool {
+        self.is_busy.load(Ordering::Relaxed)
+    }
+
+    pub fn set_busy(&self, busy: bool) {
+        self.is_busy.store(busy, Ordering::Relaxed);
+    }
+
+    /// The PID of the currently running ML sidecar process, if any.
+    pub fn sidecar_pid(&self) -> Option<u32> {
+        let pid = self.sidecar_pid.load(Ordering::Relaxed);
+        if pid > 0 {
+            Some(pid)
+        } else {
+            None
+        }
+    }
+
+    pub fn set_sidecar_pid(&self, pid: Option<u32>) {
+        self.sidecar_pid.store(pid.unwrap_or(0), Ordering::Relaxed);
     }
 
     /// Wakes the worker so a freshly queued job starts now instead of at the

@@ -339,7 +339,9 @@ export function EntryReviewPanel({
               className="w-full cursor-pointer text-left font-medium text-[12.5px] text-fg-strong transition-colors hover:text-accent"
               title="Edit description (E)"
             >
-              {entry.description}
+              {entry.description || (
+                <span className="text-fg-faint">Untitled session</span>
+              )}
               {entry.descriptionOrigin === "ai" && (
                 <span className="ml-1.5 rounded-sm border border-line px-1 align-middle font-normal text-[9.5px] text-fg-faint">
                   AI

@@ -125,6 +125,12 @@ impl Worker {
         self.probe();
         loop {
             self.rebuild_if_due();
+            let now = now_epoch_ms();
+            match self.write(|conn| store::enqueue_live_due(conn, now)) {
+                Ok(count) if count > 0 => self.emit_entries_changed(),
+                Err(error) => eprintln!("ai worker: live classification: {error}"),
+                _ => {}
+            }
             // Drain what's due, but come back to rebuild between jobs so a
             // long backlog never delays a block that just closed.
             for _ in 0..10 {
@@ -1115,7 +1121,8 @@ fn persist(
     let clears =
         |decision: &Option<Decision>| decision.as_ref().is_some_and(|d| d.confidence >= threshold);
     let untouched = category_id.is_none() && project_id.is_none();
-    let auto = settings.auto_accept
+    let auto = status != "building"
+        && settings.auto_accept
         && untouched
         && clears(&outcome.category)
         && (!outcome.want_project || clears(&outcome.project));

@@ -97,11 +97,13 @@ export function EntryBlock({
     state === "building" ? "building" : duration
   }`;
   const description =
-    state === "processing" ? "Categorizing…" : entry.description;
+    state === "processing"
+      ? "Categorizing…"
+      : entry.description || "Untitled session";
 
   const title = (
     <span
-      className={`truncate ${state === "processing" ? "font-normal text-fg-soft" : ""}`}
+      className={`truncate ${state === "processing" ? "font-semibold text-accent" : ""}`}
     >
       {description}
     </span>
@@ -183,7 +185,7 @@ export function EntryBlock({
       onClick={() => onSelect(entry.id)}
       title={density === "full" && !narrow ? undefined : tooltip}
       aria-label={`${description}, ${timeText}`}
-      className={`@container absolute cursor-pointer select-none overflow-hidden border text-left transition-all ${
+      className={`calendar-entry @container absolute cursor-pointer select-none overflow-hidden border text-left transition-all ${
         narrow ? "right-1 left-0.5" : "right-4 left-0"
       } ${(narrow ? NARROW_DENSITY_CLASSES : DENSITY_CLASSES)[density]} ${
         selected

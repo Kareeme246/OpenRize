@@ -89,6 +89,32 @@ export function rangeFor(scale: CalendarScale, date: Date): DateRange {
   return { start, end: addMonths(start, 1) };
 }
 
+/** Calendar day begins at 5 AM local, including across DST transitions. */
+export function calendarDay(date: Date): Date {
+  const start = startOfDay(date);
+  start.setHours(5);
+  return start;
+}
+
+/** Most recent calendar day for the current clock time. */
+export function currentCalendarDay(now: Date): Date {
+  const start = calendarDay(now);
+  return now < start ? addDays(start, -1) : start;
+}
+
+export function calendarRange(scale: CalendarScale, date: Date): DateRange {
+  const range = rangeFor(scale, date);
+  return { start: calendarDay(range.start), end: calendarDay(range.end) };
+}
+
+export function calendarDayEdges(start: Date, end: Date): number[] {
+  const edges: number[] = [];
+  for (let day = calendarDay(start); day <= end; day = addDays(day, 1)) {
+    edges.push(day.getTime());
+  }
+  return edges;
+}
+
 /** Moves by one unit of the scale. */
 export function stepDate(
   scale: CalendarScale,

@@ -1,9 +1,3 @@
-<!--
-Thanks for contributing to OpenRize. Before opening this PR, please read
-AGENTS.md (imported as CLAUDE.md) - in particular "Verifying changes" for
-the checks this project expects (`pnpm fix` then `pnpm verify`) and the
-rest of the file for this codebase's conventions.
--->
 
 ## What does this change do, and why?
 

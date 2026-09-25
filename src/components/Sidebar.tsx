@@ -90,14 +90,6 @@ export function Sidebar({
             <path d="M9 14l2 2 4-4" />
           </NavTab>
           <NavTab
-            active={currentName === "timers"}
-            label="Timers"
-            onSelect={() => onNavigate({ name: "timers" })}
-          >
-            <circle cx="12" cy="13" r="8" />
-            <path d="M12 9v4.2l3 1.8M9 2h6" />
-          </NavTab>
-          <NavTab
             active={currentName === "apps"}
             label="Apps"
             onSelect={() => onNavigate({ name: "apps" })}
@@ -153,6 +145,21 @@ export function Sidebar({
             <line x1="8" y1="6" x2="16" y2="6" />
             <line x1="8" y1="10" x2="16" y2="10" />
             <line x1="8" y1="14" x2="12" y2="14" />
+          </NavTab>
+        </div>
+
+        {/* Manual Group */}
+        <div className="flex flex-col gap-0.5">
+          <span className="px-2 pb-1 text-[10.5px] font-semibold tracking-wider text-fg-faint uppercase">
+            Manual
+          </span>
+          <NavTab
+            active={currentName === "timers"}
+            label="Timers"
+            onSelect={() => onNavigate({ name: "timers" })}
+          >
+            <circle cx="12" cy="13" r="8" />
+            <path d="M12 9v4.2l3 1.8M9 2h6" />
           </NavTab>
         </div>
       </nav>

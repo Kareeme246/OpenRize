@@ -301,13 +301,17 @@ impl ActivityStore {
                     if kind != KIND_ACTIVITY {
                         return Ok(false);
                     }
-                    self.close_current(now)?;
+                    // The break began at the last input, not when the
+                    // threshold was crossed; the time in between was idle.
+                    let started_at = self.current.as_ref().map_or(now, |cur| cur.started_at);
+                    let idle_since = now.saturating_sub(idle_ms).max(started_at);
+                    self.close_current(idle_since)?;
                     return self.open(
                         "Idle",
                         "No activity",
                         KIND_BREAK,
                         Some(IDLE_LABEL),
-                        now,
+                        idle_since,
                         None,
                         None,
                         None,
@@ -1638,6 +1642,10 @@ impl ActivityStore {
             frozen.iter().map(|e| e.id.as_str()).collect();
 
         let built = build_entries(&segments, &frozen, &EntrySettings::default(), now);
+        let linked: std::collections::HashMap<i64, Option<&str>> = segments
+            .iter()
+            .map(|s| (s.id, s.entry_id.as_deref()))
+            .collect();
 
         let mut changed = false;
         let mut kept = std::collections::HashSet::new();
@@ -1664,7 +1672,11 @@ impl ActivityStore {
                 ],
             )
             .map_err(|e| e.to_string())?;
+            // Only newly linked segments: a long session is rebuilt often.
             for segment_id in &entry.segment_ids {
+                if linked.get(segment_id) == Some(&Some(entry.id.as_str())) {
+                    continue;
+                }
                 tx.execute(
                     "UPDATE segments SET entry_id = ?1 WHERE id = ?2;",
                     params![entry.id, segment_id],
@@ -2164,7 +2176,9 @@ mod tests {
         let snapshot = store.snapshot(0, 130_000).unwrap();
         let current = snapshot.current.unwrap();
         assert_eq!(current.kind, KIND_ACTIVITY);
-        assert_eq!(snapshot.break_ms, 30_000);
+        // The break is backdated to the last input, 90s before it was noticed.
+        assert_eq!(snapshot.segments[0].ended_at, Some(10_000));
+        assert_eq!(snapshot.break_ms, 120_000);
     }
 
     #[test]
@@ -2349,12 +2363,16 @@ mod tests {
 
     const MIN: u64 = 60_000;
 
-    /// Code for 20 min, Slack for 15 min, then a switch back to Code: the
-    /// first two blocks close (target 30 min reached on an app switch).
+    /// Code then Slack for 20 minutes, 10 minutes away, then back to Code:
+    /// the first session closes, the second is still building.
     fn tracked_morning(store: &mut ActivityStore) {
+        store.set_idle_threshold_ms(5 * MIN).unwrap();
         store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
         store
-            .tick(sample("Slack", "#general"), 0, 20 * MIN)
+            .tick(sample("Slack", "#general"), 0, 12 * MIN)
+            .unwrap();
+        store
+            .tick(sample("Slack", "#general"), 5 * MIN, 25 * MIN)
             .unwrap();
         store.tick(sample("Code", "main.rs"), 0, 35 * MIN).unwrap();
     }

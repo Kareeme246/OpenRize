@@ -2,28 +2,22 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-pub const SHORT_BREAK_THRESHOLD_MS: u64 = 2 * 60 * 1000; // 2 min
+/// Inactivity at least this long ends a session; anything shorter is a short
+/// break inside it.
+pub const SHORT_BREAK_THRESHOLD_MS: u64 = 5 * 60 * 1000; // 5 min
+/// A finished session shorter than this is noise (a nudged mouse), not work.
+pub const MIN_SESSION_MS: u64 = 60 * 1000; // 1 min
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub struct EntrySettings {
-    pub target_duration_ms: u64,
     pub min_duration_ms: u64,
-    pub absorb_threshold_ms: u64,
-    #[serde(default = "default_short_break_threshold")]
     pub short_break_threshold_ms: u64,
-}
-
-fn default_short_break_threshold() -> u64 {
-    SHORT_BREAK_THRESHOLD_MS
 }
 
 impl Default for EntrySettings {
     fn default() -> Self {
         Self {
-            target_duration_ms: 30 * 60 * 1000, // 30 min
-            min_duration_ms: 8 * 60 * 1000,     // 8 min
-            absorb_threshold_ms: 10 * 1000,     // 10 sec
+            min_duration_ms: MIN_SESSION_MS,
             short_break_threshold_ms: SHORT_BREAK_THRESHOLD_MS,
         }
     }
@@ -62,141 +56,90 @@ pub struct BuiltTimeEntry {
     pub segment_ids: Vec<i64>,
 }
 
-/// Pure entry builder: folds raw activity segments into reviewable time entries.
+/// Pure entry builder: folds raw activity segments into sessions, one
+/// reviewable time entry per session.
 ///
 /// Rules:
-/// 1. Absorbs micro-segments under `absorb_threshold_ms` (10s) into neighbors.
-/// 2. Forgives short breaks and gaps (< `short_break_threshold_ms`, 2m) as continuous work.
-/// 3. Closes entry on real breaks (>= 2m), context shifts at target (~30m), or max target (45m).
-/// 4. Minimum entry (8 min): leftover merges into previous entry if gap <= 2 min.
-/// 5. Active session stays "building" while work is current (within 2m of now).
-/// 6. Frozen entries are preserved and never altered or re-segmented. Callers
-///    freeze every entry that has closed (so its suggestion and any edits
-///    stay attached to a stable id), plus deleted ones, whose time must stay
-///    unassigned rather than be rebuilt into a new entry.
-/// 7. Ids are stable across rebuilds: an entry keeps the id its first
-///    segment was linked to, so re-running the builder updates the open entry
-///    in place instead of minting a duplicate.
+/// 1. A session is one continuous stretch of activity, whatever apps it
+///    moves through. Only inactivity splits it: a gap of at least
+///    `short_break_threshold_ms` (5 min) between one activity segment and
+///    the next, whether the gap is an idle or manual break or time nothing
+///    was captured, ends the session. Break segments carry no work, so the
+///    gap is measured between activity segments.
+/// 2. The last session stays `building` while it is live (a segment is still
+///    open, or the last one ended less than the threshold ago). Everything
+///    before it has closed and is `pending`, which is when it gets
+///    categorized: once per session.
+/// 3. A closed session shorter than `min_duration_ms` (1 min) is dropped
+///    rather than becoming an entry of its own. Zero-length segments (an open
+///    segment the app could not close before it quit) carry no time and are
+///    ignored.
+/// 4. Frozen entries are preserved and never altered or re-segmented, and
+///    their segments stay out of the build. Callers freeze every entry that
+///    has closed (so its suggestion and any edits stay attached to a stable
+///    id), plus deleted ones, whose time must stay unassigned rather than be
+///    rebuilt into a new entry.
+/// 5. Ids are stable across rebuilds: an entry keeps the id its segments were
+///    linked to, so re-running the builder updates the open entry in place
+///    instead of minting a duplicate.
 pub fn build_entries(
     segments: &[SegmentInput],
     frozen_entries: &[BuiltTimeEntry],
     settings: &EntrySettings,
     now: u64,
 ) -> Vec<BuiltTimeEntry> {
-    if segments.is_empty() {
-        return frozen_entries.to_vec();
-    }
+    let frozen_ids: HashSet<&str> = frozen_entries.iter().map(|e| e.id.as_str()).collect();
+    let mut work: Vec<&SegmentInput> = segments
+        .iter()
+        .filter(|seg| seg.kind != "break")
+        .filter(|seg| seg.ended_at.is_none_or(|end| end > seg.started_at))
+        .filter(|seg| !belongs_to_frozen(seg, &frozen_ids, frozen_entries, now))
+        .collect();
+    work.sort_by_key(|seg| seg.started_at);
 
-    // 1. Filter out segments that fall inside frozen entries
-    let mut unfrozen_segments: Vec<SegmentInput> = Vec::new();
-    for seg in segments {
-        let seg_end = seg.ended_at.unwrap_or(now);
-        let overlaps_frozen = frozen_entries.iter().any(|fe| {
-            // Check overlap
-            seg.started_at < fe.ended_at && seg_end > fe.started_at
-        });
-        if !overlaps_frozen {
-            unfrozen_segments.push(seg.clone());
-        }
-    }
-
-    if unfrozen_segments.is_empty() {
-        return frozen_entries.to_vec();
-    }
-
-    // Sort by started_at
-    unfrozen_segments.sort_by_key(|s| s.started_at);
-
-    // 2. Absorb micro-segments (< absorb_threshold_ms)
-    let absorbed = absorb_micro_segments(&unfrozen_segments, settings.absorb_threshold_ms, now);
-
-    // 3. Group work segments into entries separated by breaks
     let mut results: Vec<BuiltTimeEntry> = frozen_entries.to_vec();
-    let frozen_ids: HashSet<String> = frozen_entries.iter().map(|e| e.id.clone()).collect();
-    let mut claimed: HashSet<String> = frozen_ids.clone();
-    let max_target = (settings.target_duration_ms as f64 * 1.5) as u64;
+    let mut claimed: HashSet<String> = frozen_ids.iter().map(|id| id.to_string()).collect();
+    let gap = settings.short_break_threshold_ms;
 
-    let mut current_segments: Vec<SegmentInput> = Vec::new();
-
-    for seg in absorbed {
-        // If this is a break segment:
-        if seg.kind == "break" {
-            let break_dur = seg.ended_at.unwrap_or(now).saturating_sub(seg.started_at);
-            // Short break / brief idleness (< short_break_threshold_ms): does not split continuous work
-            if break_dur < settings.short_break_threshold_ms {
-                continue;
-            }
-
-            // Real break: close current entry
-            if !current_segments.is_empty() {
-                if let Some(entry) =
-                    create_entry_from_segments(&current_segments, now, &mut claimed)
-                {
-                    push_or_merge_entry(&mut results, entry, &frozen_ids, settings, now);
-                }
-                current_segments.clear();
-            }
-            continue;
-        }
-
+    let mut session: Vec<&SegmentInput> = Vec::new();
+    let mut session_end = 0;
+    for seg in work {
         let seg_end = seg.ended_at.unwrap_or(now);
-        if current_segments.is_empty() {
-            current_segments.push(seg);
-        } else {
-            let prev_seg = current_segments.last().unwrap();
-            let prev_end = prev_seg.ended_at.unwrap_or(now);
-            let gap = seg.started_at.saturating_sub(prev_end);
-
-            // A gap between activity segments >= short_break_threshold_ms is a real break
-            if gap >= settings.short_break_threshold_ms {
-                if let Some(entry) =
-                    create_entry_from_segments(&current_segments, now, &mut claimed)
-                {
-                    push_or_merge_entry(&mut results, entry, &frozen_ids, settings, now);
-                }
-                current_segments.clear();
-                current_segments.push(seg);
-                continue;
-            }
-
-            let entry_start = current_segments[0].started_at;
-            let current_duration = seg_end.saturating_sub(entry_start);
-            let prev_app = &prev_seg.app;
-            let app_changed = &seg.app != prev_app;
-
-            // Close entry if:
-            // - duration >= target_duration_ms AND app changed (natural context shift)
-            // - or duration >= 1.5 * target_duration_ms
-            if (current_duration >= settings.target_duration_ms && app_changed)
-                || current_duration >= max_target
-            {
-                if let Some(entry) =
-                    create_entry_from_segments(&current_segments, now, &mut claimed)
-                {
-                    push_or_merge_entry(&mut results, entry, &frozen_ids, settings, now);
-                }
-                current_segments.clear();
-            }
-            current_segments.push(seg);
+        if !session.is_empty() && seg.started_at.saturating_sub(session_end) >= gap {
+            push_closed(
+                &mut results,
+                &session,
+                session_end,
+                settings,
+                now,
+                &mut claimed,
+            );
+            session.clear();
         }
+        session_end = if session.is_empty() {
+            seg_end
+        } else {
+            session_end.max(seg_end)
+        };
+        session.push(seg);
     }
 
-    // Process leftover open entry
-    if !current_segments.is_empty() {
-        if let Some(mut entry) = create_entry_from_segments(&current_segments, now, &mut claimed) {
-            let last_seg_end = current_segments
-                .last()
-                .and_then(|s| s.ended_at)
-                .unwrap_or(now);
-            let is_active = current_segments.iter().any(|s| s.ended_at.is_none())
-                || now.saturating_sub(last_seg_end) <= settings.short_break_threshold_ms;
-
-            if is_active {
-                entry.status = "building".to_string();
-                results.push(entry);
-            } else {
-                push_or_merge_entry(&mut results, entry, &frozen_ids, settings, now);
-            }
+    if !session.is_empty() {
+        let live = session.iter().any(|seg| seg.ended_at.is_none())
+            || now.saturating_sub(session_end) < gap;
+        if live {
+            let mut entry = create_entry_from_segments(&session, session_end, now, &mut claimed);
+            entry.status = "building".to_string();
+            results.push(entry);
+        } else {
+            push_closed(
+                &mut results,
+                &session,
+                session_end,
+                settings,
+                now,
+                &mut claimed,
+            );
         }
     }
 
@@ -204,68 +147,53 @@ pub fn build_entries(
     results
 }
 
-fn push_or_merge_entry(
+/// Adds a finished session as a pending entry, unless it is too short to be work.
+fn push_closed(
     results: &mut Vec<BuiltTimeEntry>,
-    entry: BuiltTimeEntry,
-    frozen_ids: &HashSet<String>,
+    session: &[&SegmentInput],
+    session_end: u64,
     settings: &EntrySettings,
     now: u64,
+    claimed: &mut HashSet<String>,
 ) {
-    let entry_dur = entry.ended_at.saturating_sub(entry.started_at);
-    if entry_dur < settings.min_duration_ms {
-        if let Some(prev) = results.last_mut() {
-            let gap = entry.started_at.saturating_sub(prev.ended_at);
-            if gap <= settings.short_break_threshold_ms && !frozen_ids.contains(&prev.id) {
-                // Merge into previous unfrozen entry
-                prev.ended_at = entry.ended_at;
-                prev.segment_ids.extend(entry.segment_ids);
-                prev.updated_at = now;
-                return;
-            }
-        }
+    if session_end.saturating_sub(session[0].started_at) >= settings.min_duration_ms {
+        results.push(create_entry_from_segments(
+            session,
+            session_end,
+            now,
+            claimed,
+        ));
     }
-    results.push(entry);
 }
 
-fn absorb_micro_segments(
-    segments: &[SegmentInput],
-    threshold_ms: u64,
+/// Whether a segment is already accounted for by a frozen entry: linked to
+/// it, or inside its span (a deleted entry's segments are unlinked, but its
+/// time must stay unassigned).
+fn belongs_to_frozen(
+    seg: &SegmentInput,
+    frozen_ids: &HashSet<&str>,
+    frozen_entries: &[BuiltTimeEntry],
     now: u64,
-) -> Vec<SegmentInput> {
-    if segments.len() <= 1 {
-        return segments.to_vec();
+) -> bool {
+    if seg
+        .entry_id
+        .as_deref()
+        .is_some_and(|id| frozen_ids.contains(id))
+    {
+        return true;
     }
-
-    let mut result: Vec<SegmentInput> = Vec::new();
-
-    for seg in segments {
-        let dur = seg.ended_at.unwrap_or(now).saturating_sub(seg.started_at);
-        // Only absorb micro activity segments into previous activity segments
-        if dur < threshold_ms && seg.kind != "break" && !result.is_empty() {
-            let prev = result.last_mut().unwrap();
-            if prev.kind != "break" {
-                let seg_end = seg.ended_at.unwrap_or(now);
-                if seg_end > prev.ended_at.unwrap_or(now) {
-                    prev.ended_at = Some(seg_end);
-                }
-                continue;
-            }
-        }
-        result.push(seg.clone());
-    }
-
-    result
+    let seg_end = seg.ended_at.unwrap_or(now);
+    frozen_entries
+        .iter()
+        .any(|fe| seg.started_at < fe.ended_at && seg_end > fe.started_at)
 }
 
 fn create_entry_from_segments(
-    segments: &[SegmentInput],
+    segments: &[&SegmentInput],
+    ended_at: u64,
     now: u64,
     claimed: &mut HashSet<String>,
-) -> Option<BuiltTimeEntry> {
-    if segments.is_empty() {
-        return None;
-    }
-
+) -> BuiltTimeEntry {
     // Reuse the id an earlier build gave these segments, unless an earlier
     // entry in this build already took it.
     let id = segments
@@ -277,13 +205,12 @@ fn create_entry_from_segments(
     claimed.insert(id.clone());
 
     let started_at = segments[0].started_at;
-    let ended_at = segments.last().unwrap().ended_at.unwrap_or(now);
     let segment_ids: Vec<i64> = segments.iter().map(|s| s.id).collect();
 
     // Summarize dominant app & titles for description
     let description = generate_description(segments);
 
-    Some(BuiltTimeEntry {
+    BuiltTimeEntry {
         id,
         started_at,
         ended_at,
@@ -299,10 +226,10 @@ fn create_entry_from_segments(
         updated_at: now,
         deleted_at: None,
         segment_ids,
-    })
+    }
 }
 
-fn generate_description(segments: &[SegmentInput]) -> String {
+fn generate_description(segments: &[&SegmentInput]) -> String {
     // Collect non-empty titles and apps
     let mut app_counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
     let mut titles_by_app: std::collections::HashMap<String, Vec<String>> =
@@ -344,6 +271,8 @@ fn generate_description(segments: &[SegmentInput]) -> String {
 mod tests {
     use super::*;
 
+    const MIN: u64 = 60_000;
+
     fn make_seg(id: i64, app: &str, title: &str, kind: &str, start: u64, end: u64) -> SegmentInput {
         SegmentInput {
             id,
@@ -357,86 +286,15 @@ mod tests {
         }
     }
 
-    #[test]
-    fn absorbs_micro_segments_under_10s() {
-        let segs = vec![
-            make_seg(1, "Xcode", "main.rs", "activity", 0, 60_000),
-            make_seg(2, "Finder", "Open", "activity", 60_000, 65_000), // 5s alt-tab micro-segment
-            make_seg(3, "Xcode", "main.rs", "activity", 65_000, 120_000),
-        ];
-
-        let settings = EntrySettings::default();
-        let entries = build_entries(&segs, &[], &settings, 120_000);
-
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].started_at, 0);
-        assert_eq!(entries[0].ended_at, 120_000);
-        assert_eq!(entries[0].segment_ids, vec![1, 3]);
-    }
-
-    #[test]
-    fn closes_entry_on_idle_break() {
-        let segs = vec![
-            make_seg(1, "Xcode", "main.rs", "activity", 0, 600_000), // 10 min
-            make_seg(2, "Break", "Idle", "break", 600_000, 900_000), // 5 min break
-            make_seg(3, "Xcode", "main.rs", "activity", 900_000, 1_500_000), // 10 min
-        ];
-
-        let settings = EntrySettings::default();
-        let entries = build_entries(&segs, &[], &settings, 1_500_000);
-
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].started_at, 0);
-        assert_eq!(entries[0].ended_at, 600_000);
-        assert_eq!(entries[1].started_at, 900_000);
-        assert_eq!(entries[1].ended_at, 1_500_000);
-    }
-
-    #[test]
-    fn splits_on_target_duration_with_app_switch() {
-        let segs = vec![
-            make_seg(1, "Xcode", "main.rs", "activity", 0, 1_900_000), // ~31 min
-            make_seg(2, "Safari", "docs.rs", "activity", 1_900_000, 2_600_000), // ~11 min
-        ];
-
-        let settings = EntrySettings::default();
-        let entries = build_entries(&segs, &[], &settings, 2_600_000);
-
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].started_at, 0);
-        assert_eq!(entries[0].ended_at, 1_900_000);
-        assert_eq!(entries[1].started_at, 1_900_000);
-        assert_eq!(entries[1].ended_at, 2_600_000);
-    }
-
-    #[test]
-    fn rebuilding_keeps_the_ids_segments_were_linked_to() {
-        let mut segs = vec![
-            make_seg(1, "Xcode", "main.rs", "activity", 0, 600_000),
-            make_seg(2, "Break", "Idle", "break", 600_000, 900_000),
-            make_seg(3, "Slack", "chat", "activity", 900_000, 1_200_000),
-        ];
-        let settings = EntrySettings::default();
-        let first = build_entries(&segs, &[], &settings, 1_200_000);
-        segs[0].entry_id = Some(first[0].id.clone());
-        segs[2].entry_id = Some(first[1].id.clone());
-
-        let second = build_entries(&segs, &[], &settings, 1_300_000);
-        let ids =
-            |entries: &[BuiltTimeEntry]| entries.iter().map(|e| e.id.clone()).collect::<Vec<_>>();
-        assert_eq!(ids(&first), ids(&second));
-    }
-
-    #[test]
-    fn a_leftover_never_merges_into_a_frozen_entry() {
-        let frozen = BuiltTimeEntry {
-            id: "closed".to_string(),
-            started_at: 0,
-            ended_at: 600_000,
+    fn frozen_entry(id: &str, started_at: u64, ended_at: u64, status: &str) -> BuiltTimeEntry {
+        BuiltTimeEntry {
+            id: id.to_string(),
+            started_at,
+            ended_at,
             description: "Closed".to_string(),
             category_id: None,
             project_id: None,
-            status: "pending".to_string(),
+            status: status.to_string(),
             approved_by: None,
             source: "auto".to_string(),
             billable: false,
@@ -445,121 +303,212 @@ mod tests {
             updated_at: 0,
             deleted_at: None,
             segment_ids: vec![],
-        };
-        let segs = vec![make_seg(2, "Slack", "chat", "activity", 660_000, 720_000)];
-        let entries = build_entries(
-            &segs,
-            std::slice::from_ref(&frozen),
-            &EntrySettings::default(),
-            720_000,
-        );
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].ended_at, 600_000);
+        }
+    }
+
+    /// An hour of work hopping between apps every 20 seconds.
+    fn busy_hour() -> Vec<SegmentInput> {
+        let apps = ["Code", "Terminal", "Safari", "Slack"];
+        (0..180)
+            .map(|i| {
+                let app = apps[i as usize % apps.len()];
+                make_seg(
+                    i,
+                    app,
+                    app,
+                    "activity",
+                    i as u64 * 20_000,
+                    (i as u64 + 1) * 20_000,
+                )
+            })
+            .collect()
     }
 
     #[test]
-    fn preserves_frozen_approved_entries() {
-        let frozen = BuiltTimeEntry {
-            id: "frozen-1".to_string(),
-            started_at: 0,
-            ended_at: 1_800_000,
-            description: "Frozen work".to_string(),
-            category_id: Some("cat-1".to_string()),
-            project_id: Some("proj-1".to_string()),
-            status: "approved".to_string(),
-            approved_by: Some("user".to_string()),
-            source: "manual".to_string(),
-            billable: true,
-            invoice_id: None,
-            created_at: 0,
-            updated_at: 0,
-            deleted_at: None,
-            segment_ids: vec![1],
-        };
-
-        let segs = vec![
-            make_seg(1, "Xcode", "main.rs", "activity", 0, 1_800_000),
-            make_seg(2, "Slack", "chat", "activity", 1_800_000, 2_400_000),
-        ];
-
+    fn an_hour_across_many_apps_is_one_session() {
+        let segs = busy_hour();
         let settings = EntrySettings::default();
-        let entries = build_entries(&segs, std::slice::from_ref(&frozen), &settings, 2_400_000);
 
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].id, "frozen-1");
-        assert_eq!(entries[0].status, "approved");
-        assert_eq!(entries[1].started_at, 1_800_000);
+        let live = build_entries(&segs, &[], &settings, 60 * MIN + 30_000);
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].status, "building");
+
+        let closed = build_entries(&segs, &[], &settings, 65 * MIN);
+        assert_eq!(closed.len(), 1);
+        assert_eq!(closed[0].status, "pending");
+        assert_eq!(closed[0].started_at, 0);
+        assert_eq!(closed[0].ended_at, 60 * MIN);
+        assert_eq!(closed[0].segment_ids.len(), 180);
     }
 
     #[test]
-    fn short_break_under_2_minutes_does_not_split_entry() {
+    fn five_minutes_of_inactivity_starts_a_new_session() {
         let segs = vec![
-            make_seg(1, "Xcode", "main.rs", "activity", 0, 300_000), // 5 min
-            make_seg(2, "Break", "Idle", "break", 300_000, 360_000), // 1 min break
-            make_seg(3, "Xcode", "main.rs", "activity", 360_000, 600_000), // 4 min
+            make_seg(1, "Code", "main.rs", "activity", 0, 10 * MIN),
+            make_seg(2, "Idle", "No activity", "break", 10 * MIN, 15 * MIN),
+            make_seg(3, "Slack", "chat", "activity", 15 * MIN, 25 * MIN),
+            make_seg(4, "Code", "main.rs", "activity", 25 * MIN, 30 * MIN),
         ];
+        let entries = build_entries(&segs, &[], &EntrySettings::default(), 30 * MIN);
 
-        let settings = EntrySettings::default();
-        let entries = build_entries(&segs, &[], &settings, 600_000);
+        assert_eq!(entries.len(), 2);
+        assert_eq!((entries[0].started_at, entries[0].ended_at), (0, 10 * MIN));
+        assert_eq!(entries[0].status, "pending");
+        assert_eq!(entries[1].started_at, 15 * MIN);
+        assert_eq!(entries[1].segment_ids, vec![3, 4]);
+        assert_eq!(entries[1].status, "building");
+    }
+
+    #[test]
+    fn a_break_under_five_minutes_stays_in_the_session() {
+        let segs = vec![
+            make_seg(1, "Code", "main.rs", "activity", 0, 10 * MIN),
+            make_seg(2, "Idle", "No activity", "break", 10 * MIN, 14 * MIN),
+            make_seg(3, "Code", "main.rs", "activity", 14 * MIN, 20 * MIN),
+        ];
+        let entries = build_entries(&segs, &[], &EntrySettings::default(), 20 * MIN);
 
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].started_at, 0);
-        assert_eq!(entries[0].ended_at, 600_000);
+        assert_eq!((entries[0].started_at, entries[0].ended_at), (0, 20 * MIN));
         assert_eq!(entries[0].segment_ids, vec![1, 3]);
     }
 
     #[test]
-    fn short_gap_between_segments_does_not_split_entry() {
+    fn an_uncaptured_gap_of_five_minutes_ends_the_session() {
         let segs = vec![
-            make_seg(1, "Xcode", "main.rs", "activity", 0, 300_000), // 5 min
-            // 45s uncaptured gap between 300_000 and 345_000
-            make_seg(2, "Safari", "docs.rs", "activity", 345_000, 600_000),
+            make_seg(1, "Code", "main.rs", "activity", 0, 10 * MIN),
+            // Nothing captured (asleep, capture paused) for 6 minutes.
+            make_seg(2, "Safari", "docs.rs", "activity", 16 * MIN, 20 * MIN),
         ];
+        let entries = build_entries(&segs, &[], &EntrySettings::default(), 20 * MIN);
 
-        let settings = EntrySettings::default();
-        let entries = build_entries(&segs, &[], &settings, 600_000);
-
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].started_at, 0);
-        assert_eq!(entries[0].ended_at, 600_000);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].ended_at, 10 * MIN);
+        assert_eq!(entries[1].started_at, 16 * MIN);
     }
 
     #[test]
-    fn rapid_app_switching_stays_in_single_entry() {
-        let segs = vec![
-            make_seg(1, "Xcode", "main.rs", "activity", 0, 30_000),
-            make_seg(2, "Terminal", "cargo test", "activity", 30_000, 60_000),
-            make_seg(3, "Safari", "docs.rs", "activity", 60_000, 90_000),
-            make_seg(4, "Slack", "#dev", "activity", 90_000, 120_000),
-            make_seg(5, "Xcode", "main.rs", "activity", 120_000, 180_000),
-        ];
-
+    fn the_last_session_closes_once_five_idle_minutes_pass() {
+        let segs = vec![make_seg(1, "Code", "main.rs", "activity", 0, 10 * MIN)];
         let settings = EntrySettings::default();
-        let entries = build_entries(&segs, &[], &settings, 180_000);
 
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].started_at, 0);
-        assert_eq!(entries[0].ended_at, 180_000);
-        assert_eq!(entries[0].status, "building");
+        assert_eq!(
+            build_entries(&segs, &[], &settings, 14 * MIN)[0].status,
+            "building"
+        );
+        assert_eq!(
+            build_entries(&segs, &[], &settings, 15 * MIN)[0].status,
+            "pending"
+        );
     }
 
     #[test]
-    fn active_session_stays_building_when_recent() {
-        let segs = vec![
-            make_seg(1, "Xcode", "main.rs", "activity", 0, 120_000),
-            make_seg(2, "Terminal", "cargo check", "activity", 120_000, 180_000),
-        ];
-
-        let settings = EntrySettings::default();
-        // now is only 5s after the last segment ended
-        let entries = build_entries(&segs, &[], &settings, 185_000);
+    fn an_open_segment_keeps_the_session_building() {
+        let mut segs = vec![make_seg(1, "Code", "main.rs", "activity", 0, 0)];
+        segs[0].ended_at = None;
+        let entries = build_entries(&segs, &[], &EntrySettings::default(), 90 * MIN);
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].status, "building");
+        assert_eq!(entries[0].ended_at, 90 * MIN);
+    }
 
-        // now is 10 minutes later with no new activity -> marked pending
-        let closed_entries = build_entries(&segs, &[], &settings, 780_000);
-        assert_eq!(closed_entries.len(), 1);
-        assert_eq!(closed_entries[0].status, "pending");
+    #[test]
+    fn a_session_under_a_minute_is_not_an_entry() {
+        let segs = vec![
+            make_seg(1, "Code", "main.rs", "activity", 0, 10 * MIN),
+            // A nudged mouse between two idle stretches.
+            make_seg(
+                2,
+                "Finder",
+                "Desktop",
+                "activity",
+                20 * MIN,
+                20 * MIN + 20_000,
+            ),
+        ];
+        let entries = build_entries(&segs, &[], &EntrySettings::default(), 40 * MIN);
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].segment_ids, vec![1]);
+    }
+
+    #[test]
+    fn zero_length_segments_never_become_entries() {
+        // The segment left open when the app quit is closed at its own
+        // start. It carries no time, so it must not mint an entry on every
+        // rebuild after the session before it froze.
+        let frozen = frozen_entry("closed", 0, 10 * MIN, "pending");
+        let mut segs = vec![
+            make_seg(1, "Code", "main.rs", "activity", 0, 10 * MIN),
+            make_seg(2, "Code", "main.rs", "activity", 10 * MIN, 10 * MIN),
+            make_seg(3, "Code", "main.rs", "activity", 30 * MIN, 30 * MIN),
+        ];
+        segs[0].entry_id = Some("closed".to_string());
+        segs[1].entry_id = Some("closed".to_string());
+
+        for now in [31 * MIN, 32 * MIN, 60 * MIN] {
+            let entries = build_entries(
+                &segs,
+                std::slice::from_ref(&frozen),
+                &EntrySettings::default(),
+                now,
+            );
+            assert_eq!(entries, vec![frozen.clone()]);
+        }
+    }
+
+    #[test]
+    fn rebuilding_keeps_the_ids_segments_were_linked_to() {
+        let mut segs = vec![
+            make_seg(1, "Xcode", "main.rs", "activity", 0, 10 * MIN),
+            make_seg(2, "Break", "Idle", "break", 10 * MIN, 20 * MIN),
+            make_seg(3, "Slack", "chat", "activity", 20 * MIN, 22 * MIN),
+        ];
+        let settings = EntrySettings::default();
+        let first = build_entries(&segs, &[], &settings, 22 * MIN);
+        segs[0].entry_id = Some(first[0].id.clone());
+        segs[2].entry_id = Some(first[1].id.clone());
+
+        let second = build_entries(&segs, &[], &settings, 23 * MIN);
+        let ids =
+            |entries: &[BuiltTimeEntry]| entries.iter().map(|e| e.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&first), ids(&second));
+    }
+
+    #[test]
+    fn a_closed_session_is_never_reopened_by_later_activity() {
+        let frozen = frozen_entry("closed", 0, 10 * MIN, "processing");
+        let mut segs = vec![
+            make_seg(1, "Code", "main.rs", "activity", 0, 10 * MIN),
+            make_seg(2, "Slack", "chat", "activity", 16 * MIN, 20 * MIN),
+        ];
+        segs[0].entry_id = Some("closed".to_string());
+        let entries = build_entries(
+            &segs,
+            std::slice::from_ref(&frozen),
+            &EntrySettings::default(),
+            20 * MIN,
+        );
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0], frozen);
+        assert_eq!(entries[1].segment_ids, vec![2]);
+        assert_eq!(entries[1].status, "building");
+    }
+
+    #[test]
+    fn a_deleted_entrys_time_stays_unassigned() {
+        let mut deleted = frozen_entry("gone", 0, 10 * MIN, "pending");
+        deleted.deleted_at = Some(11 * MIN);
+        let segs = vec![make_seg(1, "Code", "main.rs", "activity", 0, 10 * MIN)];
+        let entries = build_entries(
+            &segs,
+            std::slice::from_ref(&deleted),
+            &EntrySettings::default(),
+            30 * MIN,
+        );
+
+        assert_eq!(entries, vec![deleted]);
     }
 }

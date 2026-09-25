@@ -114,21 +114,39 @@ pub struct NewProject {
     pub hourly_rate: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A patch: an absent field is left alone. The optional columns take
+/// `null` to clear (a project can lose its client, due date, or rate).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateProject {
-    pub client_id: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub client_id: Option<Option<String>>,
     pub name: Option<String>,
     pub color: Option<String>,
-    pub description: Option<String>,
-    pub ai_hints: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub description: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub ai_hints: Option<Option<String>>,
     pub status: Option<String>,
-    pub due_date: Option<u64>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub due_date: Option<Option<u64>>,
     pub budget_kind: Option<String>,
-    pub budget_value: Option<f64>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub budget_value: Option<Option<f64>>,
     pub budget_period: Option<String>,
     pub billable_default: Option<bool>,
-    pub hourly_rate: Option<f64>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub hourly_rate: Option<Option<f64>>,
+}
+
+/// Tells "absent" (`None`) from an explicit `null` (`Some(None)`). Serde maps
+/// both to `None` for a plain `Option`, which would make clearing impossible.
+fn double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -155,6 +173,10 @@ pub struct TimeEntry {
     /// `list_time_entries` fills it; single-entry mutations return `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai: Option<EntryAi>,
+    /// The app or site with most of the entry's active time (list views
+    /// only), for grouping by app.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dominant_app: Option<String>,
 }
 
 /// What a Calendar block needs to know about an entry's AI suggestion.

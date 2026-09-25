@@ -71,6 +71,15 @@ function engineSummary(status: AiStatus | null): string {
   return "Using your rules only: on-device ML isn't available in this build";
 }
 
+/** 10–60 hours a week in steps of 5, plus a saved value off that grid. */
+function targetOptions(current: number): { value: number; label: string }[] {
+  const values = new Set([current]);
+  for (let hours = 10; hours <= 60; hours += 5) values.add(hours);
+  return [...values]
+    .sort((a, b) => a - b)
+    .map((hours) => ({ value: hours, label: `${hours}h a week` }));
+}
+
 const RETENTION_OPTIONS = [
   { value: 0, label: "Forever" },
   { value: 7, label: "7 days" },
@@ -524,9 +533,15 @@ export function Settings() {
       <SettingGroup title="Work hours">
         <SettingRow
           title="Expected hours"
-          description="Your baseline work week, used for utilization and capacity metrics"
-          status="not-implemented"
-        />
+          description="Your work week. The Calendar and My Timesheet measure against it; a day's target is a fifth of it."
+        >
+          <Select
+            label="Expected hours per week"
+            value={settings.weeklyTargetHours}
+            options={targetOptions(settings.weeklyTargetHours)}
+            onChange={(weeklyTargetHours) => update({ weeklyTargetHours })}
+          />
+        </SettingRow>
         <SettingRow
           title="Count toward Work Hours"
           description="Choose which categories count as work rather than personal time"

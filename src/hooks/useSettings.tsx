@@ -1,4 +1,3 @@
-import { listen } from "@tauri-apps/api/event";
 import {
   createContext,
   type ReactNode,
@@ -16,6 +15,7 @@ import {
   type Settings,
   type StoragePaths,
 } from "../lib/settings";
+import { useTauriEvent } from "./useTauriEvent";
 
 export interface SettingsApi {
   /** Always defined: defaults render until Rust answers, then are replaced. */
@@ -62,16 +62,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   // Rust owns preferences; adopt whatever it broadcasts (e.g. after a future
   // tray or CLI toggle).
-  useEffect(() => {
-    const pending = listen<Settings>(api.SETTINGS_CHANGED, (event) => {
-      setSettings(event.payload);
-      applyAppearance(event.payload);
-      setError(null);
-    });
-    return () => {
-      void pending.then((unlisten) => unlisten());
-    };
-  }, []);
+  useTauriEvent<Settings>(api.SETTINGS_CHANGED, (payload) => {
+    setSettings(payload);
+    applyAppearance(payload);
+    setError(null);
+  });
 
   // "Follow system" has to keep following: re-resolve when the OS flips while
   // the app is open.

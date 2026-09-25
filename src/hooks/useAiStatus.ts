@@ -1,7 +1,7 @@
-import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import * as api from "../lib/api";
 import type { AiStatus } from "../lib/types";
+import { useTauriEvent } from "./useTauriEvent";
 
 /** The AI engine status, kept live by `ai-status-changed`. */
 export function useAiStatus(): AiStatus | null {
@@ -17,14 +17,11 @@ export function useAiStatus(): AiStatus | null {
       .catch((err: unknown) =>
         console.error("Failed to load AI status", api.describeError(err)),
       );
-    const unlisten = listen<AiStatus>(api.AI_STATUS_CHANGED, (event) =>
-      setStatus(event.payload),
-    );
     return () => {
       active = false;
-      void unlisten.then((stop) => stop());
     };
   }, []);
+  useTauriEvent<AiStatus>(api.AI_STATUS_CHANGED, setStatus);
 
   return status;
 }

@@ -8,7 +8,6 @@ import {
   useState,
 } from "react";
 import { Donut, type Slice, StackedColumns } from "../components/Charts";
-import { EntryReviewSheet } from "../components/EntryReviewSheet";
 import {
   BUTTON_SECONDARY,
   DateStepper,
@@ -23,7 +22,6 @@ import {
 } from "../components/Page";
 import { Picker } from "../components/Picker";
 import { type Catalog, useCatalog } from "../hooks/useCatalog";
-import { useEntryReview } from "../hooks/useEntryReview";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
@@ -224,7 +222,6 @@ const hasFilters = (filters: EntryFilters): boolean =>
 
 export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
   const catalog = useCatalog();
-  const review = useEntryReview();
 
   const rangeKind: EntriesRange = route.range ?? "week";
   const view: EntriesView = route.view ?? "table";
@@ -413,12 +410,14 @@ export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
             options={categoryOptions}
             onChange={(value) => setFilter({ categoryId: value || undefined })}
           />
-          <FilterSelect
-            label="Project"
-            value={filters.projectId ?? ""}
-            options={projectOptions}
-            onChange={(value) => setFilter({ projectId: value || undefined })}
-          />
+          {catalog.projects.length > 0 && (
+            <FilterSelect
+              label="Project"
+              value={filters.projectId ?? ""}
+              options={projectOptions}
+              onChange={(value) => setFilter({ projectId: value || undefined })}
+            />
+          )}
           <FilterSelect
             label="Client"
             value={filters.clientId ?? ""}
@@ -666,8 +665,6 @@ export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
                 unit={unit}
                 catalog={catalog}
                 version={version}
-                selectedId={review.selectedId}
-                onOpenEntry={review.select}
               />
             ) : view === "charts" ? (
               <ChartsView
@@ -678,26 +675,10 @@ export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
                 version={version}
               />
             ) : (
-              <LogView
-                query={query}
-                catalog={catalog}
-                version={version}
-                selectedId={review.selectedId}
-                onOpenEntry={review.select}
-              />
+              <LogView query={query} catalog={catalog} version={version} />
             )}
           </div>
         </main>
-
-        {review.detail && (
-          <aside className="flex w-[320px] shrink-0 flex-col overflow-hidden border-line border-l bg-panel">
-            <EntryReviewSheet
-              review={review}
-              categories={catalog.categories}
-              projects={catalog.projects}
-            />
-          </aside>
-        )}
       </div>
     </div>
   );
@@ -876,8 +857,6 @@ function PivotTable({
   unit,
   catalog,
   version,
-  selectedId,
-  onOpenEntry,
 }: {
   query: EntryQuery;
   span: DateRange;
@@ -887,8 +866,6 @@ function PivotTable({
   unit: "h" | "%";
   catalog: Catalog;
   version: number;
-  selectedId?: string;
-  onOpenEntry: (id: string) => void;
 }) {
   const edges = useMemo(() => stackEdges(span, stackBy), [span, stackBy]);
   const [cells, setCells] = useState<RollupCell[] | null>(null);
@@ -1021,8 +998,6 @@ function PivotTable({
                 query={withGroup(query, groupBy, row.key)}
                 catalog={catalog}
                 version={version}
-                selectedId={selectedId}
-                onOpenEntry={onOpenEntry}
               />
             );
           })}
@@ -1063,8 +1038,6 @@ function PivotRowView({
   query,
   catalog,
   version,
-  selectedId,
-  onOpenEntry,
 }: {
   row: PivotRow;
   open: boolean;
@@ -1074,8 +1047,6 @@ function PivotRowView({
   query: EntryQuery;
   catalog: Catalog;
   version: number;
-  selectedId?: string;
-  onOpenEntry: (id: string) => void;
 }) {
   return (
     <>
@@ -1112,13 +1083,7 @@ function PivotRowView({
       {open && (
         <tr className="bg-inset-soft *:border-line-soft *:border-b">
           <td colSpan={columns + 2} className="px-3 py-2">
-            <RowEntries
-              query={query}
-              catalog={catalog}
-              version={version}
-              selectedId={selectedId}
-              onOpenEntry={onOpenEntry}
-            />
+            <RowEntries query={query} catalog={catalog} version={version} />
           </td>
         </tr>
       )}
@@ -1132,14 +1097,10 @@ function RowEntries({
   query,
   catalog,
   version,
-  selectedId,
-  onOpenEntry,
 }: {
   query: EntryQuery;
   catalog: Catalog;
   version: number;
-  selectedId?: string;
-  onOpenEntry: (id: string) => void;
 }) {
   const [entries, setEntries] = useState<TimeEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1159,13 +1120,7 @@ function RowEntries({
   return (
     <div className="max-w-3xl space-y-0.5">
       {entries.slice(0, ROW_ENTRIES_LIMIT).map((entry) => (
-        <EntryLine
-          key={entry.id}
-          entry={entry}
-          catalog={catalog}
-          selected={entry.id === selectedId}
-          onOpen={() => onOpenEntry(entry.id)}
-        />
+        <EntryLine key={entry.id} entry={entry} catalog={catalog} />
       ))}
       {entries.length > ROW_ENTRIES_LIMIT && (
         <p className="px-2 pt-1 text-[11px] text-fg-faint">
@@ -1176,28 +1131,12 @@ function RowEntries({
   );
 }
 
-function EntryLine({
-  entry,
-  catalog,
-  selected,
-  onOpen,
-}: {
-  entry: TimeEntry;
-  catalog: Catalog;
-  selected: boolean;
-  onOpen: () => void;
-}) {
+function EntryLine({ entry, catalog }: { entry: TimeEntry; catalog: Catalog }) {
   const category = entry.categoryId
     ? catalog.categoryById.get(entry.categoryId)
     : undefined;
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className={`flex w-full items-center gap-3 rounded px-2 py-1 text-left text-[11.5px] ${
-        selected ? "bg-accent/10" : "hover:bg-surface"
-      }`}
-    >
+    <div className="flex w-full items-center gap-3 rounded px-2 py-1 text-left text-[11.5px] hover:bg-surface">
       <span className="w-28 shrink-0 font-mono text-[10.5px] text-fg-soft tabular-nums">
         {formatShortDate(entry.startedAt)} {formatTime(entry.startedAt)}
       </span>
@@ -1209,7 +1148,7 @@ function EntryLine({
       <span className="w-14 shrink-0 text-right font-mono text-fg-muted tabular-nums">
         {formatDuration(durationOf(entry))}
       </span>
-    </button>
+    </div>
   );
 }
 
@@ -1356,14 +1295,10 @@ function LogView({
   query,
   catalog,
   version,
-  selectedId,
-  onOpenEntry,
 }: {
   query: EntryQuery;
   catalog: Catalog;
   version: number;
-  selectedId?: string;
-  onOpenEntry: (id: string) => void;
 }) {
   const [entries, setEntries] = useState<TimeEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1506,15 +1441,9 @@ function LogView({
                 ? catalog.projectById.get(entry.projectId)
                 : undefined;
               return (
-                <button
+                <div
                   key={entry.id}
-                  type="button"
-                  onClick={() => onOpenEntry(entry.id)}
-                  className={`absolute right-0 left-0 grid items-center gap-3 border-line-soft border-b px-3 text-left text-[12px] ${
-                    entry.id === selectedId
-                      ? "bg-accent/10"
-                      : "hover:bg-surface"
-                  }`}
+                  className="absolute right-0 left-0 grid items-center gap-3 border-line-soft border-b px-3 text-left text-[12px] hover:bg-surface"
                   style={{
                     top: index * ROW_HEIGHT,
                     height: ROW_HEIGHT,
@@ -1548,7 +1477,7 @@ function LogView({
                   <span className="text-right font-mono text-fg-muted tabular-nums">
                     {formatDuration(durationOf(entry))}
                   </span>
-                </button>
+                </div>
               );
             })}
           </div>

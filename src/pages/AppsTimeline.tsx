@@ -411,25 +411,31 @@ export function AppsTimeline({ apps, categories, projects, onUpdate }: Props) {
                                 ]}
                                 variant="compact"
                               />
-                              <Picker
-                                ariaLabel={`Default project for ${app}`}
-                                value={record.defaultProjectId || ""}
-                                disabled={record.excluded}
-                                onChange={(value) =>
-                                  onUpdate(record, {
-                                    defaultProjectId: value || undefined,
-                                  })
-                                }
-                                options={[
-                                  { value: "", label: "(None)" },
-                                  ...projects.map((p) => ({
-                                    value: p.id,
-                                    label: p.name,
-                                    color: p.color,
-                                  })),
-                                ]}
-                                variant="compact"
-                              />
+                              {projects.length > 0 ? (
+                                <Picker
+                                  ariaLabel={`Default project for ${app}`}
+                                  value={record.defaultProjectId || ""}
+                                  disabled={record.excluded}
+                                  onChange={(value) =>
+                                    onUpdate(record, {
+                                      defaultProjectId: value || undefined,
+                                    })
+                                  }
+                                  options={[
+                                    { value: "", label: "(None)" },
+                                    ...projects.map((p) => ({
+                                      value: p.id,
+                                      label: p.name,
+                                      color: p.color,
+                                    })),
+                                  ]}
+                                  variant="compact"
+                                />
+                              ) : (
+                                <span className="text-[12px] text-fg-faint">
+                                  No projects yet
+                                </span>
+                              )}
                             </div>
                           ) : (
                             <span className="text-fg-faint">

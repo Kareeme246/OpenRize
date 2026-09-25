@@ -17,6 +17,7 @@ import {
   Progress,
   Tabs,
 } from "../components/Page";
+import { Picker } from "../components/Picker";
 import { type Catalog, useCatalog } from "../hooks/useCatalog";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import * as api from "../lib/api";
@@ -315,20 +316,13 @@ export function Projects({ route, navigate, replace }: ProjectsProps) {
                   ]}
                   onChange={setClientFilter}
                 />
-                <select
-                  aria-label="Time range"
+                <Picker
+                  ariaLabel="Time range"
                   value={range}
-                  onChange={(event) =>
-                    setRoute({ range: event.target.value as ProjectsRange })
-                  }
-                  className="h-7 rounded-md border border-line bg-panel px-2 font-medium text-[12px] text-fg outline-hidden focus:border-accent"
-                >
-                  {RANGE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setRoute({ range: val as ProjectsRange })}
+                  options={RANGE_OPTIONS}
+                  variant="compact"
+                />
               </div>
 
               {tab === "active" &&

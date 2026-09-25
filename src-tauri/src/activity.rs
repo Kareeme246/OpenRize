@@ -471,6 +471,8 @@ impl ActivityStore {
             )
             .map_err(|error| error.to_string())?;
 
+        let segment_id = self.conn.last_insert_rowid();
+
         // Keep apps table updated
         if kind == KIND_ACTIVITY {
             let identifier = domain.unwrap_or(bundle_id.unwrap_or(app));
@@ -485,7 +487,7 @@ impl ActivityStore {
         }
 
         self.current = Some(Current {
-            id: self.conn.last_insert_rowid(),
+            id: segment_id,
             app: app.to_string(),
             title: title.to_string(),
             kind: kind.to_string(),

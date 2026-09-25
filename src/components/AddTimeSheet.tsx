@@ -4,6 +4,7 @@ import { describeError } from "../lib/api";
 import { localDateString, parseLocalDate } from "../lib/dates";
 import type { Category, Project } from "../lib/types";
 import { FIELD } from "./Page";
+import { Picker } from "./Picker";
 import { Field, Sheet } from "./Sheet";
 
 interface AddTimeSheetProps {
@@ -131,41 +132,43 @@ export function AddTimeSheet({
       </Field>
       <div className="grid grid-cols-2 gap-2">
         <Field label="Category" htmlFor="add-time-category">
-          <select
+          <Picker
             id="add-time-category"
+            ariaLabel="Category"
             value={categoryId}
-            onChange={(event) => setCategoryId(event.target.value)}
-            className={FIELD}
-            required
-          >
-            <option value="" disabled>
-              Choose…
-            </option>
-            {categories
-              .filter((category) => !category.archived)
-              .map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-          </select>
+            onChange={setCategoryId}
+            placeholder="Choose…"
+            options={[
+              { value: "", label: "Choose…", disabled: true },
+              ...categories
+                .filter((category) => !category.archived)
+                .map((category) => ({
+                  value: category.id,
+                  label: category.name,
+                  color: category.color,
+                })),
+            ]}
+            variant="field"
+          />
         </Field>
         <Field label="Project" htmlFor="add-time-project">
-          <select
+          <Picker
             id="add-time-project"
+            ariaLabel="Project"
             value={projectId}
-            onChange={(event) => pickProject(event.target.value)}
-            className={FIELD}
-          >
-            <option value="">No project</option>
-            {projects
-              .filter((project) => project.status === "active")
-              .map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-          </select>
+            onChange={pickProject}
+            options={[
+              { value: "", label: "No project" },
+              ...projects
+                .filter((project) => project.status === "active")
+                .map((project) => ({
+                  value: project.id,
+                  label: project.name,
+                  color: project.color,
+                })),
+            ]}
+            variant="field"
+          />
         </Field>
       </div>
       <label className="flex items-center gap-2 text-fg-muted">

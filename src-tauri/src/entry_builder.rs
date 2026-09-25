@@ -2,12 +2,20 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
+pub const SHORT_BREAK_THRESHOLD_MS: u64 = 2 * 60 * 1000; // 2 min
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EntrySettings {
     pub target_duration_ms: u64,
     pub min_duration_ms: u64,
     pub absorb_threshold_ms: u64,
+    #[serde(default = "default_short_break_threshold")]
+    pub short_break_threshold_ms: u64,
+}
+
+fn default_short_break_threshold() -> u64 {
+    SHORT_BREAK_THRESHOLD_MS
 }
 
 impl Default for EntrySettings {
@@ -16,6 +24,7 @@ impl Default for EntrySettings {
             target_duration_ms: 30 * 60 * 1000, // 30 min
             min_duration_ms: 8 * 60 * 1000,     // 8 min
             absorb_threshold_ms: 10 * 1000,     // 10 sec
+            short_break_threshold_ms: SHORT_BREAK_THRESHOLD_MS,
         }
     }
 }
@@ -57,13 +66,15 @@ pub struct BuiltTimeEntry {
 ///
 /// Rules:
 /// 1. Absorbs micro-segments under `absorb_threshold_ms` (10s) into neighbors.
-/// 2. Closes entry on idle breaks (`kind == "break"`), context shifts, or duration target (~30m).
-/// 3. Minimum entry (8 min): leftover merges into previous entry if gap <= 2 min.
-/// 4. Frozen entries are preserved and never altered or re-segmented. Callers
+/// 2. Forgives short breaks and gaps (< `short_break_threshold_ms`, 2m) as continuous work.
+/// 3. Closes entry on real breaks (>= 2m), context shifts at target (~30m), or max target (45m).
+/// 4. Minimum entry (8 min): leftover merges into previous entry if gap <= 2 min.
+/// 5. Active session stays "building" while work is current (within 2m of now).
+/// 6. Frozen entries are preserved and never altered or re-segmented. Callers
 ///    freeze every entry that has closed (so its suggestion and any edits
 ///    stay attached to a stable id), plus deleted ones, whose time must stay
 ///    unassigned rather than be rebuilt into a new entry.
-/// 5. Ids are stable across rebuilds: an entry keeps the id its first
+/// 7. Ids are stable across rebuilds: an entry keeps the id its first
 ///    segment was linked to, so re-running the builder updates the open entry
 ///    in place instead of minting a duplicate.
 pub fn build_entries(
@@ -108,13 +119,20 @@ pub fn build_entries(
     let mut current_segments: Vec<SegmentInput> = Vec::new();
 
     for seg in absorbed {
-        // If this is a break segment, close the current entry
+        // If this is a break segment:
         if seg.kind == "break" {
+            let break_dur = seg.ended_at.unwrap_or(now).saturating_sub(seg.started_at);
+            // Short break / brief idleness (< short_break_threshold_ms): does not split continuous work
+            if break_dur < settings.short_break_threshold_ms {
+                continue;
+            }
+
+            // Real break: close current entry
             if !current_segments.is_empty() {
                 if let Some(entry) =
                     create_entry_from_segments(&current_segments, now, &mut claimed)
                 {
-                    results.push(entry);
+                    push_or_merge_entry(&mut results, entry, &frozen_ids, settings, now);
                 }
                 current_segments.clear();
             }
@@ -125,9 +143,25 @@ pub fn build_entries(
         if current_segments.is_empty() {
             current_segments.push(seg);
         } else {
+            let prev_seg = current_segments.last().unwrap();
+            let prev_end = prev_seg.ended_at.unwrap_or(now);
+            let gap = seg.started_at.saturating_sub(prev_end);
+
+            // A gap between activity segments >= short_break_threshold_ms is a real break
+            if gap >= settings.short_break_threshold_ms {
+                if let Some(entry) =
+                    create_entry_from_segments(&current_segments, now, &mut claimed)
+                {
+                    push_or_merge_entry(&mut results, entry, &frozen_ids, settings, now);
+                }
+                current_segments.clear();
+                current_segments.push(seg);
+                continue;
+            }
+
             let entry_start = current_segments[0].started_at;
             let current_duration = seg_end.saturating_sub(entry_start);
-            let prev_app = &current_segments.last().unwrap().app;
+            let prev_app = &prev_seg.app;
             let app_changed = &seg.app != prev_app;
 
             // Close entry if:
@@ -139,7 +173,7 @@ pub fn build_entries(
                 if let Some(entry) =
                     create_entry_from_segments(&current_segments, now, &mut claimed)
                 {
-                    results.push(entry);
+                    push_or_merge_entry(&mut results, entry, &frozen_ids, settings, now);
                 }
                 current_segments.clear();
             }
@@ -150,37 +184,47 @@ pub fn build_entries(
     // Process leftover open entry
     if !current_segments.is_empty() {
         if let Some(mut entry) = create_entry_from_segments(&current_segments, now, &mut claimed) {
-            // Check if active (open ended_at >= now)
-            let is_currently_building = current_segments.iter().any(|s| s.ended_at.is_none());
-            if is_currently_building {
-                entry.status = "building".to_string();
-            }
+            let last_seg_end = current_segments
+                .last()
+                .and_then(|s| s.ended_at)
+                .unwrap_or(now);
+            let is_active = current_segments.iter().any(|s| s.ended_at.is_none())
+                || now.saturating_sub(last_seg_end) <= settings.short_break_threshold_ms;
 
-            // Check minimum entry size rule:
-            // Leftovers < min_duration_ms merge into previous entry when gap <= 2 min
-            let entry_dur = entry.ended_at.saturating_sub(entry.started_at);
-            if entry_dur < settings.min_duration_ms && !is_currently_building {
-                if let Some(prev) = results.last_mut() {
-                    let gap = entry.started_at.saturating_sub(prev.ended_at);
-                    if gap <= 2 * 60 * 1000 && !frozen_ids.contains(&prev.id) {
-                        // Merge into previous unfrozen entry
-                        prev.ended_at = entry.ended_at;
-                        prev.segment_ids.extend(entry.segment_ids);
-                        prev.updated_at = now;
-                    } else {
-                        results.push(entry);
-                    }
-                } else {
-                    results.push(entry);
-                }
-            } else {
+            if is_active {
+                entry.status = "building".to_string();
                 results.push(entry);
+            } else {
+                push_or_merge_entry(&mut results, entry, &frozen_ids, settings, now);
             }
         }
     }
 
     results.sort_by_key(|e| e.started_at);
     results
+}
+
+fn push_or_merge_entry(
+    results: &mut Vec<BuiltTimeEntry>,
+    entry: BuiltTimeEntry,
+    frozen_ids: &HashSet<String>,
+    settings: &EntrySettings,
+    now: u64,
+) {
+    let entry_dur = entry.ended_at.saturating_sub(entry.started_at);
+    if entry_dur < settings.min_duration_ms {
+        if let Some(prev) = results.last_mut() {
+            let gap = entry.started_at.saturating_sub(prev.ended_at);
+            if gap <= settings.short_break_threshold_ms && !frozen_ids.contains(&prev.id) {
+                // Merge into previous unfrozen entry
+                prev.ended_at = entry.ended_at;
+                prev.segment_ids.extend(entry.segment_ids);
+                prev.updated_at = now;
+                return;
+            }
+        }
+    }
+    results.push(entry);
 }
 
 fn absorb_micro_segments(
@@ -196,17 +240,18 @@ fn absorb_micro_segments(
 
     for seg in segments {
         let dur = seg.ended_at.unwrap_or(now).saturating_sub(seg.started_at);
-        // Only absorb micro activity segments (never breaks, which indicate idle)
+        // Only absorb micro activity segments into previous activity segments
         if dur < threshold_ms && seg.kind != "break" && !result.is_empty() {
-            // Absorb into previous segment by extending its ended_at
             let prev = result.last_mut().unwrap();
-            let seg_end = seg.ended_at.unwrap_or(now);
-            if seg_end > prev.ended_at.unwrap_or(now) {
-                prev.ended_at = Some(seg_end);
+            if prev.kind != "break" {
+                let seg_end = seg.ended_at.unwrap_or(now);
+                if seg_end > prev.ended_at.unwrap_or(now) {
+                    prev.ended_at = Some(seg_end);
+                }
+                continue;
             }
-        } else {
-            result.push(seg.clone());
         }
+        result.push(seg.clone());
     }
 
     result
@@ -444,5 +489,77 @@ mod tests {
         assert_eq!(entries[0].id, "frozen-1");
         assert_eq!(entries[0].status, "approved");
         assert_eq!(entries[1].started_at, 1_800_000);
+    }
+
+    #[test]
+    fn short_break_under_2_minutes_does_not_split_entry() {
+        let segs = vec![
+            make_seg(1, "Xcode", "main.rs", "activity", 0, 300_000), // 5 min
+            make_seg(2, "Break", "Idle", "break", 300_000, 360_000), // 1 min break
+            make_seg(3, "Xcode", "main.rs", "activity", 360_000, 600_000), // 4 min
+        ];
+
+        let settings = EntrySettings::default();
+        let entries = build_entries(&segs, &[], &settings, 600_000);
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].started_at, 0);
+        assert_eq!(entries[0].ended_at, 600_000);
+        assert_eq!(entries[0].segment_ids, vec![1, 3]);
+    }
+
+    #[test]
+    fn short_gap_between_segments_does_not_split_entry() {
+        let segs = vec![
+            make_seg(1, "Xcode", "main.rs", "activity", 0, 300_000), // 5 min
+            // 45s uncaptured gap between 300_000 and 345_000
+            make_seg(2, "Safari", "docs.rs", "activity", 345_000, 600_000),
+        ];
+
+        let settings = EntrySettings::default();
+        let entries = build_entries(&segs, &[], &settings, 600_000);
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].started_at, 0);
+        assert_eq!(entries[0].ended_at, 600_000);
+    }
+
+    #[test]
+    fn rapid_app_switching_stays_in_single_entry() {
+        let segs = vec![
+            make_seg(1, "Xcode", "main.rs", "activity", 0, 30_000),
+            make_seg(2, "Terminal", "cargo test", "activity", 30_000, 60_000),
+            make_seg(3, "Safari", "docs.rs", "activity", 60_000, 90_000),
+            make_seg(4, "Slack", "#dev", "activity", 90_000, 120_000),
+            make_seg(5, "Xcode", "main.rs", "activity", 120_000, 180_000),
+        ];
+
+        let settings = EntrySettings::default();
+        let entries = build_entries(&segs, &[], &settings, 180_000);
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].started_at, 0);
+        assert_eq!(entries[0].ended_at, 180_000);
+        assert_eq!(entries[0].status, "building");
+    }
+
+    #[test]
+    fn active_session_stays_building_when_recent() {
+        let segs = vec![
+            make_seg(1, "Xcode", "main.rs", "activity", 0, 120_000),
+            make_seg(2, "Terminal", "cargo check", "activity", 120_000, 180_000),
+        ];
+
+        let settings = EntrySettings::default();
+        // now is only 5s after the last segment ended
+        let entries = build_entries(&segs, &[], &settings, 185_000);
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].status, "building");
+
+        // now is 10 minutes later with no new activity -> marked pending
+        let closed_entries = build_entries(&segs, &[], &settings, 780_000);
+        assert_eq!(closed_entries.len(), 1);
+        assert_eq!(closed_entries[0].status, "pending");
     }
 }

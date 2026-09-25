@@ -21,6 +21,7 @@ import {
   StatCard,
   Tabs,
 } from "../components/Page";
+import { Picker } from "../components/Picker";
 import { type Catalog, useCatalog } from "../hooks/useCatalog";
 import { useEntryReview } from "../hooks/useEntryReview";
 import { useTauriEvent } from "../hooks/useTauriEvent";
@@ -395,20 +396,13 @@ export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
             navigate({ ...route, date: localDateString(new Date()) })
           }
         />
-        <select
-          aria-label="Date range"
+        <Picker
+          ariaLabel="Date range"
           value={rangeKind}
-          onChange={(event) =>
-            navigate({ ...route, range: event.target.value as EntriesRange })
-          }
-          className="h-7 rounded-md border border-line bg-panel px-2 font-medium text-[12px] text-fg outline-hidden focus:border-accent"
-        >
-          {RANGE_OPTIONS.map((range) => (
-            <option key={range.value} value={range.value}>
-              {range.label}
-            </option>
-          ))}
-        </select>
+          onChange={(val) => navigate({ ...route, range: val as EntriesRange })}
+          options={RANGE_OPTIONS}
+          variant="compact"
+        />
       </PageHeader>
 
       <div className="shrink-0 space-y-2 border-line border-b px-5 py-2.5">
@@ -721,20 +715,16 @@ function InlineSelect<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <label className="flex items-center gap-1.5">
+    <span className="flex items-center gap-1.5">
       {label}:
-      <select
+      <Picker<T>
+        ariaLabel={label}
         value={value}
-        onChange={(event) => onChange(event.target.value as T)}
-        className="h-7 rounded-md border border-line bg-panel px-2 font-medium text-[12px] text-fg outline-hidden focus:border-accent"
-      >
-        {options.map((entry) => (
-          <option key={entry.value} value={entry.value}>
-            {entry.label}
-          </option>
-        ))}
-      </select>
-    </label>
+        onChange={onChange}
+        options={options}
+        variant="compact"
+      />
+    </span>
   );
 }
 

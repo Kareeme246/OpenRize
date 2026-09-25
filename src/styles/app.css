@@ -166,9 +166,15 @@
 }
 
 html,
-body,
+body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 #root {
   height: 100%;
+  overflow: hidden;
 }
 
 body {

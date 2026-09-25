@@ -17,6 +17,7 @@ import {
   StatCard,
   Tabs,
 } from "../components/Page";
+import { Picker, type PickerOption } from "../components/Picker";
 import { useCatalog } from "../hooks/useCatalog";
 import { useEntryReview } from "../hooks/useEntryReview";
 import { useSettings } from "../hooks/useSettings";
@@ -484,22 +485,16 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-1.5 text-[12px] text-fg-soft">
+            <span className="flex items-center gap-1.5 text-[12px] text-fg-soft">
               Group:
-              <select
+              <Picker
+                ariaLabel="Group"
                 value={groupBy}
-                onChange={(event) =>
-                  setRoute({ groupBy: event.target.value as TimesheetGroup })
-                }
-                className="h-7 rounded-md border border-line bg-panel px-2 font-medium text-[12px] text-fg outline-hidden focus:border-accent"
-              >
-                {GROUP_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+                onChange={(val) => setRoute({ groupBy: val as TimesheetGroup })}
+                options={GROUP_OPTIONS}
+                variant="compact"
+              />
+            </span>
             <FilterSelect
               label="Category"
               value={categoryFilter}
@@ -859,23 +854,23 @@ function BulkBar({
       >
         Approve {approvable.length}
       </button>
-      <select
-        aria-label="Set category"
+      <Picker
+        ariaLabel="Set category"
         value=""
-        onChange={(event) => onSetCategory(event.target.value)}
-        className="h-7 rounded-md border border-line bg-panel px-2 text-[12px] text-fg outline-hidden focus:border-accent"
-      >
-        <option value="" disabled>
-          Set category…
-        </option>
-        {categories
-          .filter((category) => !category.archived)
-          .map((category) => (
-            <option key={category.id} value={category.id}>
-              {category.name}
-            </option>
-          ))}
-      </select>
+        placeholder="Set category…"
+        onChange={(val) => onSetCategory(val)}
+        options={[
+          { value: "", label: "Set category…", disabled: true },
+          ...categories
+            .filter((category) => !category.archived)
+            .map((category) => ({
+              value: category.id,
+              label: category.name,
+              color: category.color,
+            })),
+        ]}
+        variant="compact"
+      />
       <button
         type="button"
         onClick={() => onSetBillable(true)}
@@ -956,48 +951,23 @@ function ChipSelect({
   options: { value: string; label: string }[];
   onChange: (value: string) => void;
 }) {
+  const allOptions: PickerOption<string>[] =
+    value === ""
+      ? [{ value: "", label: placeholder, disabled: true }, ...options]
+      : options;
+
   return (
     <span className="flex min-w-0 items-center gap-1.5">
-      <span className="relative flex min-w-0 items-center">
-        {color && (
-          <span className="pointer-events-none absolute left-1.5">
-            <Dot color={color} size={7} />
-          </span>
-        )}
-        <select
-          aria-label={label}
-          value={value}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.value)}
-          onClick={(event) => event.stopPropagation()}
-          className={`h-6 min-w-0 max-w-full cursor-pointer appearance-none truncate rounded-md border py-0 pr-5 text-[11.5px] outline-hidden focus:border-accent disabled:cursor-default ${
-            color ? "pl-4.5" : "pl-1.5"
-          } ${
-            value === ""
-              ? "border-dashed border-review/50 bg-transparent text-review"
-              : "border-line-soft bg-transparent text-fg-muted hover:border-line"
-          }`}
-        >
-          {value === "" && <option value="">{placeholder}</option>}
-          {options.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        <svg
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2.2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="pointer-events-none absolute right-1.5 size-2.5 text-fg-faint"
-        >
-          <path d="m6 9 6 6 6-6" />
-        </svg>
-      </span>
+      <Picker<string>
+        ariaLabel={label}
+        value={value}
+        disabled={disabled}
+        onChange={onChange}
+        placeholder={placeholder}
+        displayColor={color}
+        options={allOptions}
+        variant="inline"
+      />
       <Confidence value={confidence} />
     </span>
   );

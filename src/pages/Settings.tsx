@@ -6,6 +6,7 @@ import {
   ThresholdSlider,
 } from "../components/AiLearning";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { Picker } from "../components/Picker";
 import {
   SegmentedControl,
   type SegmentedOption,
@@ -177,7 +178,7 @@ function FileLine({ label, path }: { label: string; path: string }) {
   );
 }
 
-/** A native dropdown, styled to match the segmented controls beside it. */
+/** A themed dropdown, styled to match the segmented controls beside it. */
 function Select({
   label,
   value,
@@ -190,32 +191,13 @@ function Select({
   onChange: (value: number) => void;
 }) {
   return (
-    <div className="relative shrink-0">
-      <select
-        aria-label={label}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-        className="appearance-none rounded-lg border border-line bg-surface py-1.5 pl-2.5 pr-7 text-[12px] text-fg-muted outline-none transition-colors hover:bg-surface-strong focus:border-accent/40"
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-      <svg
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={2.2}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-fg-faint"
-      >
-        <path d="m6 9 6 6 6-6" />
-      </svg>
-    </div>
+    <Picker<number>
+      ariaLabel={label}
+      value={value}
+      options={options}
+      onChange={onChange}
+      variant="compact"
+    />
   );
 }
 
@@ -296,7 +278,7 @@ export function Settings() {
   const problem = error ?? openError ?? aiError ?? metricsError;
 
   return (
-    <main className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-5.5">
+    <main className="flex h-full min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain p-5.5">
       <header>
         <h1 className="text-[15px] font-semibold">Settings</h1>
         <div className="font-mono text-[10.5px] text-fg-faint">

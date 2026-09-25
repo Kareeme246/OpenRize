@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { FIELD, TEXTAREA_FIELD } from "../../components/Page";
+import { Picker } from "../../components/Picker";
 import { Field, Sheet } from "../../components/Sheet";
 import * as api from "../../lib/api";
 import { describeError } from "../../lib/api";
@@ -199,23 +200,24 @@ export function ProjectSheet({
 
       <Field label="Client" htmlFor="project-client">
         {newClient === null ? (
-          <select
+          <Picker
             id="project-client"
+            ariaLabel="Client"
             value={clientId}
-            onChange={(event) => {
-              if (event.target.value === "__new") setNewClient("");
-              else setClientId(event.target.value);
+            onChange={(val) => {
+              if (val === "__new") setNewClient("");
+              else setClientId(val);
             }}
-            className={FIELD}
-          >
-            <option value="">No client</option>
-            {clients.map((client) => (
-              <option key={client.id} value={client.id}>
-                {client.name}
-              </option>
-            ))}
-            <option value="__new">+ New client…</option>
-          </select>
+            options={[
+              { value: "", label: "No client" },
+              ...clients.map((client) => ({
+                value: client.id,
+                label: client.name,
+              })),
+              { value: "__new", label: "+ New client…" },
+            ]}
+            variant="field"
+          />
         ) : (
           <div className="flex gap-2">
             <input
@@ -325,16 +327,18 @@ export function ProjectSheet({
 
       <div className="grid grid-cols-3 gap-3">
         <Field label="Budget" htmlFor="project-budget-kind">
-          <select
+          <Picker
             id="project-budget-kind"
+            ariaLabel="Budget"
             value={budgetKind}
-            onChange={(event) => setBudgetKind(event.target.value)}
-            className={FIELD}
-          >
-            <option value="none">None</option>
-            <option value="hours">Hours</option>
-            <option value="amount">Amount</option>
-          </select>
+            onChange={(val) => setBudgetKind(val)}
+            options={[
+              { value: "none", label: "None" },
+              { value: "hours", label: "Hours" },
+              { value: "amount", label: "Amount" },
+            ]}
+            variant="field"
+          />
         </Field>
         <Field
           label={budgetKind === "amount" ? "Amount" : "Hours"}
@@ -352,16 +356,18 @@ export function ProjectSheet({
           />
         </Field>
         <Field label="Per" htmlFor="project-budget-period">
-          <select
+          <Picker
             id="project-budget-period"
+            ariaLabel="Per"
             value={budgetPeriod}
             disabled={budgetKind === "none"}
-            onChange={(event) => setBudgetPeriod(event.target.value)}
-            className={`${FIELD} disabled:opacity-40`}
-          >
-            <option value="total">Total</option>
-            <option value="monthly">Month</option>
-          </select>
+            onChange={(val) => setBudgetPeriod(val)}
+            options={[
+              { value: "total", label: "Total" },
+              { value: "monthly", label: "Month" },
+            ]}
+            variant="field"
+          />
         </Field>
       </div>
 

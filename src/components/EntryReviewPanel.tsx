@@ -16,6 +16,7 @@ import type {
   RuleSuggestion,
   SuggestionField,
 } from "../lib/types";
+import { Picker } from "./Picker";
 
 /** One pickable value for a field, ranked: suggestion, alternatives, rest. */
 interface PickOption {
@@ -672,26 +673,26 @@ function FieldSection({
             </div>
           )}
           {overflow.length > 0 && (
-            <select
-              aria-label={`More ${label.toLowerCase()} options`}
+            <Picker
+              ariaLabel={`More ${label.toLowerCase()} options`}
               value=""
-              onChange={(event) =>
-                onPick(event.target.value === "" ? null : event.target.value)
-              }
-              className="mt-1 w-full rounded-md border border-line bg-surface px-2 py-1 text-[11.5px] text-fg-muted outline-hidden focus:border-accent"
-            >
-              <option value="" disabled>
-                More {label.toLowerCase()}…
-              </option>
-              {overflow.map((option) => (
-                <option
-                  key={option.valueId ?? "none"}
-                  value={option.valueId ?? ""}
-                >
-                  {option.name}
-                </option>
-              ))}
-            </select>
+              placeholder={`More ${label.toLowerCase()}…`}
+              onChange={(val) => onPick(val === "" ? null : val)}
+              options={[
+                {
+                  value: "",
+                  label: `More ${label.toLowerCase()}…`,
+                  disabled: true,
+                },
+                ...overflow.map((option) => ({
+                  value: option.valueId ?? "",
+                  label: option.name,
+                  color: option.color,
+                })),
+              ]}
+              variant="compact"
+              className="mt-1 w-full"
+            />
           )}
         </div>
       )}

@@ -4,6 +4,7 @@
   "version": "0.3.1",
   "description": "Automatic, private, local-first time tracking for your Mac",
   "license": "AGPL-3.0",
+  "packageManager": "pnpm@12.5.1",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Kareeme246/OpenRize.git"

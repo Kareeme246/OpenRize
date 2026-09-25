@@ -5,6 +5,8 @@ mod commands;
 mod entry_builder;
 mod migrations;
 mod models;
+mod projects;
+mod reports;
 mod settings;
 mod timers;
 mod tray;
@@ -177,6 +179,16 @@ pub fn run() {
             commands::ai_metrics,
             commands::ai_retrain,
             commands::ai_reset_learned,
+            commands::query_time_entries,
+            commands::entry_rollup,
+            commands::export_time_entries,
+            commands::update_time_entries,
+            commands::project_stats,
+            commands::project_rules,
+            commands::preview_project_hints,
+            commands::discover_projects,
+            commands::dismiss_project_suggestion,
+            commands::import_projects_csv,
         ])
         .build(tauri::generate_context!())
         .expect("error while building OpenRize")

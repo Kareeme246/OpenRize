@@ -3,6 +3,7 @@ This is a TAURI desktop app project. Because of this there are a few considerati
 Never directly edit `CLAUDE.md` - it only imports this file; make all agent-instruction changes here in `AGENTS.md`.
 
 - This project uses typescript on the frontend. Always properly type variables and never use the "any" type to get around linter warnings.
+- Subscribe to Tauri events with `useTauriEvent` (`src/hooks/useTauriEvent.ts`), not a raw `listen` in an effect; its docs explain the stale-listener and unlisten races it handles.
 - It is imperative to always ask the user whether or not a feature will live in the src-tauri (rust backend) or src (react frontend) or a combination of both.
 - It is very important that when writing code to ALWAYS ground decisions in the
 [tauri documentation](https://docs.rs/tauri/2.11.5/tauri) and Rust language documentation.
@@ -65,6 +66,9 @@ tree down, and prints the PNG path — read that file to look at the result.
 - Do not run `pnpm tauri dev` directly to check a UI change — it uses a fixed
   port and identifier and will collide with another agent's instance or with
   a real running copy of the app. Always go through `pnpm dev:screenshot`.
+- Both scripts run `tauri dev --no-watch`: the frontend hot-reloads, but a
+  Rust change only shows up in a fresh instance (`pnpm dev:drive stop`, then
+  `start`).
 - Do not write Playwright/WebDriver/E2E test suites to drive the app window —
   see the WebDriver limitation above; such a test would not exercise the real
   Tauri backend on this platform.

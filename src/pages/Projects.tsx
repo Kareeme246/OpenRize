@@ -1,553 +1,804 @@
-import { useCallback, useEffect, useState } from "react";
+import {
+  type ChangeEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  BUTTON_PRIMARY,
+  BUTTON_SECONDARY,
+  Dot,
+  EmptyState,
+  FilterSelect,
+  InlineError,
+  PageHeader,
+  Progress,
+  Tabs,
+} from "../components/Page";
+import { type Catalog, useCatalog } from "../hooks/useCatalog";
+import { useTauriEvent } from "../hooks/useTauriEvent";
 import * as api from "../lib/api";
-import type { Client, NewClient, NewProject, Project } from "../lib/types";
+import { describeError } from "../lib/api";
+import { addDays, startOfDay, startOfMonth, startOfWeek } from "../lib/dates";
+import {
+  formatDuration,
+  formatMoney,
+  formatRelative,
+  formatShortDate,
+  plural,
+} from "../lib/format";
+import type {
+  Client,
+  Project,
+  ProjectStats,
+  ProjectSuggestion,
+  ProjectsRange,
+  ProjectsTab,
+  Route,
+} from "../lib/types";
+import { BUDGET_WARN, budgetUsage } from "./projects/budget";
+import { ProjectDetail } from "./projects/ProjectDetail";
+import { type ProjectDraft, ProjectSheet } from "./projects/ProjectSheet";
 
-export function Projects() {
-  const [tab, setTab] = useState<
-    "active" | "completed" | "archived" | "clients"
-  >("active");
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [clients, setClients] = useState<Client[]>([]);
-  const [showNewProject, setShowNewProject] = useState(false);
-  const [showNewClient, setShowNewClient] = useState(false);
+type ProjectsRoute = Extract<Route, { name: "projects" }>;
 
-  // Form states
-  const [newProjName, setNewProjName] = useState("");
-  const [newProjColor, setNewProjColor] = useState("#75a4e5");
-  const [newProjClientId, setNewProjClientId] = useState<string>("");
-  const [newProjHints, setNewProjHints] = useState("");
-  const [newProjRate, setNewProjRate] = useState<number | undefined>(undefined);
-  const [newProjBudgetKind, setNewProjBudgetKind] = useState("none");
-  const [newProjBudgetValue, setNewProjBudgetValue] = useState<
-    number | undefined
-  >(undefined);
+interface ProjectsProps {
+  route: ProjectsRoute;
+  navigate: (route: Route) => void;
+  replace: (route: Route) => void;
+}
 
-  const [newClientName, setNewClientName] = useState("");
-  const [newClientEmail, setNewClientEmail] = useState("");
-  const [newClientRate, setNewClientRate] = useState<number | undefined>(
-    undefined,
-  );
+const RANGE_OPTIONS: { value: ProjectsRange; label: string }[] = [
+  { value: "week", label: "This week" },
+  { value: "month", label: "This month" },
+  { value: "30d", label: "Last 30 days" },
+  { value: "all", label: "All time" },
+];
 
-  const loadData = useCallback(async () => {
+/** Discovery looks at the last two weeks of titles (design board C§3b). */
+const DISCOVERY_DAYS = 14;
+
+function rangeBounds(range: ProjectsRange): { start: number; end: number } {
+  const now = new Date();
+  const end = addDays(startOfDay(now), 1).getTime();
+  if (range === "week") return { start: startOfWeek(now).getTime(), end };
+  if (range === "month") return { start: startOfMonth(now).getTime(), end };
+  if (range === "30d")
+    return { start: addDays(startOfDay(now), -29).getTime(), end };
+  return { start: 0, end };
+}
+
+/** Editing state for the sheet: a project, or a draft for a new one. */
+type Editing = { project: Project } | { draft: ProjectDraft } | null;
+
+export function Projects({ route, navigate, replace }: ProjectsProps) {
+  const catalog = useCatalog();
+  const tab: ProjectsTab = route.tab ?? "active";
+  const range: ProjectsRange = route.range ?? "month";
+
+  const [stats, setStats] = useState<Map<string, ProjectStats>>(new Map());
+  const [suggestions, setSuggestions] = useState<ProjectSuggestion[]>([]);
+  const [search, setSearch] = useState("");
+  const [clientFilter, setClientFilter] = useState("");
+  const [editing, setEditing] = useState<Editing>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const now = Date.now();
+
+  const loadStats = useCallback(async (): Promise<void> => {
+    const bounds = rangeBounds(range);
     try {
-      const [projs, cls] = await Promise.all([
-        api.listProjects(),
-        api.listClients(),
+      const [list, found] = await Promise.all([
+        api.projectStats(
+          bounds.start,
+          bounds.end,
+          startOfMonth(new Date()).getTime(),
+        ),
+        api.discoverProjects(addDays(new Date(), -DISCOVERY_DAYS).getTime()),
       ]);
-      setProjects(projs);
-      setClients(cls);
-    } catch (err) {
-      console.error("Failed to load projects/clients", err);
+      setStats(new Map(list.map((entry) => [entry.projectId, entry])));
+      setSuggestions(found);
+      setError(null);
+    } catch (cause) {
+      setError(describeError(cause));
+    } finally {
+      setLoaded(true);
     }
-  }, []);
+  }, [range]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    loadStats();
+  }, [loadStats]);
 
-  const handleCreateProject = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newProjName.trim()) return;
+  useTauriEvent(api.ENTRIES_CHANGED, () => void loadStats());
 
+  const reloadAll = useCallback(async (): Promise<void> => {
+    await Promise.all([catalog.reload(), loadStats()]);
+  }, [catalog, loadStats]);
+
+  const setRoute = (patch: Partial<ProjectsRoute>): void =>
+    replace({ ...route, ...patch });
+
+  const counts = useMemo(() => {
+    const byStatus = { active: 0, completed: 0, archived: 0 };
+    for (const project of catalog.projects) {
+      if (project.status in byStatus) {
+        byStatus[project.status as keyof typeof byStatus] += 1;
+      }
+    }
+    return byStatus;
+  }, [catalog.projects]);
+
+  const shown = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return catalog.projects
+      .filter((project) => project.status === tab)
+      .filter(
+        (project) =>
+          clientFilter === "" ||
+          (clientFilter === "none"
+            ? !project.clientId
+            : project.clientId === clientFilter),
+      )
+      .filter(
+        (project) =>
+          query === "" ||
+          project.name.toLowerCase().includes(query) ||
+          (project.clientId &&
+            catalog.clientById
+              .get(project.clientId)
+              ?.name.toLowerCase()
+              .includes(query)),
+      )
+      .sort(
+        (a, b) =>
+          (stats.get(b.id)?.lastActivity ?? 0) -
+          (stats.get(a.id)?.lastActivity ?? 0),
+      );
+  }, [catalog.projects, catalog.clientById, tab, clientFilter, search, stats]);
+
+  const importCsv = async (
+    event: ChangeEvent<HTMLInputElement>,
+  ): Promise<void> => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
     try {
-      const payload: NewProject = {
-        name: newProjName.trim(),
-        color: newProjColor,
-        clientId: newProjClientId ? newProjClientId : undefined,
-        aiHints: newProjHints ? newProjHints : undefined,
-        hourlyRate: newProjRate,
-        budgetKind: newProjBudgetKind,
-        budgetValue: newProjBudgetValue,
-      };
-      await api.createProject(payload);
-      setNewProjName("");
-      setNewProjHints("");
-      setNewProjRate(undefined);
-      setNewProjBudgetValue(undefined);
-      setShowNewProject(false);
-      await loadData();
-    } catch (err) {
-      console.error("Failed to create project", err);
+      const summary = await api.importProjectsCsv(await file.text());
+      await reloadAll();
+      const parts = [`Imported ${plural(summary.created, "project")}`];
+      if (summary.clientsCreated > 0) {
+        parts.push(`${plural(summary.clientsCreated, "new client")}`);
+      }
+      setNotice(
+        `${parts.join(" and ")}.${
+          summary.skipped.length > 0 ? ` ${summary.skipped.join(". ")}.` : ""
+        }`,
+      );
+    } catch (cause) {
+      setNotice(`Import failed: ${describeError(cause)}`);
     }
   };
 
-  const handleCreateClient = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newClientName.trim()) return;
-
+  const dismiss = async (key: string): Promise<void> => {
+    setSuggestions((list) => list.filter((entry) => entry.key !== key));
     try {
-      const payload: NewClient = {
-        name: newClientName.trim(),
-        email: newClientEmail ? newClientEmail.trim() : undefined,
-        defaultRate: newClientRate,
-      };
-      await api.createClient(payload);
-      setNewClientName("");
-      setNewClientEmail("");
-      setNewClientRate(undefined);
-      setShowNewClient(false);
-      await loadData();
-    } catch (err) {
-      console.error("Failed to create client", err);
+      await api.dismissProjectSuggestion(key);
+    } catch (cause) {
+      setError(describeError(cause));
     }
   };
 
-  const clientMap = new Map<string, string>();
-  for (const c of clients) {
-    clientMap.set(c.id, c.name);
-  }
-
-  const filteredProjects = projects.filter((p) => {
-    if (tab === "active") return p.status === "active";
-    if (tab === "completed") return p.status === "completed";
-    if (tab === "archived") return p.status === "archived";
-    return true;
-  });
+  const open = route.projectId
+    ? catalog.projects.find((project) => project.id === route.projectId)
+    : undefined;
 
   return (
-    <div className="flex h-full flex-col min-h-0 overflow-hidden bg-canvas text-fg">
-      <header className="flex h-12 shrink-0 items-center justify-between border-b border-line px-5">
-        <div className="flex items-center gap-3">
-          <h1 className="text-[15px] font-semibold text-fg-strong">Projects</h1>
-          <div className="flex rounded-md border border-line bg-panel p-0.5 text-[12px] font-medium">
-            <button
-              type="button"
-              onClick={() => setTab("active")}
-              className={`rounded px-2.5 py-0.5 transition-colors ${
-                tab === "active"
-                  ? "bg-accent/20 text-accent font-semibold"
-                  : "text-fg-soft hover:text-fg"
-              }`}
-            >
-              Active ({projects.filter((p) => p.status === "active").length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setTab("completed")}
-              className={`rounded px-2.5 py-0.5 transition-colors ${
-                tab === "completed"
-                  ? "bg-accent/20 text-accent font-semibold"
-                  : "text-fg-soft hover:text-fg"
-              }`}
-            >
-              Completed
-            </button>
-            <button
-              type="button"
-              onClick={() => setTab("archived")}
-              className={`rounded px-2.5 py-0.5 transition-colors ${
-                tab === "archived"
-                  ? "bg-accent/20 text-accent font-semibold"
-                  : "text-fg-soft hover:text-fg"
-              }`}
-            >
-              Archived
-            </button>
-            <button
-              type="button"
-              onClick={() => setTab("clients")}
-              className={`rounded px-2.5 py-0.5 transition-colors ${
-                tab === "clients"
-                  ? "bg-accent/20 text-accent font-semibold"
-                  : "text-fg-soft hover:text-fg"
-              }`}
-            >
-              Clients ({clients.length})
-            </button>
-          </div>
-        </div>
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-canvas text-fg">
+      <PageHeader title="Projects" crumb={open?.name}>
+        <input
+          ref={fileInput}
+          type="file"
+          accept=".csv,text/csv"
+          className="hidden"
+          onChange={(event) => void importCsv(event)}
+        />
+        <button
+          type="button"
+          onClick={() => fileInput.current?.click()}
+          className={BUTTON_SECONDARY}
+          title="Columns: name, client, budget, due date"
+        >
+          Import CSV
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditing({ draft: {} })}
+          className={BUTTON_PRIMARY}
+        >
+          + New project
+        </button>
+      </PageHeader>
 
-        <div>
-          {tab === "clients" ? (
-            <button
-              type="button"
-              onClick={() => setShowNewClient(true)}
-              className="rounded-md bg-accent px-3 py-1 text-[12px] font-semibold text-accent-fg hover:opacity-90 transition-opacity"
-            >
-              + New client
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowNewProject(true)}
-              className="rounded-md bg-accent px-3 py-1 text-[12px] font-semibold text-accent-fg hover:opacity-90 transition-opacity"
-            >
-              + New project
-            </button>
-          )}
-        </div>
-      </header>
-
-      <div className="flex-1 overflow-y-auto p-5">
-        {tab !== "clients" ? (
-          <div className="rounded-lg border border-line bg-panel overflow-hidden">
-            <table className="w-full text-left text-[12.5px]">
-              <thead className="border-b border-line bg-surface text-[11px] font-semibold text-fg-faint uppercase">
-                <tr>
-                  <th className="px-4 py-2.5">Project</th>
-                  <th className="px-4 py-2.5">Client</th>
-                  <th className="px-4 py-2.5">Budget</th>
-                  <th className="px-4 py-2.5">Rate</th>
-                  <th className="px-4 py-2.5 text-right">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line-soft">
-                {filteredProjects.map((p) => (
-                  <tr key={p.id} className="hover:bg-surface transition-colors">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2 font-medium text-fg-strong">
-                        <span
-                          className="size-2.5 rounded-full shrink-0"
-                          style={{ backgroundColor: p.color }}
-                        />
-                        <span>{p.name}</span>
-                      </div>
-                      {p.description && (
-                        <div className="text-[11px] text-fg-faint pl-4.5 mt-0.5">
-                          {p.description}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-fg-soft">
-                      {p.clientId ? clientMap.get(p.clientId) || "—" : "—"}
-                    </td>
-                    <td className="px-4 py-3 text-fg-soft font-mono">
-                      {p.budgetKind !== "none" && p.budgetValue
-                        ? `${p.budgetValue} ${p.budgetKind}`
-                        : "no budget"}
-                    </td>
-                    <td className="px-4 py-3 text-fg-soft font-mono">
-                      {p.hourlyRate ? `$${p.hourlyRate}/h` : "—"}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <span className="rounded-sm bg-surface px-2 py-0.5 text-[11px] font-medium text-fg-muted uppercase">
-                        {p.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-                {filteredProjects.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={5}
-                      className="px-4 py-8 text-center text-fg-faint"
-                    >
-                      No {tab} projects found. Click "+ New project" to create
-                      one.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="rounded-lg border border-line bg-panel overflow-hidden">
-            <table className="w-full text-left text-[12.5px]">
-              <thead className="border-b border-line bg-surface text-[11px] font-semibold text-fg-faint uppercase">
-                <tr>
-                  <th className="px-4 py-2.5">Client name</th>
-                  <th className="px-4 py-2.5">Email</th>
-                  <th className="px-4 py-2.5">Default rate</th>
-                  <th className="px-4 py-2.5">Projects count</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line-soft">
-                {clients.map((c) => {
-                  const clientProjs = projects.filter(
-                    (p) => p.clientId === c.id,
-                  );
-                  return (
-                    <tr
-                      key={c.id}
-                      className="hover:bg-surface transition-colors"
-                    >
-                      <td className="px-4 py-3 font-medium text-fg-strong">
-                        {c.name}
-                      </td>
-                      <td className="px-4 py-3 text-fg-soft">
-                        {c.email || "—"}
-                      </td>
-                      <td className="px-4 py-3 text-fg-soft font-mono">
-                        {c.defaultRate ? `$${c.defaultRate}/h` : "—"}
-                      </td>
-                      <td className="px-4 py-3 text-fg-muted font-mono">
-                        {clientProjs.length}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {clients.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={4}
-                      className="px-4 py-8 text-center text-fg-faint"
-                    >
-                      No clients created yet. Click "+ New client" to add one.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* New Project Modal */}
-      {showNewProject && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/80 p-4">
-          <form
-            onSubmit={handleCreateProject}
-            className="w-full max-w-md rounded-xl border border-line bg-panel p-5 shadow-2xl space-y-4"
+      {notice && (
+        <div className="flex shrink-0 items-center gap-3 border-line border-b bg-accent-soft px-5 py-2 text-[12px]">
+          <span className="min-w-0 flex-1 text-fg">{notice}</span>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            aria-label="Dismiss"
+            className="text-fg-soft hover:text-fg"
           >
-            <div className="flex items-center justify-between border-b border-line pb-2.5">
-              <h2 className="text-[14px] font-semibold text-fg-strong">
-                New project
-              </h2>
-              <button
-                type="button"
-                onClick={() => setShowNewProject(false)}
-                className="text-fg-faint hover:text-fg"
-              >
-                ✕
-              </button>
+            ✕
+          </button>
+        </div>
+      )}
+
+      {open ? (
+        <ProjectDetail
+          key={open.id}
+          project={open}
+          stats={stats.get(open.id)}
+          catalog={catalog}
+          onBack={() => navigate({ name: "projects", tab, range })}
+          onEdit={() => setEditing({ project: open })}
+          onChanged={() => void reloadAll()}
+        />
+      ) : (
+        <main className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          <Tabs
+            label="Project status"
+            tabs={[
+              {
+                value: "active" as const,
+                label: "Active",
+                count: counts.active,
+              },
+              {
+                value: "completed" as const,
+                label: "Completed",
+                count: counts.completed,
+              },
+              {
+                value: "archived" as const,
+                label: "Archived",
+                count: counts.archived,
+              },
+              {
+                value: "clients" as const,
+                label: "Clients",
+                count: catalog.clients.length,
+              },
+            ]}
+            value={tab}
+            onChange={(next) => setRoute({ tab: next })}
+          />
+
+          {(error || catalog.error) && (
+            <div className="mt-3">
+              <InlineError
+                message={error ?? catalog.error ?? ""}
+                onRetry={reloadAll}
+              />
             </div>
+          )}
 
-            <div className="space-y-3 text-[12px]">
-              <div>
-                <label
-                  htmlFor="new-proj-name"
-                  className="block text-fg-soft mb-1 font-medium"
-                >
-                  Project name *
-                </label>
+          {tab === "clients" ? (
+            <ClientsTable
+              catalog={catalog}
+              onChanged={() => void catalog.reload()}
+            />
+          ) : (
+            <>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
                 <input
-                  id="new-proj-name"
-                  type="text"
-                  required
-                  value={newProjName}
-                  onChange={(e) => setNewProjName(e.target.value)}
-                  placeholder="e.g. OpenRize Web"
-                  className="w-full rounded-md border border-line bg-surface px-2.5 py-1.5 text-fg outline-hidden focus:border-accent"
+                  type="search"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  aria-label="Search projects"
+                  placeholder="⌕ Search projects"
+                  className="h-7 w-56 rounded-md border border-line bg-panel px-2.5 text-[12px] text-fg outline-hidden placeholder:text-fg-faint focus:border-accent"
                 />
-              </div>
-
-              <div>
-                <label
-                  htmlFor="new-proj-color"
-                  className="block text-fg-soft mb-1 font-medium"
-                >
-                  Color
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="new-proj-color"
-                    type="color"
-                    value={newProjColor}
-                    onChange={(e) => setNewProjColor(e.target.value)}
-                    className="size-8 cursor-pointer rounded border border-line bg-transparent"
-                  />
-                  <span className="font-mono text-fg-muted">
-                    {newProjColor}
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <label
-                  htmlFor="new-proj-client"
-                  className="block text-fg-soft mb-1 font-medium"
-                >
-                  Client (optional)
-                </label>
+                <FilterSelect
+                  label="Client"
+                  value={clientFilter}
+                  options={[
+                    { value: "none", label: "No client" },
+                    ...catalog.clients.map((client) => ({
+                      value: client.id,
+                      label: client.name,
+                    })),
+                  ]}
+                  onChange={setClientFilter}
+                />
                 <select
-                  id="new-proj-client"
-                  value={newProjClientId}
-                  onChange={(e) => setNewProjClientId(e.target.value)}
-                  className="w-full rounded-md border border-line bg-surface px-2.5 py-1.5 text-fg outline-hidden focus:border-accent"
+                  aria-label="Time range"
+                  value={range}
+                  onChange={(event) =>
+                    setRoute({ range: event.target.value as ProjectsRange })
+                  }
+                  className="h-7 rounded-md border border-line bg-panel px-2 font-medium text-[12px] text-fg outline-hidden focus:border-accent"
                 >
-                  <option value="">No Client</option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
+                  {RANGE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div>
-                <label
-                  htmlFor="new-proj-hints"
-                  className="block text-fg-soft mb-1 font-medium"
-                >
-                  AI hints (folders, repos, domains)
-                </label>
-                <input
-                  id="new-proj-hints"
-                  type="text"
-                  value={newProjHints}
-                  onChange={(e) => setNewProjHints(e.target.value)}
-                  placeholder="e.g. ~/Code/OpenRize, github.com/.../OpenRize"
-                  className="w-full rounded-md border border-line bg-surface px-2.5 py-1.5 text-fg outline-hidden focus:border-accent"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label
-                    htmlFor="new-proj-rate"
-                    className="block text-fg-soft mb-1 font-medium"
-                  >
-                    Hourly rate ($)
-                  </label>
-                  <input
-                    id="new-proj-rate"
-                    type="number"
-                    value={newProjRate || ""}
-                    onChange={(e) =>
-                      setNewProjRate(
-                        e.target.value ? Number(e.target.value) : undefined,
-                      )
+              {tab === "active" &&
+                suggestions.map((suggestion) => (
+                  <SuggestionStrip
+                    key={suggestion.key}
+                    suggestion={suggestion}
+                    onCreate={() =>
+                      setEditing({
+                        draft: {
+                          name: suggestion.name,
+                          aiHints: suggestion.evidence.join(", "),
+                        },
+                      })
                     }
-                    placeholder="120"
-                    className="w-full rounded-md border border-line bg-surface px-2.5 py-1.5 text-fg outline-hidden focus:border-accent"
+                    onDismiss={() => void dismiss(suggestion.key)}
                   />
-                </div>
-                <div>
-                  <label
-                    htmlFor="new-proj-budget-kind"
-                    className="block text-fg-soft mb-1 font-medium"
-                  >
-                    Budget kind
-                  </label>
-                  <select
-                    id="new-proj-budget-kind"
-                    value={newProjBudgetKind}
-                    onChange={(e) => setNewProjBudgetKind(e.target.value)}
-                    className="w-full rounded-md border border-line bg-surface px-2.5 py-1.5 text-fg outline-hidden focus:border-accent"
-                  >
-                    <option value="none">None</option>
-                    <option value="hours">Hours</option>
-                    <option value="amount">Amount ($)</option>
-                  </select>
-                </div>
-              </div>
-            </div>
+                ))}
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-line">
-              <button
-                type="button"
-                onClick={() => setShowNewProject(false)}
-                className="rounded-md border border-line px-3 py-1.5 text-[12px] text-fg-soft hover:bg-surface hover:text-fg"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="rounded-md bg-accent px-3 py-1.5 text-[12px] font-semibold text-accent-fg hover:opacity-90"
-              >
-                Create project
-              </button>
-            </div>
-          </form>
-        </div>
+              <ProjectsTable
+                projects={shown}
+                stats={stats}
+                catalog={catalog}
+                now={now}
+                loaded={loaded}
+                empty={
+                  catalog.projects.length === 0
+                    ? "first"
+                    : search || clientFilter
+                      ? "filtered"
+                      : "tab"
+                }
+                tab={tab}
+                rangeLabel={
+                  RANGE_OPTIONS.find((option) => option.value === range)
+                    ?.label ?? ""
+                }
+                onOpen={(project) =>
+                  navigate({
+                    name: "projects",
+                    tab,
+                    range,
+                    projectId: project.id,
+                  })
+                }
+                onCreate={() => setEditing({ draft: {} })}
+              />
+            </>
+          )}
+        </main>
       )}
 
-      {/* New Client Modal */}
-      {showNewClient && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/80 p-4">
-          <form
-            onSubmit={handleCreateClient}
-            className="w-full max-w-sm rounded-xl border border-line bg-panel p-5 shadow-2xl space-y-4"
-          >
-            <div className="flex items-center justify-between border-b border-line pb-2.5">
-              <h2 className="text-[14px] font-semibold text-fg-strong">
-                New client
-              </h2>
-              <button
-                type="button"
-                onClick={() => setShowNewClient(false)}
-                className="text-fg-faint hover:text-fg"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-3 text-[12px]">
-              <div>
-                <label
-                  htmlFor="new-client-name"
-                  className="block text-fg-soft mb-1 font-medium"
-                >
-                  Client name *
-                </label>
-                <input
-                  id="new-client-name"
-                  type="text"
-                  required
-                  value={newClientName}
-                  onChange={(e) => setNewClientName(e.target.value)}
-                  placeholder="e.g. Acme Corp"
-                  className="w-full rounded-md border border-line bg-surface px-2.5 py-1.5 text-fg outline-hidden focus:border-accent"
-                />
-              </div>
-
-              <div>
-                <label
-                  htmlFor="new-client-email"
-                  className="block text-fg-soft mb-1 font-medium"
-                >
-                  Email (optional)
-                </label>
-                <input
-                  id="new-client-email"
-                  type="email"
-                  value={newClientEmail}
-                  onChange={(e) => setNewClientEmail(e.target.value)}
-                  placeholder="billing@acme.com"
-                  className="w-full rounded-md border border-line bg-surface px-2.5 py-1.5 text-fg outline-hidden focus:border-accent"
-                />
-              </div>
-
-              <div>
-                <label
-                  htmlFor="new-client-rate"
-                  className="block text-fg-soft mb-1 font-medium"
-                >
-                  Default rate ($)
-                </label>
-                <input
-                  id="new-client-rate"
-                  type="number"
-                  value={newClientRate || ""}
-                  onChange={(e) =>
-                    setNewClientRate(
-                      e.target.value ? Number(e.target.value) : undefined,
-                    )
-                  }
-                  placeholder="120"
-                  className="w-full rounded-md border border-line bg-surface px-2.5 py-1.5 text-fg outline-hidden focus:border-accent"
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-line">
-              <button
-                type="button"
-                onClick={() => setShowNewClient(false)}
-                className="rounded-md border border-line px-3 py-1.5 text-[12px] text-fg-soft hover:bg-surface hover:text-fg"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="rounded-md bg-accent px-3 py-1.5 text-[12px] font-semibold text-accent-fg hover:opacity-90"
-              >
-                Create client
-              </button>
-            </div>
-          </form>
-        </div>
+      {editing && (
+        <ProjectSheet
+          project={"project" in editing ? editing.project : undefined}
+          draft={"draft" in editing ? editing.draft : undefined}
+          clients={catalog.clients}
+          usedColors={catalog.projects.map((project) => project.color)}
+          onClose={() => setEditing(null)}
+          onSaved={() => void reloadAll()}
+        />
       )}
+    </div>
+  );
+}
+
+function SuggestionStrip({
+  suggestion,
+  onCreate,
+  onDismiss,
+}: {
+  suggestion: ProjectSuggestion;
+  onCreate: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="mt-3 flex items-center gap-3 rounded-lg border border-accent/30 bg-accent-soft px-3 py-2 text-[12px]">
+      <span className="text-accent" aria-hidden="true">
+        ✦
+      </span>
+      <span className="min-w-0 flex-1 truncate text-fg">
+        Suggested <b className="text-fg-strong">"{suggestion.name}"</b> ·{" "}
+        {formatDuration(suggestion.ms)} in the last {DISCOVERY_DAYS} days ·
+        matched{" "}
+        <span className="font-mono text-fg-muted">
+          {suggestion.evidence.join(", ")}
+        </span>
+      </span>
+      <button type="button" onClick={onCreate} className={BUTTON_PRIMARY}>
+        Create
+      </button>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="text-fg-soft hover:text-fg"
+      >
+        Dismiss
+      </button>
+    </div>
+  );
+}
+
+function ProjectsTable({
+  projects,
+  stats,
+  catalog,
+  now,
+  loaded,
+  empty,
+  tab,
+  rangeLabel,
+  onOpen,
+  onCreate,
+}: {
+  projects: Project[];
+  stats: Map<string, ProjectStats>;
+  catalog: Catalog;
+  now: number;
+  loaded: boolean;
+  empty: "first" | "filtered" | "tab";
+  tab: ProjectsTab;
+  rangeLabel: string;
+  onOpen: (project: Project) => void;
+  onCreate: () => void;
+}) {
+  const template =
+    "minmax(0,1.6fr) minmax(0,1fr) 110px 80px 90px minmax(150px,1fr) 16px";
+  return (
+    <div className="mt-3 overflow-hidden rounded-xl border border-line bg-panel">
+      <div
+        className="grid items-center gap-3 border-line border-b bg-surface px-4 py-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider"
+        style={{ gridTemplateColumns: template }}
+      >
+        <span>Project</span>
+        <span>Client</span>
+        <span>Last activity</span>
+        <span>Due</span>
+        <span className="text-right" title={rangeLabel}>
+          Time
+        </span>
+        <span>Budget</span>
+        <span />
+      </div>
+      {projects.length === 0 && loaded ? (
+        empty === "first" ? (
+          <EmptyState
+            title="Create your first project"
+            hint="Projects say which work time belongs to. Add hints like a folder or repo and OpenRize assigns matching time for you."
+            action={
+              <button
+                type="button"
+                onClick={onCreate}
+                className={BUTTON_PRIMARY}
+              >
+                + New project
+              </button>
+            }
+          />
+        ) : (
+          <EmptyState
+            title={
+              empty === "filtered" ? "No projects match" : `No ${tab} projects`
+            }
+          />
+        )
+      ) : (
+        projects.map((project) => {
+          const projectStats = stats.get(project.id);
+          const client = project.clientId
+            ? catalog.clientById.get(project.clientId)
+            : undefined;
+          const budget = budgetUsage(project, projectStats, client);
+          const overdue =
+            project.dueDate !== undefined &&
+            project.dueDate !== null &&
+            project.dueDate < now &&
+            project.status === "active";
+          return (
+            <button
+              key={project.id}
+              type="button"
+              onClick={() => onOpen(project)}
+              className="grid min-h-[48px] w-full items-center gap-3 border-line-soft border-b px-4 py-2.5 text-left text-[12.5px] transition-colors last:border-b-0 hover:bg-surface"
+              style={{ gridTemplateColumns: template }}
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <Dot color={project.color} size={9} />
+                <span className="truncate font-medium text-fg-strong">
+                  {project.name}
+                </span>
+              </span>
+              <span className="truncate text-fg-soft">
+                {client?.name ?? "–"}
+              </span>
+              <span className="text-[12px] text-fg-soft">
+                {projectStats?.lastActivity
+                  ? formatRelative(projectStats.lastActivity, now)
+                  : "–"}
+              </span>
+              <span
+                className={`text-[12px] ${overdue ? "font-semibold text-review" : "text-fg-soft"}`}
+              >
+                {project.dueDate ? formatShortDate(project.dueDate, now) : "–"}
+              </span>
+              <span className="text-right font-mono text-fg-muted tabular-nums">
+                {formatDuration(projectStats?.rangeMs ?? 0)}
+              </span>
+              <span className="min-w-0">
+                {budget ? (
+                  <span className="flex flex-col gap-1">
+                    <span
+                      className={`truncate font-mono text-[11px] tabular-nums ${
+                        budget.ratio !== undefined &&
+                        budget.ratio >= BUDGET_WARN
+                          ? "text-review"
+                          : "text-fg-soft"
+                      }`}
+                    >
+                      {budget.label}
+                      {budget.ratio !== undefined &&
+                        budget.ratio > 1 &&
+                        " · over"}
+                    </span>
+                    {budget.ratio !== undefined && (
+                      <Progress
+                        value={budget.ratio}
+                        warnAt={BUDGET_WARN}
+                        label={`${project.name} budget used`}
+                      />
+                    )}
+                  </span>
+                ) : (
+                  <span className="text-[11.5px] text-fg-faint">no budget</span>
+                )}
+              </span>
+              <span className="text-fg-faint">›</span>
+            </button>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+// --- Clients tab ----------------------------------------------------------------------
+
+interface ClientDraft {
+  name: string;
+  email: string;
+  rate: string;
+  currency: string;
+}
+
+const EMPTY_CLIENT: ClientDraft = {
+  name: "",
+  email: "",
+  rate: "",
+  currency: "",
+};
+
+function draftOf(client: Client): ClientDraft {
+  return {
+    name: client.name,
+    email: client.email ?? "",
+    rate:
+      client.defaultRate !== undefined && client.defaultRate !== null
+        ? String(client.defaultRate)
+        : "",
+    currency: client.currency ?? "",
+  };
+}
+
+const CELL_INPUT =
+  "h-7 w-full min-w-0 rounded-md border border-line bg-surface px-2 text-[12px] text-fg outline-hidden focus:border-accent";
+
+/** Name, projects, default rate, and email, created and edited in place. */
+function ClientsTable({
+  catalog,
+  onChanged,
+}: {
+  catalog: Catalog;
+  onChanged: () => void;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<ClientDraft>(EMPTY_CLIENT);
+  const [creating, setCreating] = useState<ClientDraft>(EMPTY_CLIENT);
+  const [error, setError] = useState<string | null>(null);
+  const template = "minmax(0,1.4fr) 90px 120px 80px minmax(0,1.4fr) 120px";
+
+  const fields = (value: ClientDraft) => ({
+    name: value.name.trim(),
+    email: value.email.trim() || undefined,
+    defaultRate: value.rate === "" ? undefined : Number(value.rate),
+    currency: value.currency.trim().toUpperCase() || undefined,
+  });
+
+  const save = async (id: string): Promise<void> => {
+    if (!draft.name.trim()) return;
+    try {
+      await api.updateClient(id, fields(draft));
+      setEditingId(null);
+      setError(null);
+      onChanged();
+    } catch (cause) {
+      setError(describeError(cause));
+    }
+  };
+
+  const create = async (): Promise<void> => {
+    if (!creating.name.trim()) return;
+    try {
+      await api.createClient(fields(creating));
+      setCreating(EMPTY_CLIENT);
+      setError(null);
+      onChanged();
+    } catch (cause) {
+      setError(describeError(cause));
+    }
+  };
+
+  const inputs = (
+    value: ClientDraft,
+    set: (next: ClientDraft) => void,
+    label: string,
+  ) => (
+    <>
+      <input
+        aria-label={`${label} name`}
+        value={value.name}
+        onChange={(event) => set({ ...value, name: event.target.value })}
+        placeholder="Client name"
+        className={CELL_INPUT}
+      />
+      <span />
+      <input
+        aria-label={`${label} default rate`}
+        type="number"
+        min="0"
+        step="any"
+        value={value.rate}
+        onChange={(event) => set({ ...value, rate: event.target.value })}
+        placeholder="Rate /h"
+        className={CELL_INPUT}
+      />
+      <input
+        aria-label={`${label} currency`}
+        value={value.currency}
+        maxLength={3}
+        onChange={(event) => set({ ...value, currency: event.target.value })}
+        placeholder="USD"
+        className={`${CELL_INPUT} uppercase`}
+      />
+      <input
+        aria-label={`${label} email`}
+        type="email"
+        value={value.email}
+        onChange={(event) => set({ ...value, email: event.target.value })}
+        placeholder="billing@example.com"
+        className={CELL_INPUT}
+      />
+    </>
+  );
+
+  return (
+    <div className="mt-3 space-y-3">
+      {error && <InlineError message={error} />}
+      <div className="overflow-hidden rounded-xl border border-line bg-panel">
+        <div
+          className="grid items-center gap-3 border-line border-b bg-surface px-4 py-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider"
+          style={{ gridTemplateColumns: template }}
+        >
+          <span>Client</span>
+          <span className="text-right">Projects</span>
+          <span className="text-right">Default rate</span>
+          <span>Currency</span>
+          <span>Email</span>
+          <span />
+        </div>
+        {catalog.clients.length === 0 && (
+          <EmptyState
+            title="No clients yet"
+            hint="Clients group projects for invoicing. Add one below."
+          />
+        )}
+        {catalog.clients.map((client) => {
+          const projectCount = catalog.projects.filter(
+            (project) => project.clientId === client.id,
+          ).length;
+          const isEditing = editingId === client.id;
+          return (
+            <form
+              key={client.id}
+              onSubmit={(event) => {
+                event.preventDefault();
+                void save(client.id);
+              }}
+              className="grid items-center gap-3 border-line-soft border-b px-4 py-2 text-[12.5px] last:border-b-0"
+              style={{ gridTemplateColumns: template }}
+            >
+              {isEditing ? (
+                inputs(draft, setDraft, client.name)
+              ) : (
+                <>
+                  <span className="truncate font-medium text-fg-strong">
+                    {client.name}
+                  </span>
+                  <span className="text-right font-mono text-fg-muted tabular-nums">
+                    {projectCount}
+                  </span>
+                  <span className="text-right font-mono text-fg-muted tabular-nums">
+                    {client.defaultRate
+                      ? `${formatMoney(client.defaultRate, client.currency || "USD")}/h`
+                      : "–"}
+                  </span>
+                  <span className="text-fg-soft">{client.currency || "–"}</span>
+                  <span className="truncate text-fg-soft">
+                    {client.email || "–"}
+                  </span>
+                </>
+              )}
+              <span className="flex justify-end gap-1.5">
+                {isEditing ? (
+                  <>
+                    <button type="submit" className={BUTTON_PRIMARY}>
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingId(null)}
+                      className="text-[12px] text-fg-soft hover:text-fg"
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingId(client.id);
+                      setDraft(draftOf(client));
+                    }}
+                    className={BUTTON_SECONDARY}
+                  >
+                    Edit
+                  </button>
+                )}
+              </span>
+            </form>
+          );
+        })}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void create();
+          }}
+          className="grid items-center gap-3 border-line border-t bg-inset-soft px-4 py-2"
+          style={{ gridTemplateColumns: template }}
+        >
+          {inputs(creating, setCreating, "New client")}
+          <span className="flex justify-end">
+            <button
+              type="submit"
+              disabled={!creating.name.trim()}
+              className={BUTTON_PRIMARY}
+            >
+              + Add client
+            </button>
+          </span>
+        </form>
+      </div>
     </div>
   );
 }

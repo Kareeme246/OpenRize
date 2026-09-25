@@ -1,7 +1,7 @@
-import { listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../lib/api";
 import type { AiMetrics } from "../lib/types";
+import { useTauriEvent } from "./useTauriEvent";
 
 /** Coalesces a burst of entry and status events into one refetch. */
 const REFETCH_DEBOUNCE_MS = 400;
@@ -22,36 +22,38 @@ export function useAiMetrics(days: number): AiMetricsApi {
   const [metrics, setMetrics] = useState<AiMetrics | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Bumped (debounced) by the events below; each bump refetches.
+  const [version, setVersion] = useState(0);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `version` is the refetch trigger.
   useEffect(() => {
     let active = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const load = (): void => {
-      api
-        .aiMetrics(days)
-        .then((loaded) => {
-          if (!active) return;
-          setMetrics(loaded);
-          setError(null);
-        })
-        .catch((cause: unknown) => {
-          if (active) setError(api.describeError(cause));
-        });
-    };
-    const schedule = (): void => {
-      clearTimeout(timer);
-      timer = setTimeout(load, REFETCH_DEBOUNCE_MS);
-    };
-    load();
-    const stops = [
-      listen(api.ENTRIES_CHANGED, schedule),
-      listen(api.AI_STATUS_CHANGED, schedule),
-    ];
+    api
+      .aiMetrics(days)
+      .then((loaded) => {
+        if (!active) return;
+        setMetrics(loaded);
+        setError(null);
+      })
+      .catch((cause: unknown) => {
+        if (active) setError(api.describeError(cause));
+      });
     return () => {
       active = false;
-      clearTimeout(timer);
-      for (const stop of stops) void stop.then((unlisten) => unlisten());
     };
-  }, [days]);
+  }, [days, version]);
+
+  const schedule = (): void => {
+    clearTimeout(timer.current);
+    timer.current = setTimeout(
+      () => setVersion((current) => current + 1),
+      REFETCH_DEBOUNCE_MS,
+    );
+  };
+  useEffect(() => () => clearTimeout(timer.current), []);
+  useTauriEvent(api.ENTRIES_CHANGED, schedule);
+  useTauriEvent(api.AI_STATUS_CHANGED, schedule);
 
   const adopt = useCallback((next: AiMetrics): void => {
     setMetrics(next);

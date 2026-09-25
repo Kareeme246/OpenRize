@@ -11,6 +11,8 @@ use crate::models::{
     Project, RuleSuggestion, TimeEntry, UpdateCategory, UpdateClient, UpdateProject,
     UpdateTimeEntry,
 };
+use crate::projects::{HintPreview, ImportSummary, ProjectRule, ProjectStats, ProjectSuggestion};
+use crate::reports::{self, EntryFilter, ExportFormat, ExportResult, GroupBy, RollupCell};
 use crate::settings::Settings;
 use crate::timers::{now_epoch_ms, Timer};
 use crate::tray;
@@ -311,16 +313,40 @@ pub fn update_time_entry(
     Ok(entry)
 }
 
+/// Returns the approved entries, so a caller adopts them without a refetch.
 #[tauri::command]
-pub fn approve_time_entries(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+pub fn approve_time_entries(app: AppHandle, ids: Vec<String>) -> Result<Vec<TimeEntry>, String> {
     let now = now_epoch_ms();
-    {
+    let entries = {
         let state = app.state::<AppState>();
         let mut store = state.activity.lock().map_err(|e| e.to_string())?;
         store.approve_time_entries(&ids, "user", now)?;
-    }
+        store.time_entries(&ids)?
+    };
     entries_changed(&app);
-    Ok(())
+    Ok(entries)
+}
+
+/// One patch applied to many entries (My Timesheet's bulk bar). Returns the
+/// updated entries.
+#[tauri::command]
+pub fn update_time_entries(
+    app: AppHandle,
+    ids: Vec<String>,
+    patch: UpdateTimeEntry,
+) -> Result<Vec<TimeEntry>, String> {
+    let now = now_epoch_ms();
+    let entries = {
+        let state = app.state::<AppState>();
+        let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+        let mut updated = Vec::with_capacity(ids.len());
+        for id in &ids {
+            updated.push(store.update_time_entry(id, patch.clone(), now)?);
+        }
+        updated
+    };
+    entries_changed(&app);
+    Ok(entries)
 }
 
 #[tauri::command]
@@ -497,6 +523,115 @@ pub fn ai_reset_learned(app: AppHandle, days: u32) -> Result<AiMetrics, String> 
     });
     ai::nudge(&app);
     Ok(metrics)
+}
+
+// --- P3: Reports (Time Entries, My Timesheet, Calendar Month) -----------
+//
+// Read-only queries go through the reader connection so an aggregation over
+// a year never holds the writer the sampler needs (decision A6).
+
+fn with_reader<T>(
+    app: &AppHandle,
+    read: impl FnOnce(&rusqlite::Connection) -> Result<T, String>,
+) -> Result<T, String> {
+    let state = app.state::<AppState>();
+    let conn = state.activity_reader.lock().map_err(|e| e.to_string())?;
+    read(&conn)
+}
+
+#[tauri::command]
+pub fn query_time_entries(
+    app: AppHandle,
+    filter: EntryFilter,
+    limit: Option<u32>,
+) -> Result<Vec<TimeEntry>, String> {
+    with_reader(&app, |conn| {
+        reports::query_entries(conn, &filter, limit.unwrap_or(reports::MAX_QUERY_ROWS))
+    })
+}
+
+#[tauri::command]
+pub fn entry_rollup(
+    app: AppHandle,
+    filter: EntryFilter,
+    boundaries: Vec<u64>,
+    group_by: String,
+) -> Result<Vec<RollupCell>, String> {
+    let group_by = GroupBy::parse(&group_by)?;
+    with_reader(&app, |conn| {
+        reports::rollup(conn, &filter, &boundaries, group_by)
+    })
+}
+
+/// Writes the filtered entries to the Downloads folder as CSV or JSON.
+#[tauri::command]
+pub fn export_time_entries(
+    app: AppHandle,
+    filter: EntryFilter,
+    format: String,
+) -> Result<ExportResult, String> {
+    let format = ExportFormat::parse(&format)?;
+    let dir = app
+        .path()
+        .download_dir()
+        .or_else(|_| app.path().home_dir())
+        .map_err(|e| e.to_string())?;
+    with_reader(&app, |conn| {
+        reports::export_entries(conn, &filter, format, &dir)
+    })
+}
+
+// --- P3: Projects ------------------------------------------------------
+
+#[tauri::command]
+pub fn project_stats(
+    app: AppHandle,
+    range_start: u64,
+    range_end: u64,
+    month_start: u64,
+) -> Result<Vec<ProjectStats>, String> {
+    with_reader(&app, |conn| {
+        crate::projects::project_stats(conn, range_start, range_end, month_start)
+    })
+}
+
+#[tauri::command]
+pub fn project_rules(app: AppHandle, project_id: String) -> Result<Vec<ProjectRule>, String> {
+    with_reader(&app, |conn| {
+        crate::projects::project_rules(conn, &project_id)
+    })
+}
+
+/// "Would have matched 14h in the last 30 days", per hint.
+#[tauri::command]
+pub fn preview_project_hints(
+    app: AppHandle,
+    hints: String,
+    since_ms: u64,
+) -> Result<HintPreview, String> {
+    with_reader(&app, |conn| {
+        crate::projects::preview_hints(conn, &hints, since_ms)
+    })
+}
+
+#[tauri::command]
+pub fn discover_projects(app: AppHandle, since_ms: u64) -> Result<Vec<ProjectSuggestion>, String> {
+    with_reader(&app, |conn| crate::projects::discover(conn, since_ms))
+}
+
+#[tauri::command]
+pub fn dismiss_project_suggestion(app: AppHandle, key: String) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let store = state.activity.lock().map_err(|e| e.to_string())?;
+    crate::projects::dismiss_suggestion(store.conn(), &key)
+}
+
+#[tauri::command]
+pub fn import_projects_csv(app: AppHandle, text: String) -> Result<ImportSummary, String> {
+    let now = now_epoch_ms();
+    let state = app.state::<AppState>();
+    let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+    crate::projects::import_csv(&mut store, &text, now)
 }
 
 // --- Preferences -------------------------------------------------------

@@ -1,0 +1,3 @@
+# Not part of the app source; written by `swift build` from build.rs.
+# Watching it makes `tauri dev` rebuild itself forever.
+swift/.build/

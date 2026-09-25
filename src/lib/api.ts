@@ -1,33 +1,222 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ActivitySnapshot, SessionKind } from "./activity";
 import type { Settings, StoragePaths } from "./settings";
 import type { Timer } from "./timers";
+import type {
+  ActivitySnapshot,
+  AppRecord,
+  Category,
+  Client,
+  EntryDetail,
+  NewCategory,
+  NewClient,
+  NewProject,
+  NewTimeEntry,
+  Project,
+  TimeEntry,
+  UpdateCategory,
+  UpdateClient,
+  UpdateProject,
+  UpdateTimeEntry,
+} from "./types";
 
-/** Rust emits this after every mutation; see useTimers. */
+export const ACTIVITY_CHANGED = "activity-changed";
+export const ACTIVITY_TICK = "activity-tick";
+export const SETTINGS_CHANGED = "settings-changed";
+export const ENTRIES_CHANGED = "entries-changed";
 export const TIMERS_CHANGED = "timers-changed";
 
-/**
- * Rust emits this whenever a segment actually opens or closes, and once more
- * immediately when the OpenRize window regains focus (a reconciliation).
- * Carries the full `ActivitySnapshot` directly — no follow-up call needed.
- */
-export const ACTIVITY_CHANGED = "activity-changed";
+/** Tauri rejects with a string; React errors are Error objects. Handle both. */
+export function describeError(error: unknown): string {
+  if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
 
-/**
- * Rust emits this at 1Hz while the OpenRize window is focused, or every 30s
- * while it isn't and nothing structural has changed. Carries the lighter
- * `ActivityTick` (same numbers, no segment list).
- */
-export const ACTIVITY_TICK = "activity-tick";
+// --- Preferences ---
 
-/** Rust emits this after a preference change so every view adopts it. */
-export const SETTINGS_CHANGED = "settings-changed";
+export async function getSettings(): Promise<Settings> {
+  return await invoke<Settings>("get_settings");
+}
 
-/*
- * One typed wrapper per #[tauri::command]. Every command returns the complete
- * timer list, so callers never have to guess at state they did not just write.
- * Tauri rejects with the Rust Err value, which is a plain string.
- */
+export async function updateSettings(settings: Settings): Promise<Settings> {
+  return await invoke<Settings>("update_settings", { settings });
+}
+
+export async function storagePaths(): Promise<StoragePaths> {
+  return await invoke<StoragePaths>("storage_paths");
+}
+
+// --- Activity & Capture ---
+
+export async function fetchActivitySnapshot(
+  sinceMs: number,
+): Promise<ActivitySnapshot> {
+  return await invoke<ActivitySnapshot>("activity_snapshot", { sinceMs });
+}
+
+export const activitySnapshot = fetchActivitySnapshot;
+
+export async function setCaptureEnabled(enabled: boolean): Promise<void> {
+  await invoke("set_capture_enabled", { enabled });
+}
+
+export async function setIdleThreshold(minutes: number): Promise<void> {
+  await invoke("set_idle_threshold", { minutes });
+}
+
+export async function startSession(
+  kind: string,
+  label?: string,
+): Promise<void> {
+  await invoke("start_session", { kind, label });
+}
+
+export async function stopSession(): Promise<void> {
+  await invoke("stop_session");
+}
+
+export async function markSegmentReviewed(id: number): Promise<void> {
+  await invoke("mark_segment_reviewed", { id });
+}
+
+// --- Categories ---
+
+export async function listCategories(): Promise<Category[]> {
+  return await invoke<Category[]>("list_categories");
+}
+
+export async function createCategory(category: NewCategory): Promise<Category> {
+  return await invoke<Category>("create_category", { category });
+}
+
+export async function updateCategory(
+  id: string,
+  patch: UpdateCategory,
+): Promise<Category> {
+  return await invoke<Category>("update_category", { id, patch });
+}
+
+export async function deleteCategory(id: string): Promise<void> {
+  await invoke("delete_category", { id });
+}
+
+// --- Projects ---
+
+export async function listProjects(): Promise<Project[]> {
+  return await invoke<Project[]>("list_projects");
+}
+
+export async function createProject(project: NewProject): Promise<Project> {
+  return await invoke<Project>("create_project", { project });
+}
+
+export async function updateProject(
+  id: string,
+  patch: UpdateProject,
+): Promise<Project> {
+  return await invoke<Project>("update_project", { id, patch });
+}
+
+export async function deleteProject(id: string): Promise<void> {
+  await invoke("delete_project", { id });
+}
+
+// --- Clients ---
+
+export async function listClients(): Promise<Client[]> {
+  return await invoke<Client[]>("list_clients");
+}
+
+export async function createClient(client: NewClient): Promise<Client> {
+  return await invoke<Client>("create_client", { client });
+}
+
+export async function updateClient(
+  id: string,
+  patch: UpdateClient,
+): Promise<Client> {
+  return await invoke<Client>("update_client", { id, patch });
+}
+
+export async function deleteClient(id: string): Promise<void> {
+  await invoke("delete_client", { id });
+}
+
+// --- Time Entries ---
+
+export async function listTimeEntries(
+  startMs: number,
+  endMs: number,
+): Promise<TimeEntry[]> {
+  return await invoke<TimeEntry[]>("list_time_entries", { startMs, endMs });
+}
+
+export async function getEntryDetail(id: string): Promise<EntryDetail> {
+  return await invoke<EntryDetail>("get_entry_detail", { id });
+}
+
+export async function updateTimeEntry(
+  id: string,
+  patch: UpdateTimeEntry,
+): Promise<TimeEntry> {
+  return await invoke<TimeEntry>("update_time_entry", { id, patch });
+}
+
+export async function approveTimeEntries(ids: string[]): Promise<void> {
+  await invoke("approve_time_entries", { ids });
+}
+
+export async function rejectTimeEntry(id: string): Promise<void> {
+  await invoke("reject_time_entry", { id });
+}
+
+export async function splitTimeEntry(
+  id: string,
+  atMs: number,
+): Promise<[TimeEntry, TimeEntry]> {
+  return await invoke<[TimeEntry, TimeEntry]>("split_time_entry", {
+    id,
+    atMs,
+  });
+}
+
+export async function deleteTimeEntry(id: string): Promise<void> {
+  await invoke("delete_time_entry", { id });
+}
+
+export async function createTimeEntry(entry: NewTimeEntry): Promise<TimeEntry> {
+  return await invoke<TimeEntry>("create_time_entry", { entry });
+}
+
+export async function rebuildTimeEntries(
+  startMs: number,
+  endMs: number,
+): Promise<TimeEntry[]> {
+  return await invoke<TimeEntry[]>("rebuild_time_entries", { startMs, endMs });
+}
+
+// --- Apps ---
+
+export async function listApps(): Promise<AppRecord[]> {
+  return await invoke<AppRecord[]>("list_apps");
+}
+
+export async function updateApp(
+  id: string,
+  defaultCategoryId?: string,
+  defaultProjectId?: string,
+  excluded?: boolean,
+): Promise<AppRecord> {
+  return await invoke<AppRecord>("update_app", {
+    id,
+    defaultCategoryId,
+    defaultProjectId,
+    excluded,
+  });
+}
+
+// --- Timers (Legacy/Compat) ---
+
 export function listTimers(): Promise<Timer[]> {
   return invoke<Timer[]>("list_timers");
 }
@@ -54,52 +243,4 @@ export function renameTimer(id: string, label: string): Promise<Timer[]> {
 
 export function deleteTimer(id: string): Promise<Timer[]> {
   return invoke<Timer[]>("delete_timer", { id });
-}
-
-// --- activity capture -------------------------------------------------
-
-export function activitySnapshot(sinceMs: number): Promise<ActivitySnapshot> {
-  return invoke<ActivitySnapshot>("activity_snapshot", { sinceMs });
-}
-
-export function setCaptureEnabled(enabled: boolean): Promise<void> {
-  return invoke<void>("set_capture_enabled", { enabled });
-}
-
-export function setIdleThreshold(minutes: number): Promise<void> {
-  return invoke<void>("set_idle_threshold", { minutes });
-}
-
-export function startSession(kind: SessionKind, label?: string): Promise<void> {
-  return invoke<void>("start_session", { kind, label: label ?? null });
-}
-
-export function stopSession(): Promise<void> {
-  return invoke<void>("stop_session");
-}
-
-export function markSegmentReviewed(id: number): Promise<void> {
-  return invoke<void>("mark_segment_reviewed", { id });
-}
-
-// --- preferences ------------------------------------------------------
-
-export function getSettings(): Promise<Settings> {
-  return invoke<Settings>("get_settings");
-}
-
-/** Replaces the whole preference set; Rust answers with the stored values. */
-export function updateSettings(settings: Settings): Promise<Settings> {
-  return invoke<Settings>("update_settings", { settings });
-}
-
-export function storagePaths(): Promise<StoragePaths> {
-  return invoke<StoragePaths>("storage_paths");
-}
-
-/** Tauri rejects with a string; React errors are Error objects. Handle both. */
-export function describeError(error: unknown): string {
-  if (typeof error === "string") return error;
-  if (error instanceof Error) return error.message;
-  return String(error);
 }

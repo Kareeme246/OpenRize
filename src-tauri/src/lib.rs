@@ -1,5 +1,9 @@
 mod activity;
+mod capture;
 mod commands;
+mod entry_builder;
+mod migrations;
+mod models;
 mod settings;
 mod timers;
 mod tray;
@@ -31,6 +35,9 @@ pub const EVENT_ACTIVITY_TICK: &str = "activity-tick";
 /// Emitted whenever preferences change, so any open view (and the tray) can
 /// re-read them without polling.
 pub const EVENT_SETTINGS_CHANGED: &str = "settings-changed";
+
+/// Emitted whenever time entries are modified or rebuilt.
+pub const EVENT_ENTRIES_CHANGED: &str = "entries-changed";
 
 /// Shared application state.
 pub struct AppState {
@@ -83,6 +90,7 @@ pub fn run() {
                 tray::init(app.handle(), &timers)?;
             }
             activity::spawn_sampler(app.handle().clone());
+            capture::register_sleep_listeners(app.handle().clone());
             spawn_retention_sweeper(app.handle().clone());
             // One sweep on startup, so a long-dormant install is cleaned before
             // the first hour-long wait elapses.
@@ -133,6 +141,29 @@ pub fn run() {
             commands::get_settings,
             commands::update_settings,
             commands::storage_paths,
+            commands::list_categories,
+            commands::create_category,
+            commands::update_category,
+            commands::delete_category,
+            commands::list_projects,
+            commands::create_project,
+            commands::update_project,
+            commands::delete_project,
+            commands::list_clients,
+            commands::create_client,
+            commands::update_client,
+            commands::delete_client,
+            commands::list_time_entries,
+            commands::get_entry_detail,
+            commands::update_time_entry,
+            commands::approve_time_entries,
+            commands::reject_time_entry,
+            commands::split_time_entry,
+            commands::delete_time_entry,
+            commands::create_time_entry,
+            commands::rebuild_time_entries,
+            commands::list_apps,
+            commands::update_app,
         ])
         .build(tauri::generate_context!())
         .expect("error while building OpenRize")

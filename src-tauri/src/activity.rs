@@ -1484,22 +1484,28 @@ impl ActivityStore {
     }
 
     pub fn delete_time_entry(&mut self, id: &str, now: u64) -> Result<(), String> {
-        self.conn
-            .execute(
-                "UPDATE time_entries SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2;",
-                params![now as i64, id],
-            )
-            .map_err(|e| e.to_string())?;
+        self.delete_time_entries(&[id.to_string()], now)
+    }
 
-        // Unlink segments so time becomes unassigned activity
-        self.conn
-            .execute(
-                "UPDATE segments SET entry_id = NULL WHERE entry_id = ?1;",
-                params![id],
-            )
-            .map_err(|e| e.to_string())?;
-
-        Ok(())
+    pub fn delete_time_entries(&mut self, ids: &[String], now: u64) -> Result<(), String> {
+        let tx = self.conn.transaction().map_err(|e| e.to_string())?;
+        {
+            let mut delete_entry = tx
+                .prepare("UPDATE time_entries SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2;")
+                .map_err(|e| e.to_string())?;
+            let mut unlink_segments = tx
+                .prepare("UPDATE segments SET entry_id = NULL WHERE entry_id = ?1;")
+                .map_err(|e| e.to_string())?;
+            for id in ids {
+                delete_entry
+                    .execute(params![now as i64, id])
+                    .map_err(|e| e.to_string())?;
+                unlink_segments
+                    .execute(params![id])
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        tx.commit().map_err(|e| e.to_string())
     }
 
     pub fn create_manual_entry(

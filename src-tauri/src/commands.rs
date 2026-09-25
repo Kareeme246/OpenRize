@@ -379,11 +379,16 @@ pub fn split_time_entry(
 
 #[tauri::command]
 pub fn delete_time_entry(app: AppHandle, id: String) -> Result<(), String> {
+    delete_time_entries(app, vec![id])
+}
+
+#[tauri::command]
+pub fn delete_time_entries(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
     let now = now_epoch_ms();
     {
         let state = app.state::<AppState>();
         let mut store = state.activity.lock().map_err(|e| e.to_string())?;
-        store.delete_time_entry(&id, now)?;
+        store.delete_time_entries(&ids, now)?;
     }
     entries_changed(&app);
     Ok(())

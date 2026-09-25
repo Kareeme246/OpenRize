@@ -232,7 +232,7 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
   const [confirmApprove, setConfirmApprove] = useState<TimeEntry[] | null>(
     null,
   );
-  const [confirmDelete, setConfirmDelete] = useState<TimeEntry | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<TimeEntry[] | null>(null);
 
   // Responses for a range the user already left are dropped.
   const shownStart = useRef(startMs);
@@ -571,6 +571,7 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
                   ),
                 )
               }
+              onDelete={() => setConfirmDelete(selectedEntries)}
               onClear={() => setSelected(new Set())}
             />
           )}
@@ -695,7 +696,7 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
                             })
                           }
                           onSplit={() => void splitEntry(entry)}
-                          onDelete={() => setConfirmDelete(entry)}
+                          onDelete={() => setConfirmDelete([entry])}
                         />
                       ))}
                   </div>
@@ -744,16 +745,20 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
       )}
       {confirmDelete && (
         <ConfirmDialog
-          title="Delete this entry?"
-          body={`"${confirmDelete.description}" (${formatDuration(durationOf(confirmDelete))}) is removed. Its activity stays in the log, unassigned.`}
+          title={`Delete ${plural(confirmDelete.length, "entry", "entries")}?`}
+          body={`${plural(confirmDelete.length, "entry", "entries")} will be removed. This cannot be undone. Their activity stays in the log, unassigned.`}
           confirmLabel="Delete"
           onCancel={() => setConfirmDelete(null)}
           onConfirm={() => {
-            const id = confirmDelete.id;
+            const ids = confirmDelete.map((entry) => entry.id);
             setConfirmDelete(null);
-            if (review.selectedId === id) review.select(undefined);
+            if (review.selectedId && ids.includes(review.selectedId)) {
+              review.select(undefined);
+            }
             void act(async () => {
-              await api.deleteTimeEntry(id);
+              await api.deleteTimeEntries(ids);
+              setSelected(new Set());
+              await refresh();
               return undefined;
             });
           }}
@@ -823,6 +828,7 @@ function BulkBar({
   onApprove,
   onSetCategory,
   onSetBillable,
+  onDelete,
   onClear,
 }: {
   entries: TimeEntry[];
@@ -830,6 +836,7 @@ function BulkBar({
   onApprove: () => void;
   onSetCategory: (categoryId: string) => void;
   onSetBillable: (billable: boolean) => void;
+  onDelete: () => void;
   onClear: () => void;
 }) {
   const approvable = entries.filter(
@@ -884,6 +891,13 @@ function BulkBar({
         className={BUTTON_SECONDARY}
       >
         Not billable
+      </button>
+      <button
+        type="button"
+        onClick={onDelete}
+        className="rounded-md border border-danger/30 px-2 py-1 text-danger hover:bg-danger/10"
+      >
+        Delete {entries.length}
       </button>
       <button
         type="button"

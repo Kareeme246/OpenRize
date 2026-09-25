@@ -16,6 +16,45 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify tag matches project versions
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          package_version=$(node -p "require('./package.json').version")
+          tauri_version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          cargo_version=$(awk '
+            /^\[package\]$/ { package=1; next }
+            /^\[/ { package=0 }
+            package && /^version = / {
+              sub(/^version = "/, "", $0)
+              sub(/"$/, "", $0)
+              print
+              exit
+            }
+          ' src-tauri/Cargo.toml)
+          if [[ "$package_version" != "$tauri_version" ||
+                "$package_version" != "$cargo_version" ||
+                "$TAG" != "v$package_version" ]]; then
+            printf 'Tag %s does not match all project versions\n' "$TAG" >&2
+            printf 'package=%s, tauri=%s, cargo=%s\n' \
+              "$package_version" "$tauri_version" "$cargo_version" >&2
+            exit 1
+          fi
+
+      - name: Generate release notes
+        id: git-cliff
+        # v4.6.0
+        uses: >-
+          orhun/git-cliff-action@d77b37db2e3f7398432d34b72a12aa3e2ba87e51
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: release-notes.md
 
       # v6.0.9
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
@@ -51,6 +90,10 @@ jobs:
             src-tauri/target/release/bundle/dmg/*.dmg
             src-tauri/target/release/bundle/macos/openrize.app.zip
           body: |
+            ${{ steps.git-cliff.outputs.content }}
+
+            ---
+
             Unsigned macOS build - no Apple Developer signing or notarization
             yet.
 
@@ -58,4 +101,3 @@ jobs:
             Right-click (or Control-click) `openrize.app` and choose **Open**,
             or go to **System Settings > Privacy & Security** and click
             **Open Anyway**, then confirm. You only need to do this once.
-          generate_release_notes: true

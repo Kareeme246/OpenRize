@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Picker, type PickerOption } from "./Picker";
 import { SegmentedControl, type SegmentedOption } from "./SegmentedControl";
 
 /**
@@ -313,7 +314,7 @@ const FIELD_BASE =
 export const FIELD = `${FIELD_BASE} h-8`;
 export const TEXTAREA_FIELD = FIELD_BASE;
 
-/** A native select dressed as a filter pill ("Category ▾"). */
+/** A themed picker dressed as a filter pill ("Category ▾"). */
 export function FilterSelect({
   label,
   value,
@@ -322,29 +323,22 @@ export function FilterSelect({
 }: {
   label: string;
   value: string;
-  options: { value: string; label: string }[];
+  options: { value: string; label: string; color?: string }[];
   onChange: (value: string) => void;
 }) {
-  const active = value !== "";
+  const allOptions: PickerOption<string>[] = options.some((o) => o.value === "")
+    ? options
+    : [{ value: "", label }, ...options];
+
   return (
-    // A fixed width: sized by its options, a filter would jump as they change.
-    <select
-      aria-label={label}
+    <Picker<string>
+      ariaLabel={label}
       value={value}
-      onChange={(event) => onChange(event.target.value)}
-      className={`h-7 w-36 cursor-pointer truncate rounded-md border px-2 font-medium text-[12px] outline-hidden transition-colors focus:border-accent ${
-        active
-          ? "border-accent/40 bg-accent-soft text-fg-strong"
-          : "border-line bg-panel text-fg-soft hover:text-fg"
-      }`}
-    >
-      <option value="">{label}</option>
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
+      options={allOptions}
+      onChange={onChange}
+      variant="filter"
+      placeholder={label}
+    />
   );
 }
 

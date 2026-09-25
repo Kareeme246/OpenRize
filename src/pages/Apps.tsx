@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Picker } from "../components/Picker";
 import * as api from "../lib/api";
 import type { AppRecord, Category, Project } from "../lib/types";
 
@@ -271,43 +272,47 @@ export function Apps() {
                     </td>
 
                     <td className="px-3 py-2.5">
-                      <select
+                      <Picker
+                        ariaLabel="Default category"
                         value={app.defaultCategoryId || ""}
                         disabled={app.excluded}
-                        onChange={(e) =>
+                        onChange={(val) =>
                           handleUpdate(app, {
-                            defaultCategoryId: e.target.value || undefined,
+                            defaultCategoryId: val || undefined,
                           })
                         }
-                        className="rounded-md border border-line bg-surface px-2 py-1 text-xs text-fg focus:border-accent focus:outline-none disabled:opacity-50"
-                      >
-                        <option value="">(None)</option>
-                        {categories.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
+                        options={[
+                          { value: "", label: "(None)" },
+                          ...categories.map((c) => ({
+                            value: c.id,
+                            label: c.name,
+                            color: c.color,
+                          })),
+                        ]}
+                        variant="compact"
+                      />
                     </td>
 
                     <td className="px-3 py-2.5">
-                      <select
+                      <Picker
+                        ariaLabel="Default project"
                         value={app.defaultProjectId || ""}
                         disabled={app.excluded}
-                        onChange={(e) =>
+                        onChange={(val) =>
                           handleUpdate(app, {
-                            defaultProjectId: e.target.value || undefined,
+                            defaultProjectId: val || undefined,
                           })
                         }
-                        className="rounded-md border border-line bg-surface px-2 py-1 text-xs text-fg focus:border-accent focus:outline-none disabled:opacity-50"
-                      >
-                        <option value="">(None)</option>
-                        {projects.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                      </select>
+                        options={[
+                          { value: "", label: "(None)" },
+                          ...projects.map((p) => ({
+                            value: p.id,
+                            label: p.name,
+                            color: p.color,
+                          })),
+                        ]}
+                        variant="compact"
+                      />
                     </td>
 
                     <td className="px-3 py-2.5 text-center">

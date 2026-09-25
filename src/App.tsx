@@ -196,7 +196,9 @@ export default function App() {
               captureEnabled={captureEnabled}
               onToggleCapture={handleToggleCapture}
             />
-            <div className="flex min-h-0 min-w-0 flex-col">{renderView()}</div>
+            <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+              {renderView()}
+            </div>
           </div>
         </div>
       </NotImplementedProvider>

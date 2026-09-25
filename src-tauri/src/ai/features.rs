@@ -102,9 +102,7 @@ pub fn extract(
                 segment.app.clone(),
             ),
         };
-        keys.entry((kind.to_string(), key))
-            .or_insert((label, 0))
-            .1 += ms;
+        keys.entry((kind.to_string(), key)).or_insert((label, 0)).1 += ms;
     }
 
     apps.sort_by_key(|app| std::cmp::Reverse(app.ms));

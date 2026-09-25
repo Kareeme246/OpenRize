@@ -111,7 +111,9 @@ pub fn build_entries(
         // If this is a break segment, close the current entry
         if seg.kind == "break" {
             if !current_segments.is_empty() {
-                if let Some(entry) = create_entry_from_segments(&current_segments, now, &mut claimed) {
+                if let Some(entry) =
+                    create_entry_from_segments(&current_segments, now, &mut claimed)
+                {
                     results.push(entry);
                 }
                 current_segments.clear();
@@ -134,7 +136,9 @@ pub fn build_entries(
             if (current_duration >= settings.target_duration_ms && app_changed)
                 || current_duration >= max_target
             {
-                if let Some(entry) = create_entry_from_segments(&current_segments, now, &mut claimed) {
+                if let Some(entry) =
+                    create_entry_from_segments(&current_segments, now, &mut claimed)
+                {
                     results.push(entry);
                 }
                 current_segments.clear();
@@ -373,9 +377,8 @@ mod tests {
         segs[2].entry_id = Some(first[1].id.clone());
 
         let second = build_entries(&segs, &[], &settings, 1_300_000);
-        let ids = |entries: &[BuiltTimeEntry]| {
-            entries.iter().map(|e| e.id.clone()).collect::<Vec<_>>()
-        };
+        let ids =
+            |entries: &[BuiltTimeEntry]| entries.iter().map(|e| e.id.clone()).collect::<Vec<_>>();
         assert_eq!(ids(&first), ids(&second));
     }
 

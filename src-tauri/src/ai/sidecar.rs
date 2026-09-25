@@ -161,7 +161,9 @@ impl Sidecar {
 
         let capabilities: Capabilities = self
             .request("capabilities", Value::Null, TIMEOUT_QUICK)
-            .and_then(|value| serde_json::from_value(value).map_err(|error| error.to_string()))?;
+            .and_then(|value| {
+            serde_json::from_value(value).map_err(|error| error.to_string())
+        })?;
         if capabilities.version != PROTOCOL_VERSION {
             self.stop();
             self.record_failure();

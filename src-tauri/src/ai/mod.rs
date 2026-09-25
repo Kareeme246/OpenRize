@@ -86,11 +86,13 @@ pub struct AiStatus {
     /// `running`, `stopped` (idle-killed, restarts on demand), or
     /// `unavailable`.
     pub sidecar: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub os: Option<String>,
     pub queued: u32,
     /// Suggestions with a user outcome so far; see `COLD_START_OUTCOMES`.
     pub outcomes: u32,
     pub calibrated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
 }
 

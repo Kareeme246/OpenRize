@@ -153,6 +153,7 @@ pub struct TimeEntry {
     pub description_origin: String,
     /// Classification state and headline confidences, for list views. Only
     /// `list_time_entries` fills it; single-entry mutations return `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai: Option<EntryAi>,
 }
 
@@ -161,8 +162,11 @@ pub struct TimeEntry {
 #[serde(rename_all = "camelCase")]
 pub struct EntryAi {
     /// The classify job: queued | running | done | failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category_confidence: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_confidence: Option<f64>,
 }
 
@@ -246,7 +250,9 @@ pub struct EntryDetail {
     pub suggestions: Vec<FieldSuggestion>,
     /// "Always categorize figma.com as Design?", after 3+ consistent
     /// corrections for the entry's dominant app or domain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rule_suggestion: Option<RuleSuggestion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub job: Option<ClassifyJob>,
 }
 
@@ -276,6 +282,7 @@ pub struct Dominant {
 #[serde(rename_all = "camelCase")]
 pub struct Alternative {
     /// `None` on the project field means "No project".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value_id: Option<String>,
     pub confidence: f64,
 }
@@ -287,17 +294,21 @@ pub struct FieldSuggestion {
     pub entry_id: String,
     /// `category` or `project`.
     pub field: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value_id: Option<String>,
     pub confidence: f64,
     /// The "Why" line, joined from `signals`.
     pub rationale: String,
     pub signals: Vec<Signal>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dominant: Option<Dominant>,
     pub alternatives: Vec<Alternative>,
     /// rules | full | fallback
     pub engine: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_version: Option<String>,
     /// accepted | changed | rejected | auto, or `None` while undecided.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<String>,
     pub created_at: u64,
 }
@@ -310,6 +321,7 @@ pub struct RuleSuggestion {
     pub pattern: String,
     /// Human label for the pattern (app name or domain).
     pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value_id: Option<String>,
     /// How many consistent corrections back this suggestion.
     pub corrections: u32,
@@ -320,5 +332,6 @@ pub struct RuleSuggestion {
 pub struct ClassifyJob {
     pub state: String,
     pub attempts: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
 }

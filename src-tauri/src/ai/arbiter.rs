@@ -38,7 +38,11 @@ pub struct Votes {
 
 impl Votes {
     pub fn top(&self) -> Option<&Label> {
-        top_label(self.counts.iter().map(|(label, count)| (label, *count as f64)))
+        top_label(
+            self.counts
+                .iter()
+                .map(|(label, count)| (label, *count as f64)),
+        )
     }
 }
 
@@ -227,10 +231,7 @@ fn signals(evidence: &Evidence<'_>, value: &Label, name: &dyn Fn(&Label) -> Stri
             let p = personal.get(value).copied().unwrap_or(0.0);
             push(
                 "personal",
-                format!(
-                    "your personal model agrees ({}%)",
-                    (p * 100.0).round()
-                ),
+                format!("your personal model agrees ({}%)", (p * 100.0).round()),
             );
         }
     }
@@ -368,7 +369,10 @@ mod tests {
         let decision = decide(&calibrated, &name).unwrap();
         assert_eq!(decision.confidence, 1.0);
         assert_eq!(decision.engine, "full");
-        assert_eq!(decision.signals[0].text, "the on-device model agrees (3 of 3 tries)");
+        assert_eq!(
+            decision.signals[0].text,
+            "the on-device model agrees (3 of 3 tries)"
+        );
     }
 
     #[test]

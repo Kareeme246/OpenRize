@@ -74,7 +74,10 @@ fn build_ml_sidecar() {
         fs::create_dir_all(staged.parent().expect("binaries dir"))
             .expect("could not create src-tauri/binaries");
         fs::copy(&built, &staged).unwrap_or_else(|error| {
-            panic!("could not stage the ML sidecar at {}: {error}", staged.display())
+            panic!(
+                "could not stage the ML sidecar at {}: {error}",
+                staged.display()
+            )
         });
     }
 }

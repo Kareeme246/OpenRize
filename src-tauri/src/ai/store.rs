@@ -405,7 +405,11 @@ pub fn record_approval(
 
 /// Marks the undecided suggestions rejected and returns them, so the caller
 /// can clear the values they pre-filled.
-pub fn record_rejection(conn: &Connection, entry_id: &str, now: u64) -> Result<Vec<FieldSuggestion>> {
+pub fn record_rejection(
+    conn: &Connection,
+    entry_id: &str,
+    now: u64,
+) -> Result<Vec<FieldSuggestion>> {
     let mut rejected = Vec::new();
     for suggestion in latest_suggestions(conn, entry_id)? {
         if suggestion.outcome.is_some() {
@@ -472,7 +476,11 @@ pub fn upsert_embedding(
 }
 
 /// A stored vector, when it was computed from exactly this text.
-pub fn embedding_for(conn: &Connection, entry_id: &str, text_hash: &str) -> Result<Option<Vec<f32>>> {
+pub fn embedding_for(
+    conn: &Connection,
+    entry_id: &str,
+    text_hash: &str,
+) -> Result<Option<Vec<f32>>> {
     conn.query_row(
         "SELECT vec FROM entry_embeddings WHERE entry_id = ?1 AND text_hash = ?2;",
         params![entry_id, text_hash],

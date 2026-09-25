@@ -110,7 +110,7 @@ export default function App() {
     };
   }, []);
 
-  // Compute pending count (suggested / unapproved entries for today)
+  // Entries waiting for review today (the Calendar's pending badge).
   useEffect(() => {
     const updatePending = async () => {
       try {
@@ -120,9 +120,7 @@ export default function App() {
           startOfDay.getTime(),
           Date.now(),
         );
-        const count = entries.filter(
-          (e) => e.status === "suggested" || e.status === "draft",
-        ).length;
+        const count = entries.filter((e) => e.status === "pending").length;
         setPendingCount(count);
       } catch (err) {
         console.error("Failed to load pending entries count", err);
@@ -131,8 +129,10 @@ export default function App() {
 
     updatePending();
     const unlistenEntries = listen(api.ENTRIES_CHANGED, updatePending);
+    const unlistenSuggestion = listen(api.SUGGESTION_READY, updatePending);
     return () => {
       void unlistenEntries.then((u) => u());
+      void unlistenSuggestion.then((u) => u());
     };
   }, []);
 

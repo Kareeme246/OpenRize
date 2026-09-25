@@ -24,8 +24,7 @@ use super::rules;
 use super::sidecar::{self, Capabilities, Sidecar};
 use super::store::{self, Job, JOB_CLASSIFY};
 use super::{
-    update_status, AiRuntime, Field, EVENT_SUGGESTION_READY, PREFILL_THRESHOLD,
-    COLD_START_OUTCOMES,
+    update_status, AiRuntime, Field, COLD_START_OUTCOMES, EVENT_SUGGESTION_READY, PREFILL_THRESHOLD,
 };
 use crate::activity::{self, ActivitySegment};
 use crate::models::TimeEntry;
@@ -201,7 +200,10 @@ impl Worker {
         if llm_ready || !self.sidecar.is_installed() {
             return;
         }
-        if self.last_probe.is_none_or(|at| at.elapsed() >= REPROBE_EVERY) {
+        if self
+            .last_probe
+            .is_none_or(|at| at.elapsed() >= REPROBE_EVERY)
+        {
             self.probe();
         }
     }
@@ -306,7 +308,8 @@ impl Worker {
         let now = now_epoch_ms();
         match result {
             Ok(()) => {
-                if let Err(error) = self.write(|conn| store::set_job_state(conn, &job.id, "done", now))
+                if let Err(error) =
+                    self.write(|conn| store::set_job_state(conn, &job.id, "done", now))
                 {
                     eprintln!("ai worker: {error}");
                 }
@@ -510,18 +513,21 @@ impl Worker {
         if categories.is_empty() {
             return Err("there are no categories to suggest".to_string());
         }
-        let want_project = settings.ai_suggest == AiSuggest::CategoryProject && !projects.is_empty();
+        let want_project =
+            settings.ai_suggest == AiSuggest::CategoryProject && !projects.is_empty();
 
         let previous = self.previous_category(&entry);
         let features = features::extract(
             entry.started_at,
             entry.ended_at,
             &segments,
-            previous.as_ref().map(|(category, start, end)| PreviousEntry {
-                category,
-                started_at: *start,
-                ended_at: *end,
-            }),
+            previous
+                .as_ref()
+                .map(|(category, start, end)| PreviousEntry {
+                    category,
+                    started_at: *start,
+                    ended_at: *end,
+                }),
         );
 
         // T0
@@ -540,11 +546,8 @@ impl Worker {
                 None
             }
         };
-        let pool = store::labeled_pool(
-            &self.conn,
-            now.saturating_sub(knn::LOOKBACK_MS),
-            &entry.id,
-        )?;
+        let pool =
+            store::labeled_pool(&self.conn, now.saturating_sub(knn::LOOKBACK_MS), &entry.id)?;
         let neighbors = vector
             .as_deref()
             .map(|v| knn::nearest(v, &pool, knn::K))
@@ -625,7 +628,11 @@ impl Worker {
             .map(|c| (c.id.as_str(), c.name.as_str()))
             .collect();
         let name = |label: &Label| match label {
-            Some(id) => names.get(id.as_str()).copied().unwrap_or("Unknown").to_string(),
+            Some(id) => names
+                .get(id.as_str())
+                .copied()
+                .unwrap_or("Unknown")
+                .to_string(),
             None => "No project".to_string(),
         };
         let category_decision = arbiter::decide(
@@ -703,9 +710,7 @@ impl Worker {
             description: Option<String>,
             samples: u32,
         }
-        let choice = |c: &&Choice| {
-            json!({ "id": c.id, "name": c.name, "description": c.description, "hint": c.hint })
-        };
+        let choice = |c: &&Choice| json!({ "id": c.id, "name": c.name, "description": c.description, "hint": c.hint });
         let mut params = json!({
             "features": request.features,
             "categories": request.categories.iter().map(choice).collect::<Vec<Value>>(),
@@ -751,7 +756,10 @@ impl Worker {
         }
         for field in [Field::Category, Field::Project] {
             if let Err(error) = self.retrain(field) {
-                eprintln!("ai worker: retraining the {} model failed: {error}", field.as_str());
+                eprintln!(
+                    "ai worker: retraining the {} model failed: {error}",
+                    field.as_str()
+                );
             }
         }
     }
@@ -917,11 +925,8 @@ fn persist(
     }
 
     let threshold = f64::from(settings.auto_accept_percent) / 100.0;
-    let clears = |decision: &Option<Decision>| {
-        decision
-            .as_ref()
-            .is_some_and(|d| d.confidence >= threshold)
-    };
+    let clears =
+        |decision: &Option<Decision>| decision.as_ref().is_some_and(|d| d.confidence >= threshold);
     let untouched = category_id.is_none() && project_id.is_none();
     let auto = settings.auto_accept
         && untouched
@@ -1191,7 +1196,16 @@ mod tests {
     #[test]
     fn a_confident_suggestion_auto_approves() {
         let conn = db();
-        persist(&conn, "e1", &outcome(0.97), None, "v", &Settings::default(), 5).unwrap();
+        persist(
+            &conn,
+            "e1",
+            &outcome(0.97),
+            None,
+            "v",
+            &Settings::default(),
+            5,
+        )
+        .unwrap();
         let (status, category, by, description) = entry(&conn);
         assert_eq!(status, "approved");
         assert_eq!(category.as_deref(), Some("coding"));
@@ -1206,7 +1220,16 @@ mod tests {
     #[test]
     fn a_medium_suggestion_prefills_and_waits_for_review() {
         let conn = db();
-        persist(&conn, "e1", &outcome(0.7), None, "v", &Settings::default(), 5).unwrap();
+        persist(
+            &conn,
+            "e1",
+            &outcome(0.7),
+            None,
+            "v",
+            &Settings::default(),
+            5,
+        )
+        .unwrap();
         let (status, category, by, _) = entry(&conn);
         assert_eq!(status, "pending");
         assert_eq!(category.as_deref(), Some("coding"));
@@ -1216,7 +1239,16 @@ mod tests {
     #[test]
     fn a_low_suggestion_preselects_nothing() {
         let conn = db();
-        persist(&conn, "e1", &outcome(0.4), None, "v", &Settings::default(), 5).unwrap();
+        persist(
+            &conn,
+            "e1",
+            &outcome(0.4),
+            None,
+            "v",
+            &Settings::default(),
+            5,
+        )
+        .unwrap();
         let (status, category, _, _) = entry(&conn);
         assert_eq!(status, "pending");
         assert_eq!(category, None);
@@ -1230,7 +1262,16 @@ mod tests {
             [],
         )
         .unwrap();
-        persist(&conn, "e1", &outcome(0.99), None, "v", &Settings::default(), 5).unwrap();
+        persist(
+            &conn,
+            "e1",
+            &outcome(0.99),
+            None,
+            "v",
+            &Settings::default(),
+            5,
+        )
+        .unwrap();
         let (status, category, _, description) = entry(&conn);
         assert_eq!(status, "pending");
         assert_eq!(category.as_deref(), Some("design"));

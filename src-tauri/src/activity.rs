@@ -1610,7 +1610,10 @@ impl ActivityStore {
         }
 
         // An open entry whose segments all moved elsewhere no longer exists.
-        for stale in existing.iter().filter(|e| is_open(e) && !kept.contains(&e.id)) {
+        for stale in existing
+            .iter()
+            .filter(|e| is_open(e) && !kept.contains(&e.id))
+        {
             tx.execute(
                 "UPDATE time_entries SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2;",
                 params![now as i64, stale.id],
@@ -2279,7 +2282,9 @@ mod tests {
     /// first two blocks close (target 30 min reached on an app switch).
     fn tracked_morning(store: &mut ActivityStore) {
         store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
-        store.tick(sample("Slack", "#general"), 0, 20 * MIN).unwrap();
+        store
+            .tick(sample("Slack", "#general"), 0, 20 * MIN)
+            .unwrap();
         store.tick(sample("Code", "main.rs"), 0, 35 * MIN).unwrap();
     }
 
@@ -2456,7 +2461,11 @@ mod tests {
             store.approve_time_entries(&[id], "user", 2).unwrap();
         }
         let third = suggested_entry(&mut store, 200 * MIN, "coding", "figma.com");
-        assert!(store.get_entry_detail(&third).unwrap().rule_suggestion.is_none());
+        assert!(store
+            .get_entry_detail(&third)
+            .unwrap()
+            .rule_suggestion
+            .is_none());
 
         set_category(&mut store, &third, "design");
         let offer = store
@@ -2469,7 +2478,11 @@ mod tests {
         assert_eq!(offer.corrections, 3);
 
         store.resolve_rule_suggestion(&offer, false, 3).unwrap();
-        assert!(store.get_entry_detail(&third).unwrap().rule_suggestion.is_none());
+        assert!(store
+            .get_entry_detail(&third)
+            .unwrap()
+            .rule_suggestion
+            .is_none());
         // A dismissed suggestion is stored disabled, so T0 never applies it.
         let rules = crate::ai::store::load_rules(&store.conn).unwrap();
         assert!(rules.is_empty());

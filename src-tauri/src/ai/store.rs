@@ -81,14 +81,15 @@ pub fn enqueue(conn: &Connection, entry_id: &str, kind: &str, now: u64) -> Resul
     Ok(())
 }
 
-/// Queues every pending entry in the range that has never been classified.
+/// Queues unclassified closed auto entries and blank manual sessions after they end.
 /// Returns how many were queued.
 pub fn enqueue_unclassified(conn: &Connection, start: u64, end: u64, now: u64) -> Result<usize> {
     let ids: Vec<String> = {
         let mut stmt = conn
             .prepare(
                 "SELECT e.id FROM time_entries e
-                 WHERE e.deleted_at IS NULL AND e.status = 'pending' AND e.source = 'auto'
+                 WHERE e.deleted_at IS NULL AND e.status = 'pending'
+                   AND (e.source = 'auto' OR (e.source = 'manual' AND e.description = '' AND e.ended_at <= ?3))
                    AND e.ended_at >= ?1 AND e.started_at <= ?2
                    AND NOT EXISTS (SELECT 1 FROM suggestions s WHERE s.entry_id = e.id)
                    AND NOT EXISTS (
@@ -97,7 +98,44 @@ pub fn enqueue_unclassified(conn: &Connection, start: u64, end: u64, now: u64) -
             )
             .map_err(err)?;
         let rows = stmt
-            .query_map(params![start as i64, end as i64], |row| row.get(0))
+            .query_map(params![start as i64, end as i64, now as i64], |row| {
+                row.get(0)
+            })
+            .map_err(err)?;
+        rows.collect::<rusqlite::Result<_>>().map_err(err)?
+    };
+    for id in &ids {
+        enqueue(conn, id, JOB_CLASSIFY, now)?;
+    }
+    Ok(ids.len())
+}
+
+/// Queue a live session at 30 minutes, then each 15-minute milestone.
+/// Only freshly rebuilt open entries qualify; old/closed sessions never poll.
+pub fn enqueue_live_due(conn: &Connection, now: u64) -> Result<usize> {
+    const MINUTE: u64 = 60_000;
+    let ids: Vec<String> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT e.id FROM time_entries e
+             LEFT JOIN classify_jobs j ON j.entry_id = e.id AND j.kind = 'classify'
+             WHERE e.deleted_at IS NULL AND e.status = 'building' AND e.source = 'auto'
+               AND e.ended_at >= ?1 AND e.started_at <= ?2
+               AND (j.id IS NULL OR (j.state NOT IN ('queued', 'running')
+                    AND j.created_at < e.started_at + 30 * ?3
+                      + ((?4 - e.started_at - 30 * ?3) / (15 * ?3)) * 15 * ?3));",
+            )
+            .map_err(err)?;
+        let rows = stmt
+            .query_map(
+                params![
+                    now.saturating_sub(2 * MINUTE) as i64,
+                    now.saturating_sub(30 * MINUTE) as i64,
+                    MINUTE as i64,
+                    now as i64
+                ],
+                |row| row.get(0),
+            )
             .map_err(err)?;
         rows.collect::<rusqlite::Result<_>>().map_err(err)?
     };

@@ -1,7 +1,7 @@
 /**
  * Vertical timeline geometry shared by the Day and Week views.
  *
- * The Day view places time by *elapsed* hours since local midnight and
+ * The Day view places time by *elapsed* hours since local 5 AM and
  * labels its gutter from real timestamps, so a DST day renders as 23 or 25
  * hours (the repeated 1 AM shows twice). The Week view shares one gutter
  * across seven columns, so it places time by wall-clock hour instead.
@@ -51,9 +51,10 @@ export function timelineFor(
   placement: Placement,
   hourHeight: number,
   dayHours = 24,
+  fullDay = false,
 ): Timeline {
-  let startHour = DEFAULT_START;
-  let endHour = DEFAULT_END;
+  let startHour = fullDay ? 0 : DEFAULT_START;
+  let endHour = fullDay ? dayHours : DEFAULT_END;
   for (const span of spans) {
     const from = hourOffset(span.start, span.dayStart, placement);
     const to = hourOffset(span.end, span.dayStart, placement);

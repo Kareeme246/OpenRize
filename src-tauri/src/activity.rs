@@ -1516,15 +1516,20 @@ impl ActivityStore {
         if new_entry.ended_at <= new_entry.started_at {
             return Err("Entry end must be after its start".to_string());
         }
-        if new_entry.description.trim().is_empty() {
+        let unclassified = new_entry.description.trim().is_empty()
+            && new_entry.category_id.is_none()
+            && new_entry.project_id.is_none();
+        if new_entry.description.trim().is_empty() && !unclassified {
             return Err("Entry description cannot be empty".to_string());
         }
         let id = uuid::Uuid::now_v7().to_string();
         let billable = new_entry.billable.unwrap_or(false) as i64;
+        let status = if unclassified { "pending" } else { "approved" };
+        let approved_by = if unclassified { None } else { Some("user") };
 
         self.conn.execute(
             "INSERT INTO time_entries (id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, created_at, updated_at, description_origin)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'approved', 'user', 'manual', ?7, ?8, ?8, 'user');",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'manual', ?9, ?10, ?10, 'user');",
             params![
                 id,
                 new_entry.started_at as i64,
@@ -1532,14 +1537,20 @@ impl ActivityStore {
                 new_entry.description,
                 new_entry.category_id,
                 new_entry.project_id,
+                status,
+                approved_by,
                 billable,
                 now as i64,
             ],
         ).map_err(|e| e.to_string())?;
 
         self.log_event(&id, "created", "user", None, now);
-        // A hand-made entry is a labeled example: give it a vector for kNN.
-        crate::ai::store::enqueue(&self.conn, &id, crate::ai::store::JOB_EMBED, now)?;
+        if unclassified && new_entry.ended_at <= now {
+            crate::ai::store::enqueue(&self.conn, &id, crate::ai::store::JOB_CLASSIFY, now)?;
+        } else if !unclassified {
+            // A labeled hand-made entry contributes to kNN.
+            crate::ai::store::enqueue(&self.conn, &id, crate::ai::store::JOB_EMBED, now)?;
+        }
 
         Ok(TimeEntry {
             id,
@@ -1548,8 +1559,13 @@ impl ActivityStore {
             description: new_entry.description,
             category_id: new_entry.category_id,
             project_id: new_entry.project_id,
-            status: "approved".to_string(),
-            approved_by: Some("user".to_string()),
+            status: if unclassified && new_entry.ended_at <= now {
+                "processing"
+            } else {
+                status
+            }
+            .to_string(),
+            approved_by: approved_by.map(str::to_string),
             source: "manual".to_string(),
             billable: billable != 0,
             invoice_id: None,
@@ -2441,6 +2457,80 @@ mod tests {
         // The open block kept its id while it grew.
         assert_eq!(third[1].status, "building");
         assert_eq!(third[1].ended_at, 38 * MIN);
+    }
+
+    #[test]
+    fn live_classification_runs_at_thirty_then_every_fifteen_minutes() {
+        let mut store = store();
+        store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
+        let start = 1_000;
+        for minute in [29, 30, 44, 45, 59, 60] {
+            let now = start + minute * MIN;
+            store.rebuild_range(0, now, now).unwrap();
+            let count = crate::ai::store::enqueue_live_due(store.conn(), now).unwrap();
+            assert_eq!(count, usize::from(matches!(minute, 30 | 45 | 60)));
+            if count > 0 {
+                let entry = live_entries(&store).remove(0);
+                let job = crate::ai::store::next_due(store.conn(), now)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(entry.id, job.entry_id);
+                crate::ai::store::set_job_state(store.conn(), &job.id, "done", now).unwrap();
+            }
+        }
+        store.stop_session(start + 61 * MIN).unwrap();
+        store
+            .rebuild_range(0, start + 70 * MIN, start + 70 * MIN)
+            .unwrap();
+        assert_eq!(
+            crate::ai::store::enqueue_live_due(store.conn(), start + 75 * MIN).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn overnight_session_stays_in_previous_five_am_day() {
+        let mut store = store();
+        let hour = 60 * MIN;
+        store
+            .tick(sample("Code", "night.rs"), 0, 23 * hour + 30 * MIN)
+            .unwrap();
+        store.stop_session(28 * hour).unwrap();
+        let entries = store
+            .rebuild_time_entries_in_range(5 * hour, 29 * hour, 29 * hour)
+            .unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].started_at, 23 * hour + 30 * MIN);
+        assert_eq!(entries[0].ended_at, 28 * hour);
+        assert_eq!(entries[0].status, "processing");
+    }
+
+    #[test]
+    fn blank_manual_entry_is_classified_only_after_its_end() {
+        let mut store = store();
+        let entry = store
+            .create_manual_entry(
+                NewTimeEntry {
+                    started_at: 1_000,
+                    ended_at: 16 * MIN,
+                    description: String::new(),
+                    category_id: None,
+                    project_id: None,
+                    billable: None,
+                },
+                2_000,
+            )
+            .unwrap();
+        assert_eq!(entry.status, "pending");
+        store.rebuild_range(0, 20 * MIN, 15 * MIN).unwrap();
+        assert!(crate::ai::store::next_due(store.conn(), 15 * MIN)
+            .unwrap()
+            .is_none());
+        store.rebuild_range(0, 20 * MIN, 16 * MIN).unwrap();
+        assert_eq!(live_entries(&store)[0].status, "processing");
+        assert!(crate::ai::store::next_due(store.conn(), 16 * MIN)
+            .unwrap()
+            .is_some());
     }
 
     #[test]

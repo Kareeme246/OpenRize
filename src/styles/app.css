@@ -205,6 +205,16 @@ body {
   }
 }
 
+.calendar-view,
+.calendar-view * {
+  scrollbar-width: none;
+}
+
+.calendar-view::-webkit-scrollbar,
+.calendar-view *::-webkit-scrollbar {
+  display: none;
+}
+
 .entry-processing {
   background-image: linear-gradient(
     90deg,

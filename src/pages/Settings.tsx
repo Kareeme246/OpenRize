@@ -1,13 +1,21 @@
 import { openPath } from "@tauri-apps/plugin-opener";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useCallback, useState } from "react";
+import {
+  AiEffectiveness,
+  PersonalModels,
+  ThresholdSlider,
+} from "../components/AiLearning";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
   SegmentedControl,
   type SegmentedOption,
   Toggle,
 } from "../components/SegmentedControl";
 import { type Status, StatusBadge } from "../components/StatusBadge";
+import { useAiMetrics } from "../hooks/useAiMetrics";
 import { llmUnavailableReason, useAiStatus } from "../hooks/useAiStatus";
 import { useSettings } from "../hooks/useSettings";
+import * as api from "../lib/api";
 import { describeError } from "../lib/api";
 import {
   ACCENT_ORDER,
@@ -43,12 +51,11 @@ const SUGGEST_OPTIONS: SegmentedOption<AiSuggest>[] = [
   { value: "categoryProject", label: "Category + Project" },
 ];
 
-const THRESHOLD_OPTIONS = [
-  { value: 85, label: "85%" },
-  { value: 90, label: "90%" },
-  { value: 95, label: "95% (recommended)" },
-  { value: 98, label: "98%" },
-] satisfies { value: number; label: string }[];
+const METRIC_RANGES: SegmentedOption<number>[] = [
+  { value: 7, label: "7d" },
+  { value: 30, label: "30d" },
+  { value: 90, label: "90d" },
+];
 
 /** One line on which tiers are running and why. */
 function engineSummary(status: AiStatus | null): string {
@@ -253,8 +260,31 @@ export function Settings() {
   };
 
   const aiStatus = useAiStatus();
+  const [metricDays, setMetricDays] = useState(30);
+  const { metrics, error: metricsError, adopt } = useAiMetrics(metricDays);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const saveThreshold = useCallback(
+    (autoAcceptPercent: number) => update({ autoAcceptPercent }),
+    [update],
+  );
+
+  const retrain = (): void => {
+    setAiError(null);
+    api.aiRetrain().catch((cause: unknown) => setAiError(describeError(cause)));
+  };
+
+  const resetLearned = (): void => {
+    setConfirmReset(false);
+    setAiError(null);
+    api
+      .aiResetLearned(metricDays)
+      .then(adopt)
+      .catch((cause: unknown) => setAiError(describeError(cause)));
+  };
+
   const trayOff = !settings.trayEnabled;
-  const problem = error ?? openError;
+  const problem = error ?? openError ?? aiError ?? metricsError;
 
   return (
     <main className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-5.5">
@@ -367,22 +397,84 @@ export function Settings() {
             onChange={(autoAccept) => update({ autoAccept })}
           />
         </SettingRow>
-        <SettingRow
+        <SettingBlock
           title="Auto-accept threshold"
-          description="Minimum confidence for an entry to skip review"
+          description="Minimum calibrated confidence for an entry to skip review"
         >
-          <Select
-            label="Auto-accept threshold"
+          <ThresholdSlider
             value={settings.autoAcceptPercent}
-            options={THRESHOLD_OPTIONS}
-            onChange={(autoAcceptPercent) => update({ autoAcceptPercent })}
+            disabled={!settings.autoAccept}
+            metrics={metrics}
+            calibrated={aiStatus?.calibrated ?? false}
+            onChange={saveThreshold}
           />
-        </SettingRow>
+        </SettingBlock>
         <CustomInstructions
           value={settings.aiCustomPrompt}
           onSave={(aiCustomPrompt) => update({ aiCustomPrompt })}
         />
       </SettingGroup>
+
+      <SettingGroup title="AI effectiveness">
+        <div className="flex items-center justify-between gap-4 border-b border-line px-4 py-3">
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium text-fg">
+              How suggestions are doing
+            </div>
+            <div className="text-[11.5px] text-fg-faint">
+              Measured on your own reviews, on this Mac
+            </div>
+          </div>
+          <SegmentedControl
+            name="ai-metrics-range"
+            value={metricDays}
+            options={METRIC_RANGES}
+            onChange={setMetricDays}
+          />
+        </div>
+        <div className="border-b border-line px-4 py-3">
+          {metrics === null ? (
+            <p className="text-[11.5px] text-fg-faint">Loading…</p>
+          ) : (
+            <AiEffectiveness metrics={metrics} status={aiStatus} />
+          )}
+        </div>
+        <SettingBlock
+          title="Personal model"
+          description="Classifiers trained on your approved entries"
+        >
+          {metrics === null ? (
+            <p className="text-[11.5px] text-fg-faint">Loading…</p>
+          ) : (
+            <PersonalModels
+              metrics={metrics}
+              status={aiStatus}
+              onRetrain={retrain}
+            />
+          )}
+        </SettingBlock>
+        <SettingRow
+          title="Reset learned data"
+          description="Forget the personal models, calibration, and similar-entry index. Entries, categories, projects, and rules stay."
+        >
+          <button
+            type="button"
+            onClick={() => setConfirmReset(true)}
+            className="shrink-0 rounded-lg border border-danger/40 bg-danger-soft px-3 py-1.5 text-[12px] font-medium text-danger hover:bg-danger/20"
+          >
+            Reset…
+          </button>
+        </SettingRow>
+      </SettingGroup>
+      {confirmReset && (
+        <ConfirmDialog
+          title="Reset learned data?"
+          body="OpenRize forgets its personal models, calibration, and the index of similar entries. Your entries, categories, projects, and rules are kept. Suggestions start over from Apple's on-device model and your rules, and confidence is capped at 90% again until you review 50 more."
+          confirmLabel="Reset learned data"
+          onConfirm={resetLearned}
+          onCancel={() => setConfirmReset(false)}
+        />
+      )}
 
       <SettingGroup title="Notifications">
         <SettingRow

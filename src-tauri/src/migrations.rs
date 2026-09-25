@@ -256,6 +256,48 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
     }
 
+    let version_after_v3: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
+
+    if version_after_v3 < 4 {
+        let tx = conn.transaction()?;
+        migrate_v4(&tx)?;
+        tx.execute("PRAGMA user_version = 4;", [])?;
+        tx.commit()?;
+    }
+
+    Ok(())
+}
+
+fn has_column(tx: &rusqlite::Transaction<'_>, table: &str, column: &str) -> Result<bool> {
+    let mut stmt = tx.prepare(&format!("PRAGMA table_info({table});"))?;
+    let cols = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for col in cols {
+        if col? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// P4: the learning loop. Suggestions keep the score calibration is fitted
+/// on and the tier that decided them (for the AI effectiveness metrics).
+fn migrate_v4(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+    // The arbiter's blended score before calibration. NULL on rows written
+    // before P4, which calibration therefore skips.
+    if !has_column(tx, "suggestions", "raw_confidence")? {
+        tx.execute(
+            "ALTER TABLE suggestions ADD COLUMN raw_confidence REAL;",
+            [],
+        )?;
+    }
+    // rule | personal | model. NULL before P4; readers derive it from engine.
+    if !has_column(tx, "suggestions", "tier")? {
+        tx.execute("ALTER TABLE suggestions ADD COLUMN tier TEXT;", [])?;
+    }
+    tx.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_suggestions_created_at ON suggestions (created_at);
+         CREATE INDEX IF NOT EXISTS idx_model_artifacts_kind ON model_artifacts (kind, active, trained_at);",
+    )?;
     Ok(())
 }
 
@@ -358,7 +400,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 3);
+        assert_eq!(v, 4);
 
         let cat_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM categories;", [], |r| r.get(0))
@@ -389,10 +431,12 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 3);
+        assert_eq!(v, 4);
 
-        // Check new column exists
+        // Check new columns exist
         conn.execute("SELECT bundle_id, url, entry_id FROM segments LIMIT 1;", [])
+            .unwrap();
+        conn.execute("SELECT raw_confidence, tier FROM suggestions LIMIT 1;", [])
             .unwrap();
     }
 }

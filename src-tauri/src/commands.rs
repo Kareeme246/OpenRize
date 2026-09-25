@@ -4,6 +4,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::activity::{self, ActivitySnapshot};
+use crate::ai::metrics::AiMetrics;
 use crate::ai::{self, AiRuntime, AiStatus};
 use crate::models::{
     AppRecord, Category, Client, EntryDetail, NewCategory, NewClient, NewProject, NewTimeEntry,
@@ -444,6 +445,58 @@ pub fn resolve_rule_suggestion(
     let state = app.state::<AppState>();
     let mut store = state.activity.lock().map_err(|e| e.to_string())?;
     store.resolve_rule_suggestion(&suggestion, accept, now)
+}
+
+// --- P4: Learning loop -----------------------------------------------------
+
+/// Settings → Categories & AI: effectiveness, calibration, the threshold
+/// preview, and personal-model versions over the last `days` days.
+#[tauri::command]
+pub fn ai_metrics(app: AppHandle, days: u32) -> Result<AiMetrics, String> {
+    let state = app.state::<AppState>();
+    let reader = state.activity_reader.lock().map_err(|e| e.to_string())?;
+    ai::metrics::metrics(&reader, days, now_epoch_ms())
+}
+
+/// "Retrain now": queues a personal-model retrain that skips the idle/power
+/// gate. The result arrives as `ai-status-changed`.
+#[tauri::command]
+pub fn ai_retrain(app: AppHandle) -> AiStatus {
+    ai::update_status(&app, |s| {
+        s.retrain = "queued".to_string();
+        s.retrain_note = None;
+    });
+    app.state::<AiRuntime>().request_retrain();
+    app.state::<AiRuntime>().status()
+}
+
+/// "Reset learned data": forgets the personal models, calibration, and the
+/// kNN store, keeping entries, categories, projects, and rules. Returns the
+/// updated metrics.
+#[tauri::command]
+pub fn ai_reset_learned(app: AppHandle, days: u32) -> Result<AiMetrics, String> {
+    let now = now_epoch_ms();
+    let metrics = {
+        let state = app.state::<AppState>();
+        let store = state.activity.lock().map_err(|e| e.to_string())?;
+        let paths = ai::store::reset_learned(store.conn(), now)?;
+        for path in paths {
+            if let Err(error) = std::fs::remove_dir_all(&path) {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    eprintln!("could not delete model {path}: {error}");
+                }
+            }
+        }
+        ai::metrics::metrics(store.conn(), days, now)?
+    };
+    ai::update_status(&app, |s| {
+        s.outcomes = 0;
+        s.calibrated = false;
+        s.personal_model = false;
+        s.retrain_note = None;
+    });
+    ai::nudge(&app);
+    Ok(metrics)
 }
 
 // --- Preferences -------------------------------------------------------

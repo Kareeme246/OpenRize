@@ -1,6 +1,6 @@
 //! The classification worker: one background thread that keeps recent
 //! entries built, drains `classify_jobs` one job at a time, owns the Swift
-//! sidecar, and retrains the personal model when enough new labels exist.
+//! sidecar, retrains the personal models, and refits confidence calibration.
 //!
 //! Reads use the worker's own SQLite connection, so a slow query never
 //! blocks the 1 Hz sampler. Writes go through the `ActivityStore` writer and
@@ -18,14 +18,14 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use super::arbiter::{self, Decision, Evidence, Label, Votes};
+use super::calibration::Calibrator;
 use super::features::{self, EntryFeatures, PreviousEntry};
 use super::knn;
+use super::power::Conditions;
 use super::rules;
 use super::sidecar::{self, Capabilities, Sidecar};
 use super::store::{self, Job, JOB_CLASSIFY};
-use super::{
-    update_status, AiRuntime, Field, COLD_START_OUTCOMES, EVENT_SUGGESTION_READY, PREFILL_THRESHOLD,
-};
+use super::{update_status, AiRuntime, Field, EVENT_SUGGESTION_READY, PREFILL_THRESHOLD};
 use crate::activity::{self, ActivitySegment};
 use crate::models::TimeEntry;
 use crate::settings::{AiSuggest, Settings};
@@ -40,8 +40,17 @@ const REBUILD_DEBOUNCE: Duration = Duration::from_secs(3);
 /// finish downloading, or the user may turn Apple Intelligence on).
 const REPROBE_EVERY: Duration = Duration::from_secs(30 * 60);
 const RETRAIN_CHECK_EVERY: Duration = Duration::from_secs(10 * 60);
-/// New labeled entries needed before retraining the personal model.
-const RETRAIN_AFTER_LABELS: u32 = 20;
+/// New labeled entries that trigger retraining the personal models, and the
+/// fewest a model is trained on.
+pub const RETRAIN_AFTER_LABELS: u32 = 20;
+/// With fewer new labels, the models still retrain once this long after the
+/// last attempt ("nightly").
+const RETRAIN_AT_LEAST_EVERY_MS: u64 = 24 * 60 * 60 * 1000;
+/// One entry in `HOLDOUT_ONE_IN` is held out to judge a retrained model.
+const HOLDOUT_ONE_IN: u64 = 5;
+const CALIBRATION_CHECK_EVERY: Duration = Duration::from_secs(60);
+/// New verdicts that trigger refitting the calibration curve.
+const CALIBRATION_REFIT_AFTER: u32 = 10;
 /// With more choices than this, only the fast tiers' top picks are sent to
 /// the model, to stay inside its 4,096-token context.
 const MAX_LLM_CATEGORIES: usize = 16;
@@ -80,7 +89,18 @@ struct Worker {
     last_rebuild: Option<Instant>,
     last_probe: Option<Instant>,
     last_retrain_check: Option<Instant>,
+    last_calibration_check: Option<Instant>,
     applied: Option<Capabilities>,
+}
+
+/// What one personal-model retrain did.
+enum Retrained {
+    /// Not enough labeled data to train on yet.
+    Skipped(String),
+    /// The new model beat (or tied) the old one on the holdout and replaced it.
+    Swapped { accuracy: Option<f64> },
+    /// The new model did worse on the holdout; the old one stays.
+    Kept { new: f64, old: f64 },
 }
 
 impl Worker {
@@ -93,6 +113,7 @@ impl Worker {
             last_rebuild: None,
             last_probe: None,
             last_retrain_check: None,
+            last_calibration_check: None,
             applied: None,
         }
     }
@@ -121,6 +142,7 @@ impl Worker {
             }
             self.reprobe_if_due();
             self.retrain_if_due();
+            self.refit_calibration_if_due(false);
             self.refresh_counts();
 
             let due_now = store::next_due(&self.conn, now_epoch_ms())
@@ -244,7 +266,11 @@ impl Worker {
 
     fn refresh_counts(&self) {
         let queued = store::queued_count(&self.conn).unwrap_or(0);
-        let outcomes = store::outcome_count(&self.conn).unwrap_or(0);
+        let outcomes = store::outcome_count(&self.conn, now_epoch_ms()).unwrap_or(0);
+        let calibrated = store::active_calibration(&self.conn)
+            .ok()
+            .flatten()
+            .is_some();
         let personal = store::active_artifact(&self.conn, Field::Category.as_str())
             .ok()
             .flatten()
@@ -254,7 +280,7 @@ impl Worker {
         update_status(&self.app, |s| {
             s.queued = queued;
             s.outcomes = outcomes;
-            s.calibrated = outcomes >= COLD_START_OUTCOMES;
+            s.calibrated = calibrated;
             s.personal_model = personal;
             s.sidecar = if !installed {
                 "unavailable"
@@ -569,7 +595,7 @@ impl Worker {
             .then(|| self.personal_predict(Field::Project, &features.content))
             .flatten();
         let labeled = store::labeled_count(&self.conn)?;
-        let outcomes = store::outcome_count(&self.conn)?;
+        let calibrator = store::active_calibration(&self.conn)?;
 
         // T2
         let t1_category = arbiter::t1_top(&category_neighbors, personal_category.as_ref(), labeled);
@@ -644,7 +670,7 @@ impl Worker {
                 llm: llm_category,
                 mentions: HashMap::new(),
                 labeled,
-                outcomes,
+                calibration: calibrator.as_ref(),
                 dominant: features.dominant.as_ref(),
             },
             &name,
@@ -659,7 +685,7 @@ impl Worker {
                     llm: llm_project,
                     mentions: mentions(&projects, &segments),
                     labeled,
-                    outcomes,
+                    calibration: calibrator.as_ref(),
                     dominant: features.dominant.as_ref(),
                 },
                 &name,
@@ -743,49 +769,126 @@ impl Worker {
 
     // --- Personal model retraining -------------------------------------------
 
+    /// Retrains when "Retrain now" was pressed, or when a model is due (20+
+    /// new labels, or any new label a day after the last attempt) and the
+    /// Mac is idle, on AC power, and not in Low Power Mode. Calibration is
+    /// refit right after, since the raw scores it maps just changed.
     fn retrain_if_due(&mut self) {
-        if self
-            .last_retrain_check
-            .is_some_and(|at| at.elapsed() < RETRAIN_CHECK_EVERY)
+        let requested = self.app.state::<AiRuntime>().take_retrain_request();
+        if !requested
+            && self
+                .last_retrain_check
+                .is_some_and(|at| at.elapsed() < RETRAIN_CHECK_EVERY)
         {
             return;
         }
         self.last_retrain_check = Some(Instant::now());
         if !self.sidecar.is_installed() {
+            if requested {
+                update_status(&self.app, |s| {
+                    s.retrain = "idle".to_string();
+                    s.retrain_note = Some("On-device ML isn't available in this build".to_string());
+                });
+            }
             return;
         }
-        for field in [Field::Category, Field::Project] {
-            if let Err(error) = self.retrain(field) {
-                eprintln!(
-                    "ai worker: retraining the {} model failed: {error}",
-                    field.as_str()
-                );
+
+        let now = now_epoch_ms();
+        let due: Vec<Field> = [Field::Category, Field::Project]
+            .into_iter()
+            .filter(|field| requested || self.retrain_due(*field, now))
+            .collect();
+        if due.is_empty() {
+            return;
+        }
+        if !requested {
+            if let Some(why) = Conditions::read().blocker() {
+                update_status(&self.app, |s| {
+                    s.retrain_note = Some(format!("Retrain due, {why}"));
+                });
+                return;
             }
         }
+
+        update_status(&self.app, |s| s.retrain = "running".to_string());
+        let mut notes = Vec::new();
+        for field in due {
+            let what = format!("{} model", field.as_str());
+            match self.retrain(field) {
+                Ok(Retrained::Skipped(why)) if requested || field == Field::Category => {
+                    notes.push(format!("{}: {why}", capitalize(&what)))
+                }
+                Ok(Retrained::Skipped(_)) => {}
+                Ok(Retrained::Swapped { accuracy }) => notes.push(match accuracy {
+                    Some(accuracy) => format!(
+                        "{} updated ({}% on the holdout)",
+                        capitalize(&what),
+                        (accuracy * 100.0).round()
+                    ),
+                    None => format!("{} updated", capitalize(&what)),
+                }),
+                Ok(Retrained::Kept { new, old }) => notes.push(format!(
+                    "Kept the current {what}: the new one scored {}% vs {}% on the holdout",
+                    (new * 100.0).round(),
+                    (old * 100.0).round()
+                )),
+                Err(error) => {
+                    eprintln!("ai worker: retraining the {what} failed: {error}");
+                    notes.push(format!("Retraining the {what} failed: {error}"));
+                }
+            }
+        }
+        self.refit_calibration_if_due(true);
+        let note = (!notes.is_empty()).then(|| notes.join(" · "));
+        update_status(&self.app, |s| {
+            s.retrain = "idle".to_string();
+            s.retrain_note = note;
+        });
+        self.refresh_counts();
     }
 
-    /// Trains a new personal classifier on 80% of the labeled entries and
-    /// swaps it in only if it scores at least as well as the current one on
-    /// the same 20% holdout.
-    fn retrain(&mut self, field: Field) -> Result<(), String> {
+    fn retrain_due(&self, field: Field, now: u64) -> bool {
+        let last = store::last_trained_at(&self.conn, field.as_str())
+            .ok()
+            .flatten()
+            .unwrap_or(0);
+        let new = store::labeled_since(&self.conn, last).unwrap_or(0);
+        new >= RETRAIN_AFTER_LABELS
+            || (new > 0 && now.saturating_sub(last) >= RETRAIN_AT_LEAST_EVERY_MS)
+    }
+
+    /// Trains a new personal classifier on the approved entries minus a 20%
+    /// holdout and swaps it in only if it scores at least as well as the
+    /// current one on that same holdout. Every attempt is versioned in
+    /// `model_artifacts`.
+    fn retrain(&mut self, field: Field) -> Result<Retrained, String> {
         let kind = field.as_str();
-        let active = store::active_artifact(&self.conn, kind)?;
-        let since = active.as_ref().map_or(0, |a| a.trained_at);
-        if store::labeled_since(&self.conn, since)? < RETRAIN_AFTER_LABELS {
-            return Ok(());
-        }
+        let epoch = store::learning_since(&self.conn)?;
         let rows = store::training_rows(&self.conn, field)?;
         let labels: HashSet<&str> = rows.iter().map(|(_, _, label)| label.as_str()).collect();
-        if labels.len() < 2 || rows.len() < RETRAIN_AFTER_LABELS as usize {
-            return Ok(());
+        if rows.len() < RETRAIN_AFTER_LABELS as usize {
+            return Ok(Retrained::Skipped(format!(
+                "needs {RETRAIN_AFTER_LABELS} reviewed entries, has {}",
+                rows.len()
+            )));
         }
+        if labels.len() < 2 {
+            let what = match field {
+                Field::Category => "at least two categories",
+                Field::Project => "at least two projects (No project counts as one)",
+            };
+            return Ok(Retrained::Skipped(format!(
+                "needs reviewed entries in {what}"
+            )));
+        }
+        let active = store::active_artifact(&self.conn, kind)?;
 
         std::fs::create_dir_all(&self.ml_dir).map_err(|e| e.to_string())?;
         let dataset = self.ml_dir.join(format!("{kind}-train.jsonl"));
         let mut file = std::fs::File::create(&dataset).map_err(|e| e.to_string())?;
         let mut holdout: Vec<(&str, &str)> = Vec::new();
         for (entry_id, text, label) in &rows {
-            let is_holdout = text_hash(entry_id).ends_with(['0', '5', 'a']);
+            let is_holdout = in_holdout(entry_id);
             if is_holdout {
                 holdout.push((text, label));
             }
@@ -804,12 +907,13 @@ impl Worker {
         let out = self
             .ml_dir
             .join(format!("{kind}-{}.mlmodelc", uuid::Uuid::now_v7()));
-        let trained: Trained = self.sidecar.call(
+        let trained: Result<Trained, String> = self.sidecar.call(
             "train",
             json!({ "dataset": dataset, "out": out }),
             sidecar::TIMEOUT_TRAIN,
-        )?;
+        );
         let _ = std::fs::remove_file(&dataset);
+        let trained = trained?;
 
         let old_accuracy = match &active {
             Some(artifact) if !holdout.is_empty() => {
@@ -822,7 +926,12 @@ impl Worker {
             _ => true,
         };
         let now = now_epoch_ms();
-        self.write(|conn| {
+        let recorded = self.write(|conn| {
+            // "Reset learned data" ran while this model trained on the old
+            // data: drop it instead of bringing that data back.
+            if store::learning_since(conn)? != epoch {
+                return Ok(false);
+            }
             store::insert_artifact(
                 conn,
                 kind,
@@ -831,8 +940,13 @@ impl Worker {
                 trained.holdout_accuracy,
                 better,
                 now,
-            )
+            )?;
+            Ok(true)
         })?;
+        if !recorded {
+            let _ = std::fs::remove_dir_all(&trained.path);
+            return Ok(Retrained::Skipped("learned data was reset".to_string()));
+        }
         let retired = if better {
             active.map(|a| a.path)
         } else {
@@ -841,7 +955,58 @@ impl Worker {
         if let Some(path) = retired {
             let _ = std::fs::remove_dir_all(path);
         }
-        self.refresh_counts();
+        Ok(match (better, trained.holdout_accuracy, old_accuracy) {
+            (false, Some(new), Some(old)) => Retrained::Kept { new, old },
+            (_, accuracy, _) => Retrained::Swapped { accuracy },
+        })
+    }
+
+    // --- Calibration -----------------------------------------------------------
+
+    /// Refits the isotonic calibration curve once `CALIBRATION_REFIT_AFTER`
+    /// new verdicts exist (or the first time `MIN_SAMPLES` do), checked every
+    /// minute. `force` refits now, after the models changed. Fitting is pure
+    /// Rust over at most a few thousand rows, so it needs no power gate.
+    fn refit_calibration_if_due(&mut self, force: bool) {
+        if !force
+            && self
+                .last_calibration_check
+                .is_some_and(|at| at.elapsed() < CALIBRATION_CHECK_EVERY)
+        {
+            return;
+        }
+        self.last_calibration_check = Some(Instant::now());
+        if let Err(error) = self.refit_calibration(force) {
+            eprintln!("ai worker: calibration refit failed: {error}");
+        }
+    }
+
+    fn refit_calibration(&mut self, force: bool) -> Result<(), String> {
+        let now = now_epoch_ms();
+        let epoch = store::learning_since(&self.conn)?;
+        let fitted_at = store::last_trained_at(&self.conn, store::KIND_CALIBRATION)?;
+        let due = force
+            || match fitted_at {
+                None => true,
+                Some(at) => store::verdicts_since(&self.conn, at, now)? >= CALIBRATION_REFIT_AFTER,
+            };
+        if !due {
+            return Ok(());
+        }
+        let samples = store::calibration_samples(&self.conn, now)?;
+        let Some(calibrator) = Calibrator::fit(&samples) else {
+            return Ok(());
+        };
+        let saved = self.write(|conn| {
+            if store::learning_since(conn)? != epoch {
+                return Ok(false);
+            }
+            store::insert_calibration(conn, &calibrator, now)?;
+            Ok(true)
+        })?;
+        if saved {
+            update_status(&self.app, |s| s.calibrated = true);
+        }
         Ok(())
     }
 
@@ -1041,6 +1206,8 @@ fn shortlist<'a>(choices: &'a [Choice], max: usize, neighbors: &[(Label, f32)]) 
 }
 
 /// The closest approved entries, as few-shot examples for the model.
+/// Corrections come first: an entry the user had to fix is exactly where the
+/// model needs the hint.
 fn few_shot(
     neighbors: &[knn::Neighbor<'_>],
     categories: &[Choice],
@@ -1052,8 +1219,10 @@ fn few_shot(
             .and_then(|id| choices.iter().find(|c| &c.id == id))
             .map(|c| c.name.clone())
     };
-    neighbors
-        .iter()
+    let (corrected, rest): (Vec<_>, Vec<_>) = neighbors.iter().partition(|n| n.item.corrected);
+    corrected
+        .into_iter()
+        .chain(rest)
         .filter_map(|n| {
             let category = name(categories, &n.item.category_id)?;
             let project = want_project
@@ -1122,28 +1291,53 @@ fn merge_votes(into: &mut Votes, more: Votes) {
 }
 
 fn model_version(caps: Option<&Capabilities>, conn: &Connection) -> String {
-    let personal = store::active_artifact(conn, Field::Category.as_str())
-        .ok()
-        .flatten()
-        .map(|a| a.id)
-        .unwrap_or_else(|| "none".to_string());
+    let artifact = |kind: &str| {
+        store::active_artifact(conn, kind)
+            .ok()
+            .flatten()
+            .map(|a| a.id)
+            .unwrap_or_else(|| "none".to_string())
+    };
+    let calibration = artifact(store::KIND_CALIBRATION);
     match caps {
         Some(caps) => format!(
-            "fm:{}:{} emb:r{} pm:{personal}",
-            caps.os, caps.llm, caps.embed_revision
+            "fm:{}:{} emb:r{} pm:{} cal:{calibration}",
+            caps.os,
+            caps.llm,
+            caps.embed_revision,
+            artifact(Field::Category.as_str())
         ),
-        None => "rules-only".to_string(),
+        None => format!("rules-only cal:{calibration}"),
+    }
+}
+
+/// Whether an entry belongs to the 20% holdout. Keyed on the entry id, so an
+/// entry stays in (or out of) the holdout across retrains and the old and
+/// new models are always compared on data neither trained on.
+fn in_holdout(entry_id: &str) -> bool {
+    fnv1a(entry_id).is_multiple_of(HOLDOUT_ONE_IN)
+}
+
+fn capitalize(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
     }
 }
 
 /// FNV-1a, hex. Stable across Rust releases, unlike `DefaultHasher`.
 fn text_hash(text: &str) -> String {
+    format!("{:016x}", fnv1a(text))
+}
+
+fn fnv1a(text: &str) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in text.as_bytes() {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
-    format!("{hash:016x}")
+    hash
 }
 
 #[cfg(test)]
@@ -1167,9 +1361,11 @@ mod tests {
         Decision {
             value: Some(value.to_string()),
             confidence,
+            raw_confidence: confidence,
             alternatives: vec![],
             signals: vec![],
             engine: "full",
+            tier: "model",
         }
     }
 

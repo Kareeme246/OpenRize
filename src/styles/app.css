@@ -63,6 +63,12 @@
   --cat-10: #9b87df;
   --cat-11: #e97e7b;
   --cat-12: #64748b;
+
+  /* Decision tiers (Settings → AI effectiveness), fixed order rule →
+     personal → model. Validated with the dataviz palette checks. */
+  --tier-rule: #5f8fd6;
+  --tier-personal: #cc7f43;
+  --tier-model: #a07ad6;
 }
 
 :root[data-theme="light"] {
@@ -115,6 +121,10 @@
   --cat-10: #6b52c0;
   --cat-11: #c83d39;
   --cat-12: #475569;
+
+  --tier-rule: #366acb;
+  --tier-personal: #b85a20;
+  --tier-model: #7e5bc8;
 }
 
 @theme {
@@ -147,6 +157,10 @@
   --color-accent-dim: var(--accent-dim);
   --color-accent-soft: var(--accent-soft);
   --color-accent-fg: var(--accent-fg);
+
+  --color-tier-rule: var(--tier-rule);
+  --color-tier-personal: var(--tier-personal);
+  --color-tier-model: var(--tier-model);
 
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -200,4 +214,20 @@ body {
   .entry-processing {
     animation: none;
   }
+}
+
+/* Settings → auto-accept threshold. The track fill is an inline gradient. */
+.threshold-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: var(--accent);
+  border: 3px solid var(--bg-panel);
+  box-shadow: 0 0 0 1px var(--line), 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.threshold-range:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
 }

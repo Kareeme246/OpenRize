@@ -10,14 +10,17 @@
 //! - `raw = Σ w·p / Σ w` over the tiers that fired. The LLM/kNN/personal
 //!   weights move from the LLM toward the personal tiers as labeled examples
 //!   accumulate: 0.7/0.2/0.1 at cold start, 0.3/0.35/0.35 at 500+ labels.
-//! - Until `COLD_START_OUTCOMES` suggestions have a user outcome, displayed
-//!   confidence is capped at `COLD_START_CAP`. Isotonic calibration on the
-//!   outcome history (P4) replaces the cap once it exists.
+//! - The displayed confidence is `raw` mapped through the isotonic
+//!   calibrator fitted on the user's accept/reject history
+//!   (`calibration.rs`). Until one exists, it is capped at `COLD_START_CAP`.
+//! - Each decision also records the tier that carried it (rule, personal,
+//!   or model) for the AI effectiveness metrics.
 
 use std::collections::HashMap;
 
+use super::calibration::{self, Calibrator};
 use super::rules::RuleHit;
-use super::{Field, COLD_START_CAP, COLD_START_OUTCOMES};
+use super::Field;
 use crate::models::{Dominant, Signal};
 
 /// A field value. `None` is "No project" on the project field; the
@@ -57,19 +60,39 @@ pub struct Evidence<'a> {
     pub mentions: HashMap<Label, f64>,
     /// Approved, labeled entries so far (drives the weight schedule).
     pub labeled: u32,
-    /// Suggestions with a user outcome so far (drives the cold-start cap).
-    pub outcomes: u32,
+    /// The active calibration curve; `None` means cold start (capped).
+    pub calibration: Option<&'a Calibrator>,
     pub dominant: Option<&'a Dominant>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Decision {
     pub value: Label,
+    /// Displayed (calibrated) confidence.
     pub confidence: f64,
+    /// The blended score before calibration, kept so calibration can be
+    /// refit on it.
+    pub raw_confidence: f64,
     pub alternatives: Vec<(Label, f64)>,
     pub signals: Vec<Signal>,
     /// rules | full | fallback
     pub engine: &'static str,
+    /// The tier that carried the decision: rule | personal | model.
+    pub tier: &'static str,
+}
+
+pub const TIER_RULE: &str = "rule";
+pub const TIER_PERSONAL: &str = "personal";
+pub const TIER_MODEL: &str = "model";
+
+/// Which kind of evidence a distribution came from.
+#[derive(Clone, Copy, PartialEq)]
+enum Source {
+    /// kNN, the personal classifier, and project mentions: learned from the
+    /// user's own data.
+    Personal,
+    /// The Foundation Model.
+    Model,
 }
 
 /// LLM / kNN / personal weights for the given number of labeled examples.
@@ -87,10 +110,10 @@ pub fn t1_top(
     let (_, w_knn, w_personal) = weights(labeled);
     let mut tiers = Vec::new();
     if !neighbors.is_empty() {
-        tiers.push((w_knn, knn_distribution(neighbors)));
+        tiers.push((Source::Personal, w_knn, knn_distribution(neighbors)));
     }
     if let Some(personal) = personal.filter(|p| !p.is_empty()) {
-        tiers.push((w_personal, personal.clone()));
+        tiers.push((Source::Personal, w_personal, personal.clone()));
     }
     let blended = blend(&tiers);
     top_label(blended.iter().map(|(label, p)| (label, *p))).cloned()
@@ -98,12 +121,16 @@ pub fn t1_top(
 
 pub fn decide(evidence: &Evidence<'_>, name: &dyn Fn(&Label) -> String) -> Option<Decision> {
     let (w_llm, w_knn, w_personal) = weights(evidence.labeled);
-    let mut tiers: Vec<(f64, HashMap<Label, f64>)> = Vec::new();
+    let mut tiers: Vec<(Source, f64, HashMap<Label, f64>)> = Vec::new();
     if !evidence.neighbors.is_empty() {
-        tiers.push((w_knn, knn_distribution(&evidence.neighbors)));
+        tiers.push((
+            Source::Personal,
+            w_knn,
+            knn_distribution(&evidence.neighbors),
+        ));
     }
     if let Some(personal) = evidence.personal.as_ref().filter(|p| !p.is_empty()) {
-        tiers.push((w_personal, personal.clone()));
+        tiers.push((Source::Personal, w_personal, personal.clone()));
     }
     if let Some(llm) = evidence.llm.as_ref().filter(|v| v.samples > 0) {
         let share = llm
@@ -111,26 +138,20 @@ pub fn decide(evidence: &Evidence<'_>, name: &dyn Fn(&Label) -> String) -> Optio
             .iter()
             .map(|(label, count)| (label.clone(), *count as f64 / llm.samples as f64))
             .collect();
-        tiers.push((w_llm, share));
+        tiers.push((Source::Model, w_llm, share));
     }
     if !evidence.mentions.is_empty() {
-        tiers.push((MENTION_WEIGHT, evidence.mentions.clone()));
+        tiers.push((Source::Personal, MENTION_WEIGHT, evidence.mentions.clone()));
     }
     let mut blended = blend(&tiers);
     if evidence.field == Field::Category {
         blended.remove(&None);
     }
 
-    let cap = |p: f64| {
-        if evidence.outcomes < COLD_START_OUTCOMES {
-            p.min(COLD_START_CAP)
-        } else {
-            p
-        }
-    };
+    let shown = |p: f64| calibration::display(p, evidence.calibration);
 
-    let (value, confidence, engine) = if let Some(hit) = evidence.rule {
-        (hit.value.clone(), 1.0, "rules")
+    let (value, confidence, raw_confidence, engine, tier) = if let Some(hit) = evidence.rule {
+        (hit.value.clone(), 1.0, 1.0, "rules", TIER_RULE)
     } else {
         let top = top_label(blended.iter().map(|(label, p)| (label, *p)))?.clone();
         let p = blended.get(&top).copied().unwrap_or(0.0);
@@ -139,13 +160,13 @@ pub fn decide(evidence: &Evidence<'_>, name: &dyn Fn(&Label) -> String) -> Optio
         } else {
             "fallback"
         };
-        (top, cap(p), engine)
+        (top.clone(), shown(p), p, engine, carried_by(&tiers, &top))
     };
 
     let mut alternatives: Vec<(Label, f64)> = blended
         .iter()
         .filter(|(label, p)| **label != value && **p >= 0.005)
-        .map(|(label, p)| (label.clone(), cap(*p)))
+        .map(|(label, p)| (label.clone(), shown(*p)))
         .collect();
     alternatives.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     alternatives.truncate(MAX_ALTERNATIVES);
@@ -154,10 +175,29 @@ pub fn decide(evidence: &Evidence<'_>, name: &dyn Fn(&Label) -> String) -> Optio
     Some(Decision {
         value,
         confidence,
+        raw_confidence,
         alternatives,
         signals,
         engine,
+        tier,
     })
+}
+
+/// The tier whose weighted vote for `label` was largest: the Foundation
+/// Model, or the user's own data (kNN, personal model, project mentions).
+fn carried_by(tiers: &[(Source, f64, HashMap<Label, f64>)], label: &Label) -> &'static str {
+    let share = |source: Source| -> f64 {
+        tiers
+            .iter()
+            .filter(|(s, _, _)| *s == source)
+            .map(|(_, w, dist)| w * dist.get(label).copied().unwrap_or(0.0))
+            .sum()
+    };
+    if share(Source::Model) > share(Source::Personal) {
+        TIER_MODEL
+    } else {
+        TIER_PERSONAL
+    }
 }
 
 /// The "Why" line: only the signals that fired, in a fixed order.
@@ -273,13 +313,13 @@ fn knn_distribution(neighbors: &[(Label, f32)]) -> HashMap<Label, f64> {
     out
 }
 
-fn blend(tiers: &[(f64, HashMap<Label, f64>)]) -> HashMap<Label, f64> {
-    let total_weight: f64 = tiers.iter().map(|(w, _)| w).sum();
+fn blend(tiers: &[(Source, f64, HashMap<Label, f64>)]) -> HashMap<Label, f64> {
+    let total_weight: f64 = tiers.iter().map(|(_, w, _)| w).sum();
     let mut out: HashMap<Label, f64> = HashMap::new();
     if total_weight <= 0.0 {
         return out;
     }
-    for (weight, distribution) in tiers {
+    for (_, weight, distribution) in tiers {
         for (label, p) in distribution {
             *out.entry(label.clone()).or_default() += weight * p / total_weight;
         }
@@ -298,6 +338,7 @@ fn top_label<'a>(scores: impl Iterator<Item = (&'a Label, f64)>) -> Option<&'a L
 mod tests {
     use super::*;
     use crate::ai::rules::Rule;
+    use crate::ai::COLD_START_CAP;
 
     fn l(value: &str) -> Label {
         Some(value.to_string())
@@ -316,7 +357,7 @@ mod tests {
             llm: None,
             mentions: HashMap::new(),
             labeled: 0,
-            outcomes: 0,
+            calibration: None,
             dominant: None,
         }
     }
@@ -350,7 +391,7 @@ mod tests {
     }
 
     #[test]
-    fn cold_start_caps_confidence_until_enough_outcomes() {
+    fn cold_start_caps_confidence_until_a_calibrator_exists() {
         let llm = Votes {
             counts: HashMap::from([(l("coding"), 3)]),
             samples: 3,
@@ -359,11 +400,19 @@ mod tests {
             llm: Some(llm.clone()),
             ..evidence()
         };
-        assert_eq!(decide(&e, &name).unwrap().confidence, COLD_START_CAP);
+        let capped = decide(&e, &name).unwrap();
+        assert_eq!(capped.confidence, COLD_START_CAP);
+        assert_eq!(capped.raw_confidence, 1.0);
+        assert_eq!(capped.tier, TIER_MODEL);
 
+        let identity = Calibrator {
+            x: vec![0.0, 1.0],
+            y: vec![0.0, 1.0],
+            samples: 50,
+        };
         let calibrated = Evidence {
             llm: Some(llm),
-            outcomes: COLD_START_OUTCOMES,
+            calibration: Some(&identity),
             ..evidence()
         };
         let decision = decide(&calibrated, &name).unwrap();
@@ -376,10 +425,51 @@ mod tests {
     }
 
     #[test]
+    fn calibration_maps_raw_scores_for_the_pick_and_its_alternatives() {
+        // A model that is right about half as often as it claims.
+        let halve = Calibrator {
+            x: vec![0.0, 1.0],
+            y: vec![0.0, 0.5],
+            samples: 80,
+        };
+        let e = Evidence {
+            neighbors: vec![(l("research"), 1.0)],
+            llm: Some(Votes {
+                counts: HashMap::from([(l("coding"), 1)]),
+                samples: 1,
+            }),
+            calibration: Some(&halve),
+            ..evidence()
+        };
+        let decision = decide(&e, &name).unwrap();
+        assert!((decision.raw_confidence - 0.7 / 0.9).abs() < 1e-9);
+        assert!((decision.confidence - 0.35 / 0.9).abs() < 1e-9);
+        assert!((decision.alternatives[0].1 - 0.05 / 0.9).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_tier_that_carried_the_pick_is_recorded() {
+        let e = Evidence {
+            neighbors: vec![(l("coding"), 1.0), (l("coding"), 1.0)],
+            personal: Some(HashMap::from([(l("coding"), 0.9)])),
+            llm: Some(Votes {
+                counts: HashMap::from([(l("research"), 1)]),
+                samples: 1,
+            }),
+            labeled: 500,
+            ..evidence()
+        };
+        // At 500 labels kNN and the personal model (0.35 each) outvote the
+        // LLM (0.3).
+        let decision = decide(&e, &name).unwrap();
+        assert_eq!(decision.value, l("coding"));
+        assert_eq!(decision.tier, TIER_PERSONAL);
+    }
+
+    #[test]
     fn knn_votes_are_shrunk_toward_unsure() {
         let e = Evidence {
             neighbors: vec![(l("coding"), 1.0), (l("coding"), 1.0)],
-            outcomes: COLD_START_OUTCOMES,
             ..evidence()
         };
         let decision = decide(&e, &name).unwrap();
@@ -399,7 +489,6 @@ mod tests {
                 counts: HashMap::from([(l("coding"), 1)]),
                 samples: 1,
             }),
-            outcomes: COLD_START_OUTCOMES,
             ..evidence()
         };
         let decision = decide(&e, &name).unwrap();

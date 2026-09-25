@@ -21,6 +21,8 @@ pub struct Labeled {
     /// The content rendering the vector was computed from, reused as a
     /// few-shot example for the Foundation Model.
     pub features: String,
+    /// The user corrected (changed or rejected) the AI's suggestion on it.
+    pub corrected: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -83,6 +85,7 @@ mod tests {
             category_id: Some(category.to_string()),
             project_id: None,
             features: String::new(),
+            corrected: false,
         }
     }
 

@@ -31,8 +31,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       # No signing identity is configured, so this produces an unsigned
-      # .app/.dmg. The captain has decided to ship unsigned builds for now
-      # (see AGENTS.md and the release procedure in RELEASING.md).
+      # .app/.dmg.
       - run: pnpm tauri build
 
       - name: Zip the .app bundle for upload

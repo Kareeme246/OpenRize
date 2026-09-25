@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Swift sidecar build output (built by src-tauri/build.rs)
+src-tauri/swift/.build
+src-tauri/binaries

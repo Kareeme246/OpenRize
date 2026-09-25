@@ -3,6 +3,7 @@ import type { Settings, StoragePaths } from "./settings";
 import type { Timer } from "./timers";
 import type {
   ActivitySnapshot,
+  AiStatus,
   AppRecord,
   Category,
   Client,
@@ -12,6 +13,7 @@ import type {
   NewProject,
   NewTimeEntry,
   Project,
+  RuleSuggestion,
   TimeEntry,
   UpdateCategory,
   UpdateClient,
@@ -24,6 +26,10 @@ export const ACTIVITY_TICK = "activity-tick";
 export const SETTINGS_CHANGED = "settings-changed";
 export const ENTRIES_CHANGED = "entries-changed";
 export const TIMERS_CHANGED = "timers-changed";
+/** Payload: `{ entryId }`. */
+export const SUGGESTION_READY = "suggestion-ready";
+/** Payload: `AiStatus`. */
+export const AI_STATUS_CHANGED = "ai-status-changed";
 
 /** Tauri rejects with a string; React errors are Error objects. Handle both. */
 export function describeError(error: unknown): string {
@@ -193,6 +199,23 @@ export async function rebuildTimeEntries(
   endMs: number,
 ): Promise<TimeEntry[]> {
   return await invoke<TimeEntry[]>("rebuild_time_entries", { startMs, endMs });
+}
+
+// --- AI suggestions ---
+
+export async function aiStatus(): Promise<AiStatus> {
+  return await invoke<AiStatus>("ai_status");
+}
+
+export async function retryClassification(id: string): Promise<void> {
+  await invoke("retry_classification", { id });
+}
+
+export async function resolveRuleSuggestion(
+  suggestion: RuleSuggestion,
+  accept: boolean,
+): Promise<void> {
+  await invoke("resolve_rule_suggestion", { suggestion, accept });
 }
 
 // --- Apps ---

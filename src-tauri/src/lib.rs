@@ -1,4 +1,5 @@
 mod activity;
+mod ai;
 mod capture;
 mod commands;
 mod entry_builder;
@@ -85,11 +86,17 @@ pub fn run() {
                 foreground: AtomicBool::new(true),
                 settings: Mutex::new(settings),
             });
+            app.manage(ai::AiRuntime::default());
 
             if preferences.tray_enabled {
                 tray::init(app.handle(), &timers)?;
             }
             activity::spawn_sampler(app.handle().clone());
+            ai::worker::spawn(
+                app.handle().clone(),
+                dir.join(activity::DB_FILE),
+                dir.join("ml"),
+            );
             capture::register_sleep_listeners(app.handle().clone());
             spawn_retention_sweeper(app.handle().clone());
             // One sweep on startup, so a long-dormant install is cleaned before
@@ -164,6 +171,9 @@ pub fn run() {
             commands::rebuild_time_entries,
             commands::list_apps,
             commands::update_app,
+            commands::ai_status,
+            commands::retry_classification,
+            commands::resolve_rule_suggestion,
         ])
         .build(tauri::generate_context!())
         .expect("error while building OpenRize")

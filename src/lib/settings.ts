@@ -10,6 +10,8 @@
 export type Theme = "system" | "light" | "dark";
 export type Accent = "green" | "blue" | "purple" | "orange";
 export type CloseBehavior = "quit" | "hide";
+/** What the AI suggests for each entry (Rize's "Suggestion level"). */
+export type AiSuggest = "category" | "categoryProject";
 
 export interface Settings {
   theme: Theme;
@@ -18,6 +20,12 @@ export interface Settings {
   trayEnabled: boolean;
   /** Activity history older than this many days. 0 = keep forever. */
   retentionDays: number;
+  aiSuggest: AiSuggest;
+  /** Approve entries whose every suggested field clears the threshold. */
+  autoAccept: boolean;
+  autoAcceptPercent: number;
+  /** Appended to the on-device model's instructions. */
+  aiCustomPrompt: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -26,6 +34,10 @@ export const DEFAULT_SETTINGS: Settings = {
   closeBehavior: "hide",
   trayEnabled: true,
   retentionDays: 0,
+  aiSuggest: "categoryProject",
+  autoAccept: true,
+  autoAcceptPercent: 95,
+  aiCustomPrompt: "",
 };
 
 export interface AccentPalette {

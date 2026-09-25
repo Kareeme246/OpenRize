@@ -6,15 +6,18 @@ import {
   Toggle,
 } from "../components/SegmentedControl";
 import { type Status, StatusBadge } from "../components/StatusBadge";
+import { llmUnavailableReason, useAiStatus } from "../hooks/useAiStatus";
 import { useSettings } from "../hooks/useSettings";
 import { describeError } from "../lib/api";
 import {
   ACCENT_ORDER,
   ACCENTS,
   type Accent,
+  type AiSuggest,
   type CloseBehavior,
   type Theme,
 } from "../lib/settings";
+import type { AiStatus } from "../lib/types";
 
 const THEME_OPTIONS: SegmentedOption<Theme>[] = [
   { value: "system", label: "System" },
@@ -34,6 +37,32 @@ const CLOSE_OPTIONS: SegmentedOption<CloseBehavior>[] = [
   { value: "hide", label: "Hide to menu bar" },
   { value: "quit", label: "Quit" },
 ];
+
+const SUGGEST_OPTIONS: SegmentedOption<AiSuggest>[] = [
+  { value: "category", label: "Category" },
+  { value: "categoryProject", label: "Category + Project" },
+];
+
+const THRESHOLD_OPTIONS = [
+  { value: 85, label: "85%" },
+  { value: 90, label: "90%" },
+  { value: 95, label: "95% (recommended)" },
+  { value: 98, label: "98%" },
+] satisfies { value: number; label: string }[];
+
+/** One line on which tiers are running and why. */
+function engineSummary(status: AiStatus | null): string {
+  if (status === null || status.engine === "starting") {
+    return "Starting the on-device models…";
+  }
+  if (status.engine === "full") {
+    return "Rules, your personal model, and Apple's on-device model";
+  }
+  if (status.engine === "fallback") {
+    return `Using rules and your personal model only. ${llmUnavailableReason(status) ?? ""}.`;
+  }
+  return "Using your rules only: on-device ML isn't available in this build";
+}
 
 const RETENTION_OPTIONS = [
   { value: 0, label: "Forever" },
@@ -174,6 +203,43 @@ function Select({
   );
 }
 
+/** Saved on blur, so typing doesn't rewrite settings.json per keystroke. */
+function CustomInstructions({
+  value,
+  onSave,
+}: {
+  value: string;
+  onSave: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [focused, setFocused] = useState(false);
+  const shown = focused ? draft : value;
+  return (
+    <SettingBlock
+      title="Custom instructions"
+      description="Added to the on-device model's prompt, e.g. “Anything in the OpenRize repo is Coding”"
+    >
+      <textarea
+        aria-label="Custom instructions"
+        value={shown}
+        maxLength={1000}
+        rows={3}
+        onFocus={() => {
+          setDraft(value);
+          setFocused(true);
+        }}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => {
+          setFocused(false);
+          if (draft !== value) onSave(draft);
+        }}
+        className="mt-2 w-full resize-y rounded-lg border border-line bg-surface px-2.5 py-2 text-[12px] text-fg outline-hidden placeholder:text-fg-faint focus:border-accent"
+        placeholder="No custom instructions"
+      />
+    </SettingBlock>
+  );
+}
+
 export function Settings() {
   const { settings, storage, error, update } = useSettings();
   const [openError, setOpenError] = useState<string | null>(null);
@@ -186,6 +252,7 @@ export function Settings() {
     );
   };
 
+  const aiStatus = useAiStatus();
   const trayOff = !settings.trayEnabled;
   const problem = error ?? openError;
 
@@ -260,6 +327,61 @@ export function Settings() {
             onChange={(closeBehavior) => update({ closeBehavior })}
           />
         </SettingRow>
+      </SettingGroup>
+
+      <SettingGroup title="Categories & AI">
+        <SettingRow
+          title="Suggestion engine"
+          description={engineSummary(aiStatus)}
+        >
+          <span className="shrink-0 font-mono text-[10.5px] text-fg-faint">
+            {aiStatus === null
+              ? ""
+              : aiStatus.calibrated
+                ? `${aiStatus.outcomes} reviewed`
+                : `learning · ${aiStatus.outcomes}/50 reviewed`}
+          </span>
+        </SettingRow>
+        <SettingRow
+          title="What to suggest"
+          description="Suggest a category for each entry, or a project too"
+        >
+          <SegmentedControl
+            name="ai-suggest"
+            value={settings.aiSuggest}
+            options={SUGGEST_OPTIONS}
+            onChange={(aiSuggest) => update({ aiSuggest })}
+          />
+        </SettingRow>
+        <SettingRow
+          title="Auto-accept confident suggestions"
+          description={
+            aiStatus?.calibrated === false
+              ? "Starts after 50 reviewed suggestions; until then only rule matches auto-approve"
+              : "Approve entries whose every suggestion clears the threshold"
+          }
+        >
+          <Toggle
+            checked={settings.autoAccept}
+            label="Auto-accept confident suggestions"
+            onChange={(autoAccept) => update({ autoAccept })}
+          />
+        </SettingRow>
+        <SettingRow
+          title="Auto-accept threshold"
+          description="Minimum confidence for an entry to skip review"
+        >
+          <Select
+            label="Auto-accept threshold"
+            value={settings.autoAcceptPercent}
+            options={THRESHOLD_OPTIONS}
+            onChange={(autoAcceptPercent) => update({ autoAcceptPercent })}
+          />
+        </SettingRow>
+        <CustomInstructions
+          value={settings.aiCustomPrompt}
+          onSave={(aiCustomPrompt) => update({ aiCustomPrompt })}
+        />
       </SettingGroup>
 
       <SettingGroup title="Notifications">

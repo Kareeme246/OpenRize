@@ -1,6 +1,3 @@
-import { useState } from "react";
-import { useNotImplemented } from "./NotImplemented";
-
 interface TopBarProps {
   canGoBack: boolean;
   canGoForward: boolean;
@@ -22,11 +19,6 @@ export function TopBar({
   onBack,
   onForward,
 }: TopBarProps) {
-  const { show } = useNotImplemented();
-  const [teamsOpen, setTeamsOpen] = useState(false);
-
-  const teamItems = ["Create a team", "Join a team", "Switch workspace"];
-
   return (
     <header
       data-tauri-drag-region="deep"
@@ -34,74 +26,7 @@ export function TopBar({
         isMac ? "pl-[84px]" : "pl-3"
       }`}
     >
-      <div className="relative flex flex-1 items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setTeamsOpen((open) => !open)}
-          aria-haspopup="menu"
-          aria-expanded={teamsOpen}
-          className="flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[12.5px] font-medium text-fg-muted hover:bg-surface-strong"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            className="size-3.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <circle cx="9" cy="8" r="3" />
-            <path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 6.2a3 3 0 0 1 0 5.6M17.5 19a5.5 5.5 0 0 0-2-4.2" />
-          </svg>
-          Teams
-          <svg
-            viewBox="0 0 24 24"
-            className="size-3 text-fg-soft"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2.2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="m6 9 6 6 6-6" />
-          </svg>
-        </button>
-
-        {teamsOpen && (
-          <>
-            {/* Transparent full-window button: closes on any outside click
-                without a document listener. */}
-            <button
-              type="button"
-              aria-label="Close teams menu"
-              onClick={() => setTeamsOpen(false)}
-              className="fixed inset-0 z-40 cursor-default"
-            />
-            <div
-              role="menu"
-              className="absolute left-0 top-full z-50 mt-1 w-48 overflow-hidden rounded-xl border border-line bg-panel py-1 shadow-2xl"
-            >
-              {teamItems.map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setTeamsOpen(false);
-                    show(item);
-                  }}
-                  className="block w-full px-3 py-1.5 text-left text-[12.5px] text-fg-muted hover:bg-surface"
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-
+      <div className="flex flex-1 items-center gap-2">
         <NavArrow
           label="Back"
           enabled={canGoBack}
@@ -120,15 +45,7 @@ export function TopBar({
         OpenRize
       </span>
 
-      <div className="flex flex-1 items-center justify-end">
-        <button
-          type="button"
-          onClick={() => show("Refer friends")}
-          className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[12.5px] font-medium text-fg-muted hover:bg-surface-strong"
-        >
-          Refer friends
-        </button>
-      </div>
+      <div className="flex-1" />
     </header>
   );
 }

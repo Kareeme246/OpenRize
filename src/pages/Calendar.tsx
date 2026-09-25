@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AddTimeSheet } from "../components/AddTimeSheet";
 import { AiEngineBanner } from "../components/AiEngineBanner";
 import type { Slice } from "../components/Charts";
 import { EntryReviewSheet } from "../components/EntryReviewSheet";
@@ -19,10 +18,12 @@ import * as api from "../lib/api";
 import { describeError } from "../lib/api";
 import {
   addDays,
-  dayEdges,
+  calendarDay,
+  calendarDayEdges,
+  calendarRange,
+  currentCalendarDay,
   localDateString,
   parseLocalDate,
-  rangeFor,
   rangeLabel,
   startOfWeek,
   stepDate,
@@ -56,7 +57,7 @@ interface CalendarProps {
   navigate: (route: Route) => void;
 }
 
-/** Time per category, in the categories' own order, as chart slices. */
+/** Category totals in catalog order for the day summary. */
 function categorySlices(
   totals: Map<string | null, number>,
   categoryById: Map<string, Category>,
@@ -86,23 +87,23 @@ export function Calendar({ route, navigate }: CalendarProps) {
   const review = useEntryReview(route.entryId);
 
   const scale: CalendarScale = route.scale ?? "day";
-  const date = useMemo(() => parseLocalDate(route.date), [route.date]);
-  const range = useMemo(() => rangeFor(scale, date), [scale, date]);
+  const date = useMemo(
+    () =>
+      route.date ? parseLocalDate(route.date) : currentCalendarDay(new Date()),
+    [route.date],
+  );
+  const range = useMemo(() => calendarRange(scale, date), [scale, date]);
   const startMs = range.start.getTime();
   const endMs = range.end.getTime();
   // Month shows whole weeks, Monday first.
   const grid = useMemo(() => {
-    const start = startOfWeek(range.start);
+    const start = calendarDay(startOfWeek(range.start));
     const lastDay = addDays(range.end, -1);
-    const end = addDays(startOfWeek(lastDay), 7);
-    return {
-      start,
-      end,
-      weeks: Math.round((end.getTime() - start.getTime()) / (7 * 86_400_000)),
-    };
+    const end = calendarDay(addDays(startOfWeek(lastDay), 7));
+    let weeks = 0;
+    for (let day = start; day < end; day = addDays(day, 7)) weeks++;
+    return { start, end, weeks };
   }, [range]);
-
-  const daysInRange = Math.round((endMs - startMs) / 86_400_000);
 
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [segments, setSegments] = useState<ActivitySegment[]>([]);
@@ -110,8 +111,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
-  const [adding, setAdding] = useState(false);
-  const [addingAt, setAddingAt] = useState<number | undefined>();
+  const [now, setNow] = useState(Date.now);
 
   // Responses for a range the user already left are dropped.
   const rangeKey = `${scale}:${startMs}`;
@@ -125,7 +125,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
       if (scale === "month") {
         const next = await api.entryRollup(
           { startMs: grid.start.getTime(), endMs: grid.end.getTime() },
-          dayEdges(grid.start, grid.end),
+          calendarDayEdges(grid.start, grid.end),
           "category",
         );
         if (shownKey.current === key) setCells(next);
@@ -192,6 +192,34 @@ export function Calendar({ route, navigate }: CalendarProps) {
 
   useTauriEvent(api.ENTRIES_CHANGED, () => void refresh());
   useTauriEvent(api.SUGGESTION_READY, () => void refresh());
+
+  useEffect(() => {
+    let timer: number | undefined;
+    const update = (): void => {
+      if (document.visibilityState !== "visible" || !document.hasFocus())
+        return;
+      setNow(Date.now());
+      void refresh();
+    };
+    const sync = (): void => {
+      window.clearInterval(timer);
+      timer = undefined;
+      if (document.visibilityState === "visible" && document.hasFocus()) {
+        update();
+        timer = window.setInterval(update, 15_000);
+      }
+    };
+    document.addEventListener("visibilitychange", sync);
+    window.addEventListener("focus", sync);
+    window.addEventListener("blur", sync);
+    sync();
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", sync);
+      window.removeEventListener("focus", sync);
+      window.removeEventListener("blur", sync);
+    };
+  }, [refresh]);
 
   // Another view can open an entry or review mode here.
   const { select } = review;
@@ -312,6 +340,12 @@ export function Calendar({ route, navigate }: CalendarProps) {
     startReviewMode,
   ]);
 
+  const daysInRange =
+    scale === "day"
+      ? 1
+      : scale === "week"
+        ? 7
+        : new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
   const summary = useMemo(() => {
     const byCategory = new Map<string | null, number>();
     let workMs = 0;
@@ -319,13 +353,10 @@ export function Calendar({ route, navigate }: CalendarProps) {
     let count = 0;
     let toReview = 0;
     if (scale === "month") {
-      // The grid shows the neighbouring months' days too; count this one.
-      const firstDay = Math.round(
-        (startMs - grid.start.getTime()) / 86_400_000,
-      );
-      const lastDay = firstDay + daysInRange;
+      const firstDay = calendarDayEdges(grid.start, range.start).length - 1;
       for (const cell of cells) {
-        if (cell.bucket < firstDay || cell.bucket >= lastDay) continue;
+        if (cell.bucket < firstDay || cell.bucket >= firstDay + daysInRange)
+          continue;
         const key = cell.key ?? null;
         byCategory.set(key, (byCategory.get(key) ?? 0) + cell.ms);
         if (countsAsWork(key, categoryById)) workMs += cell.ms;
@@ -357,8 +388,8 @@ export function Calendar({ route, navigate }: CalendarProps) {
     visible,
     reviewQueue,
     categoryById,
-    startMs,
     grid,
+    range,
     daysInRange,
   ]);
 
@@ -374,6 +405,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
         })()
       : undefined;
 
+  const targetMs = targetMsFor(settings, scale, daysInRange);
   const title =
     scale === "day"
       ? date.toLocaleDateString(undefined, {
@@ -382,10 +414,9 @@ export function Calendar({ route, navigate }: CalendarProps) {
           day: "numeric",
         })
       : rangeLabel(scale, date);
-  const targetMs = targetMsFor(settings, scale, daysInRange);
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-canvas text-fg">
+    <div className="calendar-view flex h-full min-h-0 flex-col overflow-hidden bg-canvas text-fg">
       <PageHeader title={title}>
         <div className="flex w-[180px] shrink-0 justify-end">
           {reviewQueue.length > 0 && (
@@ -399,24 +430,14 @@ export function Calendar({ route, navigate }: CalendarProps) {
             </button>
           )}
         </div>
-        {scale === "day" && (
-          <button
-            type="button"
-            onClick={() => {
-              setAddingAt(undefined);
-              setAdding(true);
-            }}
-            className="rounded-md border border-line bg-panel px-2.5 py-1 font-medium text-[12px] text-fg-soft hover:bg-surface hover:text-fg"
-          >
-            Add time
-          </button>
-        )}
         <DateStepper
           unit={scale}
           onStep={(direction) =>
             go({ date: localDateString(stepDate(scale, date, direction)) })
           }
-          onToday={() => go({ date: localDateString(new Date()) })}
+          onToday={() =>
+            go({ date: localDateString(currentCalendarDay(new Date())) })
+          }
         />
         <ScaleControl
           name="calendar-scale"
@@ -432,8 +453,8 @@ export function Calendar({ route, navigate }: CalendarProps) {
         </div>
       )}
 
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_320px] overflow-hidden">
-        <div className="flex min-h-0 min-w-0 flex-col">
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_320px] gap-4 overflow-hidden p-4">
+        <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-sm">
           {scale === "day" && (
             <DayView
               dayStart={startMs}
@@ -444,10 +465,23 @@ export function Calendar({ route, navigate }: CalendarProps) {
               categoryById={categoryById}
               projectById={projectById}
               onSelect={select}
-              onAdd={(startMs) => {
-                setAddingAt(startMs);
-                setAdding(true);
+              onEmpty={() => {
+                select(undefined);
+                setReviewing(false);
               }}
+              onCreate={async (startedAt, endedAt) => {
+                try {
+                  await api.createTimeEntry({
+                    startedAt,
+                    endedAt,
+                    description: "",
+                  });
+                  await refresh();
+                } catch (cause) {
+                  setError(describeError(cause));
+                }
+              }}
+              now={now}
             />
           )}
           {scale === "week" && (
@@ -474,7 +508,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
           )}
         </div>
 
-        <aside className="flex min-h-0 flex-col overflow-hidden border-line border-l bg-panel">
+        <aside className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-sm">
           {review.detail ? (
             <EntryReviewSheet
               review={review}
@@ -526,10 +560,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
               categories={summary.categories}
               topApps={
                 scale === "day"
-                  ? timeByApp(segments, Date.now()).map(({ app, ms }) => ({
-                      app,
-                      ms,
-                    }))
+                  ? timeByApp(segments, now).map(({ app, ms }) => ({ app, ms }))
                   : undefined
               }
               onStartReview={scale === "month" ? undefined : startReviewMode}
@@ -537,16 +568,6 @@ export function Calendar({ route, navigate }: CalendarProps) {
           )}
         </aside>
       </div>
-      {scale === "day" && adding && (
-        <AddTimeSheet
-          date={date}
-          initialStartMs={addingAt}
-          categories={catalog.categories}
-          projects={catalog.projects}
-          onClose={() => setAdding(false)}
-          onCreated={() => void load()}
-        />
-      )}
     </div>
   );
 }

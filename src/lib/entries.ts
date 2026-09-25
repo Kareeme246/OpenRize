@@ -16,11 +16,11 @@ export type BlockState =
 
 export function blockState(entry: TimeEntry): BlockState {
   if (entry.status === "approved") return "approved";
-  if (entry.status === "building") return "building";
   const job = entry.ai?.state;
   if (entry.status === "processing" || job === "queued" || job === "running") {
     return "processing";
   }
+  if (entry.status === "building") return "building";
   const confidence = confidenceOf(entry);
   if (job === "failed" && confidence === undefined) return "failed";
   if (!entry.categoryId || (confidence !== undefined && confidence < PREFILL)) {

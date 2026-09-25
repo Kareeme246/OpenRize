@@ -1,4 +1,9 @@
-import { addDays, isSameDay, localDateString } from "../../lib/dates";
+import {
+  addDays,
+  currentCalendarDay,
+  isSameDay,
+  localDateString,
+} from "../../lib/dates";
 import { durationOf, isReviewable } from "../../lib/entries";
 import { formatDuration } from "../../lib/format";
 import type { Category, Project, TimeEntry } from "../../lib/types";
@@ -52,17 +57,23 @@ export function WeekView({
     };
   });
   const timeline = timelineFor(
-    columns.flatMap((column) =>
-      column.entries.map((entry) => ({
+    columns.flatMap((column) => [
+      {
+        start: column.start,
+        end: addDays(column.day, 1).getTime(),
+        dayStart: column.start,
+      },
+      ...column.entries.map((entry) => ({
         start: entry.startedAt,
         end: entry.endedAt,
         dayStart: column.start,
       })),
-    ),
+    ]),
     "wall",
     HOUR_HEIGHT_PX,
+    29,
   );
-  const today = new Date(now);
+  const today = currentCalendarDay(new Date(now));
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">

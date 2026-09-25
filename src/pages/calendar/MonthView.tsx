@@ -1,5 +1,10 @@
 import { type Slice, StackedBar } from "../../components/Charts";
-import { addDays, isSameDay, localDateString } from "../../lib/dates";
+import {
+  addDays,
+  currentCalendarDay,
+  isSameDay,
+  localDateString,
+} from "../../lib/dates";
 import { formatDuration, formatHours } from "../../lib/format";
 import type { Category, RollupCell } from "../../lib/types";
 
@@ -70,7 +75,7 @@ export function MonthView({
 }: MonthViewProps) {
   const days = weeks * 7;
   const totals = dayTotals(cells, categoryById, days);
-  const today = new Date();
+  const today = currentCalendarDay(new Date());
   const weekdays = Array.from({ length: 7 }, (_, index) =>
     addDays(gridStart, index).toLocaleDateString(undefined, {
       weekday: "short",

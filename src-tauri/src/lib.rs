@@ -192,11 +192,17 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building OpenRize")
-        .run(|app, event| {
+        .run(|app, event| match event {
             // macOS: clicking the dock icon with no visible window reopens it.
-            if let RunEvent::Reopen { .. } = event {
-                tray::show_main_window(app);
+            RunEvent::Reopen { .. } => tray::show_main_window(app),
+            // Close the open segment at the real quit time. Left open, the
+            // next launch can only close it at its own start, losing its time.
+            RunEvent::Exit => {
+                if let Ok(mut store) = app.state::<AppState>().activity.lock() {
+                    let _ = store.close_active_segment(timers::now_epoch_ms());
+                }
             }
+            _ => {}
         });
 }
 

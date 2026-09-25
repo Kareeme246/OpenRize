@@ -4,7 +4,8 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     let current_version: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
 
     if current_version < 1 {
-        conn.execute_batch(
+        let tx = conn.transaction()?;
+        tx.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS segments (
               id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -14,10 +15,16 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
               label      TEXT,
               started_at INTEGER NOT NULL,
               ended_at   INTEGER,
-              reviewed   INTEGER NOT NULL DEFAULT 0
+              reviewed   INTEGER NOT NULL DEFAULT 0,
+              app_id     TEXT,
+              bundle_id  TEXT,
+              url        TEXT,
+              domain     TEXT,
+              entry_id   TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_segments_started_at ON segments (started_at);
             CREATE INDEX IF NOT EXISTS idx_segments_ended_at ON segments (ended_at);
+            CREATE INDEX IF NOT EXISTS idx_segments_entry_id ON segments (entry_id);
 
             CREATE TABLE IF NOT EXISTS settings (
               key   TEXT PRIMARY KEY,
@@ -30,45 +37,6 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
               total_ms  INTEGER NOT NULL,
               PRIMARY KEY (day_epoch, kind)
             );
-            PRAGMA user_version = 1;
-            ",
-        )?;
-    }
-
-    let version_after_v1: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
-
-    if version_after_v1 < 2 {
-        let tx = conn.transaction()?;
-
-        // Add new columns to segments table if not present
-        let mut existing_cols = std::collections::HashSet::new();
-        {
-            let mut stmt = tx.prepare("PRAGMA table_info(segments);")?;
-            let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
-            for col in rows.flatten() {
-                existing_cols.insert(col);
-            }
-        }
-
-        if !existing_cols.contains("app_id") {
-            tx.execute("ALTER TABLE segments ADD COLUMN app_id TEXT;", [])?;
-        }
-        if !existing_cols.contains("bundle_id") {
-            tx.execute("ALTER TABLE segments ADD COLUMN bundle_id TEXT;", [])?;
-        }
-        if !existing_cols.contains("url") {
-            tx.execute("ALTER TABLE segments ADD COLUMN url TEXT;", [])?;
-        }
-        if !existing_cols.contains("domain") {
-            tx.execute("ALTER TABLE segments ADD COLUMN domain TEXT;", [])?;
-        }
-        if !existing_cols.contains("entry_id") {
-            tx.execute("ALTER TABLE segments ADD COLUMN entry_id TEXT;", [])?;
-        }
-
-        tx.execute_batch(
-            "
-            CREATE INDEX IF NOT EXISTS idx_segments_entry_id ON segments (entry_id);
 
             CREATE TABLE IF NOT EXISTS apps (
               id                  TEXT PRIMARY KEY,
@@ -145,25 +113,28 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
               updated_at  INTEGER NOT NULL,
               deleted_at  INTEGER
             );
+            CREATE INDEX IF NOT EXISTS idx_rules_project ON rules (project_id);
 
             CREATE TABLE IF NOT EXISTS time_entries (
-              id          TEXT PRIMARY KEY,
-              started_at  INTEGER NOT NULL,
-              ended_at    INTEGER NOT NULL,
-              description TEXT NOT NULL,
-              category_id TEXT,
-              project_id  TEXT,
-              status      TEXT NOT NULL DEFAULT 'pending',
-              approved_by TEXT,
-              source      TEXT NOT NULL DEFAULT 'auto',
-              billable    INTEGER NOT NULL DEFAULT 0,
-              invoice_id  TEXT,
-              created_at  INTEGER NOT NULL,
-              updated_at  INTEGER NOT NULL,
-              deleted_at  INTEGER
+              id                 TEXT PRIMARY KEY,
+              started_at         INTEGER NOT NULL,
+              ended_at           INTEGER NOT NULL,
+              description        TEXT NOT NULL,
+              description_origin TEXT NOT NULL DEFAULT 'template',
+              category_id        TEXT,
+              project_id         TEXT,
+              status             TEXT NOT NULL DEFAULT 'pending',
+              approved_by        TEXT,
+              source             TEXT NOT NULL DEFAULT 'auto',
+              billable           INTEGER NOT NULL DEFAULT 0,
+              invoice_id         TEXT,
+              created_at         INTEGER NOT NULL,
+              updated_at         INTEGER NOT NULL,
+              deleted_at         INTEGER
             );
             CREATE INDEX IF NOT EXISTS idx_time_entries_started_at ON time_entries (started_at);
             CREATE INDEX IF NOT EXISTS idx_time_entries_status ON time_entries (status);
+            CREATE INDEX IF NOT EXISTS idx_time_entries_project ON time_entries (project_id, started_at);
 
             CREATE TABLE IF NOT EXISTS suggestions (
               id            TEXT PRIMARY KEY,
@@ -171,6 +142,8 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
               field         TEXT NOT NULL,
               value_id      TEXT,
               confidence    REAL NOT NULL,
+              raw_confidence REAL,
+              tier          TEXT,
               signals       TEXT,
               rationale     TEXT,
               alternatives  TEXT,
@@ -181,6 +154,8 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
               updated_at    INTEGER NOT NULL,
               deleted_at    INTEGER
             );
+            CREATE INDEX IF NOT EXISTS idx_suggestions_entry ON suggestions (entry_id, field, created_at);
+            CREATE INDEX IF NOT EXISTS idx_suggestions_created_at ON suggestions (created_at);
 
             CREATE TABLE IF NOT EXISTS entry_events (
               id       TEXT PRIMARY KEY,
@@ -191,316 +166,242 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
               at       INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_entry_events_entry_id ON entry_events (entry_id);
+
+            -- One NLEmbedding vector per entry (512 x f32, little-endian) plus the
+            -- feature text it was computed from, reused as few-shot examples.
+            CREATE TABLE IF NOT EXISTS entry_embeddings (
+              entry_id   TEXT PRIMARY KEY,
+              vec        BLOB NOT NULL,
+              text_hash  TEXT NOT NULL,
+              features   TEXT NOT NULL,
+              model      TEXT NOT NULL,
+              created_at INTEGER NOT NULL
+            );
+
+            -- Durable work queue for the classification worker. `kind` is
+            -- classify (full pipeline) or embed (vector only, for entries that
+            -- were approved without ever being classified).
+            CREATE TABLE IF NOT EXISTS classify_jobs (
+              id         TEXT PRIMARY KEY,
+              entry_id   TEXT NOT NULL,
+              kind       TEXT NOT NULL DEFAULT 'classify',
+              state      TEXT NOT NULL DEFAULT 'queued',
+              attempts   INTEGER NOT NULL DEFAULT 0,
+              next_at    INTEGER NOT NULL,
+              last_error TEXT,
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL,
+              UNIQUE (entry_id, kind)
+            );
+            CREATE INDEX IF NOT EXISTS idx_classify_jobs_state ON classify_jobs (state, next_at);
+
+            -- Trained personal models (Create ML). Only one per kind is active.
+            CREATE TABLE IF NOT EXISTS model_artifacts (
+              id          TEXT PRIMARY KEY,
+              kind        TEXT NOT NULL,
+              path        TEXT NOT NULL,
+              trained_at  INTEGER NOT NULL,
+              n_examples  INTEGER NOT NULL,
+              holdout_acc REAL,
+              calibration TEXT,
+              active      INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_model_artifacts_kind ON model_artifacts (kind, active, trained_at);
+
+            CREATE TABLE IF NOT EXISTS energy_samples (
+              id            INTEGER PRIMARY KEY AUTOINCREMENT,
+              sampled_at    INTEGER NOT NULL,
+              duration_ms   INTEGER NOT NULL,
+              cpu_time_ms   INTEGER NOT NULL,
+              energy_nj     INTEGER NOT NULL,
+              power_watts   REAL NOT NULL,
+              impact_level  TEXT NOT NULL,
+              ai_active     INTEGER NOT NULL DEFAULT 0,
+              on_battery    INTEGER NOT NULL DEFAULT 0,
+              battery_level REAL
+            );
+            CREATE INDEX IF NOT EXISTS idx_energy_samples_sampled_at ON energy_samples (sampled_at);
+
+            -- Full-text search over window titles for Time Entries (\"where did I
+            -- work on invoices.rs?\"). A trigram index answers substring `LIKE`
+            -- queries, so \"Rize\" finds \"OpenRize\". It mirrors `segments`
+            -- through triggers; `segments.id` is an INTEGER PRIMARY KEY, so the
+            -- external-content rowid is stable across VACUUM.
+            CREATE VIRTUAL TABLE IF NOT EXISTS segments_fts USING fts5(
+              title, content='segments', content_rowid='id', tokenize='trigram'
+            );
+            CREATE TRIGGER IF NOT EXISTS segments_fts_insert AFTER INSERT ON segments BEGIN
+              INSERT INTO segments_fts (rowid, title) VALUES (new.id, new.title);
+            END;
+            CREATE TRIGGER IF NOT EXISTS segments_fts_delete AFTER DELETE ON segments BEGIN
+              INSERT INTO segments_fts (segments_fts, rowid, title) VALUES ('delete', old.id, old.title);
+            END;
+            CREATE TRIGGER IF NOT EXISTS segments_fts_update AFTER UPDATE OF title ON segments BEGIN
+              INSERT INTO segments_fts (segments_fts, rowid, title) VALUES ('delete', old.id, old.title);
+              INSERT INTO segments_fts (rowid, title) VALUES (new.id, new.title);
+            END;
             ",
         )?;
 
-        // Seed 12 default categories if table is empty
-        let cat_count: i64 = tx.query_row("SELECT COUNT(*) FROM categories;", [], |r| r.get(0))?;
-        if cat_count == 0 {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
+        seed_default_categories(&tx)?;
 
-            let defaults = [
-                ("Coding", "#75a4e5", "Writing, reviewing, debugging code", "Apply when writing, reviewing, or debugging code, using an IDE, terminal, or code editor.", 1, 1, 1),
-                ("Research", "#56c2b1", "Documentation and technical research", "Reading documentation, investigating solutions, exploring tools and libraries.", 1, 1, 2),
-                ("Communication", "#e5995c", "Email, chat, and messaging", "Email, Slack, Discord, async messaging, team coordination.", 0, 1, 3),
-                ("Design", "#df84b5", "UI/UX, visual design, assets", "Working in Figma, design tools, creating mockups, UI components, styling.", 1, 1, 4),
-                ("Writing", "#e4817d", "Docs, articles, specifications", "Writing prose, documentation, specifications, blog posts, proposals.", 1, 1, 5),
-                ("Planning", "#9aa6b4", "Roadmaps, tasks, issue tracking", "Project planning, issue trackers, linear, github issues, backlog management.", 1, 1, 6),
-                ("Administrative", "#bfa181", "Invoicing, accounts, setup", "Administrative tasks, billing, accounts, dev environment setup, file management.", 0, 1, 7),
-                ("Meetings", "#e7b447", "Calls, video conferences, syncs", "Zoom, Google Meet, video calls, live client meetings, team syncs.", 1, 1, 8),
-                ("Learning", "#66b1df", "Courses, tutorials, reading", "Tutorials, educational courses, learning new frameworks and concepts.", 0, 1, 9),
-                ("Review", "#9b87df", "Pull requests, code review", "Reviewing pull requests, inspecting diffs, giving feedback on changes.", 1, 1, 10),
-                ("Debugging", "#e97e7b", "Bug reproduction, profiling, fixing", "Tracking bugs, stepping through debuggers, profiling performance bottlenecks.", 1, 1, 11),
-                ("Break", "#64748b", "Rest, lunch, away from screen", "Away from computer, resting, lunch breaks.", 0, 0, 12),
-            ];
-
-            let mut insert_cat = tx.prepare(
-                "INSERT INTO categories (id, name, color, description, ai_prompt, billable_default, counts_as_work, archived, sort, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9, ?9);",
-            )?;
-
-            for (name, color, desc, prompt, billable, counts, sort) in defaults {
-                let id = uuid::Uuid::now_v7().to_string();
-                insert_cat.execute((
-                    id, name, color, desc, prompt, billable, counts, sort, now as i64,
-                ))?;
-            }
-        }
-
-        // Backfill apps table from existing segments
-        {
-            let mut insert_app = tx.prepare(
-                "INSERT OR IGNORE INTO apps (id, kind, identifier, display_name, excluded, first_seen, last_seen, created_at, updated_at)
-                 SELECT ?1, 'app', s.app, s.app, 0, MIN(s.started_at), MAX(COALESCE(s.ended_at, s.started_at)), MIN(s.started_at), MAX(COALESCE(s.ended_at, s.started_at))
-                 FROM segments s
-                 WHERE s.app != ''
-                 GROUP BY s.app;",
-            )?;
-            let id = uuid::Uuid::now_v7().to_string();
-            insert_app.execute([id])?;
-        }
-
-        tx.execute("PRAGMA user_version = 2;", [])?;
-        tx.commit()?;
-    }
-
-    let version_after_v2: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
-
-    if version_after_v2 < 3 {
-        let tx = conn.transaction()?;
-        migrate_v3(&tx)?;
-        tx.execute("PRAGMA user_version = 3;", [])?;
-        tx.commit()?;
-    }
-
-    let version_after_v3: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
-
-    if version_after_v3 < 4 {
-        let tx = conn.transaction()?;
-        migrate_v4(&tx)?;
-        tx.execute("PRAGMA user_version = 4;", [])?;
-        tx.commit()?;
-    }
-
-    let version_after_v4: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
-
-    if version_after_v4 < 5 {
-        let tx = conn.transaction()?;
-        migrate_v5(&tx)?;
-        tx.execute("PRAGMA user_version = 5;", [])?;
-        tx.commit()?;
-    }
-
-    let version_after_v5: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
-
-    if version_after_v5 < 6 {
-        let tx = conn.transaction()?;
-        migrate_v6(&tx)?;
-        tx.execute("PRAGMA user_version = 6;", [])?;
-        tx.commit()?;
-    }
-
-    let version_after_v6: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
-
-    if version_after_v6 < 7 {
-        let tx = conn.transaction()?;
-        migrate_v7(&tx)?;
-        tx.execute("PRAGMA user_version = 7;", [])?;
+        tx.execute("PRAGMA user_version = 1;", [])?;
         tx.commit()?;
     }
 
     Ok(())
 }
 
-fn has_column(tx: &rusqlite::Transaction<'_>, table: &str, column: &str) -> Result<bool> {
-    let mut stmt = tx.prepare(&format!("PRAGMA table_info({table});"))?;
-    let cols = stmt.query_map([], |row| row.get::<_, String>(1))?;
-    for col in cols {
-        if col? == column {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-/// P4: the learning loop. Suggestions keep the score calibration is fitted
-/// on and the tier that decided them (for the AI effectiveness metrics).
-fn migrate_v4(tx: &rusqlite::Transaction<'_>) -> Result<()> {
-    // The arbiter's blended score before calibration. NULL on rows written
-    // before P4, which calibration therefore skips.
-    if !has_column(tx, "suggestions", "raw_confidence")? {
-        tx.execute(
-            "ALTER TABLE suggestions ADD COLUMN raw_confidence REAL;",
-            [],
-        )?;
-    }
-    // rule | personal | model. NULL before P4; readers derive it from engine.
-    if !has_column(tx, "suggestions", "tier")? {
-        tx.execute("ALTER TABLE suggestions ADD COLUMN tier TEXT;", [])?;
-    }
-    tx.execute_batch(
-        "CREATE INDEX IF NOT EXISTS idx_suggestions_created_at ON suggestions (created_at);
-         CREATE INDEX IF NOT EXISTS idx_model_artifacts_kind ON model_artifacts (kind, active, trained_at);",
-    )?;
-    Ok(())
-}
-
-/// P3: full-text search over window titles for Time Entries ("where did I
-/// work on invoices.rs?"). A trigram index answers substring `LIKE` queries,
-/// so "Rize" finds "OpenRize". It mirrors `segments` through triggers;
-/// `segments.id` is an INTEGER PRIMARY KEY, so the external-content rowid is
-/// stable across VACUUM. Entry descriptions are few and short and are
-/// searched directly.
-fn migrate_v5(tx: &rusqlite::Transaction<'_>) -> Result<()> {
-    tx.execute_batch(
-        "
-        CREATE VIRTUAL TABLE IF NOT EXISTS segments_fts USING fts5(
-          title, content='segments', content_rowid='id', tokenize='trigram'
-        );
-        CREATE TRIGGER IF NOT EXISTS segments_fts_insert AFTER INSERT ON segments BEGIN
-          INSERT INTO segments_fts (rowid, title) VALUES (new.id, new.title);
-        END;
-        CREATE TRIGGER IF NOT EXISTS segments_fts_delete AFTER DELETE ON segments BEGIN
-          INSERT INTO segments_fts (segments_fts, rowid, title) VALUES ('delete', old.id, old.title);
-        END;
-        CREATE TRIGGER IF NOT EXISTS segments_fts_update AFTER UPDATE OF title ON segments BEGIN
-          INSERT INTO segments_fts (segments_fts, rowid, title) VALUES ('delete', old.id, old.title);
-          INSERT INTO segments_fts (rowid, title) VALUES (new.id, new.title);
-        END;
-        INSERT INTO segments_fts (segments_fts) VALUES ('rebuild');
-
-        CREATE INDEX IF NOT EXISTS idx_time_entries_project ON time_entries (project_id, started_at);
-        CREATE INDEX IF NOT EXISTS idx_rules_project ON rules (project_id);
-        ",
-    )
-}
-
-/// Retires the zero-length entries the old builder minted on every rebuild:
-/// a segment left open at quit is closed at its own start on the next
-/// launch, and that empty segment never overlapped the entry it was frozen
-/// into, so each rebuild turned it into yet another entry (and AI call).
-fn migrate_v6(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+fn seed_default_categories(tx: &rusqlite::Transaction<'_>) -> Result<()> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
+        .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
-    tx.execute_batch(
-        "CREATE TEMP TABLE retired_entries AS
-           SELECT id FROM time_entries
-           WHERE deleted_at IS NULL
-             AND source = 'auto'
-             AND status != 'approved'
-             AND ended_at <= started_at
-             AND NOT EXISTS (
-               SELECT 1 FROM entry_events ev WHERE ev.entry_id = time_entries.id AND ev.actor = 'user'
-             );",
-    )?;
-    tx.execute(
-        "UPDATE time_entries SET deleted_at = ?1, updated_at = ?1
-         WHERE id IN (SELECT id FROM retired_entries);",
-        [now],
-    )?;
-    tx.execute_batch(
-        "UPDATE segments SET entry_id = NULL WHERE entry_id IN (SELECT id FROM retired_entries);
-         DROP TABLE retired_entries;",
-    )
-}
 
-/// Energy and battery monitoring: periodic process telemetry samples
-/// persisting CPU time, energy usage, power in Watts, and AI activity.
-fn migrate_v7(tx: &rusqlite::Transaction<'_>) -> Result<()> {
-    tx.execute_batch(
-        "
-        CREATE TABLE IF NOT EXISTS energy_samples (
-          id           INTEGER PRIMARY KEY AUTOINCREMENT,
-          sampled_at   INTEGER NOT NULL,
-          duration_ms  INTEGER NOT NULL,
-          cpu_time_ms  INTEGER NOT NULL,
-          energy_nj    INTEGER NOT NULL,
-          power_watts  REAL NOT NULL,
-          impact_level TEXT NOT NULL,
-          ai_active    INTEGER NOT NULL DEFAULT 0,
-          on_battery   INTEGER NOT NULL DEFAULT 0,
-          battery_level REAL
-        );
-        CREATE INDEX IF NOT EXISTS idx_energy_samples_sampled_at ON energy_samples (sampled_at);
-        ",
-    )
-}
+    let defaults = [
+        ("Coding", "#75a4e5", "Writing, reviewing, debugging code", "Apply when writing, reviewing, or debugging code, using an IDE, terminal, or code editor.", 1, 1, 1),
+        ("Research", "#56c2b1", "Documentation and technical research", "Reading documentation, investigating solutions, exploring tools and libraries.", 1, 1, 2),
+        ("Communication", "#e5995c", "Email, chat, and messaging", "Email, Slack, Discord, async messaging, team coordination.", 0, 1, 3),
+        ("Design", "#df84b5", "UI/UX, visual design, assets", "Working in Figma, design tools, creating mockups, UI components, styling.", 1, 1, 4),
+        ("Writing", "#e4817d", "Docs, articles, specifications", "Writing prose, documentation, specifications, blog posts, proposals.", 1, 1, 5),
+        ("Planning", "#9aa6b4", "Roadmaps, tasks, issue tracking", "Project planning, issue trackers, linear, github issues, backlog management.", 1, 1, 6),
+        ("Administrative", "#bfa181", "Invoicing, accounts, setup", "Administrative tasks, billing, accounts, dev environment setup, file management.", 0, 1, 7),
+        ("Meetings", "#e7b447", "Calls, video conferences, syncs", "Zoom, Google Meet, video calls, live client meetings, team syncs.", 1, 1, 8),
+        ("Learning", "#66b1df", "Courses, tutorials, reading", "Tutorials, educational courses, learning new frameworks and concepts.", 0, 1, 9),
+        ("Review", "#9b87df", "Pull requests, code review", "Reviewing pull requests, inspecting diffs, giving feedback on changes.", 1, 1, 10),
+        ("Debugging", "#e97e7b", "Bug reproduction, profiling, fixing", "Tracking bugs, stepping through debuggers, profiling performance bottlenecks.", 1, 1, 11),
+        ("Break", "#64748b", "Rest, lunch, away from screen", "Away from computer, resting, lunch breaks.", 0, 0, 12),
+    ];
 
-/// P2: the on-device AI pipeline (src/ai/).
-fn migrate_v3(tx: &rusqlite::Transaction<'_>) -> Result<()> {
-    // Where an entry's description came from. The entry builder may only
-    // rewrite its own template text; an AI sentence or a user edit sticks.
-    let has_origin = {
-        let mut stmt = tx.prepare("PRAGMA table_info(time_entries);")?;
-        let cols = stmt.query_map([], |row| row.get::<_, String>(1))?;
-        let mut found = false;
-        for col in cols {
-            found |= col? == "description_origin";
-        }
-        found
-    };
-    if !has_origin {
-        tx.execute(
-            "ALTER TABLE time_entries ADD COLUMN description_origin TEXT NOT NULL DEFAULT 'template';",
-            [],
-        )?;
+    let mut insert_cat = tx.prepare(
+        "INSERT INTO categories (id, name, color, description, ai_prompt, billable_default, counts_as_work, archived, sort, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9, ?9);",
+    )?;
+
+    for (name, color, desc, prompt, billable, counts, sort) in defaults {
+        let id = uuid::Uuid::now_v7().to_string();
+        insert_cat.execute((
+            id, name, color, desc, prompt, billable, counts, sort, now as i64,
+        ))?;
     }
 
-    tx.execute_batch(
-        "
-        CREATE INDEX IF NOT EXISTS idx_suggestions_entry ON suggestions (entry_id, field, created_at);
-
-        -- One NLEmbedding vector per entry (512 x f32, little-endian) plus the
-        -- feature text it was computed from, reused as few-shot examples.
-        CREATE TABLE IF NOT EXISTS entry_embeddings (
-          entry_id   TEXT PRIMARY KEY,
-          vec        BLOB NOT NULL,
-          text_hash  TEXT NOT NULL,
-          features   TEXT NOT NULL,
-          model      TEXT NOT NULL,
-          created_at INTEGER NOT NULL
-        );
-
-        -- Durable work queue for the classification worker. `kind` is
-        -- classify (full pipeline) or embed (vector only, for entries that
-        -- were approved without ever being classified).
-        CREATE TABLE IF NOT EXISTS classify_jobs (
-          id         TEXT PRIMARY KEY,
-          entry_id   TEXT NOT NULL,
-          kind       TEXT NOT NULL DEFAULT 'classify',
-          state      TEXT NOT NULL DEFAULT 'queued',
-          attempts   INTEGER NOT NULL DEFAULT 0,
-          next_at    INTEGER NOT NULL,
-          last_error TEXT,
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL,
-          UNIQUE (entry_id, kind)
-        );
-        CREATE INDEX IF NOT EXISTS idx_classify_jobs_state ON classify_jobs (state, next_at);
-
-        -- Trained personal models (Create ML). Only one per kind is active.
-        CREATE TABLE IF NOT EXISTS model_artifacts (
-          id          TEXT PRIMARY KEY,
-          kind        TEXT NOT NULL,
-          path        TEXT NOT NULL,
-          trained_at  INTEGER NOT NULL,
-          n_examples  INTEGER NOT NULL,
-          holdout_acc REAL,
-          calibration TEXT,
-          active      INTEGER NOT NULL DEFAULT 0
-        );
-        ",
-    )?;
-
-    // P1's rebuild minted fresh ids on every call, so each Calendar load
-    // duplicated every unapproved entry. Only the newest copy is still
-    // referenced by its segments; retire the orphans the user never touched.
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
-    tx.execute(
-        "UPDATE time_entries SET deleted_at = ?1, updated_at = ?1
-         WHERE deleted_at IS NULL
-           AND source = 'auto'
-           AND status != 'approved'
-           AND id NOT IN (SELECT entry_id FROM segments WHERE entry_id IS NOT NULL)
-           AND NOT EXISTS (
-             SELECT 1 FROM entry_events ev WHERE ev.entry_id = time_entries.id AND ev.actor = 'user'
-           );",
-        [now],
-    )?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A structural fingerprint of tables, columns, indexes, and triggers.
+    /// Columns are unordered because the old ladder's `ALTER TABLE ADD COLUMN`
+    /// statements append them; `sqlite_master.sql` would report that harmless
+    /// difference despite equivalent table definitions.
+    fn schema_snapshot(conn: &Connection) -> Vec<String> {
+        let mut lines = Vec::new();
+
+        let mut tables_stmt = conn
+            .prepare(
+                "SELECT name FROM sqlite_master
+                 WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'
+                 ORDER BY name;",
+            )
+            .unwrap();
+        let table_names: Vec<String> = tables_stmt
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+
+        for table in &table_names {
+            let mut cols_stmt = conn
+                .prepare(&format!("PRAGMA table_info({table});"))
+                .unwrap();
+            let mut cols: Vec<String> = cols_stmt
+                .query_map([], |row| {
+                    let name: String = row.get(1)?;
+                    let ty: String = row.get(2)?;
+                    let notnull: i64 = row.get(3)?;
+                    let dflt: Option<String> = row.get(4)?;
+                    let pk: i64 = row.get(5)?;
+                    Ok(format!("{name}:{ty}:{notnull}:{dflt:?}:{pk}"))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            cols.sort();
+            lines.push(format!("TABLE {table} COLUMNS [{}]", cols.join(", ")));
+
+            let mut idx_stmt = conn
+                .prepare(&format!("PRAGMA index_list({table});"))
+                .unwrap();
+            let indexes: Vec<(String, i64, i64)> = idx_stmt
+                .query_map([], |row| Ok((row.get(1)?, row.get(2)?, row.get(4)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            let mut idx_lines: Vec<String> = indexes
+                .into_iter()
+                .map(|(idx_name, unique, partial)| {
+                    let mut info_stmt = conn
+                        .prepare(&format!("PRAGMA index_info({idx_name});"))
+                        .unwrap();
+                    let cols: Vec<String> = info_stmt
+                        .query_map([], |row| row.get::<_, String>(2))
+                        .unwrap()
+                        .collect::<rusqlite::Result<_>>()
+                        .unwrap();
+                    format!(
+                        "{idx_name}: unique={unique} partial={partial} cols=[{}]",
+                        cols.join(",")
+                    )
+                })
+                .collect();
+            idx_lines.sort();
+            lines.push(format!("TABLE {table} INDEXES [{}]", idx_lines.join(", ")));
+        }
+
+        let mut triggers_stmt = conn
+            .prepare(
+                "SELECT name, sql FROM sqlite_master
+                 WHERE type = 'trigger'
+                 ORDER BY name;",
+            )
+            .unwrap();
+        let mut triggers: Vec<String> = triggers_stmt
+            .query_map([], |row| {
+                let name: String = row.get(0)?;
+                let sql: String = row.get(1)?;
+                let normalized = sql.split_whitespace().collect::<Vec<_>>().join(" ");
+                Ok(format!("{name}: {normalized}"))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        triggers.sort();
+        lines.extend(triggers);
+
+        let mut virtual_tables_stmt = conn
+            .prepare(
+                "SELECT name, sql FROM sqlite_master
+                 WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'
+                 ORDER BY name;",
+            )
+            .unwrap();
+        let mut virtual_tables: Vec<String> = virtual_tables_stmt
+            .query_map([], |row| {
+                let name: String = row.get(0)?;
+                let sql: String = row.get(1)?;
+                let normalized = sql.split_whitespace().collect::<Vec<_>>().join(" ");
+                Ok(format!("{name}: {normalized}"))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        virtual_tables.sort();
+        lines.extend(virtual_tables);
+
+        lines
+    }
 
     #[test]
     fn migrations_run_cleanly_on_fresh_db() {
@@ -510,7 +411,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 7);
+        assert_eq!(v, 1);
 
         let cat_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM categories;", [], |r| r.get(0))
@@ -525,96 +426,53 @@ mod tests {
     }
 
     #[test]
-    fn migrations_upgrade_from_v1() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE segments (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              app TEXT NOT NULL,
-              title TEXT NOT NULL,
-              kind TEXT NOT NULL,
-              label TEXT,
-              started_at INTEGER NOT NULL,
-              ended_at INTEGER,
-              reviewed INTEGER NOT NULL DEFAULT 0
-            );
-            PRAGMA user_version = 1;",
-        )
-        .unwrap();
+    fn fresh_schema_matches_schema_migrated_through_v7() {
+        let mut fresh = Connection::open_in_memory().unwrap();
+        run_migrations(&mut fresh).unwrap();
 
-        run_migrations(&mut conn).unwrap();
+        let mut legacy = Connection::open_in_memory().unwrap();
+        legacy_v1_through_v7::run(&mut legacy).unwrap();
 
-        let v: i32 = conn
+        let v: i32 = legacy
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
         assert_eq!(v, 7);
 
-        // Check new columns exist
-        conn.execute("SELECT bundle_id, url, entry_id FROM segments LIMIT 1;", [])
-            .unwrap();
-        conn.execute("SELECT raw_confidence, tier FROM suggestions LIMIT 1;", [])
-            .unwrap();
-        conn.execute(
-            "SELECT id, sampled_at, power_watts FROM energy_samples LIMIT 1;",
-            [],
-        )
-        .unwrap();
+        assert_eq!(schema_snapshot(&fresh), schema_snapshot(&legacy));
     }
 
     #[test]
-    fn zero_length_auto_entries_are_retired() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        run_migrations(&mut conn).unwrap();
-        conn.execute_batch(
-            "PRAGMA user_version = 5;
-            INSERT INTO time_entries (id, started_at, ended_at, description, status, source, created_at, updated_at)
-            VALUES ('ghost', 10, 10, 'Took a short break with no activity.', 'pending', 'auto', 0, 0),
-                   ('work', 0, 10, 'Code', 'pending', 'auto', 0, 0),
-                   ('kept', 20, 20, 'Approved', 'approved', 'auto', 0, 0);
-            INSERT INTO segments (app, title, kind, started_at, ended_at, entry_id)
-            VALUES ('Code', 'main.rs', 'activity', 10, 10, 'ghost');",
-        )
-        .unwrap();
+    fn zero_length_segments_do_not_create_entries() {
+        let segment = crate::entry_builder::SegmentInput {
+            id: 1,
+            app: "Code".to_string(),
+            title: "main.rs".to_string(),
+            kind: "activity".to_string(),
+            label: None,
+            started_at: 10,
+            ended_at: Some(10),
+            entry_id: None,
+        };
+        let entries = crate::entry_builder::build_entries(
+            &[segment],
+            &[],
+            &crate::entry_builder::EntrySettings::default(),
+            1000,
+        );
 
-        run_migrations(&mut conn).unwrap();
-
-        let live: Vec<String> = conn
-            .prepare("SELECT id FROM time_entries WHERE deleted_at IS NULL ORDER BY id;")
-            .unwrap()
-            .query_map([], |r| r.get(0))
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap();
-        assert_eq!(live, vec!["kept", "work"]);
-        let linked: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM segments WHERE entry_id = 'ghost';",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(linked, 0);
+        assert!(entries.is_empty());
     }
 
     #[test]
     fn window_titles_are_searchable_by_substring() {
         let mut conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE segments (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              app TEXT NOT NULL,
-              title TEXT NOT NULL,
-              kind TEXT NOT NULL,
-              label TEXT,
-              started_at INTEGER NOT NULL,
-              ended_at INTEGER,
-              reviewed INTEGER NOT NULL DEFAULT 0
-            );
-            INSERT INTO segments (app, title, kind, started_at) VALUES ('Zed', 'invoices.rs - OpenRize', 'activity', 1);
-            PRAGMA user_version = 1;",
+        run_migrations(&mut conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO segments (app, title, kind, started_at) VALUES ('Zed', 'invoices.rs - OpenRize', 'activity', 1);",
+            [],
         )
         .unwrap();
-        run_migrations(&mut conn).unwrap();
 
         let hits = |conn: &Connection, pattern: &str| -> i64 {
             conn.query_row(
@@ -624,7 +482,6 @@ mod tests {
             )
             .unwrap()
         };
-        // Backfilled from rows that existed before the migration.
         assert_eq!(hits(&conn, "%invoices.rs%"), 1);
         assert_eq!(hits(&conn, "%rize%"), 1);
 
@@ -646,5 +503,293 @@ mod tests {
         conn.execute("DELETE FROM segments WHERE app = 'Zed';", [])
             .unwrap();
         assert_eq!(hits(&conn, "%invoices%"), 0);
+    }
+
+    /// The old v1-v7 ladder exists only here so the schema-equivalence test
+    /// compares introspected results rather than relying on visual inspection.
+    mod legacy_v1_through_v7 {
+        use rusqlite::{Connection, Result};
+
+        pub fn run(conn: &mut Connection) -> Result<()> {
+            conn.execute_batch(
+                "
+                CREATE TABLE IF NOT EXISTS segments (
+                  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                  app        TEXT    NOT NULL,
+                  title      TEXT    NOT NULL,
+                  kind       TEXT    NOT NULL,
+                  label      TEXT,
+                  started_at INTEGER NOT NULL,
+                  ended_at   INTEGER,
+                  reviewed   INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS idx_segments_started_at ON segments (started_at);
+                CREATE INDEX IF NOT EXISTS idx_segments_ended_at ON segments (ended_at);
+
+                CREATE TABLE IF NOT EXISTS settings (
+                  key   TEXT PRIMARY KEY,
+                  value TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS daily_rollups (
+                  day_epoch INTEGER NOT NULL,
+                  kind      TEXT    NOT NULL,
+                  total_ms  INTEGER NOT NULL,
+                  PRIMARY KEY (day_epoch, kind)
+                );
+                PRAGMA user_version = 1;
+                ",
+            )?;
+
+            let tx = conn.transaction()?;
+            tx.execute("ALTER TABLE segments ADD COLUMN app_id TEXT;", [])?;
+            tx.execute("ALTER TABLE segments ADD COLUMN bundle_id TEXT;", [])?;
+            tx.execute("ALTER TABLE segments ADD COLUMN url TEXT;", [])?;
+            tx.execute("ALTER TABLE segments ADD COLUMN domain TEXT;", [])?;
+            tx.execute("ALTER TABLE segments ADD COLUMN entry_id TEXT;", [])?;
+            tx.execute_batch(
+                "
+                CREATE INDEX IF NOT EXISTS idx_segments_entry_id ON segments (entry_id);
+
+                CREATE TABLE IF NOT EXISTS apps (
+                  id                  TEXT PRIMARY KEY,
+                  kind                TEXT NOT NULL,
+                  identifier          TEXT NOT NULL UNIQUE,
+                  display_name        TEXT NOT NULL,
+                  icon_png            BLOB,
+                  default_category_id TEXT,
+                  default_project_id  TEXT,
+                  excluded            INTEGER NOT NULL DEFAULT 0,
+                  first_seen          INTEGER NOT NULL,
+                  last_seen           INTEGER NOT NULL,
+                  created_at          INTEGER NOT NULL,
+                  updated_at          INTEGER NOT NULL,
+                  deleted_at          INTEGER
+                );
+
+                CREATE TABLE IF NOT EXISTS categories (
+                  id               TEXT PRIMARY KEY,
+                  name             TEXT NOT NULL,
+                  color            TEXT NOT NULL,
+                  description      TEXT,
+                  ai_prompt        TEXT,
+                  billable_default INTEGER NOT NULL DEFAULT 0,
+                  counts_as_work   INTEGER NOT NULL DEFAULT 1,
+                  archived         INTEGER NOT NULL DEFAULT 0,
+                  sort             INTEGER NOT NULL DEFAULT 0,
+                  created_at       INTEGER NOT NULL,
+                  updated_at       INTEGER NOT NULL,
+                  deleted_at       INTEGER
+                );
+
+                CREATE TABLE IF NOT EXISTS projects (
+                  id               TEXT PRIMARY KEY,
+                  client_id        TEXT,
+                  name             TEXT NOT NULL,
+                  color            TEXT NOT NULL,
+                  description      TEXT,
+                  ai_hints         TEXT,
+                  status           TEXT NOT NULL DEFAULT 'active',
+                  due_date         INTEGER,
+                  budget_kind      TEXT NOT NULL DEFAULT 'none',
+                  budget_value     REAL,
+                  budget_period    TEXT NOT NULL DEFAULT 'total',
+                  billable_default INTEGER NOT NULL DEFAULT 0,
+                  hourly_rate      REAL,
+                  created_at       INTEGER NOT NULL,
+                  updated_at       INTEGER NOT NULL,
+                  deleted_at       INTEGER
+                );
+
+                CREATE TABLE IF NOT EXISTS clients (
+                  id           TEXT PRIMARY KEY,
+                  name         TEXT NOT NULL,
+                  email        TEXT,
+                  address      TEXT,
+                  default_rate REAL,
+                  currency     TEXT,
+                  created_at   INTEGER NOT NULL,
+                  updated_at   INTEGER NOT NULL,
+                  deleted_at   INTEGER
+                );
+
+                CREATE TABLE IF NOT EXISTS rules (
+                  id          TEXT PRIMARY KEY,
+                  match_kind  TEXT NOT NULL,
+                  pattern     TEXT NOT NULL,
+                  category_id TEXT,
+                  project_id  TEXT,
+                  priority    INTEGER NOT NULL DEFAULT 0,
+                  enabled     INTEGER NOT NULL DEFAULT 1,
+                  origin      TEXT NOT NULL DEFAULT 'manual',
+                  created_at  INTEGER NOT NULL,
+                  updated_at  INTEGER NOT NULL,
+                  deleted_at  INTEGER
+                );
+
+                CREATE TABLE IF NOT EXISTS time_entries (
+                  id          TEXT PRIMARY KEY,
+                  started_at  INTEGER NOT NULL,
+                  ended_at    INTEGER NOT NULL,
+                  description TEXT NOT NULL,
+                  category_id TEXT,
+                  project_id  TEXT,
+                  status      TEXT NOT NULL DEFAULT 'pending',
+                  approved_by TEXT,
+                  source      TEXT NOT NULL DEFAULT 'auto',
+                  billable    INTEGER NOT NULL DEFAULT 0,
+                  invoice_id  TEXT,
+                  created_at  INTEGER NOT NULL,
+                  updated_at  INTEGER NOT NULL,
+                  deleted_at  INTEGER
+                );
+                CREATE INDEX IF NOT EXISTS idx_time_entries_started_at ON time_entries (started_at);
+                CREATE INDEX IF NOT EXISTS idx_time_entries_status ON time_entries (status);
+
+                CREATE TABLE IF NOT EXISTS suggestions (
+                  id            TEXT PRIMARY KEY,
+                  entry_id      TEXT NOT NULL,
+                  field         TEXT NOT NULL,
+                  value_id      TEXT,
+                  confidence    REAL NOT NULL,
+                  signals       TEXT,
+                  rationale     TEXT,
+                  alternatives  TEXT,
+                  engine        TEXT NOT NULL DEFAULT 'full',
+                  model_version TEXT,
+                  outcome       TEXT,
+                  created_at    INTEGER NOT NULL,
+                  updated_at    INTEGER NOT NULL,
+                  deleted_at    INTEGER
+                );
+
+                CREATE TABLE IF NOT EXISTS entry_events (
+                  id       TEXT PRIMARY KEY,
+                  entry_id TEXT NOT NULL,
+                  kind     TEXT NOT NULL,
+                  actor    TEXT NOT NULL,
+                  payload  TEXT,
+                  at       INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_entry_events_entry_id ON entry_events (entry_id);
+                ",
+            )?;
+
+            super::super::seed_default_categories(&tx)?;
+            tx.execute("PRAGMA user_version = 2;", [])?;
+            tx.commit()?;
+
+            let tx = conn.transaction()?;
+            tx.execute(
+                "ALTER TABLE time_entries ADD COLUMN description_origin TEXT NOT NULL DEFAULT 'template';",
+                [],
+            )?;
+            tx.execute_batch(
+                "
+                CREATE INDEX IF NOT EXISTS idx_suggestions_entry ON suggestions (entry_id, field, created_at);
+
+                CREATE TABLE IF NOT EXISTS entry_embeddings (
+                  entry_id   TEXT PRIMARY KEY,
+                  vec        BLOB NOT NULL,
+                  text_hash  TEXT NOT NULL,
+                  features   TEXT NOT NULL,
+                  model      TEXT NOT NULL,
+                  created_at INTEGER NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS classify_jobs (
+                  id         TEXT PRIMARY KEY,
+                  entry_id   TEXT NOT NULL,
+                  kind       TEXT NOT NULL DEFAULT 'classify',
+                  state      TEXT NOT NULL DEFAULT 'queued',
+                  attempts   INTEGER NOT NULL DEFAULT 0,
+                  next_at    INTEGER NOT NULL,
+                  last_error TEXT,
+                  created_at INTEGER NOT NULL,
+                  updated_at INTEGER NOT NULL,
+                  UNIQUE (entry_id, kind)
+                );
+                CREATE INDEX IF NOT EXISTS idx_classify_jobs_state ON classify_jobs (state, next_at);
+
+                CREATE TABLE IF NOT EXISTS model_artifacts (
+                  id          TEXT PRIMARY KEY,
+                  kind        TEXT NOT NULL,
+                  path        TEXT NOT NULL,
+                  trained_at  INTEGER NOT NULL,
+                  n_examples  INTEGER NOT NULL,
+                  holdout_acc REAL,
+                  calibration TEXT,
+                  active      INTEGER NOT NULL DEFAULT 0
+                );
+                ",
+            )?;
+            tx.execute("PRAGMA user_version = 3;", [])?;
+            tx.commit()?;
+
+            let tx = conn.transaction()?;
+            tx.execute(
+                "ALTER TABLE suggestions ADD COLUMN raw_confidence REAL;",
+                [],
+            )?;
+            tx.execute("ALTER TABLE suggestions ADD COLUMN tier TEXT;", [])?;
+            tx.execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_suggestions_created_at ON suggestions (created_at);
+                 CREATE INDEX IF NOT EXISTS idx_model_artifacts_kind ON model_artifacts (kind, active, trained_at);",
+            )?;
+            tx.execute("PRAGMA user_version = 4;", [])?;
+            tx.commit()?;
+
+            let tx = conn.transaction()?;
+            tx.execute_batch(
+                "
+                CREATE VIRTUAL TABLE IF NOT EXISTS segments_fts USING fts5(
+                  title, content='segments', content_rowid='id', tokenize='trigram'
+                );
+                CREATE TRIGGER IF NOT EXISTS segments_fts_insert AFTER INSERT ON segments BEGIN
+                  INSERT INTO segments_fts (rowid, title) VALUES (new.id, new.title);
+                END;
+                CREATE TRIGGER IF NOT EXISTS segments_fts_delete AFTER DELETE ON segments BEGIN
+                  INSERT INTO segments_fts (segments_fts, rowid, title) VALUES ('delete', old.id, old.title);
+                END;
+                CREATE TRIGGER IF NOT EXISTS segments_fts_update AFTER UPDATE OF title ON segments BEGIN
+                  INSERT INTO segments_fts (segments_fts, rowid, title) VALUES ('delete', old.id, old.title);
+                  INSERT INTO segments_fts (rowid, title) VALUES (new.id, new.title);
+                END;
+                INSERT INTO segments_fts (segments_fts) VALUES ('rebuild');
+
+                CREATE INDEX IF NOT EXISTS idx_time_entries_project ON time_entries (project_id, started_at);
+                CREATE INDEX IF NOT EXISTS idx_rules_project ON rules (project_id);
+                ",
+            )?;
+            tx.execute("PRAGMA user_version = 5;", [])?;
+            tx.commit()?;
+
+            let tx = conn.transaction()?;
+            tx.execute("PRAGMA user_version = 6;", [])?;
+            tx.commit()?;
+
+            let tx = conn.transaction()?;
+            tx.execute_batch(
+                "
+                CREATE TABLE IF NOT EXISTS energy_samples (
+                  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                  sampled_at   INTEGER NOT NULL,
+                  duration_ms  INTEGER NOT NULL,
+                  cpu_time_ms  INTEGER NOT NULL,
+                  energy_nj    INTEGER NOT NULL,
+                  power_watts  REAL NOT NULL,
+                  impact_level TEXT NOT NULL,
+                  ai_active    INTEGER NOT NULL DEFAULT 0,
+                  on_battery   INTEGER NOT NULL DEFAULT 0,
+                  battery_level REAL
+                );
+                CREATE INDEX IF NOT EXISTS idx_energy_samples_sampled_at ON energy_samples (sampled_at);
+                ",
+            )?;
+            tx.execute("PRAGMA user_version = 7;", [])?;
+            tx.commit()?;
+
+            Ok(())
+        }
     }
 }

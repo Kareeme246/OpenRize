@@ -13,6 +13,7 @@ import { MyTimesheet } from "./pages/MyTimesheet";
 import { Projects } from "./pages/Projects";
 import { Settings } from "./pages/Settings";
 import { TimeEntries } from "./pages/TimeEntries";
+import { Timers } from "./pages/Timers";
 import { Timesheets } from "./pages/Timesheets";
 
 /** Browser-style history: a stack plus where the user is standing in it. */
@@ -147,6 +148,8 @@ export default function App() {
             replace={replace}
           />
         );
+      case "timers":
+        return <Timers />;
       case "apps":
         return <Apps />;
       case "entries":

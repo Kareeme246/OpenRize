@@ -9,6 +9,7 @@ export interface TimersApi {
   /** Shared 1 Hz clock; every card reads this same value. */
   now: number;
   error: string | null;
+  loading: boolean;
   create: (label: string) => void;
   start: (id: string) => void;
   pause: (id: string) => void;
@@ -17,10 +18,19 @@ export interface TimersApi {
   remove: (id: string) => void;
 }
 
+let cachedTimers: Timer[] | null = null;
+
 export function useTimers(): TimersApi {
-  const [timers, setTimers] = useState<Timer[]>([]);
+  const [timers, setTimersState] = useState<Timer[]>(() => cachedTimers ?? []);
+  const [loading, setLoading] = useState<boolean>(cachedTimers === null);
   const [now, setNow] = useState<number>(() => Date.now());
   const [error, setError] = useState<string | null>(null);
+
+  const setTimers = useCallback((next: Timer[]) => {
+    cachedTimers = next;
+    setTimersState(next);
+    setLoading(false);
+  }, []);
 
   // Adopt whatever Rust already has on disk. Rust owns the state, so there is
   // no default array to render in the meantime.
@@ -28,8 +38,11 @@ export function useTimers(): TimersApi {
     api
       .listTimers()
       .then(setTimers)
-      .catch((cause: unknown) => setError(describeError(cause)));
-  }, []);
+      .catch((cause: unknown) => {
+        setError(describeError(cause));
+        setLoading(false);
+      });
+  }, [setTimers]);
 
   // ONE interval for the whole page. N running stopwatches cost one repaint per
   // second, not N — this is the reason the tick lives here and not in a card.
@@ -47,11 +60,14 @@ export function useTimers(): TimersApi {
 
   // Every command answers with the full list, so state is replaced, never
   // patched — the UI cannot invent a timer that is not on disk.
-  const send = useCallback((action: Promise<Timer[]>): void => {
-    action
-      .then(setTimers)
-      .catch((cause: unknown) => setError(describeError(cause)));
-  }, []);
+  const send = useCallback(
+    (action: Promise<Timer[]>): void => {
+      action
+        .then(setTimers)
+        .catch((cause: unknown) => setError(describeError(cause)));
+    },
+    [setTimers],
+  );
 
   const create = useCallback(
     (label: string) => send(api.createTimer(label)),
@@ -66,5 +82,16 @@ export function useTimers(): TimersApi {
   );
   const remove = useCallback((id: string) => send(api.deleteTimer(id)), [send]);
 
-  return { timers, now, error, create, start, pause, reset, rename, remove };
+  return {
+    timers,
+    now,
+    error,
+    loading,
+    create,
+    start,
+    pause,
+    reset,
+    rename,
+    remove,
+  };
 }

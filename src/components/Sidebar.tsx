@@ -90,6 +90,14 @@ export function Sidebar({
             <path d="M9 14l2 2 4-4" />
           </NavTab>
           <NavTab
+            active={currentName === "timers"}
+            label="Timers"
+            onSelect={() => onNavigate({ name: "timers" })}
+          >
+            <circle cx="12" cy="13" r="8" />
+            <path d="M12 9v4.2l3 1.8M9 2h6" />
+          </NavTab>
+          <NavTab
             active={currentName === "apps"}
             label="Apps"
             onSelect={() => onNavigate({ name: "apps" })}

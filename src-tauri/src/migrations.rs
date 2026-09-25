@@ -274,6 +274,15 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
     }
 
+    let version_after_v5: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
+
+    if version_after_v5 < 6 {
+        let tx = conn.transaction()?;
+        migrate_v6(&tx)?;
+        tx.execute("PRAGMA user_version = 6;", [])?;
+        tx.commit()?;
+    }
+
     Ok(())
 }
 
@@ -337,6 +346,37 @@ fn migrate_v5(tx: &rusqlite::Transaction<'_>) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_time_entries_project ON time_entries (project_id, started_at);
         CREATE INDEX IF NOT EXISTS idx_rules_project ON rules (project_id);
         ",
+    )
+}
+
+/// Retires the zero-length entries the old builder minted on every rebuild:
+/// a segment left open at quit is closed at its own start on the next
+/// launch, and that empty segment never overlapped the entry it was frozen
+/// into, so each rebuild turned it into yet another entry (and AI call).
+fn migrate_v6(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    tx.execute_batch(
+        "CREATE TEMP TABLE retired_entries AS
+           SELECT id FROM time_entries
+           WHERE deleted_at IS NULL
+             AND source = 'auto'
+             AND status != 'approved'
+             AND ended_at <= started_at
+             AND NOT EXISTS (
+               SELECT 1 FROM entry_events ev WHERE ev.entry_id = time_entries.id AND ev.actor = 'user'
+             );",
+    )?;
+    tx.execute(
+        "UPDATE time_entries SET deleted_at = ?1, updated_at = ?1
+         WHERE id IN (SELECT id FROM retired_entries);",
+        [now],
+    )?;
+    tx.execute_batch(
+        "UPDATE segments SET entry_id = NULL WHERE entry_id IN (SELECT id FROM retired_entries);
+         DROP TABLE retired_entries;",
     )
 }
 
@@ -439,7 +479,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 5);
+        assert_eq!(v, 6);
 
         let cat_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM categories;", [], |r| r.get(0))
@@ -470,13 +510,48 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 5);
+        assert_eq!(v, 6);
 
         // Check new columns exist
         conn.execute("SELECT bundle_id, url, entry_id FROM segments LIMIT 1;", [])
             .unwrap();
         conn.execute("SELECT raw_confidence, tier FROM suggestions LIMIT 1;", [])
             .unwrap();
+    }
+
+    #[test]
+    fn zero_length_auto_entries_are_retired() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        conn.execute_batch(
+            "PRAGMA user_version = 5;
+            INSERT INTO time_entries (id, started_at, ended_at, description, status, source, created_at, updated_at)
+            VALUES ('ghost', 10, 10, 'Took a short break with no activity.', 'pending', 'auto', 0, 0),
+                   ('work', 0, 10, 'Code', 'pending', 'auto', 0, 0),
+                   ('kept', 20, 20, 'Approved', 'approved', 'auto', 0, 0);
+            INSERT INTO segments (app, title, kind, started_at, ended_at, entry_id)
+            VALUES ('Code', 'main.rs', 'activity', 10, 10, 'ghost');",
+        )
+        .unwrap();
+
+        run_migrations(&mut conn).unwrap();
+
+        let live: Vec<String> = conn
+            .prepare("SELECT id FROM time_entries WHERE deleted_at IS NULL ORDER BY id;")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(live, vec!["kept", "work"]);
+        let linked: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM segments WHERE entry_id = 'ghost';",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(linked, 0);
     }
 
     #[test]

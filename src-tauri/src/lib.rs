@@ -171,6 +171,7 @@ pub fn run() {
             commands::reject_time_entry,
             commands::split_time_entry,
             commands::delete_time_entry,
+            commands::delete_time_entries,
             commands::create_time_entry,
             commands::rebuild_time_entries,
             commands::list_apps,

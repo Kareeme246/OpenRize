@@ -282,6 +282,10 @@ export async function deleteTimeEntry(id: string): Promise<void> {
   await invoke("delete_time_entry", { id });
 }
 
+export async function deleteTimeEntries(ids: string[]): Promise<void> {
+  await invoke("delete_time_entries", { ids });
+}
+
 export async function createTimeEntry(entry: NewTimeEntry): Promise<TimeEntry> {
   return await invoke<TimeEntry>("create_time_entry", { entry });
 }

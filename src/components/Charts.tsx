@@ -25,6 +25,7 @@ export function Donut({
   emptyLabel = "No time yet",
   maxLegend = 6,
   stacked = false,
+  showLegend = true,
 }: {
   slices: Slice[];
   size?: number;
@@ -34,6 +35,7 @@ export function Donut({
   maxLegend?: number;
   /** Ring above the legend, for narrow cards side by side. */
   stacked?: boolean;
+  showLegend?: boolean;
 }) {
   const [hovered, setHovered] = useState<string | null>(null);
   const total = slices.reduce((sum, slice) => sum + slice.ms, 0);
@@ -116,7 +118,9 @@ export function Donut({
           textAnchor="middle"
           className="fill-fg-strong font-semibold text-[15px]"
         >
-          {total > 0 ? formatDuration(focus?.ms ?? total) : "–"}
+          {total > 0
+            ? formatDuration(showLegend ? (focus?.ms ?? total) : total)
+            : "–"}
         </text>
         <text
           x="50%"
@@ -124,7 +128,7 @@ export function Donut({
           textAnchor="middle"
           className="fill-fg-soft text-[10px]"
         >
-          {focus
+          {showLegend && focus
             ? `${Math.round((focus.ms / total) * 100)}%`
             : total > 0
               ? "total"
@@ -132,36 +136,38 @@ export function Donut({
         </text>
       </svg>
       {/* Capped so a wide card keeps each value near its label. */}
-      <figcaption className="min-w-0 max-w-sm flex-1 space-y-1 text-[11.5px]">
-        <div className="mb-1.5 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
-          {title}
-        </div>
-        {shown.length === 0 && (
-          <div className="text-fg-faint">{emptyLabel}</div>
-        )}
-        {shown.map((slice) => (
-          // biome-ignore lint/a11y/noStaticElementInteractions: hover highlights the matching ring slice; the row is plain text.
-          <div
-            key={slice.key}
-            onMouseEnter={() => setHovered(slice.key)}
-            onMouseLeave={() => setHovered(null)}
-            className={`flex items-center gap-2 rounded px-1 ${
-              hovered === slice.key ? "bg-surface" : ""
-            }`}
-          >
-            <span
-              className="size-2 shrink-0 rounded-full"
-              style={{ backgroundColor: slice.color }}
-            />
-            <span className="min-w-0 flex-1 truncate text-fg-muted">
-              {slice.label}
-            </span>
-            <span className="shrink-0 font-mono text-fg-soft tabular-nums">
-              {formatDuration(slice.ms)}
-            </span>
+      {showLegend && (
+        <figcaption className="min-w-0 max-w-sm flex-1 space-y-1 text-[11.5px]">
+          <div className="mb-1.5 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
+            {title}
           </div>
-        ))}
-      </figcaption>
+          {shown.length === 0 && (
+            <div className="text-fg-faint">{emptyLabel}</div>
+          )}
+          {shown.map((slice) => (
+            // biome-ignore lint/a11y/noStaticElementInteractions: hover highlights the matching ring slice; the row is plain text.
+            <div
+              key={slice.key}
+              onMouseEnter={() => setHovered(slice.key)}
+              onMouseLeave={() => setHovered(null)}
+              className={`flex items-center gap-2 rounded px-1 ${
+                hovered === slice.key ? "bg-surface" : ""
+              }`}
+            >
+              <span
+                className="size-2 shrink-0 rounded-full"
+                style={{ backgroundColor: slice.color }}
+              />
+              <span className="min-w-0 flex-1 truncate text-fg-muted">
+                {slice.label}
+              </span>
+              <span className="shrink-0 font-mono text-fg-soft tabular-nums">
+                {formatDuration(slice.ms)}
+              </span>
+            </div>
+          ))}
+        </figcaption>
+      )}
     </figure>
   );
 }

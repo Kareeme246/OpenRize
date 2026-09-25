@@ -283,6 +283,15 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
     }
 
+    let version_after_v6: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
+
+    if version_after_v6 < 7 {
+        let tx = conn.transaction()?;
+        migrate_v7(&tx)?;
+        tx.execute("PRAGMA user_version = 7;", [])?;
+        tx.commit()?;
+    }
+
     Ok(())
 }
 
@@ -377,6 +386,28 @@ fn migrate_v6(tx: &rusqlite::Transaction<'_>) -> Result<()> {
     tx.execute_batch(
         "UPDATE segments SET entry_id = NULL WHERE entry_id IN (SELECT id FROM retired_entries);
          DROP TABLE retired_entries;",
+    )
+}
+
+/// Energy and battery monitoring: periodic process telemetry samples
+/// persisting CPU time, energy usage, power in Watts, and AI activity.
+fn migrate_v7(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+    tx.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS energy_samples (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          sampled_at   INTEGER NOT NULL,
+          duration_ms  INTEGER NOT NULL,
+          cpu_time_ms  INTEGER NOT NULL,
+          energy_nj    INTEGER NOT NULL,
+          power_watts  REAL NOT NULL,
+          impact_level TEXT NOT NULL,
+          ai_active    INTEGER NOT NULL DEFAULT 0,
+          on_battery   INTEGER NOT NULL DEFAULT 0,
+          battery_level REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_energy_samples_sampled_at ON energy_samples (sampled_at);
+        ",
     )
 }
 
@@ -479,12 +510,18 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 6);
+        assert_eq!(v, 7);
 
         let cat_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM categories;", [], |r| r.get(0))
             .unwrap();
         assert_eq!(cat_count, 12);
+
+        conn.execute(
+            "SELECT id, sampled_at, power_watts FROM energy_samples LIMIT 1;",
+            [],
+        )
+        .unwrap();
     }
 
     #[test]
@@ -510,13 +547,18 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 6);
+        assert_eq!(v, 7);
 
         // Check new columns exist
         conn.execute("SELECT bundle_id, url, entry_id FROM segments LIMIT 1;", [])
             .unwrap();
         conn.execute("SELECT raw_confidence, tier FROM suggestions LIMIT 1;", [])
             .unwrap();
+        conn.execute(
+            "SELECT id, sampled_at, power_watts FROM energy_samples LIMIT 1;",
+            [],
+        )
+        .unwrap();
     }
 
     #[test]

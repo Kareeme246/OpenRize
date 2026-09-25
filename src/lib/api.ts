@@ -8,6 +8,8 @@ import type {
   AppRecord,
   Category,
   Client,
+  EnergySample,
+  EnergySummary,
   EntryDetail,
   EntryQuery,
   ExportResult,
@@ -40,6 +42,7 @@ export const TIMERS_CHANGED = "timers-changed";
 export const SUGGESTION_READY = "suggestion-ready";
 /** Payload: `AiStatus`. */
 export const AI_STATUS_CHANGED = "ai-status-changed";
+export const ENERGY_CHANGED = "energy-changed";
 
 /** Tauri rejects with a string; React errors are Error objects. Handle both. */
 export function describeError(error: unknown): string {
@@ -370,4 +373,21 @@ export function renameTimer(id: string, label: string): Promise<Timer[]> {
 
 export function deleteTimer(id: string): Promise<Timer[]> {
   return invoke<Timer[]>("delete_timer", { id });
+}
+
+// --- Battery & Energy ---
+
+export function getEnergySummary(days?: number): Promise<EnergySummary> {
+  return invoke<EnergySummary>("get_energy_summary", { days });
+}
+
+export function queryEnergyHistory(
+  sinceMs?: number,
+  limit?: number,
+): Promise<EnergySample[]> {
+  return invoke<EnergySample[]>("query_energy_history", { sinceMs, limit });
+}
+
+export function resetEnergyHistory(): Promise<EnergySummary> {
+  return invoke<EnergySummary>("reset_energy_history");
 }

@@ -2,6 +2,7 @@ mod activity;
 mod ai;
 mod capture;
 mod commands;
+mod energy;
 mod entry_builder;
 mod migrations;
 mod models;
@@ -99,6 +100,7 @@ pub fn run() {
                 dir.join(activity::DB_FILE),
                 dir.join("ml"),
             );
+            energy::spawn_sampler(app.handle().clone(), dir.join(activity::DB_FILE));
             capture::register_sleep_listeners(app.handle().clone());
             spawn_retention_sweeper(app.handle().clone());
             // One sweep on startup, so a long-dormant install is cleaned before
@@ -189,6 +191,9 @@ pub fn run() {
             commands::discover_projects,
             commands::dismiss_project_suggestion,
             commands::import_projects_csv,
+            commands::get_energy_summary,
+            commands::query_energy_history,
+            commands::reset_energy_history,
         ])
         .build(tauri::generate_context!())
         .expect("error while building OpenRize")

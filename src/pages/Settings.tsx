@@ -5,6 +5,7 @@ import {
   PersonalModels,
   ThresholdSlider,
 } from "../components/AiLearning";
+import { BatteryEnergyMonitor } from "../components/BatteryEnergyMonitor";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Picker } from "../components/Picker";
 import {
@@ -15,6 +16,7 @@ import {
 import { type Status, StatusBadge } from "../components/StatusBadge";
 import { useAiMetrics } from "../hooks/useAiMetrics";
 import { llmUnavailableReason, useAiStatus } from "../hooks/useAiStatus";
+import { useEnergy } from "../hooks/useEnergy";
 import { useSettings } from "../hooks/useSettings";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
@@ -274,8 +276,16 @@ export function Settings() {
       .catch((cause: unknown) => setAiError(describeError(cause)));
   };
 
+  const [energyDays, setEnergyDays] = useState(7);
+  const {
+    summary: energySummary,
+    error: energyError,
+    loading: energyLoading,
+    resetHistory: resetEnergyHistory,
+  } = useEnergy(energyDays);
+
   const trayOff = !settings.trayEnabled;
-  const problem = error ?? openError ?? aiError ?? metricsError;
+  const problem = error ?? openError ?? aiError ?? metricsError ?? energyError;
 
   return (
     <main className="flex h-full min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain p-5.5">
@@ -466,6 +476,16 @@ export function Settings() {
           onCancel={() => setConfirmReset(false)}
         />
       )}
+
+      <SettingGroup title="Battery & Energy">
+        <BatteryEnergyMonitor
+          summary={energySummary}
+          loading={energyLoading}
+          selectedDays={energyDays}
+          onRangeChange={setEnergyDays}
+          onReset={resetEnergyHistory}
+        />
+      </SettingGroup>
 
       <SettingGroup title="Notifications">
         <SettingRow

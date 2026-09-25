@@ -680,7 +680,9 @@ pub fn sweep_retention(app: &AppHandle) -> Result<u64, String> {
     let removed = {
         let state = app.state::<AppState>();
         let mut store = state.activity.lock().map_err(|error| error.to_string())?;
-        store.purge_older_than(days, now_epoch_ms())?
+        let removed = store.purge_older_than(days, now_epoch_ms())?;
+        let _ = crate::energy::purge_older_than(store.conn(), days, now_epoch_ms());
+        removed
     };
     if removed > 0 {
         activity::emit_full(app);
@@ -711,4 +713,44 @@ pub fn storage_paths(app: AppHandle) -> Result<StoragePaths, String> {
             .display()
             .to_string(),
     })
+}
+
+#[tauri::command]
+pub fn get_energy_summary(
+    app: AppHandle,
+    days: Option<u32>,
+) -> Result<crate::energy::EnergySummary, String> {
+    let state = app.state::<AppState>();
+    let conn = state.activity_reader.lock().map_err(|e| e.to_string())?;
+    crate::energy::get_summary(
+        &conn,
+        days.unwrap_or(crate::energy::DEFAULT_HISTORY_DAYS),
+        None,
+        None,
+    )
+}
+
+#[tauri::command]
+pub fn query_energy_history(
+    app: AppHandle,
+    since_ms: Option<u64>,
+    limit: Option<u32>,
+) -> Result<Vec<crate::energy::EnergySample>, String> {
+    let state = app.state::<AppState>();
+    let conn = state.activity_reader.lock().map_err(|e| e.to_string())?;
+    crate::energy::query_history(&conn, since_ms, limit)
+}
+
+#[tauri::command]
+pub fn reset_energy_history(app: AppHandle) -> Result<crate::energy::EnergySummary, String> {
+    let state = app.state::<AppState>();
+    {
+        let store = state.activity.lock().map_err(|e| e.to_string())?;
+        crate::energy::reset_history(store.conn())?;
+    }
+    let conn = state.activity_reader.lock().map_err(|e| e.to_string())?;
+    let summary =
+        crate::energy::get_summary(&conn, crate::energy::DEFAULT_HISTORY_DAYS, None, None)?;
+    let _ = app.emit(crate::energy::EVENT_ENERGY_CHANGED, &summary);
+    Ok(summary)
 }

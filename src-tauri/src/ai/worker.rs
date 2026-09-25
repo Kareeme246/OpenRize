@@ -321,8 +321,15 @@ impl Worker {
     // --- Jobs --------------------------------------------------------------
 
     fn run_job(&mut self, job: Job) {
+        {
+            let runtime = self.app.state::<AiRuntime>();
+            runtime.set_busy(true);
+            runtime.set_sidecar_pid(self.sidecar.pid());
+        }
+
         let now = now_epoch_ms();
         if let Err(error) = self.write(|conn| store::set_job_state(conn, &job.id, "running", now)) {
+            self.app.state::<AiRuntime>().set_busy(false);
             eprintln!("ai worker: {error}");
             return;
         }
@@ -331,6 +338,11 @@ impl Worker {
         } else {
             self.embed_only(&job)
         };
+        {
+            let runtime = self.app.state::<AiRuntime>();
+            runtime.set_busy(false);
+            runtime.set_sidecar_pid(self.sidecar.pid());
+        }
         let now = now_epoch_ms();
         match result {
             Ok(()) => {
@@ -811,6 +823,11 @@ impl Worker {
         }
 
         update_status(&self.app, |s| s.retrain = "running".to_string());
+        {
+            let runtime = self.app.state::<AiRuntime>();
+            runtime.set_busy(true);
+            runtime.set_sidecar_pid(self.sidecar.pid());
+        }
         let mut notes = Vec::new();
         for field in due {
             let what = format!("{} model", field.as_str());
@@ -844,6 +861,11 @@ impl Worker {
             s.retrain = "idle".to_string();
             s.retrain_note = note;
         });
+        {
+            let runtime = self.app.state::<AiRuntime>();
+            runtime.set_busy(false);
+            runtime.set_sidecar_pid(self.sidecar.pid());
+        }
         self.refresh_counts();
     }
 

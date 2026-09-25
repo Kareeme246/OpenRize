@@ -44,7 +44,7 @@ export function StopwatchCard({
           : "border-line bg-linear-to-b from-surface to-transparent"
       }`}
     >
-      <div className="flex w-full min-w-0 items-center justify-center">
+      <div className="flex w-full min-w-0 items-center justify-center gap-1.5">
         {editing ? (
           <input
             // biome-ignore lint/a11y/noAutofocus: intentional — focuses the rename input the moment editing starts
@@ -63,17 +63,42 @@ export function StopwatchCard({
             className="w-full min-w-0 rounded-md border border-accent/30 bg-inset px-2 py-1 text-center text-[13px] text-fg-strong outline-none"
           />
         ) : (
-          <button
-            type="button"
-            title="Double-click to rename"
-            onDoubleClick={() => {
-              setDraft(timer.label);
-              setEditing(true);
-            }}
-            className="min-w-0 max-w-full truncate text-center text-[13px] font-semibold"
-          >
-            {timer.label}
-          </button>
+          <div className="group flex min-w-0 max-w-full items-center justify-center gap-1">
+            <button
+              type="button"
+              title="Double-click to rename"
+              onDoubleClick={() => {
+                setDraft(timer.label);
+                setEditing(true);
+              }}
+              className="min-w-0 truncate text-center text-[13px] font-semibold text-fg-strong hover:text-accent transition-colors"
+            >
+              {timer.label}
+            </button>
+            <button
+              type="button"
+              title="Rename"
+              aria-label="Rename tracker"
+              onClick={() => {
+                setDraft(timer.label);
+                setEditing(true);
+              }}
+              className="p-0.5 text-fg-faint opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 hover:text-fg"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                className="size-3"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+              </svg>
+            </button>
+          </div>
         )}
       </div>
 
@@ -86,7 +111,7 @@ export function StopwatchCard({
       <div
         className={`font-mono text-[26px] font-semibold tabular-nums leading-none tracking-tight ${
           running
-            ? "text-accent drop-shadow-[0_0_28px_rgba(42,234,131,0.35)]"
+            ? "text-accent drop-shadow-[0_0_24px_rgba(var(--accent-rgb),0.35)]"
             : "text-fg-soft"
         }`}
       >
@@ -99,7 +124,7 @@ export function StopwatchCard({
           title="Reset to zero and stop"
           aria-label="Reset to zero and stop"
           onClick={() => setPending("reset")}
-          className="grid w-9 shrink-0 place-items-center rounded-lg border border-line bg-surface text-fg-soft"
+          className="grid size-8 shrink-0 place-items-center rounded-lg border border-line bg-surface text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
         >
           <svg
             viewBox="0 0 24 24"
@@ -118,7 +143,7 @@ export function StopwatchCard({
           title="Delete"
           aria-label="Delete"
           onClick={() => setPending("delete")}
-          className="grid w-9 shrink-0 place-items-center rounded-lg border border-line bg-surface text-sm text-fg-soft"
+          className="grid size-8 shrink-0 place-items-center rounded-lg border border-line bg-surface text-sm text-fg-soft transition-colors hover:bg-surface-strong hover:text-danger"
         >
           ×
         </button>

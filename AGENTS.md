@@ -38,6 +38,15 @@ initiative. Verification for this project is deliberately just these scripts
 (`pnpm verify`, `pnpm dev:screenshot`, and `pnpm dev:drive` below) — that
 is a decision, not an oversight.
 
+## CI and releases
+
+`.github/workflows/verify.yml` runs `pnpm verify` (check only) on pull requests, on a
+`macos-26` runner - `cargo clippy` compiles the Swift sidecar below, which needs Xcode 26+;
+verify that GitHub-hosted image still provides it before changing the runner label.
+`.github/workflows/release.yml` builds and publishes an unsigned macOS `.dmg`/`.app` to a
+GitHub Release on `v*` tags - no signing or notarization yet. See `RELEASING.md` for the
+release procedure and `scripts/bump-version.sh` for the version-bump script.
+
 ## On-device AI sidecar
 
 AI categorization lives in `src-tauri/src/ai/` (module docs in `ai/mod.rs`

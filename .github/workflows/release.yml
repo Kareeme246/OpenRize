@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # Needs Xcode 26+ (src-tauri/build.rs compiles the Swift sidecar, which
+    # requires the Foundation Models SDK). macos-26 ships Xcode 26.6 as its
+    # default toolchain - see AGENTS.md "On-device AI sidecar".
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: pnpm install --frozen-lockfile
+
+      # No signing identity is configured, so this produces an unsigned
+      # .app/.dmg. The captain has decided to ship unsigned builds for now
+      # (see AGENTS.md and the release procedure in RELEASING.md).
+      - run: pnpm tauri build
+
+      - name: Zip the .app bundle for upload
+        run: |
+          cd src-tauri/target/release/bundle/macos
+          ditto -c -k --sequesterRsrc --keepParent openrize.app openrize.app.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/macos/openrize.app.zip
+          body: |
+            Unsigned macOS build - no Apple Developer signing or notarization yet.
+
+            On first launch, macOS Gatekeeper will refuse to open the app. Right-click
+            (or Control-click) `openrize.app` and choose **Open**, or go to
+            **System Settings > Privacy & Security** and click **Open Anyway**, then
+            confirm. You only need to do this once.
+          generate_release_notes: true

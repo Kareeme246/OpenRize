@@ -2,7 +2,7 @@
 
 **A real answer to "where did my day go?" - automatic, private, local-first time tracking for your Mac. Free, open-source, no account, no screenshots, no keystrokes.**
 
-[![Status](https://img.shields.io/badge/status-alpha%20%C2%B7%20core%20shipped-E8734A?style=for-the-badge)](#where-it-stands)
+[![Status](https://img.shields.io/badge/status-beta%20%C2%B7%20core%20shipped-E8734A?style=for-the-badge)](#where-it-stands)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-2aea83?style=for-the-badge)](LICENSE)
 [![Built with Tauri 2](https://img.shields.io/badge/Built%20with-Tauri%202-24C8DB?style=for-the-badge)](https://tauri.app)
 [![Rust](https://img.shields.io/badge/Rust-backend-000000?style=for-the-badge&logo=rust)](https://www.rust-lang.org)
@@ -18,14 +18,14 @@ The categorizing is done by AI that runs entirely on your Mac and learns from ev
 
 ---
 
-## ⚠️ Alpha - read this first
+## ⚠️ Beta - read this first
 
 The core product works end to end: OpenRize captures your activity in the background, folds it
 into reviewable time entries, suggests a category and project for each one with an on-device model,
 and learns from what you accept and correct. You can review your day on a calendar, approve a whole
 timesheet, slice your time in reports, and manage projects and clients.
 
-It is still alpha. There are no packaged releases and it only runs on macOS for now.
+It is still beta, and it only runs on macOS for now.
 
 ## Where it stands
 
@@ -149,7 +149,12 @@ Stack: [Tauri 2](https://tauri.app) · Rust · SQLite · Swift · [React 19](htt
 
 ## Building from source
 
-There are no packaged releases yet, so building from source is the only way in. First install the
+Packaged builds are available from the [Releases](https://github.com/Kareeme246/OpenRize/releases)
+page. They are unsigned for now, so macOS will refuse to open the `.app` on first launch - right-click
+it and choose **Open** (or System Settings > Privacy & Security > **Open Anyway**) to run it once and
+clear the warning.
+
+To build from source instead, first install the
 [Tauri prerequisites](https://tauri.app/start/prerequisites/) (on macOS: Xcode command line tools
 and Rust), plus Node and pnpm. The Rust build also compiles the Swift sidecar with `swift build`, so
 it needs the **Xcode 26+** command line tools.

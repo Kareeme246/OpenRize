@@ -26,6 +26,7 @@ interface DayViewProps {
   categoryById: Map<string, Category>;
   projectById: Map<string, Project>;
   onSelect: (id: string) => void;
+  onAdd: (startMs: number) => void;
 }
 
 /** A clock that ticks once a minute, for the "now" line. */
@@ -52,6 +53,7 @@ export function DayView({
   categoryById,
   projectById,
   onSelect,
+  onAdd,
 }: DayViewProps) {
   const now = useMinuteClock();
   const hoursInDay = dayLength(dayStart);
@@ -132,6 +134,25 @@ export function DayView({
         </div>
 
         <div className="relative">
+          <button
+            type="button"
+            aria-label="Click a time to add a session"
+            title="Click to add a session"
+            className="absolute inset-0 w-full cursor-cell"
+            onClick={(event) => {
+              if (event.detail === 0) {
+                onAdd(dayStart + 9 * 3_600_000);
+                return;
+              }
+              const bounds = event.currentTarget.getBoundingClientRect();
+              const offset =
+                timeline.startHour +
+                (event.clientY - bounds.top) / HOUR_HEIGHT_PX;
+              const rounded =
+                Math.round((dayStart + offset * 3_600_000) / 900_000) * 900_000;
+              onAdd(Math.min(rounded, dayEnd - 3_600_000));
+            }}
+          />
           {timeline.hours.map((hour) => (
             <div
               key={`line-${hour}`}

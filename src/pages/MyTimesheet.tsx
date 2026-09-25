@@ -746,7 +746,7 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
       {confirmDelete && (
         <ConfirmDialog
           title={`Delete ${plural(confirmDelete.length, "entry", "entries")}?`}
-          body={`${plural(confirmDelete.length, "entry", "entries")} will be removed. This cannot be undone. Their activity stays in the log, unassigned.`}
+          body={`${plural(confirmDelete.length, "entry", "entries")} and their captured activity will be permanently removed. This cannot be undone.`}
           confirmLabel="Delete"
           onCancel={() => setConfirmDelete(null)}
           onConfirm={() => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AddTimeSheet } from "../components/AddTimeSheet";
 import { AiEngineBanner } from "../components/AiEngineBanner";
 import type { Slice } from "../components/Charts";
 import { EntryReviewSheet } from "../components/EntryReviewSheet";
@@ -109,6 +110,8 @@ export function Calendar({ route, navigate }: CalendarProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [addingAt, setAddingAt] = useState<number | undefined>();
 
   // Responses for a range the user already left are dropped.
   const rangeKey = `${scale}:${startMs}`;
@@ -127,8 +130,21 @@ export function Calendar({ route, navigate }: CalendarProps) {
         );
         if (shownKey.current === key) setCells(next);
       } else {
-        const list = await api.listTimeEntries(startMs, endMs - 1);
-        if (shownKey.current === key) setEntries(list);
+        const [list, snapshot] = await Promise.all([
+          api.listTimeEntries(startMs, endMs - 1),
+          scale === "day" ? api.fetchActivitySnapshot(startMs) : null,
+        ]);
+        if (shownKey.current === key) {
+          setEntries(list);
+          if (snapshot) {
+            setSegments(
+              snapshot.segments.filter(
+                (segment) =>
+                  segment.startedAt >= startMs && segment.startedAt < endMs,
+              ),
+            );
+          }
+        }
       }
       setError(null);
     } catch (cause) {
@@ -371,6 +387,30 @@ export function Calendar({ route, navigate }: CalendarProps) {
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-canvas text-fg">
       <PageHeader title={title}>
+        <div className="flex w-[180px] shrink-0 justify-end">
+          {reviewQueue.length > 0 && (
+            <button
+              type="button"
+              onClick={startReviewMode}
+              className="flex items-center gap-1.5 rounded-full border border-review/30 bg-review/15 px-3 py-1 font-semibold text-[12px] text-review transition-colors hover:bg-review/25"
+            >
+              <span>Review {reviewQueue.length} pending</span>
+              <kbd className="rounded bg-review/20 px-1 text-[10px]">R</kbd>
+            </button>
+          )}
+        </div>
+        {scale === "day" && (
+          <button
+            type="button"
+            onClick={() => {
+              setAddingAt(undefined);
+              setAdding(true);
+            }}
+            className="rounded-md border border-line bg-panel px-2.5 py-1 font-medium text-[12px] text-fg-soft hover:bg-surface hover:text-fg"
+          >
+            Add time
+          </button>
+        )}
         <DateStepper
           unit={scale}
           onStep={(direction) =>
@@ -383,16 +423,6 @@ export function Calendar({ route, navigate }: CalendarProps) {
           value={scale}
           onChange={(next) => go({ scale: next })}
         />
-        {reviewQueue.length > 0 && (
-          <button
-            type="button"
-            onClick={startReviewMode}
-            className="flex items-center gap-1.5 rounded-full border border-review/30 bg-review/15 px-3 py-1 font-semibold text-[12px] text-review transition-colors hover:bg-review/25"
-          >
-            <span>Review {reviewQueue.length} pending</span>
-            <kbd className="rounded bg-review/20 px-1 text-[10px]">R</kbd>
-          </button>
-        )}
       </PageHeader>
 
       <AiEngineBanner status={aiStatus} />
@@ -414,6 +444,10 @@ export function Calendar({ route, navigate }: CalendarProps) {
               categoryById={categoryById}
               projectById={projectById}
               onSelect={select}
+              onAdd={(startMs) => {
+                setAddingAt(startMs);
+                setAdding(true);
+              }}
             />
           )}
           {scale === "week" && (
@@ -503,6 +537,16 @@ export function Calendar({ route, navigate }: CalendarProps) {
           )}
         </aside>
       </div>
+      {scale === "day" && adding && (
+        <AddTimeSheet
+          date={date}
+          initialStartMs={addingAt}
+          categories={catalog.categories}
+          projects={catalog.projects}
+          onClose={() => setAdding(false)}
+          onCreated={() => void load()}
+        />
+      )}
     </div>
   );
 }

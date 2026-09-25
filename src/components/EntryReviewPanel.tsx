@@ -90,25 +90,51 @@ function buildOptions(
   categories: Category[],
   projects: Project[],
 ): PickOption[] {
-  const choices: PickOption[] =
-    field === "category"
-      ? categories
-          .filter((category) => !category.archived)
-          .map((category) => ({
-            valueId: category.id,
-            name: category.name,
-            color: category.color,
-          }))
-      : [
-          { valueId: null, name: "No project", color: NO_PROJECT_COLOR },
-          ...projects
-            .filter((project) => project.status === "active")
-            .map((project) => ({
-              valueId: project.id,
-              name: project.name,
-              color: project.color,
-            })),
-        ];
+  if (field === "category") {
+    const choices: PickOption[] = categories
+      .filter((category) => !category.archived)
+      .map((category) => ({
+        valueId: category.id,
+        name: category.name,
+        color: category.color,
+      }));
+
+    const ranked: PickOption[] = [];
+    const take = (valueId: string | null, confidence: number): void => {
+      const choice = choices.find((option) => option.valueId === valueId);
+      if (choice && !ranked.some((option) => option.valueId === valueId)) {
+        ranked.push({ ...choice, confidence });
+      }
+    };
+    if (suggestion) {
+      take(suggestion.valueId ?? null, suggestion.confidence);
+      for (const alternative of suggestion.alternatives) {
+        take(alternative.valueId ?? null, alternative.confidence);
+      }
+    }
+    for (const choice of choices) {
+      if (!ranked.some((option) => option.valueId === choice.valueId)) {
+        ranked.push(choice);
+      }
+    }
+    return ranked;
+  }
+
+  const activeProjects = projects.filter(
+    (project) => project.status === "active",
+  );
+  if (activeProjects.length === 0) {
+    return [];
+  }
+
+  const choices: PickOption[] = [
+    { valueId: null, name: "No project", color: NO_PROJECT_COLOR },
+    ...activeProjects.map((project) => ({
+      valueId: project.id,
+      name: project.name,
+      color: project.color,
+    })),
+  ];
 
   const ranked: PickOption[] = [];
   const take = (valueId: string | null, confidence: number): void => {
@@ -134,6 +160,13 @@ function buildOptions(
 /** A field is settled when it has a value nobody needs to double-check. */
 function settled(model: FieldModel): boolean {
   if (model.value === null && model.field === "category") return false;
+  if (
+    model.value === null &&
+    model.field === "project" &&
+    model.options.length === 0
+  ) {
+    return true;
+  }
   const suggestion = model.suggestion;
   if (!suggestion) return model.value !== null;
   if (suggestion.outcome !== undefined) return true;
@@ -246,7 +279,10 @@ export function EntryReviewPanel({
     if (field === "category") {
       return categories.find((c) => c.id === valueId)?.name ?? "Unknown";
     }
-    if (!valueId) return "No project";
+    if (!valueId) {
+      const hasActive = projects.some((p) => p.status === "active");
+      return hasActive ? "No project" : "No projects yet";
+    }
     return projects.find((p) => p.id === valueId)?.name ?? "Unknown";
   };
 
@@ -584,6 +620,7 @@ function FieldSection({
   const overflow = options.slice(KEYED_OPTIONS);
   const label = field === "category" ? "Category" : "Project";
   const shortcut = field === "category" ? "C" : "P";
+  const isProjectEmpty = field === "project" && options.length === 0;
 
   return (
     <section
@@ -595,7 +632,11 @@ function FieldSection({
         type="button"
         onClick={onActivate}
         className="flex w-full items-center gap-2 text-left"
-        title={`Choose ${label.toLowerCase()} (${shortcut})`}
+        title={
+          isProjectEmpty
+            ? "No projects yet"
+            : `Choose ${label.toLowerCase()} (${shortcut})`
+        }
       >
         <span className="font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
           {label}
@@ -617,6 +658,8 @@ function FieldSection({
       <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         {current ? (
           <Chip option={current} strong />
+        ) : isProjectEmpty ? (
+          <span className="text-[12px] text-fg-faint">No projects yet</span>
         ) : (
           <span className="text-[12px] text-fg-faint italic">
             {field === "category" ? "No category yet" : "No project"}
@@ -641,63 +684,69 @@ function FieldSection({
         </p>
       )}
 
-      {active && !locked && (
-        <div className="mt-2 space-y-1">
-          {rows.map((option, index) => (
-            <OptionRow
-              key={option.valueId ?? "none"}
-              option={option}
-              shortcut={index + 1}
-              selected={option.valueId === value}
-              onPick={onPick}
-            />
-          ))}
-          {chips.length > 0 && (
-            <div className="flex flex-wrap gap-1 pt-0.5">
-              {chips.map((option, index) => (
-                <button
-                  key={option.valueId ?? "none"}
-                  type="button"
-                  onClick={() => onPick(option.valueId)}
-                  className={`inline-flex max-w-full items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-[11px] transition-colors ${
-                    option.valueId === value
-                      ? "border-accent/60 bg-accent-soft text-fg-strong"
-                      : "border-line text-fg-muted hover:bg-surface-strong"
-                  }`}
-                >
-                  <Dot color={option.color} />
-                  <span className="truncate">{option.name}</span>
-                  <span className="font-mono text-[9.5px] text-fg-faint">
-                    {rows.length + index + 1}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-          {overflow.length > 0 && (
-            <Picker
-              ariaLabel={`More ${label.toLowerCase()} options`}
-              value=""
-              placeholder={`More ${label.toLowerCase()}…`}
-              onChange={(val) => onPick(val === "" ? null : val)}
-              options={[
-                {
-                  value: "",
-                  label: `More ${label.toLowerCase()}…`,
-                  disabled: true,
-                },
-                ...overflow.map((option) => ({
-                  value: option.valueId ?? "",
-                  label: option.name,
-                  color: option.color,
-                })),
-              ]}
-              variant="compact"
-              className="mt-1 w-full"
-            />
-          )}
-        </div>
-      )}
+      {active &&
+        !locked &&
+        (isProjectEmpty ? (
+          <p className="mt-2 text-[11.5px] text-fg-muted">
+            No projects yet. Create projects in Projects to assign time.
+          </p>
+        ) : (
+          <div className="mt-2 space-y-1">
+            {rows.map((option, index) => (
+              <OptionRow
+                key={option.valueId ?? "none"}
+                option={option}
+                shortcut={index + 1}
+                selected={option.valueId === value}
+                onPick={onPick}
+              />
+            ))}
+            {chips.length > 0 && (
+              <div className="flex flex-wrap gap-1 pt-0.5">
+                {chips.map((option, index) => (
+                  <button
+                    key={option.valueId ?? "none"}
+                    type="button"
+                    onClick={() => onPick(option.valueId)}
+                    className={`inline-flex max-w-full items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-[11px] transition-colors ${
+                      option.valueId === value
+                        ? "border-accent/60 bg-accent-soft text-fg-strong"
+                        : "border-line text-fg-muted hover:bg-surface-strong"
+                    }`}
+                  >
+                    <Dot color={option.color} />
+                    <span className="truncate">{option.name}</span>
+                    <span className="font-mono text-[9.5px] text-fg-faint">
+                      {rows.length + index + 1}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {overflow.length > 0 && (
+              <Picker
+                ariaLabel={`More ${label.toLowerCase()} options`}
+                value=""
+                placeholder={`More ${label.toLowerCase()}…`}
+                onChange={(val) => onPick(val === "" ? null : val)}
+                options={[
+                  {
+                    value: "",
+                    label: `More ${label.toLowerCase()}…`,
+                    disabled: true,
+                  },
+                  ...overflow.map((option) => ({
+                    value: option.valueId ?? "",
+                    label: option.name,
+                    color: option.color,
+                  })),
+                ]}
+                variant="compact"
+                className="mt-1 w-full"
+              />
+            )}
+          </div>
+        ))}
     </section>
   );
 }

@@ -55,6 +55,10 @@ export function AddTimeSheet({
   const valid =
     description.trim() !== "" && categoryId !== "" && endMs > startMs;
 
+  const activeProjects = projects.filter(
+    (project) => project.status === "active",
+  );
+
   const pickProject = (id: string): void => {
     setProjectId(id);
     const project = projects.find((candidate) => candidate.id === id);
@@ -157,24 +161,31 @@ export function AddTimeSheet({
             variant="field"
           />
         </Field>
-        <Field label="Project" htmlFor="add-time-project">
-          <Picker
-            id="add-time-project"
-            ariaLabel="Project"
-            value={projectId}
-            onChange={pickProject}
-            options={[
-              { value: "", label: "No project" },
-              ...projects
-                .filter((project) => project.status === "active")
-                .map((project) => ({
+        <Field
+          label="Project"
+          htmlFor={activeProjects.length > 0 ? "add-time-project" : undefined}
+        >
+          {activeProjects.length > 0 ? (
+            <Picker
+              id="add-time-project"
+              ariaLabel="Project"
+              value={projectId}
+              onChange={pickProject}
+              options={[
+                { value: "", label: "No project" },
+                ...activeProjects.map((project) => ({
                   value: project.id,
                   label: project.name,
                   color: project.color,
                 })),
-            ]}
-            variant="field"
-          />
+              ]}
+              variant="field"
+            />
+          ) : (
+            <div className="flex h-8 w-full items-center rounded-md border border-line bg-surface px-2.5 text-[12px] text-fg-faint">
+              No projects yet
+            </div>
+          )}
         </Field>
       </div>
       <label className="flex items-center gap-2 text-fg-muted">

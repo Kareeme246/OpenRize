@@ -501,12 +501,14 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
               options={categoryOptions}
               onChange={setCategoryFilter}
             />
-            <FilterSelect
-              label="Project"
-              value={projectFilter}
-              options={projectOptions}
-              onChange={setProjectFilter}
-            />
+            {catalog.projects.length > 0 && (
+              <FilterSelect
+                label="Project"
+                value={projectFilter}
+                options={projectOptions}
+                onChange={setProjectFilter}
+              />
+            )}
             <ColumnsMenu
               columns={columns}
               onChange={(next) => {
@@ -1027,11 +1029,13 @@ function TimesheetRow({
   const categoryOptions = categories
     .filter((c) => !c.archived || c.id === entry.categoryId)
     .map((c) => ({ value: c.id, label: c.name }));
+  const activeProjects = projects.filter(
+    (p) => p.status === "active" || p.id === entry.projectId,
+  );
+  const hasProjects = activeProjects.length > 0;
   const projectOptions = [
     { value: "", label: "No project" },
-    ...projects
-      .filter((p) => p.status === "active" || p.id === entry.projectId)
-      .map((p) => ({ value: p.id, label: p.name })),
+    ...activeProjects.map((p) => ({ value: p.id, label: p.name })),
   ];
 
   return (
@@ -1110,17 +1114,20 @@ function TimesheetRow({
           </button>
         )}
       </span>
-      {columns.project && (
-        <ChipSelect
-          label="Project"
-          value={entry.projectId ?? ""}
-          color={project?.color}
-          placeholder="No project"
-          confidence={unconfirmed ? entry.ai?.projectConfidence : undefined}
-          options={projectOptions}
-          onChange={(projectId) => onUpdate({ projectId })}
-        />
-      )}
+      {columns.project &&
+        (hasProjects ? (
+          <ChipSelect
+            label="Project"
+            value={entry.projectId ?? ""}
+            color={project?.color}
+            placeholder="No project"
+            confidence={unconfirmed ? entry.ai?.projectConfidence : undefined}
+            options={projectOptions}
+            onChange={(projectId) => onUpdate({ projectId })}
+          />
+        ) : (
+          <span className="text-[11.5px] text-fg-faint">No projects yet</span>
+        ))}
       {columns.category && (
         <ChipSelect
           label="Category"

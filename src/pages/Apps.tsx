@@ -323,25 +323,31 @@ export function Apps() {
                         </td>
 
                         <td className="px-3 py-2.5">
-                          <Picker
-                            ariaLabel="Default project"
-                            value={app.defaultProjectId || ""}
-                            disabled={app.excluded}
-                            onChange={(val) =>
-                              handleUpdate(app, {
-                                defaultProjectId: val || undefined,
-                              })
-                            }
-                            options={[
-                              { value: "", label: "(None)" },
-                              ...projects.map((p) => ({
-                                value: p.id,
-                                label: p.name,
-                                color: p.color,
-                              })),
-                            ]}
-                            variant="compact"
-                          />
+                          {projects.length > 0 ? (
+                            <Picker
+                              ariaLabel="Default project"
+                              value={app.defaultProjectId || ""}
+                              disabled={app.excluded}
+                              onChange={(val) =>
+                                handleUpdate(app, {
+                                  defaultProjectId: val || undefined,
+                                })
+                              }
+                              options={[
+                                { value: "", label: "(None)" },
+                                ...projects.map((p) => ({
+                                  value: p.id,
+                                  label: p.name,
+                                  color: p.color,
+                                })),
+                              ]}
+                              variant="compact"
+                            />
+                          ) : (
+                            <span className="text-[12px] text-fg-faint">
+                              No projects yet
+                            </span>
+                          )}
                         </td>
 
                         <td className="px-3 py-2.5 text-center">

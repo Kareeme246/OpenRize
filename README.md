@@ -25,8 +25,7 @@ into reviewable time entries, suggests a category and project for each one with 
 and learns from what you accept and correct. You can review your day on a calendar, approve a whole
 timesheet, slice your time in reports, and manage projects and clients.
 
-It is still alpha. There are no packaged releases, it only runs on macOS, and two planned pages -
-**Timesheets** and **Invoices** - are placeholders until the next phase lands. Expect rough edges.
+It is still alpha. There are no packaged releases and it only runs on macOS for now.
 
 ## Where it stands
 
@@ -42,10 +41,9 @@ macOS has been verified.
 | 🐧 Linux | ❌ Untested - capture and the AI sidecar are macOS-specific |
 
 The full AI tier needs macOS 26+ with Apple Intelligence turned on. Without it, OpenRize falls back
-to your rules and a personal model it trains on your own reviews, shows a dismissible banner that
-links to the Apple Intelligence settings, and keeps categorizing.
+to your rules and a personal model it trains on your own reviews and keeps categorizing.
 
-**Features** - one row per sidebar destination, then the engines behind them.
+## Features
 
 | Area | Status | What it is |
 | --- | --- | --- |
@@ -54,17 +52,15 @@ links to the Apple Intelligence settings, and keeps categorizing.
 | **Timers** | ✅ Working | Manual stopwatches: any number of named timers, running concurrently, that keep going across views and restarts. |
 | **Apps** | ✅ Working | Every detected app, with its category and project mapping and an exclusion toggle. |
 | **Time Entries** | ✅ Working | Any range with filters and full-text search over descriptions and window titles. A pivot table, charts by project, category, and app, a sortable log, saved views, and CSV or JSON export. |
-| **Timesheets** | 🚧 Placeholder | Projects x days grid. Planned for P5. |
+| **Timesheets** | 🚧 Placeholder | Projects x days grid. |
 | **Projects** (with Clients) | ✅ Working | Active, Completed, Archived, and Clients tabs. Budgets, due dates, a per-project detail page, AI hints that become rules, and project discovery from repo paths, forge URLs, and editor titles. CSV import. |
-| **Invoices** | 🚧 Placeholder | Draft, sent, and paid invoices per client from approved billable project time. Planned for P5. |
+| **Invoices** | 🚧 Placeholder | Draft, sent, and paid invoices per client from approved billable project time. |
 | **Settings** | ✅ Working | Theme and accent, menu bar and close behavior, storage location, activity retention, expected hours per week, and Categories & AI (engine status, auto-accept threshold, custom instructions, AI effectiveness, personal model versions, Retrain now, Reset learned data). |
 | **Automatic capture** | ✅ Working | A background sampler records the foreground app, its window title (via Accessibility, not Screen Recording), and the URL in Safari and Chromium browsers. Idle and sleep time are not counted as work. |
 | **AI categorization & review** | ✅ Working | Each entry gets a category and project suggestion with a confidence meter, a "Why" line, and pickable alternatives. Keyboard review mode, and auto-approve only when both fields clear your threshold. |
 | **Learning loop & calibration** | ✅ Working | Your accepts and corrections feed the personal model, offer a rule after 3 consistent corrections, trigger background retraining, and calibrate the confidence you see against how often you actually agree. |
 | **Menu-bar tray** | ✅ Working | A menu-bar glyph. Closing the window can hide OpenRize there so capture keeps running. |
-| **Sync server** | ❌ Not started | A self-hostable server for syncing between machines. The schema is sync-ready, but the server is future work and not yet scoped. |
-
-Legend: ✅ ship it · 🚧 page exists, no engine behind it · ❌ nothing yet.
+| **Sync server** | ❌ Not started | If there is demand, a self-hostable server for syncing between machines and organization level features. |
 
 ## Local-first
 
@@ -73,8 +69,7 @@ Legend: ✅ ship it · 🚧 page exists, no engine behind it · ❌ nothing yet.
 - **On-device AI.** Categorization runs on your Mac through Apple's Foundation Models,
   NaturalLanguage, and Create ML. Your activity never leaves the machine to be classified.
 - **No keystroke logging, no screenshots, no screen recording.** Tracking is metadata about
-  *what app you're in*, not a recording of what you typed. Window titles come from the
-  Accessibility API, so OpenRize never needs Screen Recording permission.
+  *what app you're in*, not a recording of what you typed.
 - **No surveillance posture.** OpenRize is a personal/agency tool for billing your own honest hours,
   not a way to watch employees.
 
@@ -83,9 +78,8 @@ Legend: ✅ ship it · 🚧 page exists, no engine behind it · ❌ nothing yet.
 OpenRize is a Tauri 2 app: a Rust core with a React webview as its view, plus a small Swift
 sidecar for the on-device ML.
 
-**One rule shapes the design: Rust owns the truth.** Everything durable lives in SQLite behind the
-Rust core, with versioned migrations. React holds only the current route, transient UI state, and
-the last snapshot Rust sent it; Rust pushes events when something changes behind the window's back.
+Everything durable lives in SQLite behind the Rust core, with versioned migrations. React holds only the current route, transient UI state, and
+the last snapshot Rust sent it; Rust pushes events when something changes.
 
 ```text
 ┌──────────────────────────────────────────────────────────────────┐
@@ -171,13 +165,6 @@ pnpm tauri build        # produce a release bundle
 On first run, grant OpenRize **Accessibility** permission in System Settings so it can read window
 titles.
 
-Backend tests (capture, the entry builder, the AI pipeline and calibration, reports, projects, and
-timers):
-
-```sh
-cd src-tauri && cargo test
-```
-
 ## Contributing
 
 Contributions are welcome - issues, focused PRs, or opinions about the roadmap.
@@ -189,9 +176,6 @@ Before you start, a few things in this repo will save you time:
   [Tauri docs](https://docs.rs/tauri/2.11.5/tauri), and run `pnpm fix` then `pnpm verify` before
   calling a change done. It also explains `pnpm dev:screenshot` and `pnpm dev:drive` for seeing a
   change in an isolated instance of the real app.
-- **[`docs/rize-feature-research.md`](docs/rize-feature-research.md)** - background research on
-  every Rize feature area. It predates the current design, so treat it as reference material
-  rather than the plan.
 
 **Roadmap.** OpenRize is being built in phases:
 
@@ -203,10 +187,7 @@ Before you start, a few things in this repo will save you time:
 | P3 | Calendar Week and Month, My Timesheet, Time Entries, the Projects page | ✅ Done |
 | P4 | The learning loop and confidence calibration | ✅ Done |
 | P5 | Timesheets and Invoices | Next |
-| Future | A self-hostable sync server | Not scoped |
-
-The manual Timers page shipped alongside these. If you would like to pick up P5 or something off
-this list, say so in an issue first.
+| Future | A self-hostable sync server | Future |
 
 ## License
 

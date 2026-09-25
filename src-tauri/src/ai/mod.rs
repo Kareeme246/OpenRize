@@ -12,18 +12,30 @@
 //!   the live category and project lists. Absent without Apple Intelligence,
 //!   in which case the engine runs in fallback (T0 + T1).
 //!
+//! Corrections feed back three ways (P4): an approved or corrected entry's
+//! vector joins the kNN store and few-shot pool at once; three consistent
+//! corrections for one app or domain offer a rule (`store::rule_suggestion`);
+//! and the worker periodically retrains the personal models (idle, on AC,
+//! outside Low Power Mode; `power.rs`) and refits the isotonic calibration
+//! of displayed confidence on the accept/reject history (`calibration.rs`).
+//! `metrics.rs` reports how well all of it is working.
+//!
 //! Everything except the ML calls runs in Rust. The ML calls go to the Swift
 //! sidecar `openrize-ml` over JSON lines on stdio (`sidecar.rs`). Nothing
 //! here makes a network call.
 
 pub mod arbiter;
+pub mod calibration;
 pub mod features;
 pub mod knn;
+pub mod metrics;
+pub mod power;
 pub mod rules;
 pub mod sidecar;
 pub mod store;
 pub mod worker;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex};
 use std::time::Duration;
 
@@ -41,9 +53,9 @@ pub const FIELD_PROJECT: &str = "project";
 /// Suggestions at or above this confidence pre-fill the entry's field. Below
 /// it the panel shows "Needs you" with nothing pre-selected.
 pub const PREFILL_THRESHOLD: f64 = 0.60;
-/// Until this many suggestions have a user outcome, displayed confidence is
-/// capped at `COLD_START_CAP`, so nothing auto-approves during the first
-/// week except deterministic rule hits.
+/// Until this many suggestions have a user outcome, there is no calibration
+/// curve and displayed confidence is capped at `COLD_START_CAP`, so nothing
+/// auto-approves during the first week except deterministic rule hits.
 pub const COLD_START_OUTCOMES: u32 = 50;
 pub const COLD_START_CAP: f64 = 0.90;
 
@@ -89,9 +101,16 @@ pub struct AiStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub os: Option<String>,
     pub queued: u32,
-    /// Suggestions with a user outcome so far; see `COLD_START_OUTCOMES`.
+    /// Verdicts calibration can learn from so far; see `COLD_START_OUTCOMES`.
     pub outcomes: u32,
+    /// Whether a calibration curve is active (otherwise the cold-start cap).
     pub calibrated: bool,
+    /// Personal-model retraining: `idle`, `queued` (Retrain now pressed), or
+    /// `running`.
+    pub retrain: String,
+    /// The last retrain's result, or why a due retrain is waiting.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retrain_note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
 }
@@ -108,6 +127,8 @@ impl Default for AiStatus {
             queued: 0,
             outcomes: 0,
             calibrated: false,
+            retrain: "idle".to_string(),
+            retrain_note: None,
             last_error: None,
         }
     }
@@ -119,6 +140,7 @@ pub struct AiRuntime {
     status: Mutex<AiStatus>,
     wake: Mutex<bool>,
     wake_signal: Condvar,
+    retrain_requested: AtomicBool,
 }
 
 impl AiRuntime {
@@ -136,6 +158,17 @@ impl AiRuntime {
             *woken = true;
             self.wake_signal.notify_one();
         }
+    }
+
+    /// "Retrain now": the worker retrains on its next pass, skipping the
+    /// idle/power gate and the new-label threshold.
+    pub fn request_retrain(&self) {
+        self.retrain_requested.store(true, Ordering::SeqCst);
+        self.nudge();
+    }
+
+    fn take_retrain_request(&self) -> bool {
+        self.retrain_requested.swap(false, Ordering::SeqCst)
     }
 
     fn wait(&self, timeout: Duration) {

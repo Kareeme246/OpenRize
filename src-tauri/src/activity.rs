@@ -1225,6 +1225,16 @@ impl ActivityStore {
             ],
         ).map_err(|e| e.to_string())?;
 
+        // Re-categorizing an entry the AI already had approved (or the user
+        // accepted) is a correction: the suggestion becomes `changed`.
+        crate::ai::store::record_edit(
+            &self.conn,
+            id,
+            entry.category_id.as_deref(),
+            entry.project_id.as_deref(),
+            now,
+        )?;
+
         self.log_event(id, "edited", "user", None, now);
 
         Ok(entry)
@@ -1980,7 +1990,7 @@ fn emit_tick(app: &AppHandle, now: u64) {
     }
 }
 
-fn read_idle_ms() -> u64 {
+pub(crate) fn read_idle_ms() -> u64 {
     user_idle3::UserIdle::get_time()
         .map(|idle| idle.duration().as_millis() as u64)
         .unwrap_or(0)
@@ -2376,9 +2386,11 @@ mod tests {
         let decision = crate::ai::arbiter::Decision {
             value: Some(value.to_string()),
             confidence: 0.7,
+            raw_confidence: 0.7,
             alternatives: vec![],
             signals: vec![],
             engine: "full",
+            tier: "model",
         };
         let dominant = crate::models::Dominant {
             kind: "domain".into(),
@@ -2486,5 +2498,130 @@ mod tests {
         // A dismissed suggestion is stored disabled, so T0 never applies it.
         let rules = crate::ai::store::load_rules(&store.conn).unwrap();
         assert!(rules.is_empty());
+    }
+
+    #[test]
+    fn rejections_count_toward_a_rule_suggestion() {
+        let mut store = store();
+        for i in 0..2 {
+            let id = suggested_entry(&mut store, i * 40 * MIN, "coding", "figma.com");
+            store.reject_time_entry(&id, 2).unwrap();
+            set_category(&mut store, &id, "design");
+            store.approve_time_entries(&[id], "user", 3).unwrap();
+        }
+        let third = suggested_entry(&mut store, 200 * MIN, "coding", "figma.com");
+        store.reject_time_entry(&third, 4).unwrap();
+        set_category(&mut store, &third, "design");
+        let offer = store
+            .get_entry_detail(&third)
+            .unwrap()
+            .rule_suggestion
+            .expect("rejections followed by a pick are corrections");
+        assert_eq!(offer.corrections, 3);
+        assert_eq!(offer.value_id.as_deref(), Some("design"));
+    }
+
+    #[test]
+    fn recategorizing_an_approved_entry_is_a_correction() {
+        let mut store = store();
+        let auto = suggested_entry(&mut store, 0, "coding", "github.com");
+        store
+            .conn
+            .execute(
+                "UPDATE suggestions SET outcome = 'auto' WHERE entry_id = ?1;",
+                params![auto],
+            )
+            .unwrap();
+        let accepted = suggested_entry(&mut store, 40 * MIN, "coding", "github.com");
+        store
+            .approve_time_entries(&[auto.clone(), accepted.clone()], "user", 2)
+            .unwrap();
+        set_category(&mut store, &auto, "review");
+        set_category(&mut store, &accepted, "coding");
+
+        let outcome = |id: &str| {
+            crate::ai::store::latest_suggestions(&store.conn, id).unwrap()[0]
+                .outcome
+                .clone()
+        };
+        assert_eq!(outcome(&auto).as_deref(), Some("changed"));
+        // Saving the same value again is not a correction.
+        assert_eq!(outcome(&accepted).as_deref(), Some("accepted"));
+    }
+
+    #[test]
+    fn calibration_learns_from_verdicts_on_model_suggestions() {
+        let mut store = store();
+        let kept = suggested_entry(&mut store, 0, "coding", "github.com");
+        let fixed = suggested_entry(&mut store, 40 * MIN, "coding", "github.com");
+        let open = suggested_entry(&mut store, 80 * MIN, "coding", "github.com");
+        set_category(&mut store, &fixed, "review");
+        store
+            .approve_time_entries(&[kept, fixed], "user", 2)
+            .unwrap();
+        let _ = open;
+
+        let now = 10 * MIN;
+        let mut samples = crate::ai::store::calibration_samples(&store.conn, now).unwrap();
+        samples.sort_by_key(|a| a.1);
+        assert_eq!(samples, vec![(0.7, false), (0.7, true)]);
+        assert_eq!(
+            crate::ai::store::outcome_count(&store.conn, now).unwrap(),
+            2
+        );
+        assert_eq!(
+            crate::ai::store::verdicts_since(&store.conn, 1, now).unwrap(),
+            2
+        );
+        assert_eq!(
+            crate::ai::store::verdicts_since(&store.conn, 2, now).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn reset_forgets_what_was_learned_but_keeps_the_entries() {
+        let mut store = store();
+        let id = suggested_entry(&mut store, 0, "coding", "github.com");
+        store
+            .approve_time_entries(std::slice::from_ref(&id), "user", 2)
+            .unwrap();
+        crate::ai::store::upsert_embedding(&store.conn, &id, &[1.0, 0.0], "h", "Xcode", "m", 3)
+            .unwrap();
+        crate::ai::store::insert_artifact(
+            &store.conn,
+            "category",
+            "/tmp/m.mlmodelc",
+            20,
+            Some(0.8),
+            true,
+            4,
+        )
+        .unwrap();
+        let curve = crate::ai::calibration::Calibrator {
+            x: vec![0.0, 1.0],
+            y: vec![0.0, 1.0],
+            samples: 50,
+        };
+        crate::ai::store::insert_calibration(&store.conn, &curve, 5).unwrap();
+        assert_eq!(crate::ai::store::labeled_count(&store.conn).unwrap(), 1);
+        assert!(crate::ai::store::active_calibration(&store.conn)
+            .unwrap()
+            .is_some());
+
+        let paths = crate::ai::store::reset_learned(&store.conn, 10).unwrap();
+        assert_eq!(paths, vec!["/tmp/m.mlmodelc".to_string()]);
+        assert!(crate::ai::store::active_calibration(&store.conn)
+            .unwrap()
+            .is_none());
+        assert!(crate::ai::store::active_artifact(&store.conn, "category")
+            .unwrap()
+            .is_none());
+        assert_eq!(crate::ai::store::labeled_count(&store.conn).unwrap(), 0);
+        assert_eq!(crate::ai::store::outcome_count(&store.conn, 20).unwrap(), 0);
+        assert_eq!(crate::ai::store::learning_since(&store.conn).unwrap(), 10);
+        let entry = store.get_entry_detail(&id).unwrap().entry;
+        assert_eq!(entry.status, "approved");
+        assert_eq!(entry.category_id.as_deref(), Some("coding"));
     }
 }

@@ -206,9 +206,70 @@ export interface AiStatus {
   sidecar: "running" | "stopped" | "unavailable";
   os?: string;
   queued: number;
+  /** Verdicts calibration has learned from; the curve starts at 50. */
   outcomes: number;
+  /** A calibration curve is active (otherwise the cold-start 90% cap). */
   calibrated: boolean;
+  retrain: "idle" | "queued" | "running";
+  /** The last retrain's result, or why a due retrain is waiting. */
+  retrainNote?: string;
   lastError?: string;
+}
+
+/** One trained version in `model_artifacts`. */
+export interface ArtifactVersion {
+  id: string;
+  trainedAt: number;
+  examples: number;
+  holdoutAccuracy?: number;
+  /** False when it lost the holdout comparison, or was superseded. */
+  active: boolean;
+}
+
+/** Displayed confidence vs actual accept rate for one 10% bucket. */
+export interface ReliabilityBin {
+  lo: number;
+  hi: number;
+  count: number;
+  predicted: number;
+  actual: number;
+}
+
+export interface ThresholdPreview {
+  percent: number;
+  autoApproved: number;
+  wrong: number;
+}
+
+/** Settings → Categories & AI: how the learning loop is doing. */
+export interface AiMetrics {
+  days: number;
+  /** Entries that got a suggestion in the period. */
+  entries: number;
+  decided: number;
+  autoApproved: number;
+  /** Per-field suggestions a person ruled on. */
+  reviewed: number;
+  accepted: number;
+  changed: number;
+  rejected: number;
+  tiers: { rule: number; personal: number; model: number };
+  calibration: {
+    bins: ReliabilityBin[];
+    samples: number;
+    expectedError?: number;
+    /** The active curve as [raw, displayed] knots. */
+    curve?: [number, number][];
+    history: ArtifactVersion[];
+  };
+  thresholds: ThresholdPreview[];
+  models: {
+    category: ArtifactVersion[];
+    project: ArtifactVersion[];
+    newLabels: number;
+    retrainAfter: number;
+  };
+  learningSince?: number;
 }
 
 export interface NewTimeEntry {

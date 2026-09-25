@@ -3,6 +3,7 @@ import type { Settings, StoragePaths } from "./settings";
 import type { Timer } from "./timers";
 import type {
   ActivitySnapshot,
+  AiMetrics,
   AiStatus,
   AppRecord,
   Category,
@@ -216,6 +217,21 @@ export async function resolveRuleSuggestion(
   accept: boolean,
 ): Promise<void> {
   await invoke("resolve_rule_suggestion", { suggestion, accept });
+}
+
+// --- Learning loop ---
+
+export async function aiMetrics(days: number): Promise<AiMetrics> {
+  return await invoke<AiMetrics>("ai_metrics", { days });
+}
+
+/** Queues a retrain that skips the idle/power gate; returns the new status. */
+export async function aiRetrain(): Promise<AiStatus> {
+  return await invoke<AiStatus>("ai_retrain");
+}
+
+export async function aiResetLearned(days: number): Promise<AiMetrics> {
+  return await invoke<AiMetrics>("ai_reset_learned", { days });
 }
 
 // --- Apps ---

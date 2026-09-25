@@ -174,6 +174,9 @@ pub fn run() {
             commands::ai_status,
             commands::retry_classification,
             commands::resolve_rule_suggestion,
+            commands::ai_metrics,
+            commands::ai_retrain,
+            commands::ai_reset_learned,
         ])
         .build(tauri::generate_context!())
         .expect("error while building OpenRize")

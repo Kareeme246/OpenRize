@@ -10,6 +10,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::json;
 
 use super::arbiter::{Decision, Label};
+use super::calibration::Calibrator;
 use super::knn::{self, Labeled};
 use super::rules::Rule;
 use super::{Field, FIELD_CATEGORY, FIELD_PROJECT};
@@ -23,6 +24,19 @@ pub const MAX_ATTEMPTS: u32 = 3;
 const RETRY_BASE_MS: u64 = 30_000;
 /// Consistent corrections for one app or domain before a rule is offered.
 pub const RULE_SUGGESTION_MIN: u32 = 3;
+/// `model_artifacts.kind` of the isotonic calibration curve.
+pub const KIND_CALIBRATION: &str = "calibration";
+/// Calibration fits on at most this many recent verdicts, so it follows
+/// drift in the models and in the user's habits.
+const CALIBRATION_WINDOW: u32 = 2_000;
+/// An auto-approved suggestion nobody corrected within this long counts as
+/// accepted. Without it, calibration would only ever hear about the
+/// auto-approvals that were wrong.
+pub const AUTO_TRUSTED_AFTER_MS: u64 = 24 * 60 * 60 * 1000;
+/// Retired versions kept per kind, for the model history.
+const ARTIFACT_HISTORY: u32 = 20;
+/// Key in the activity `settings` table: when "Reset learned data" last ran.
+const LEARNING_RESET_KEY: &str = "ai_learning_reset_at";
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -256,14 +270,16 @@ pub fn insert_suggestion(
         })
         .collect();
     conn.execute(
-        "INSERT INTO suggestions (id, entry_id, field, value_id, confidence, signals, rationale, alternatives, engine, model_version, outcome, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12);",
+        "INSERT INTO suggestions (id, entry_id, field, value_id, confidence, raw_confidence, tier, signals, rationale, alternatives, engine, model_version, outcome, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14);",
         params![
             id,
             entry_id,
             field.as_str(),
             decision.value,
             decision.confidence,
+            decision.raw_confidence,
+            decision.tier,
             signals.to_string(),
             why_text(&decision.signals),
             serde_json::to_string(&alternatives).map_err(|e| e.to_string())?,
@@ -425,9 +441,133 @@ pub fn record_rejection(
     Ok(rejected)
 }
 
-pub fn outcome_count(conn: &Connection) -> Result<u32> {
+/// A later edit to an approved entry is a correction too: a suggestion that
+/// was accepted or auto-approved becomes `changed` when the user moves the
+/// entry to another value, so calibration, the metrics, and rule
+/// suggestions all hear about it.
+pub fn record_edit(
+    conn: &Connection,
+    entry_id: &str,
+    category_id: Option<&str>,
+    project_id: Option<&str>,
+    now: u64,
+) -> Result<()> {
+    for suggestion in latest_suggestions(conn, entry_id)? {
+        if !matches!(suggestion.outcome.as_deref(), Some("accepted" | "auto")) {
+            continue;
+        }
+        let current = if suggestion.field == FIELD_CATEGORY {
+            category_id
+        } else {
+            project_id
+        };
+        if suggestion.value_id.as_deref() != current {
+            conn.execute(
+                "UPDATE suggestions SET outcome = 'changed', updated_at = ?2 WHERE id = ?1;",
+                params![suggestion.id, now as i64],
+            )
+            .map_err(err)?;
+        }
+    }
+    Ok(())
+}
+
+// --- Calibration -------------------------------------------------------------
+
+/// When learning last started from scratch (0 = never reset).
+pub fn learning_since(conn: &Connection) -> Result<u64> {
     conn.query_row(
-        "SELECT COUNT(*) FROM suggestions WHERE outcome IN ('accepted', 'changed', 'rejected');",
+        "SELECT value FROM settings WHERE key = ?1;",
+        params![LEARNING_RESET_KEY],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map(|value| value.and_then(|v| v.parse().ok()).unwrap_or(0))
+    .map_err(err)
+}
+
+/// The suggestions calibration learns from: model (non-rule) suggestions
+/// since the last reset with a user verdict, plus auto-approvals that stood
+/// for `AUTO_TRUSTED_AFTER_MS`. `?1` is the reset time, `?2` the trust cutoff.
+const VERDICTS: &str = "FROM suggestions s JOIN time_entries e ON e.id = s.entry_id
+     WHERE s.deleted_at IS NULL AND e.deleted_at IS NULL
+       AND s.engine != 'rules' AND s.raw_confidence IS NOT NULL AND s.created_at >= ?1
+       AND (s.outcome IN ('accepted', 'changed', 'rejected')
+            OR (s.outcome = 'auto' AND s.updated_at <= ?2))";
+
+/// Verdicts calibration can learn from so far (drives the cold-start cap
+/// and the "12/50 reviewed" readout).
+pub fn outcome_count(conn: &Connection, now: u64) -> Result<u32> {
+    let since = learning_since(conn)?;
+    conn.query_row(
+        &format!("SELECT COUNT(*) {VERDICTS};"),
+        params![
+            since as i64,
+            now.saturating_sub(AUTO_TRUSTED_AFTER_MS) as i64
+        ],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|n| n as u32)
+    .map_err(err)
+}
+
+/// `(raw score, accepted)` for the most recent verdicts.
+pub fn calibration_samples(conn: &Connection, now: u64) -> Result<Vec<(f64, bool)>> {
+    let since = learning_since(conn)?;
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT s.raw_confidence, s.outcome IN ('accepted', 'auto') {VERDICTS}
+             ORDER BY s.created_at DESC LIMIT {CALIBRATION_WINDOW};"
+        ))
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(
+            params![
+                since as i64,
+                now.saturating_sub(AUTO_TRUSTED_AFTER_MS) as i64
+            ],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(err)?;
+    rows.collect::<rusqlite::Result<_>>().map_err(err)
+}
+
+pub fn active_calibration(conn: &Connection) -> Result<Option<Calibrator>> {
+    let json: Option<String> = conn
+        .query_row(
+            "SELECT calibration FROM model_artifacts
+             WHERE kind = ?1 AND active = 1 ORDER BY trained_at DESC LIMIT 1;",
+            params![KIND_CALIBRATION],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(err)?
+        .flatten();
+    Ok(json.and_then(|json| serde_json::from_str(&json).ok()))
+}
+
+/// Versions a freshly fitted curve and makes it the active one.
+pub fn insert_calibration(conn: &Connection, calibrator: &Calibrator, now: u64) -> Result<()> {
+    let json = serde_json::to_string(calibrator).map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE model_artifacts SET active = 0 WHERE kind = ?1;",
+        params![KIND_CALIBRATION],
+    )
+    .map_err(err)?;
+    conn.execute(
+        "INSERT INTO model_artifacts (id, kind, path, trained_at, n_examples, holdout_acc, calibration, active)
+         VALUES (?1, ?2, '', ?3, ?4, NULL, ?5, 1);",
+        params![new_id(), KIND_CALIBRATION, now as i64, calibrator.samples, json],
+    )
+    .map_err(err)?;
+    prune_artifacts(conn, KIND_CALIBRATION)?;
+    Ok(())
+}
+
+pub fn labeled_count(conn: &Connection) -> Result<u32> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM time_entries e JOIN entry_embeddings v ON v.entry_id = e.id
+         WHERE e.deleted_at IS NULL AND e.status = 'approved' AND e.category_id IS NOT NULL;",
         [],
         |row| row.get::<_, i64>(0),
     )
@@ -435,15 +575,33 @@ pub fn outcome_count(conn: &Connection) -> Result<u32> {
     .map_err(err)
 }
 
-pub fn labeled_count(conn: &Connection) -> Result<u32> {
-    conn.query_row(
-        "SELECT COUNT(*) FROM time_entries
-         WHERE deleted_at IS NULL AND status = 'approved' AND category_id IS NOT NULL;",
-        [],
-        |row| row.get::<_, i64>(0),
+/// "Reset learned data": forgets the personal models, the calibration
+/// curve, the kNN store (and with it the few-shot pool), and the verdict
+/// history calibration counts. Entries, categories, projects, and rules are
+/// the user's data and stay. Returns the model files to delete.
+pub fn reset_learned(conn: &Connection, now: u64) -> Result<Vec<String>> {
+    let paths: Vec<String> = {
+        let mut stmt = conn
+            .prepare("SELECT path FROM model_artifacts WHERE path != '';")
+            .map_err(err)?;
+        let rows = stmt.query_map([], |row| row.get(0)).map_err(err)?;
+        rows.collect::<rusqlite::Result<_>>().map_err(err)?
+    };
+    let tx = conn.unchecked_transaction().map_err(err)?;
+    tx.execute_batch(
+        "DELETE FROM model_artifacts;
+         DELETE FROM entry_embeddings;
+         DELETE FROM classify_jobs WHERE kind = 'embed' AND state IN ('queued', 'failed');",
     )
-    .map(|n| n as u32)
-    .map_err(err)
+    .map_err(err)?;
+    tx.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
+        params![LEARNING_RESET_KEY, now.to_string()],
+    )
+    .map_err(err)?;
+    tx.commit().map_err(err)?;
+    Ok(paths)
 }
 
 // --- kNN store ------------------------------------------------------------
@@ -495,7 +653,9 @@ pub fn embedding_for(
 pub fn labeled_pool(conn: &Connection, since: u64, exclude: &str) -> Result<Vec<Labeled>> {
     let mut stmt = conn
         .prepare(
-            "SELECT v.vec, e.category_id, e.project_id, v.features
+            "SELECT v.vec, e.category_id, e.project_id, v.features,
+               EXISTS (SELECT 1 FROM suggestions s WHERE s.entry_id = e.id
+                         AND s.outcome IN ('changed', 'rejected'))
              FROM entry_embeddings v JOIN time_entries e ON e.id = v.entry_id
              WHERE e.deleted_at IS NULL AND e.status = 'approved' AND e.started_at >= ?1 AND e.id != ?2;",
         )
@@ -507,6 +667,7 @@ pub fn labeled_pool(conn: &Connection, since: u64, exclude: &str) -> Result<Vec<
                 category_id: row.get(1)?,
                 project_id: row.get(2)?,
                 features: row.get(3)?,
+                corrected: row.get(4)?,
             })
         })
         .map_err(err)?;
@@ -620,7 +781,10 @@ pub fn rule_suggestion(
             continue;
         };
         let corrected_here = suggestion.value_id.as_deref() != Some(current)
-            && matches!(suggestion.outcome.as_deref(), None | Some("changed"));
+            && matches!(
+                suggestion.outcome.as_deref(),
+                None | Some("changed" | "rejected")
+            );
         if !corrected_here {
             continue;
         }
@@ -647,7 +811,9 @@ pub fn rule_suggestion(
                        AND e.{field_column} = ?2
                        AND EXISTS (
                          SELECT 1 FROM suggestions s
-                         WHERE s.entry_id = e.id AND s.field = ?3 AND s.outcome = 'changed'
+                         WHERE s.entry_id = e.id AND s.field = ?3
+                           AND s.outcome IN ('changed', 'rejected')
+                           AND s.value_id IS NOT e.{field_column}
                            AND json_extract(s.signals, '$.dominant.kind') = ?4
                            AND json_extract(s.signals, '$.dominant.key') = ?5
                        );"
@@ -683,19 +849,17 @@ pub fn rule_suggestion(
 pub struct Artifact {
     pub id: String,
     pub path: String,
-    pub trained_at: u64,
 }
 
 pub fn active_artifact(conn: &Connection, kind: &str) -> Result<Option<Artifact>> {
     conn.query_row(
-        "SELECT id, path, trained_at FROM model_artifacts
+        "SELECT id, path FROM model_artifacts
          WHERE kind = ?1 AND active = 1 ORDER BY trained_at DESC LIMIT 1;",
         params![kind],
         |row| {
             Ok(Artifact {
                 id: row.get(0)?,
                 path: row.get(1)?,
-                trained_at: row.get::<_, i64>(2)? as u64,
             })
         },
     )
@@ -703,6 +867,8 @@ pub fn active_artifact(conn: &Connection, kind: &str) -> Result<Option<Artifact>
     .map_err(err)
 }
 
+/// Every trained version is recorded, including ones that lost the holdout
+/// comparison (`active = 0`), so Settings can show why a retrain didn't swap.
 pub fn insert_artifact(
     conn: &Connection,
     kind: &str,
@@ -732,8 +898,57 @@ pub fn insert_artifact(
             active as i64
         ],
     )
+    .map_err(err)?;
+    prune_artifacts(conn, kind)
+}
+
+/// Drops all but the newest `ARTIFACT_HISTORY` inactive versions of a kind.
+/// Their model files are already gone: the worker deletes a model's
+/// directory as soon as it stops being active.
+fn prune_artifacts(conn: &Connection, kind: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM model_artifacts WHERE kind = ?1 AND active = 0 AND id NOT IN (
+           SELECT id FROM model_artifacts WHERE kind = ?1 AND active = 0
+           ORDER BY trained_at DESC LIMIT ?2
+         );",
+        params![kind, ARTIFACT_HISTORY],
+    )
     .map(|_| ())
     .map_err(err)
+}
+
+/// A trained version as Settings shows it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactVersion {
+    pub id: String,
+    pub trained_at: u64,
+    pub examples: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub holdout_accuracy: Option<f64>,
+    pub active: bool,
+}
+
+/// Newest first.
+pub fn artifact_history(conn: &Connection, kind: &str, limit: u32) -> Result<Vec<ArtifactVersion>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, trained_at, n_examples, holdout_acc, active FROM model_artifacts
+             WHERE kind = ?1 ORDER BY trained_at DESC, active DESC LIMIT ?2;",
+        )
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(params![kind, limit], |row| {
+            Ok(ArtifactVersion {
+                id: row.get(0)?,
+                trained_at: row.get::<_, i64>(1)? as u64,
+                examples: row.get::<_, i64>(2)? as u32,
+                holdout_accuracy: row.get(3)?,
+                active: row.get::<_, i64>(4)? != 0,
+            })
+        })
+        .map_err(err)?;
+    rows.collect::<rusqlite::Result<_>>().map_err(err)
 }
 
 /// (entry id, content text, label) for every approved entry with a vector.
@@ -754,6 +969,33 @@ pub fn training_rows(conn: &Connection, field: Field) -> Result<Vec<(String, Str
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
         .map_err(err)?;
     rows.collect::<rusqlite::Result<_>>().map_err(err)
+}
+
+/// When a model of this kind was last trained or fitted, kept or not.
+pub fn last_trained_at(conn: &Connection, kind: &str) -> Result<Option<u64>> {
+    conn.query_row(
+        "SELECT MAX(trained_at) FROM model_artifacts WHERE kind = ?1;",
+        params![kind],
+        |row| row.get::<_, Option<i64>>(0),
+    )
+    .map(|at| at.map(|at| at as u64))
+    .map_err(err)
+}
+
+/// Verdicts recorded after `after` (calibration refit trigger).
+pub fn verdicts_since(conn: &Connection, after: u64, now: u64) -> Result<u32> {
+    let since = learning_since(conn)?;
+    conn.query_row(
+        &format!("SELECT COUNT(*) {VERDICTS} AND s.updated_at > ?3;"),
+        params![
+            since as i64,
+            now.saturating_sub(AUTO_TRUSTED_AFTER_MS) as i64,
+            after as i64
+        ],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|n| n as u32)
+    .map_err(err)
 }
 
 /// Labeled entries approved since `since` (retraining trigger).

@@ -15,6 +15,9 @@ All notable changes are documented here. Entries are generated from commit histo
 - **activity:** Capture active windows; wire dashboard, sessions, focus, breaks
 - Implement P0 foundations and P1 core tracking with Calendar day view (#11)
 - **timers:** Bring back manual multi-timer page and stopwatch widgets (#15)
+- **calendar:** Add drag sessions and zoomable five-to-five day (#28)
+- **apps:** Add interactive daily timeline view (#27)
+- **entries:** Make time entries read-only and handle empty project state (#29)
 
 ### Bug Fixes
 - **ui:** Scroll sidebar on its own, standardise nav rows, retarget dial
@@ -23,6 +26,9 @@ All notable changes are documented here. Entries are generated from commit histo
 
 ### Documentation
 - Rewrite README for the shipped P0-P4 core (#16)
+
+### Maintenance
+- Add generated changelog and release version guard (#26)
 
 ### Other Changes
 - Init create tauri app

@@ -1,0 +1,54 @@
+name: Bug report
+description: Report a problem with OpenRize
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        OpenRize only tracks bug reports right now - it isn't taking feature requests.
+        Before filing a privacy or security issue, please email support@offlinestudios.net
+        instead of opening a public issue (see SECURITY.md).
+
+  - type: input
+    id: version
+    attributes:
+      label: OpenRize version
+      description: Shown in Settings, or the release tag you downloaded (e.g. v0.3.1).
+      placeholder: v0.3.1
+    validations:
+      required: true
+
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS version
+      placeholder: macOS 15.4
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect to happen instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      description: Drag and drop screenshots here, or paste any relevant log output.
+    validations:
+      required: false

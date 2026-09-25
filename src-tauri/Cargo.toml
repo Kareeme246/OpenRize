@@ -1,8 +1,8 @@
 [package]
 name = "openrize"
-version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+version = "0.3.1"
+description = "Automatic, private, local-first time tracking for your Mac"
+authors = ["Kareem Elgohry <kareemdev52@gmail.com>"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

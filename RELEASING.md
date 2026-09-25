@@ -1,30 +1,30 @@
 # Releasing
 
-Tags are plain semver: `vX.Y.Z` (e.g. `v0.3.1`). Pushing a `v*` tag runs the
-`Release` workflow (`.github/workflows/release.yml`), which builds an
-**unsigned** macOS `.dmg`/`.app` with `pnpm tauri build` and attaches them to
-a GitHub Release. There is no Apple Developer signing or notarization yet -
-the release notes tell users to right-click and "Open Anyway" on first
-launch.
+Tags are plain semver: `vX.Y.Z` (e.g. `v0.3.4`). Every user-facing change
+bumps the patch version in the same pull request and uses a Conventional Commit
+subject. See `cliff.toml` for the commit categories and `AGENTS.md` for the
+project-wide rule.
 
 To cut a release:
 
-1. On `main`, with a clean working tree, bump the version everywhere it's
-   recorded:
+1. On `main`, regenerate and commit the changelog:
    ```sh
-   ./scripts/bump-version.sh X.Y.Z
+   ./scripts/changelog.sh
+   git add CHANGELOG.md
+   git commit -m "docs: update changelog for vX.Y.Z"
    ```
-   This updates `package.json`, `src-tauri/tauri.conf.json`, and
-   `src-tauri/Cargo.toml` together so they can't drift.
-2. Run `pnpm fix && pnpm verify`, then commit:
-   ```sh
-   git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
-   git commit -m "Release vX.Y.Z"
-   ```
-3. Tag and push:
+   `CHANGELOG.md` is generated from git history; do not edit it by hand.
+2. Tag and push the version already recorded in `package.json`,
+   `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`:
    ```sh
    git tag vX.Y.Z
    git push origin main vX.Y.Z
    ```
-4. Watch the `Release` workflow run. When it finishes, it has published the
-   GitHub Release for `vX.Y.Z` with the `.dmg` and zipped `.app` attached.
+   The release workflow rejects a tag unless all three versions match. It uses
+   the same `cliff.toml` to generate GitHub Release notes and builds an unsigned
+   macOS `.dmg`/`.app` with `pnpm tauri build`.
+3. Watch the `Release` workflow. When it finishes, it publishes the GitHub
+   Release with the `.dmg` and zipped `.app` attached. There is no Apple
+   Developer signing or notarization yet. On first launch, right-click (or
+   Control-click) `openrize.app` and choose **Open**, or go to **System Settings
+   > Privacy & Security** and click **Open Anyway**, then confirm.

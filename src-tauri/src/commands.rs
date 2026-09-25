@@ -4,9 +4,11 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::activity::{self, ActivitySnapshot};
+use crate::ai::{self, AiRuntime, AiStatus};
 use crate::models::{
     AppRecord, Category, Client, EntryDetail, NewCategory, NewClient, NewProject, NewTimeEntry,
-    Project, TimeEntry, UpdateCategory, UpdateClient, UpdateProject, UpdateTimeEntry,
+    Project, RuleSuggestion, TimeEntry, UpdateCategory, UpdateClient, UpdateProject,
+    UpdateTimeEntry,
 };
 use crate::settings::Settings;
 use crate::timers::{now_epoch_ms, Timer};
@@ -267,6 +269,13 @@ pub fn delete_client(app: AppHandle, id: String) -> Result<(), String> {
 
 // --- P1: Time Entries ---------------------------------------------------
 
+/// Tells views to refetch, and wakes the AI worker: an entry mutation can
+/// queue work (an approval queues its embedding, a rebuild a classification).
+fn entries_changed(app: &AppHandle) {
+    let _ = app.emit(crate::EVENT_ENTRIES_CHANGED, ());
+    ai::nudge(app);
+}
+
 #[tauri::command]
 pub fn list_time_entries(
     app: AppHandle,
@@ -297,7 +306,7 @@ pub fn update_time_entry(
         let mut store = state.activity.lock().map_err(|e| e.to_string())?;
         store.update_time_entry(&id, patch, now)?
     };
-    let _ = app.emit(crate::EVENT_ENTRIES_CHANGED, ());
+    entries_changed(&app);
     Ok(entry)
 }
 
@@ -309,7 +318,7 @@ pub fn approve_time_entries(app: AppHandle, ids: Vec<String>) -> Result<(), Stri
         let mut store = state.activity.lock().map_err(|e| e.to_string())?;
         store.approve_time_entries(&ids, "user", now)?;
     }
-    let _ = app.emit(crate::EVENT_ENTRIES_CHANGED, ());
+    entries_changed(&app);
     Ok(())
 }
 
@@ -321,7 +330,7 @@ pub fn reject_time_entry(app: AppHandle, id: String) -> Result<(), String> {
         let mut store = state.activity.lock().map_err(|e| e.to_string())?;
         store.reject_time_entry(&id, now)?;
     }
-    let _ = app.emit(crate::EVENT_ENTRIES_CHANGED, ());
+    entries_changed(&app);
     Ok(())
 }
 
@@ -337,7 +346,7 @@ pub fn split_time_entry(
         let mut store = state.activity.lock().map_err(|e| e.to_string())?;
         store.split_time_entry(&id, at_ms, now)?
     };
-    let _ = app.emit(crate::EVENT_ENTRIES_CHANGED, ());
+    entries_changed(&app);
     Ok(res)
 }
 
@@ -349,7 +358,7 @@ pub fn delete_time_entry(app: AppHandle, id: String) -> Result<(), String> {
         let mut store = state.activity.lock().map_err(|e| e.to_string())?;
         store.delete_time_entry(&id, now)?;
     }
-    let _ = app.emit(crate::EVENT_ENTRIES_CHANGED, ());
+    entries_changed(&app);
     Ok(())
 }
 
@@ -361,7 +370,7 @@ pub fn create_time_entry(app: AppHandle, entry: NewTimeEntry) -> Result<TimeEntr
         let mut store = state.activity.lock().map_err(|e| e.to_string())?;
         store.create_manual_entry(entry, now)?
     };
-    let _ = app.emit(crate::EVENT_ENTRIES_CHANGED, ());
+    entries_changed(&app);
     Ok(created)
 }
 
@@ -377,7 +386,7 @@ pub fn rebuild_time_entries(
         let mut store = state.activity.lock().map_err(|e| e.to_string())?;
         store.rebuild_time_entries_in_range(start_ms, end_ms, now)?
     };
-    let _ = app.emit(crate::EVENT_ENTRIES_CHANGED, ());
+    entries_changed(&app);
     Ok(entries)
 }
 
@@ -402,6 +411,39 @@ pub fn update_app(
     let state = app.state::<AppState>();
     let mut store = state.activity.lock().map_err(|e| e.to_string())?;
     store.update_app(&id, default_category_id, default_project_id, excluded, now)
+}
+
+// --- P2: AI suggestions --------------------------------------------------
+
+#[tauri::command]
+pub fn ai_status(app: AppHandle) -> AiStatus {
+    app.state::<AiRuntime>().status()
+}
+
+/// "Couldn't categorize · Retry", or re-running a suggestion on demand.
+#[tauri::command]
+pub fn retry_classification(app: AppHandle, id: String) -> Result<(), String> {
+    let now = now_epoch_ms();
+    {
+        let state = app.state::<AppState>();
+        let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+        store.queue_classification(&id, now)?;
+    }
+    entries_changed(&app);
+    Ok(())
+}
+
+/// Accepts (creating a rule) or dismisses an inline rule suggestion.
+#[tauri::command]
+pub fn resolve_rule_suggestion(
+    app: AppHandle,
+    suggestion: RuleSuggestion,
+    accept: bool,
+) -> Result<(), String> {
+    let now = now_epoch_ms();
+    let state = app.state::<AppState>();
+    let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+    store.resolve_rule_suggestion(&suggestion, accept, now)
 }
 
 // --- Preferences -------------------------------------------------------

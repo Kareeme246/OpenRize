@@ -247,6 +247,102 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
     }
 
+    let version_after_v2: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
+
+    if version_after_v2 < 3 {
+        let tx = conn.transaction()?;
+        migrate_v3(&tx)?;
+        tx.execute("PRAGMA user_version = 3;", [])?;
+        tx.commit()?;
+    }
+
+    Ok(())
+}
+
+/// P2: the on-device AI pipeline (src/ai/).
+fn migrate_v3(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+    // Where an entry's description came from. The entry builder may only
+    // rewrite its own template text; an AI sentence or a user edit sticks.
+    let has_origin = {
+        let mut stmt = tx.prepare("PRAGMA table_info(time_entries);")?;
+        let cols = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        let mut found = false;
+        for col in cols {
+            found |= col? == "description_origin";
+        }
+        found
+    };
+    if !has_origin {
+        tx.execute(
+            "ALTER TABLE time_entries ADD COLUMN description_origin TEXT NOT NULL DEFAULT 'template';",
+            [],
+        )?;
+    }
+
+    tx.execute_batch(
+        "
+        CREATE INDEX IF NOT EXISTS idx_suggestions_entry ON suggestions (entry_id, field, created_at);
+
+        -- One NLEmbedding vector per entry (512 x f32, little-endian) plus the
+        -- feature text it was computed from, reused as few-shot examples.
+        CREATE TABLE IF NOT EXISTS entry_embeddings (
+          entry_id   TEXT PRIMARY KEY,
+          vec        BLOB NOT NULL,
+          text_hash  TEXT NOT NULL,
+          features   TEXT NOT NULL,
+          model      TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+
+        -- Durable work queue for the classification worker. `kind` is
+        -- classify (full pipeline) or embed (vector only, for entries that
+        -- were approved without ever being classified).
+        CREATE TABLE IF NOT EXISTS classify_jobs (
+          id         TEXT PRIMARY KEY,
+          entry_id   TEXT NOT NULL,
+          kind       TEXT NOT NULL DEFAULT 'classify',
+          state      TEXT NOT NULL DEFAULT 'queued',
+          attempts   INTEGER NOT NULL DEFAULT 0,
+          next_at    INTEGER NOT NULL,
+          last_error TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE (entry_id, kind)
+        );
+        CREATE INDEX IF NOT EXISTS idx_classify_jobs_state ON classify_jobs (state, next_at);
+
+        -- Trained personal models (Create ML). Only one per kind is active.
+        CREATE TABLE IF NOT EXISTS model_artifacts (
+          id          TEXT PRIMARY KEY,
+          kind        TEXT NOT NULL,
+          path        TEXT NOT NULL,
+          trained_at  INTEGER NOT NULL,
+          n_examples  INTEGER NOT NULL,
+          holdout_acc REAL,
+          calibration TEXT,
+          active      INTEGER NOT NULL DEFAULT 0
+        );
+        ",
+    )?;
+
+    // P1's rebuild minted fresh ids on every call, so each Calendar load
+    // duplicated every unapproved entry. Only the newest copy is still
+    // referenced by its segments; retire the orphans the user never touched.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    tx.execute(
+        "UPDATE time_entries SET deleted_at = ?1, updated_at = ?1
+         WHERE deleted_at IS NULL
+           AND source = 'auto'
+           AND status != 'approved'
+           AND id NOT IN (SELECT entry_id FROM segments WHERE entry_id IS NOT NULL)
+           AND NOT EXISTS (
+             SELECT 1 FROM entry_events ev WHERE ev.entry_id = time_entries.id AND ev.actor = 'user'
+           );",
+        [now],
+    )?;
     Ok(())
 }
 
@@ -262,7 +358,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 2);
+        assert_eq!(v, 3);
 
         let cat_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM categories;", [], |r| r.get(0))
@@ -293,7 +389,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 2);
+        assert_eq!(v, 3);
 
         // Check new column exists
         conn.execute("SELECT bundle_id, url, entry_id FROM segments LIMIT 1;", [])

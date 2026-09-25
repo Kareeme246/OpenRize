@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,7 +59,13 @@ pub struct BuiltTimeEntry {
 /// 1. Absorbs micro-segments under `absorb_threshold_ms` (10s) into neighbors.
 /// 2. Closes entry on idle breaks (`kind == "break"`), context shifts, or duration target (~30m).
 /// 3. Minimum entry (8 min): leftover merges into previous entry if gap <= 2 min.
-/// 4. Frozen (approved) entries are preserved and never altered or re-segmented.
+/// 4. Frozen entries are preserved and never altered or re-segmented. Callers
+///    freeze every entry that has closed (so its suggestion and any edits
+///    stay attached to a stable id), plus deleted ones, whose time must stay
+///    unassigned rather than be rebuilt into a new entry.
+/// 5. Ids are stable across rebuilds: an entry keeps the id its first
+///    segment was linked to, so re-running the builder updates the open entry
+///    in place instead of minting a duplicate.
 pub fn build_entries(
     segments: &[SegmentInput],
     frozen_entries: &[BuiltTimeEntry],
@@ -93,6 +101,8 @@ pub fn build_entries(
 
     // 3. Group work segments into entries separated by breaks
     let mut results: Vec<BuiltTimeEntry> = frozen_entries.to_vec();
+    let frozen_ids: HashSet<String> = frozen_entries.iter().map(|e| e.id.clone()).collect();
+    let mut claimed: HashSet<String> = frozen_ids.clone();
     let max_target = (settings.target_duration_ms as f64 * 1.5) as u64;
 
     let mut current_segments: Vec<SegmentInput> = Vec::new();
@@ -101,7 +111,9 @@ pub fn build_entries(
         // If this is a break segment, close the current entry
         if seg.kind == "break" {
             if !current_segments.is_empty() {
-                if let Some(entry) = create_entry_from_segments(&current_segments, now) {
+                if let Some(entry) =
+                    create_entry_from_segments(&current_segments, now, &mut claimed)
+                {
                     results.push(entry);
                 }
                 current_segments.clear();
@@ -124,7 +136,9 @@ pub fn build_entries(
             if (current_duration >= settings.target_duration_ms && app_changed)
                 || current_duration >= max_target
             {
-                if let Some(entry) = create_entry_from_segments(&current_segments, now) {
+                if let Some(entry) =
+                    create_entry_from_segments(&current_segments, now, &mut claimed)
+                {
                     results.push(entry);
                 }
                 current_segments.clear();
@@ -135,7 +149,7 @@ pub fn build_entries(
 
     // Process leftover open entry
     if !current_segments.is_empty() {
-        if let Some(mut entry) = create_entry_from_segments(&current_segments, now) {
+        if let Some(mut entry) = create_entry_from_segments(&current_segments, now, &mut claimed) {
             // Check if active (open ended_at >= now)
             let is_currently_building = current_segments.iter().any(|s| s.ended_at.is_none());
             if is_currently_building {
@@ -148,7 +162,7 @@ pub fn build_entries(
             if entry_dur < settings.min_duration_ms && !is_currently_building {
                 if let Some(prev) = results.last_mut() {
                     let gap = entry.started_at.saturating_sub(prev.ended_at);
-                    if gap <= 2 * 60 * 1000 && prev.status != "approved" {
+                    if gap <= 2 * 60 * 1000 && !frozen_ids.contains(&prev.id) {
                         // Merge into previous unfrozen entry
                         prev.ended_at = entry.ended_at;
                         prev.segment_ids.extend(entry.segment_ids);
@@ -198,10 +212,24 @@ fn absorb_micro_segments(
     result
 }
 
-fn create_entry_from_segments(segments: &[SegmentInput], now: u64) -> Option<BuiltTimeEntry> {
+fn create_entry_from_segments(
+    segments: &[SegmentInput],
+    now: u64,
+    claimed: &mut HashSet<String>,
+) -> Option<BuiltTimeEntry> {
     if segments.is_empty() {
         return None;
     }
+
+    // Reuse the id an earlier build gave these segments, unless an earlier
+    // entry in this build already took it.
+    let id = segments
+        .iter()
+        .filter_map(|s| s.entry_id.as_ref())
+        .find(|id| !id.is_empty() && !claimed.contains(*id))
+        .cloned()
+        .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    claimed.insert(id.clone());
 
     let started_at = segments[0].started_at;
     let ended_at = segments.last().unwrap().ended_at.unwrap_or(now);
@@ -211,7 +239,7 @@ fn create_entry_from_segments(segments: &[SegmentInput], now: u64) -> Option<Bui
     let description = generate_description(segments);
 
     Some(BuiltTimeEntry {
-        id: uuid::Uuid::now_v7().to_string(),
+        id,
         started_at,
         ended_at,
         description,
@@ -334,6 +362,54 @@ mod tests {
         assert_eq!(entries[0].ended_at, 1_900_000);
         assert_eq!(entries[1].started_at, 1_900_000);
         assert_eq!(entries[1].ended_at, 2_600_000);
+    }
+
+    #[test]
+    fn rebuilding_keeps_the_ids_segments_were_linked_to() {
+        let mut segs = vec![
+            make_seg(1, "Xcode", "main.rs", "activity", 0, 600_000),
+            make_seg(2, "Break", "Idle", "break", 600_000, 900_000),
+            make_seg(3, "Slack", "chat", "activity", 900_000, 1_200_000),
+        ];
+        let settings = EntrySettings::default();
+        let first = build_entries(&segs, &[], &settings, 1_200_000);
+        segs[0].entry_id = Some(first[0].id.clone());
+        segs[2].entry_id = Some(first[1].id.clone());
+
+        let second = build_entries(&segs, &[], &settings, 1_300_000);
+        let ids =
+            |entries: &[BuiltTimeEntry]| entries.iter().map(|e| e.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&first), ids(&second));
+    }
+
+    #[test]
+    fn a_leftover_never_merges_into_a_frozen_entry() {
+        let frozen = BuiltTimeEntry {
+            id: "closed".to_string(),
+            started_at: 0,
+            ended_at: 600_000,
+            description: "Closed".to_string(),
+            category_id: None,
+            project_id: None,
+            status: "pending".to_string(),
+            approved_by: None,
+            source: "auto".to_string(),
+            billable: false,
+            invoice_id: None,
+            created_at: 0,
+            updated_at: 0,
+            deleted_at: None,
+            segment_ids: vec![],
+        };
+        let segs = vec![make_seg(2, "Slack", "chat", "activity", 660_000, 720_000)];
+        let entries = build_entries(
+            &segs,
+            std::slice::from_ref(&frozen),
+            &EntrySettings::default(),
+            720_000,
+        );
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].ended_at, 600_000);
     }
 
     #[test]

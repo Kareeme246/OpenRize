@@ -126,6 +126,89 @@ export interface TimeEntry {
   createdAt: number;
   updatedAt: number;
   deletedAt?: number;
+  /** Where the description came from; only `template` text is rebuilt. */
+  descriptionOrigin: "template" | "ai" | "user" | string;
+  /** Classification state and confidences (list views only). */
+  ai?: EntryAi;
+}
+
+export type ClassifyState = "queued" | "running" | "done" | "failed";
+
+export interface EntryAi {
+  state?: ClassifyState;
+  categoryConfidence?: number;
+  projectConfidence?: number;
+}
+
+export type SuggestionField = "category" | "project";
+
+/** One piece of evidence behind a suggestion; the "Why" line joins them. */
+export interface Signal {
+  kind: "dominant" | "rule" | "knn" | "personal" | "llm" | "mention" | string;
+  text: string;
+}
+
+export interface Dominant {
+  kind: "app" | "domain";
+  key: string;
+  label: string;
+  share: number;
+}
+
+export interface Alternative {
+  /** Absent on the project field means "No project". */
+  valueId?: string;
+  confidence: number;
+}
+
+export interface FieldSuggestion {
+  id: string;
+  entryId: string;
+  field: SuggestionField;
+  valueId?: string;
+  confidence: number;
+  rationale: string;
+  signals: Signal[];
+  dominant?: Dominant;
+  alternatives: Alternative[];
+  engine: "rules" | "full" | "fallback" | string;
+  modelVersion?: string;
+  outcome?: "accepted" | "changed" | "rejected" | "auto";
+  createdAt: number;
+}
+
+export interface RuleSuggestion {
+  field: SuggestionField;
+  matchKind: "app" | "domain";
+  pattern: string;
+  label: string;
+  valueId?: string;
+  corrections: number;
+}
+
+export interface ClassifyJob {
+  state: ClassifyState;
+  attempts: number;
+  lastError?: string;
+}
+
+export interface AiStatus {
+  engine: "full" | "fallback" | "rules" | "starting";
+  llm:
+    | "available"
+    | "appleIntelligenceNotEnabled"
+    | "modelNotReady"
+    | "deviceNotEligible"
+    | "unsupportedOS"
+    | "unknown";
+  embed: boolean;
+  personalModel: boolean;
+  sidecar: "running" | "stopped" | "unavailable";
+  os?: string;
+  queued: number;
+  outcomes: number;
+  calibrated: boolean;
+  lastError?: string;
 }
 
 export interface NewTimeEntry {
@@ -216,6 +299,10 @@ export interface EntryDetail {
   apps: AppContribution[];
   titles: TitleItem[];
   events: EntryEvent[];
+  /** The latest suggestion per field, category first. */
+  suggestions: FieldSuggestion[];
+  ruleSuggestion?: RuleSuggestion;
+  job?: ClassifyJob;
 }
 
 export interface AppRecord {

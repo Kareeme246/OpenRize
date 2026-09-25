@@ -1,6 +1,6 @@
 This is a TAURI desktop app project. Because of this there are a few considerations to ensure that code quality remains high in this codebase.
 
-Never directly edit `CLAUDE.md` - it is a symlink to this file; make all agent-instruction changes here in `AGENTS.md`.
+Never directly edit `CLAUDE.md` - it only imports this file; make all agent-instruction changes here in `AGENTS.md`.
 
 - This project uses typescript on the frontend. Always properly type variables and never use the "any" type to get around linter warnings.
 - It is imperative to always ask the user whether or not a feature will live in the src-tauri (rust backend) or src (react frontend) or a combination of both.
@@ -37,6 +37,15 @@ initiative. Verification for this project is deliberately just these scripts
 (`pnpm verify`, `pnpm dev:screenshot`, and `pnpm dev:drive` below) — that
 is a decision, not an oversight.
 
+## On-device AI sidecar
+
+AI categorization lives in `src-tauri/src/ai/` (module docs in `ai/mod.rs`
+explain the tiers). The ML calls go to a Swift sidecar in `src-tauri/swift/`
+that `src-tauri/build.rs` compiles with `swift build` on macOS and ships as a
+Tauri `externalBin` (`tauri.macos.conf.json`), so every Rust build needs
+Xcode 26+ command line tools. Bump `protocolVersion` in `Entry.swift` and
+`PROTOCOL_VERSION` in `ai/sidecar.rs` together when the wire format changes.
+
 ## Visually verifying UI changes
 
 Tauri has no supported WebDriver backend for macOS (only Linux/webkit2gtk and
@@ -61,3 +70,10 @@ tree down, and prints the PNG path — read that file to look at the result.
   Tauri backend on this platform.
 - macOS only. If you are not on macOS, state that visual verification isn't
   available in this environment rather than attempting a workaround.
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.

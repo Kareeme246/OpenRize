@@ -82,7 +82,6 @@ export default function App() {
 
   // Initial load & capture events
   useEffect(() => {
-    // Load initial snapshot
     api
       .fetchActivitySnapshot(0)
       .then((snapshot) => {

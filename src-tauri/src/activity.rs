@@ -171,7 +171,6 @@ impl ActivityStore {
         conn.busy_timeout(BUSY_TIMEOUT)
             .map_err(|error| error.to_string())?;
 
-        // Replace raw schema block with versioned migration runner
         crate::migrations::run_migrations(&mut conn).map_err(|error| error.to_string())?;
 
         let mut store = Self {
@@ -477,7 +476,10 @@ impl ActivityStore {
 
         let segment_id = self.conn.last_insert_rowid();
 
-        // Keep apps table updated
+        // Browser tabs are tracked per domain, not per browser app, so a
+        // domain (when present) takes priority over the bundle id as the
+        // identifier; errors here are swallowed because a failed apps-table
+        // upsert must not stop the segment itself from being recorded.
         if kind == KIND_ACTIVITY {
             let identifier = domain.unwrap_or(bundle_id.unwrap_or(app));
             let app_kind = if domain.is_some() { "site" } else { "app" };
@@ -1426,7 +1428,6 @@ impl ActivityStore {
             return Err("Split point must be strictly inside the entry duration".to_string());
         }
 
-        // Update first half
         self.conn
             .execute(
                 "UPDATE time_entries SET ended_at = ?1, updated_at = ?2 WHERE id = ?3;",
@@ -1440,7 +1441,6 @@ impl ActivityStore {
             ..original.clone()
         };
 
-        // Create second half
         let new_id = uuid::Uuid::now_v7().to_string();
         self.conn.execute(
             "INSERT INTO time_entries (id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, description_origin)
@@ -1462,7 +1462,6 @@ impl ActivityStore {
             ],
         ).map_err(|e| e.to_string())?;
 
-        // Reassign segments that start after split point to new entry
         self.conn
             .execute(
                 "UPDATE segments SET entry_id = ?1 WHERE entry_id = ?2 AND started_at >= ?3;",

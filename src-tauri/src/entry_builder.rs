@@ -207,7 +207,6 @@ fn create_entry_from_segments(
     let started_at = segments[0].started_at;
     let segment_ids: Vec<i64> = segments.iter().map(|s| s.id).collect();
 
-    // Summarize dominant app & titles for description
     let description = generate_description(segments);
 
     BuiltTimeEntry {
@@ -230,7 +229,6 @@ fn create_entry_from_segments(
 }
 
 fn generate_description(segments: &[&SegmentInput]) -> String {
-    // Collect non-empty titles and apps
     let mut app_counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
     let mut titles_by_app: std::collections::HashMap<String, Vec<String>> =
         std::collections::HashMap::new();
@@ -243,6 +241,9 @@ fn generate_description(segments: &[&SegmentInput]) -> String {
         *app_counts.entry(seg.app.clone()).or_insert(0) += dur;
 
         let clean_title = seg.title.trim();
+        // A title equal to the app name is uninformative in a description
+        // like "Slack: Slack", so it's dropped; titles are capped at 3 per
+        // app to keep the generated description short.
         if !clean_title.is_empty() && clean_title != seg.app {
             let list = titles_by_app.entry(seg.app.clone()).or_default();
             if !list.contains(&clean_title.to_string()) && list.len() < 3 {
@@ -251,7 +252,6 @@ fn generate_description(segments: &[&SegmentInput]) -> String {
         }
     }
 
-    // Find dominant app
     let dominant_app = app_counts
         .into_iter()
         .max_by_key(|(_, dur)| *dur)

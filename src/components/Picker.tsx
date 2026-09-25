@@ -111,7 +111,6 @@ export function Picker<T extends string | number>({
   );
   const selectedOption = flatOptions[selectedIndex];
 
-  // Close when clicking outside or pressing Escape
   useEffect(() => {
     if (!isOpen) return;
 
@@ -141,14 +140,13 @@ export function Picker<T extends string | number>({
     };
   }, [isOpen]);
 
-  // Viewport-aware open position (drop up if near viewport bottom)
+  // Avoid clipping the menu below the viewport.
   const openMenu = useCallback(() => {
     if (disabled) return;
     if (triggerRef.current) {
       const rect = triggerRef.current.getBoundingClientRect();
       const spaceBelow = window.innerHeight - rect.bottom;
       const spaceAbove = rect.top;
-      // If less than 240px below and more room above, open upward
       setOpenUpward(spaceBelow < 240 && spaceAbove > spaceBelow);
     }
     setIsOpen(true);
@@ -170,7 +168,7 @@ export function Picker<T extends string | number>({
     [onChange],
   );
 
-  // Keep highlighted option visible in scroll container
+  // Keyboard navigation can move the highlight outside the list's viewport.
   useEffect(() => {
     if (!isOpen || highlightedIndex < 0 || !listboxRef.current) return;
     const element = listboxRef.current.querySelector(
@@ -181,7 +179,6 @@ export function Picker<T extends string | number>({
     }
   }, [isOpen, highlightedIndex]);
 
-  // Keyboard navigation
   const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (disabled) return;
 
@@ -280,7 +277,6 @@ export function Picker<T extends string | number>({
       return;
     }
 
-    // Typeahead search
     if (event.key.length === 1 && !event.ctrlKey && !event.metaKey) {
       const char = event.key.toLowerCase();
       const matchIndex = flatOptions.findIndex(
@@ -300,14 +296,12 @@ export function Picker<T extends string | number>({
     }
   };
 
-  // Determine display label
   const displayLabel =
     selectedOption?.label ??
     placeholder ??
     (value !== "" ? String(value) : "Select…");
   const displayColor = selectedOption?.color ?? explicitColor;
 
-  // Variants styling
   let triggerClasses =
     "group flex items-center justify-between gap-1.5 cursor-pointer select-none text-left transition-colors outline-hidden";
 
@@ -329,7 +323,6 @@ export function Picker<T extends string | number>({
         : "border-line-soft bg-transparent text-fg-muted hover:border-line"
     }`;
   } else {
-    // "field" variant (default)
     triggerClasses +=
       " h-8 w-full rounded-md border border-line bg-surface px-2.5 py-1.5 text-[12px] text-fg focus:border-accent";
   }

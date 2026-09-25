@@ -1493,14 +1493,14 @@ impl ActivityStore {
             let mut delete_entry = tx
                 .prepare("UPDATE time_entries SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2;")
                 .map_err(|e| e.to_string())?;
-            let mut unlink_segments = tx
-                .prepare("UPDATE segments SET entry_id = NULL WHERE entry_id = ?1;")
+            let mut delete_segments = tx
+                .prepare("DELETE FROM segments WHERE entry_id = ?1;")
                 .map_err(|e| e.to_string())?;
             for id in ids {
                 delete_entry
                     .execute(params![now as i64, id])
                     .map_err(|e| e.to_string())?;
-                unlink_segments
+                delete_segments
                     .execute(params![id])
                     .map_err(|e| e.to_string())?;
             }
@@ -1513,6 +1513,12 @@ impl ActivityStore {
         new_entry: NewTimeEntry,
         now: u64,
     ) -> Result<TimeEntry, String> {
+        if new_entry.ended_at <= new_entry.started_at {
+            return Err("Entry end must be after its start".to_string());
+        }
+        if new_entry.description.trim().is_empty() {
+            return Err("Entry description cannot be empty".to_string());
+        }
         let id = uuid::Uuid::now_v7().to_string();
         let billable = new_entry.billable.unwrap_or(false) as i64;
 
@@ -2161,6 +2167,35 @@ mod tests {
         assert_eq!(snapshot.segments[1].app, "Slack");
         assert_eq!(snapshot.segments[1].ended_at, None);
         assert_eq!(snapshot.tracked_ms, 6_000);
+    }
+
+    #[test]
+    fn deleting_an_entry_also_deletes_its_activity_segments() {
+        let mut store = store();
+        store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
+        store.tick(sample("Slack", "#general"), 0, 5_000).unwrap();
+        let entries = store
+            .rebuild_time_entries_in_range(0, 5_000, 5_000)
+            .unwrap();
+        let code_entry = entries
+            .iter()
+            .find(|entry| entry.description.contains("Code"))
+            .unwrap();
+
+        store.delete_time_entry(&code_entry.id, 6_000).unwrap();
+
+        let remaining = store.snapshot(0, 6_000).unwrap();
+        assert_eq!(remaining.segments.len(), 1);
+        assert_eq!(remaining.segments[0].app, "Slack");
+        let linked: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM segments WHERE entry_id = ?1;",
+                params![code_entry.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(linked, 0);
     }
 
     #[test]

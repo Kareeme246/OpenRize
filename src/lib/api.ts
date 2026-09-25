@@ -9,11 +9,20 @@ import type {
   Category,
   Client,
   EntryDetail,
+  EntryQuery,
+  ExportResult,
+  HintPreview,
+  ImportSummary,
   NewCategory,
   NewClient,
   NewProject,
   NewTimeEntry,
   Project,
+  ProjectRule,
+  ProjectStats,
+  ProjectSuggestion,
+  RollupCell,
+  RollupGroup,
   RuleSuggestion,
   TimeEntry,
   UpdateCategory,
@@ -128,6 +137,43 @@ export async function deleteProject(id: string): Promise<void> {
   await invoke("delete_project", { id });
 }
 
+export async function projectStats(
+  rangeStart: number,
+  rangeEnd: number,
+  monthStart: number,
+): Promise<ProjectStats[]> {
+  return await invoke<ProjectStats[]>("project_stats", {
+    rangeStart,
+    rangeEnd,
+    monthStart,
+  });
+}
+
+export async function projectRules(projectId: string): Promise<ProjectRule[]> {
+  return await invoke<ProjectRule[]>("project_rules", { projectId });
+}
+
+export async function previewProjectHints(
+  hints: string,
+  sinceMs: number,
+): Promise<HintPreview> {
+  return await invoke<HintPreview>("preview_project_hints", { hints, sinceMs });
+}
+
+export async function discoverProjects(
+  sinceMs: number,
+): Promise<ProjectSuggestion[]> {
+  return await invoke<ProjectSuggestion[]>("discover_projects", { sinceMs });
+}
+
+export async function dismissProjectSuggestion(key: string): Promise<void> {
+  await invoke("dismiss_project_suggestion", { key });
+}
+
+export async function importProjectsCsv(text: string): Promise<ImportSummary> {
+  return await invoke<ImportSummary>("import_projects_csv", { text });
+}
+
 // --- Clients ---
 
 export async function listClients(): Promise<Client[]> {
@@ -169,8 +215,50 @@ export async function updateTimeEntry(
   return await invoke<TimeEntry>("update_time_entry", { id, patch });
 }
 
-export async function approveTimeEntries(ids: string[]): Promise<void> {
-  await invoke("approve_time_entries", { ids });
+export async function approveTimeEntries(ids: string[]): Promise<TimeEntry[]> {
+  return await invoke<TimeEntry[]>("approve_time_entries", { ids });
+}
+
+/** One patch applied to many entries; returns them updated. */
+export async function updateTimeEntries(
+  ids: string[],
+  patch: UpdateTimeEntry,
+): Promise<TimeEntry[]> {
+  return await invoke<TimeEntry[]>("update_time_entries", { ids, patch });
+}
+
+// --- Reports ---
+
+/** Entries matching a filter, newest first. */
+export async function queryTimeEntries(
+  filter: EntryQuery,
+  limit?: number,
+): Promise<TimeEntry[]> {
+  return await invoke<TimeEntry[]>("query_time_entries", { filter, limit });
+}
+
+/**
+ * Totals per group per bucket, summed in SQL. `boundaries` holds n + 1
+ * ascending local-time edges for n buckets.
+ */
+export async function entryRollup(
+  filter: EntryQuery,
+  boundaries: number[],
+  groupBy: RollupGroup,
+): Promise<RollupCell[]> {
+  return await invoke<RollupCell[]>("entry_rollup", {
+    filter,
+    boundaries,
+    groupBy,
+  });
+}
+
+/** Writes the filtered entries to Downloads; returns the file. */
+export async function exportTimeEntries(
+  filter: EntryQuery,
+  format: "csv" | "json",
+): Promise<ExportResult> {
+  return await invoke<ExportResult>("export_time_entries", { filter, format });
 }
 
 export async function rejectTimeEntry(id: string): Promise<void> {

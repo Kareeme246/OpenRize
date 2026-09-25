@@ -744,6 +744,7 @@ impl ActivityStore {
                 now as i64,
             ],
         ).map_err(|e| e.to_string())?;
+        crate::projects::sync_hint_rules(&self.conn, &id, proj.ai_hints.as_deref(), now)?;
 
         Ok(Project {
             id,
@@ -773,7 +774,27 @@ impl ActivityStore {
     ) -> Result<Project, String> {
         let mut proj = self.get_project(id)?;
         if let Some(client_id) = patch.client_id {
-            proj.client_id = Some(client_id);
+            let client_id = client_id.filter(|value| !value.is_empty());
+            if client_id != proj.client_id {
+                // An invoice bills a client; moving invoiced time to another
+                // one would change what was already sent.
+                let invoiced: bool = self
+                    .conn
+                    .query_row(
+                        "SELECT EXISTS (SELECT 1 FROM time_entries
+                         WHERE project_id = ?1 AND deleted_at IS NULL AND invoice_id IS NOT NULL);",
+                        params![id],
+                        |row| row.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+                if invoiced {
+                    return Err(
+                        "This project has invoiced time, so its client can't change. Void the invoice first."
+                            .to_string(),
+                    );
+                }
+            }
+            proj.client_id = client_id;
         }
         if let Some(name) = patch.name {
             proj.name = name;
@@ -782,22 +803,26 @@ impl ActivityStore {
             proj.color = color;
         }
         if let Some(desc) = patch.description {
-            proj.description = Some(desc);
+            proj.description = desc;
         }
+        let hints_changed = patch
+            .ai_hints
+            .as_ref()
+            .is_some_and(|hints| *hints != proj.ai_hints);
         if let Some(hints) = patch.ai_hints {
-            proj.ai_hints = Some(hints);
+            proj.ai_hints = hints;
         }
         if let Some(status) = patch.status {
             proj.status = status;
         }
         if let Some(due) = patch.due_date {
-            proj.due_date = Some(due);
+            proj.due_date = due;
         }
         if let Some(bk) = patch.budget_kind {
             proj.budget_kind = bk;
         }
         if let Some(bv) = patch.budget_value {
-            proj.budget_value = Some(bv);
+            proj.budget_value = bv;
         }
         if let Some(bp) = patch.budget_period {
             proj.budget_period = bp;
@@ -806,7 +831,7 @@ impl ActivityStore {
             proj.billable_default = b;
         }
         if let Some(rate) = patch.hourly_rate {
-            proj.hourly_rate = Some(rate);
+            proj.hourly_rate = rate;
         }
         proj.updated_at = now;
 
@@ -831,16 +856,33 @@ impl ActivityStore {
             ],
         ).map_err(|e| e.to_string())?;
 
+        if hints_changed {
+            crate::projects::sync_hint_rules(&self.conn, id, proj.ai_hints.as_deref(), now)?;
+        }
         Ok(proj)
     }
 
+    /// Only a project with no entries can be deleted; one with history is
+    /// completed or archived instead, so its time keeps its project.
     pub fn delete_project(&mut self, id: &str, now: u64) -> Result<(), String> {
+        let has_entries: bool = self
+            .conn
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM time_entries WHERE project_id = ?1 AND deleted_at IS NULL);",
+                params![id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if has_entries {
+            return Err("This project has time entries. Archive it instead.".to_string());
+        }
         self.conn
             .execute(
                 "UPDATE projects SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2;",
                 params![now as i64, id],
             )
             .map_err(|e| e.to_string())?;
+        crate::projects::sync_hint_rules(&self.conn, id, None, now)?;
         Ok(())
     }
 
@@ -1019,13 +1061,28 @@ impl ActivityStore {
             .map_err(|e| e.to_string())?;
 
         let mut ai = crate::ai::store::summaries(&self.conn, start_ms, end_ms)?;
+        let mut apps = crate::reports::dominant_apps(&self.conn, start_ms, end_ms)?;
         let mut list = Vec::new();
         for entry in rows {
             let mut entry = entry.map_err(|e| e.to_string())?;
             entry.ai = ai.remove(&entry.id);
+            entry.dominant_app = apps.remove(&entry.id);
             list.push(entry);
         }
         Ok(list)
+    }
+
+    /// The entries with these ids, in the order given (missing ids skipped).
+    pub fn time_entries(&self, ids: &[String]) -> Result<Vec<TimeEntry>, String> {
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Ok(entry) = self.time_entry(id) {
+                if entry.deleted_at.is_none() {
+                    out.push(entry);
+                }
+            }
+        }
+        Ok(out)
     }
 
     fn time_entry(&self, id: &str) -> Result<TimeEntry, String> {
@@ -1484,6 +1541,7 @@ impl ActivityStore {
             deleted_at: None,
             description_origin: "user".to_string(),
             ai: None,
+            dominant_app: None,
         })
     }
 
@@ -1753,6 +1811,7 @@ pub(crate) fn time_entry_from_row(row: &Row<'_>) -> rusqlite::Result<TimeEntry> 
         deleted_at: row.get::<_, Option<i64>>(13)?.map(|v| v as u64),
         description_origin: row.get(14)?,
         ai: None,
+        dominant_app: None,
     })
 }
 

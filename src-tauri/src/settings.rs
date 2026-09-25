@@ -62,6 +62,9 @@ pub enum AiSuggest {
 pub const MIN_AUTO_ACCEPT_PERCENT: u8 = 50;
 pub const MAX_AUTO_ACCEPT_PERCENT: u8 = 100;
 const MAX_CUSTOM_PROMPT_CHARS: usize = 1_000;
+/// The work week the Calendar, My Timesheet, and Timesheets measure against.
+pub const DEFAULT_WEEKLY_TARGET_HOURS: u16 = 40;
+pub const MAX_WEEKLY_TARGET_HOURS: u16 = 168;
 
 /// Every field is `#[serde(default)]`, so a settings file written by an older
 /// build loads with new fields defaulted instead of failing to parse.
@@ -82,6 +85,8 @@ pub struct Settings {
     pub auto_accept_percent: u8,
     /// Appended to the Foundation Model's instructions.
     pub ai_custom_prompt: String,
+    /// Expected work hours per week. A day's target is a fifth of it.
+    pub weekly_target_hours: u16,
 }
 
 impl Default for Settings {
@@ -96,6 +101,7 @@ impl Default for Settings {
             auto_accept: true,
             auto_accept_percent: 95,
             ai_custom_prompt: String::new(),
+            weekly_target_hours: DEFAULT_WEEKLY_TARGET_HOURS,
         }
     }
 }
@@ -105,6 +111,7 @@ impl Settings {
     /// in one spot so a command can never write something unloadable.
     fn normalized(mut self) -> Self {
         self.retention_days = self.retention_days.min(MAX_RETENTION_DAYS);
+        self.weekly_target_hours = self.weekly_target_hours.clamp(1, MAX_WEEKLY_TARGET_HOURS);
         self.auto_accept_percent = self
             .auto_accept_percent
             .clamp(MIN_AUTO_ACCEPT_PERCENT, MAX_AUTO_ACCEPT_PERCENT);
@@ -217,6 +224,7 @@ mod tests {
                     auto_accept: false,
                     auto_accept_percent: 90,
                     ai_custom_prompt: "OpenRize is Coding".to_string(),
+                    weekly_target_hours: 32,
                 })
                 .unwrap();
         }
@@ -230,6 +238,7 @@ mod tests {
         assert!(!reloaded.auto_accept);
         assert_eq!(reloaded.auto_accept_percent, 90);
         assert_eq!(reloaded.ai_custom_prompt, "OpenRize is Coding");
+        assert_eq!(reloaded.weekly_target_hours, 32);
     }
 
     #[test]
@@ -256,6 +265,26 @@ mod tests {
             })
             .unwrap();
         assert_eq!(saved.retention_days, MAX_RETENTION_DAYS);
+    }
+
+    #[test]
+    fn weekly_target_is_clamped() {
+        let dir = temp_dir("target");
+        let mut store = SettingsStore::load(&dir).unwrap();
+        let zero = store
+            .set(Settings {
+                weekly_target_hours: 0,
+                ..Settings::default()
+            })
+            .unwrap();
+        assert_eq!(zero.weekly_target_hours, 1);
+        let huge = store
+            .set(Settings {
+                weekly_target_hours: 500,
+                ..Settings::default()
+            })
+            .unwrap();
+        assert_eq!(huge.weekly_target_hours, MAX_WEEKLY_TARGET_HOURS);
     }
 
     #[test]

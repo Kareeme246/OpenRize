@@ -26,6 +26,8 @@ export interface Settings {
   autoAcceptPercent: number;
   /** Appended to the on-device model's instructions. */
   aiCustomPrompt: string;
+  /** Expected work hours per week; a day's target is a fifth of it. */
+  weeklyTargetHours: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -38,7 +40,37 @@ export const DEFAULT_SETTINGS: Settings = {
   autoAccept: true,
   autoAcceptPercent: 95,
   aiCustomPrompt: "",
+  weeklyTargetHours: 40,
 };
+
+/** A working day's share of the weekly target, in milliseconds. */
+export function dailyTargetMs(settings: Settings): number {
+  return (settings.weeklyTargetHours / 5) * 3_600_000;
+}
+
+export function weeklyTargetMs(settings: Settings): number {
+  return settings.weeklyTargetHours * 3_600_000;
+}
+
+/**
+ * Expected work time for a Calendar-style range: a day's or a week's share of
+ * the weekly target, or for a month the weekly target prorated by its days.
+ */
+export function targetMsFor(
+  settings: Settings,
+  scale: "day" | "week" | "month",
+  days: number,
+): number {
+  if (scale === "day") return dailyTargetMs(settings);
+  if (scale === "week") return weeklyTargetMs(settings);
+  return weeklyTargetMs(settings) * (days / 7);
+}
+
+/** A target in hours: "7.5h" for a short one, whole hours ("171h") above 10. */
+export function formatTargetHours(ms: number): string {
+  const hours = ms / 3_600_000;
+  return `${hours >= 10 ? Math.round(hours) : Math.round(hours * 10) / 10}h`;
+}
 
 export interface AccentPalette {
   label: string;

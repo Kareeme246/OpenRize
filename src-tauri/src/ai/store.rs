@@ -681,8 +681,13 @@ pub fn load_rules(conn: &Connection) -> Result<Vec<Rule>> {
     let mut rules: Vec<Rule> = {
         let mut stmt = conn
             .prepare(
+                // Only active projects are offered to the AI, so a rule that
+                // names a completed or archived project sits out.
                 "SELECT id, match_kind, pattern, category_id, project_id, priority, origin FROM rules
-                 WHERE deleted_at IS NULL AND enabled = 1;",
+                 WHERE deleted_at IS NULL AND enabled = 1
+                   AND (project_id IS NULL OR project_id IN (
+                     SELECT id FROM projects WHERE deleted_at IS NULL AND status = 'active'
+                   ));",
             )
             .map_err(err)?;
         let rows = stmt

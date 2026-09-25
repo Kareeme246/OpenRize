@@ -4,6 +4,11 @@ interface ConfirmDialogProps {
   title: string;
   body: string;
   confirmLabel: string;
+  /**
+   * `destructive` (the default) makes Cancel the primary button;
+   * `affirmative` (e.g. "Approve 4 entries?") makes the confirm button it.
+   */
+  tone?: "destructive" | "affirmative";
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -18,9 +23,14 @@ export function ConfirmDialog({
   title,
   body,
   confirmLabel,
+  tone = "destructive",
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const primary =
+    "rounded-lg border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-3 py-1.5 text-[12.5px] font-semibold text-accent-fg";
+  const secondary =
+    "rounded-lg border border-line bg-surface px-3 py-1.5 text-[12.5px] font-medium text-fg-muted hover:bg-surface-strong";
   const ref = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -53,14 +63,14 @@ export function ConfirmDialog({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-lg border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-3 py-1.5 text-[12.5px] font-semibold text-accent-fg"
+            className={tone === "destructive" ? primary : secondary}
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="rounded-lg border border-line bg-surface px-3 py-1.5 text-[12.5px] font-medium text-fg-muted hover:bg-surface-strong"
+            className={tone === "destructive" ? secondary : primary}
           >
             {confirmLabel}
           </button>

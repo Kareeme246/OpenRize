@@ -265,6 +265,15 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
     }
 
+    let version_after_v4: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
+
+    if version_after_v4 < 5 {
+        let tx = conn.transaction()?;
+        migrate_v5(&tx)?;
+        tx.execute("PRAGMA user_version = 5;", [])?;
+        tx.commit()?;
+    }
+
     Ok(())
 }
 
@@ -299,6 +308,36 @@ fn migrate_v4(tx: &rusqlite::Transaction<'_>) -> Result<()> {
          CREATE INDEX IF NOT EXISTS idx_model_artifacts_kind ON model_artifacts (kind, active, trained_at);",
     )?;
     Ok(())
+}
+
+/// P3: full-text search over window titles for Time Entries ("where did I
+/// work on invoices.rs?"). A trigram index answers substring `LIKE` queries,
+/// so "Rize" finds "OpenRize". It mirrors `segments` through triggers;
+/// `segments.id` is an INTEGER PRIMARY KEY, so the external-content rowid is
+/// stable across VACUUM. Entry descriptions are few and short and are
+/// searched directly.
+fn migrate_v5(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+    tx.execute_batch(
+        "
+        CREATE VIRTUAL TABLE IF NOT EXISTS segments_fts USING fts5(
+          title, content='segments', content_rowid='id', tokenize='trigram'
+        );
+        CREATE TRIGGER IF NOT EXISTS segments_fts_insert AFTER INSERT ON segments BEGIN
+          INSERT INTO segments_fts (rowid, title) VALUES (new.id, new.title);
+        END;
+        CREATE TRIGGER IF NOT EXISTS segments_fts_delete AFTER DELETE ON segments BEGIN
+          INSERT INTO segments_fts (segments_fts, rowid, title) VALUES ('delete', old.id, old.title);
+        END;
+        CREATE TRIGGER IF NOT EXISTS segments_fts_update AFTER UPDATE OF title ON segments BEGIN
+          INSERT INTO segments_fts (segments_fts, rowid, title) VALUES ('delete', old.id, old.title);
+          INSERT INTO segments_fts (rowid, title) VALUES (new.id, new.title);
+        END;
+        INSERT INTO segments_fts (segments_fts) VALUES ('rebuild');
+
+        CREATE INDEX IF NOT EXISTS idx_time_entries_project ON time_entries (project_id, started_at);
+        CREATE INDEX IF NOT EXISTS idx_rules_project ON rules (project_id);
+        ",
+    )
 }
 
 /// P2: the on-device AI pipeline (src/ai/).
@@ -400,7 +439,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 4);
+        assert_eq!(v, 5);
 
         let cat_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM categories;", [], |r| r.get(0))
@@ -431,12 +470,64 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 4);
+        assert_eq!(v, 5);
 
         // Check new columns exist
         conn.execute("SELECT bundle_id, url, entry_id FROM segments LIMIT 1;", [])
             .unwrap();
         conn.execute("SELECT raw_confidence, tier FROM suggestions LIMIT 1;", [])
             .unwrap();
+    }
+
+    #[test]
+    fn window_titles_are_searchable_by_substring() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE segments (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              app TEXT NOT NULL,
+              title TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              label TEXT,
+              started_at INTEGER NOT NULL,
+              ended_at INTEGER,
+              reviewed INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO segments (app, title, kind, started_at) VALUES ('Zed', 'invoices.rs - OpenRize', 'activity', 1);
+            PRAGMA user_version = 1;",
+        )
+        .unwrap();
+        run_migrations(&mut conn).unwrap();
+
+        let hits = |conn: &Connection, pattern: &str| -> i64 {
+            conn.query_row(
+                "SELECT COUNT(*) FROM segments_fts WHERE title LIKE ?1;",
+                [pattern],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        // Backfilled from rows that existed before the migration.
+        assert_eq!(hits(&conn, "%invoices.rs%"), 1);
+        assert_eq!(hits(&conn, "%rize%"), 1);
+
+        conn.execute(
+            "INSERT INTO segments (app, title, kind, started_at) VALUES ('Safari', 'docs.rs serde', 'activity', 2);",
+            [],
+        )
+        .unwrap();
+        assert_eq!(hits(&conn, "%serde%"), 1);
+
+        conn.execute(
+            "UPDATE segments SET title = 'renamed' WHERE app = 'Safari';",
+            [],
+        )
+        .unwrap();
+        assert_eq!(hits(&conn, "%serde%"), 0);
+        assert_eq!(hits(&conn, "%renamed%"), 1);
+
+        conn.execute("DELETE FROM segments WHERE app = 'Zed';", [])
+            .unwrap();
+        assert_eq!(hits(&conn, "%invoices%"), 0);
     }
 }

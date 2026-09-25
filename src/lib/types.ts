@@ -96,19 +96,20 @@ export interface NewProject {
   hourlyRate?: number;
 }
 
+/** A patch: omitted fields stay; `null` clears an optional one. */
 export interface UpdateProject {
-  clientId?: string;
+  clientId?: string | null;
   name?: string;
   color?: string;
-  description?: string;
-  aiHints?: string;
+  description?: string | null;
+  aiHints?: string | null;
   status?: string;
-  dueDate?: number;
+  dueDate?: number | null;
   budgetKind?: string;
-  budgetValue?: number;
+  budgetValue?: number | null;
   budgetPeriod?: string;
   billableDefault?: boolean;
-  hourlyRate?: number;
+  hourlyRate?: number | null;
 }
 
 export interface TimeEntry {
@@ -130,6 +131,8 @@ export interface TimeEntry {
   descriptionOrigin: "template" | "ai" | "user" | string;
   /** Classification state and confidences (list views only). */
   ai?: EntryAi;
+  /** The app or site with most of the entry's time (list views only). */
+  dominantApp?: string;
 }
 
 export type ClassifyState = "queued" | "running" | "done" | "failed";
@@ -381,35 +384,59 @@ export interface AppRecord {
   deletedAt?: number;
 }
 
+export type CalendarScale = "day" | "week" | "month";
+export type TimesheetTab = "review" | "processing" | "approved" | "all";
+export type TimesheetGroup = "project" | "category" | "app" | "none";
+export type EntriesView = "table" | "charts" | "log";
+export type EntriesGroup = "project" | "client" | "category" | "app" | "status";
+export type EntriesStack = "day" | "week" | "month";
+export type EntriesRange = "day" | "week" | "month" | "30d" | "year";
+export type ProjectsTab = "active" | "completed" | "archived" | "clients";
+export type ProjectsRange = "week" | "month" | "30d" | "all";
+
+/** Time Entries' filter bar. Values are ids, or `none` for "no …". */
+export interface EntryFilters {
+  categoryId?: string;
+  projectId?: string;
+  clientId?: string;
+  app?: string;
+  status?: "pending" | "approved";
+  billable?: boolean;
+  search?: string;
+}
+
 export type Route =
   | {
       name: "calendar";
-      scale?: "day" | "week" | "month";
+      scale?: CalendarScale;
+      /** Local `YYYY-MM-DD`; today when absent. */
       date?: string;
       entryId?: string;
       review?: boolean;
     }
   | {
       name: "timesheet";
-      scale?: "day" | "week" | "month";
+      scale?: CalendarScale;
       date?: string;
-      tab?: "review" | "processing" | "approved" | "all";
-      groupBy?: string;
+      tab?: TimesheetTab;
+      groupBy?: TimesheetGroup;
     }
   | {
       name: "apps";
-      scale?: "day" | "week" | "month";
+      scale?: CalendarScale;
       date?: string;
       tab?: "timeline" | "log";
       appId?: string;
     }
   | {
       name: "entries";
-      range?: string;
-      view?: "table" | "charts" | "log";
-      filters?: Record<string, string>;
-      groupBy?: string;
-      stackBy?: string;
+      range?: EntriesRange;
+      /** Local `YYYY-MM-DD` inside the range; today when absent. */
+      date?: string;
+      view?: EntriesView;
+      filters?: EntryFilters;
+      groupBy?: EntriesGroup;
+      stackBy?: EntriesStack;
     }
   | {
       name: "timesheets";
@@ -419,9 +446,9 @@ export type Route =
     }
   | {
       name: "projects";
-      tab?: "active" | "completed" | "archived" | "clients";
+      tab?: ProjectsTab;
       projectId?: string;
-      range?: string;
+      range?: ProjectsRange;
     }
   | {
       name: "invoices";
@@ -431,3 +458,70 @@ export type Route =
       name: "settings";
       section?: string;
     };
+
+/** The Rust-side filter (src-tauri/src/reports.rs). */
+export interface EntryQuery extends EntryFilters {
+  startMs: number;
+  endMs: number;
+}
+
+export type RollupGroup = EntriesGroup | "none";
+
+export interface RollupCell {
+  /** Group id or name; absent is "No project", "Uncategorized", etc. */
+  key?: string | null;
+  bucket: number;
+  ms: number;
+  entries: number;
+  approvedMs: number;
+  pending: number;
+  billableMs: number;
+}
+
+export interface ExportResult {
+  path: string;
+  count: number;
+}
+
+export interface ProjectStats {
+  projectId: string;
+  entries: number;
+  totalMs: number;
+  rangeMs: number;
+  monthMs: number;
+  billableMs: number;
+  billableMonthMs: number;
+  lastActivity?: number | null;
+}
+
+export interface ProjectRule {
+  id: string;
+  matchKind: string;
+  pattern: string;
+  origin: "manual" | "suggested" | "hint" | "app" | string;
+}
+
+export interface HintMatch {
+  hint: string;
+  matchKind?: string | null;
+  pattern?: string | null;
+  matchedMs: number;
+}
+
+export interface HintPreview {
+  hints: HintMatch[];
+  totalMs: number;
+}
+
+export interface ProjectSuggestion {
+  key: string;
+  name: string;
+  ms: number;
+  evidence: string[];
+}
+
+export interface ImportSummary {
+  created: number;
+  clientsCreated: number;
+  skipped: string[];
+}

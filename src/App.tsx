@@ -1,9 +1,9 @@
-import { listen } from "@tauri-apps/api/event";
 import { type ReactElement, useCallback, useEffect, useState } from "react";
 import { NotImplementedProvider } from "./components/NotImplemented";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { SettingsProvider } from "./hooks/useSettings";
+import { useTauriEvent } from "./hooks/useTauriEvent";
 import * as api from "./lib/api";
 import type { ActivitySnapshot, ActivityTick, Route } from "./lib/types";
 import { Apps } from "./pages/Apps";
@@ -40,6 +40,15 @@ export default function App() {
       }
       const entries = [...previous.entries.slice(0, previous.cursor + 1), next];
       return { entries, cursor: entries.length - 1 };
+    });
+  }, []);
+
+  /** Updates the current route in place: filters and tabs, not new pages. */
+  const replace = useCallback((next: Route): void => {
+    setNav((previous) => {
+      const entries = [...previous.entries];
+      entries[previous.cursor] = next;
+      return { ...previous, entries };
     });
   }, []);
 
@@ -84,57 +93,37 @@ export default function App() {
       .catch((err) => {
         console.error("Failed to load activity snapshot", err);
       });
-
-    // Listen to tick events
-    const unlistenTick = listen<ActivityTick>(api.ACTIVITY_TICK, (event) => {
-      setCaptureEnabledState(event.payload.captureEnabled);
-      if (event.payload.current) {
-        setCurrentApp(event.payload.current.app);
-      }
-    });
-
-    // Listen to activity changed events
-    const unlistenActivity = listen<ActivitySnapshot>(
-      api.ACTIVITY_CHANGED,
-      (event) => {
-        setCaptureEnabledState(event.payload.captureEnabled);
-        if (event.payload.current) {
-          setCurrentApp(event.payload.current.app);
-        }
-      },
-    );
-
-    return () => {
-      void unlistenTick.then((u) => u());
-      void unlistenActivity.then((u) => u());
-    };
   }, []);
+
+  const adoptCapture = (payload: ActivityTick | ActivitySnapshot): void => {
+    setCaptureEnabledState(payload.captureEnabled);
+    if (payload.current) {
+      setCurrentApp(payload.current.app);
+    }
+  };
+  useTauriEvent<ActivityTick>(api.ACTIVITY_TICK, adoptCapture);
+  useTauriEvent<ActivitySnapshot>(api.ACTIVITY_CHANGED, adoptCapture);
 
   // Entries waiting for review today (the Calendar's pending badge).
-  useEffect(() => {
-    const updatePending = async () => {
-      try {
-        const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
-        const entries = await api.listTimeEntries(
-          startOfDay.getTime(),
-          Date.now(),
-        );
-        const count = entries.filter((e) => e.status === "pending").length;
-        setPendingCount(count);
-      } catch (err) {
-        console.error("Failed to load pending entries count", err);
-      }
-    };
-
-    updatePending();
-    const unlistenEntries = listen(api.ENTRIES_CHANGED, updatePending);
-    const unlistenSuggestion = listen(api.SUGGESTION_READY, updatePending);
-    return () => {
-      void unlistenEntries.then((u) => u());
-      void unlistenSuggestion.then((u) => u());
-    };
+  const updatePending = useCallback(async (): Promise<void> => {
+    try {
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const entries = await api.listTimeEntries(
+        startOfDay.getTime(),
+        Date.now(),
+      );
+      const count = entries.filter((e) => e.status === "pending").length;
+      setPendingCount(count);
+    } catch (err) {
+      console.error("Failed to load pending entries count", err);
+    }
   }, []);
+  useEffect(() => {
+    void updatePending();
+  }, [updatePending]);
+  useTauriEvent(api.ENTRIES_CHANGED, updatePending);
+  useTauriEvent(api.SUGGESTION_READY, updatePending);
 
   const handleToggleCapture = async () => {
     try {
@@ -149,17 +138,35 @@ export default function App() {
   const renderView = (): ReactElement => {
     switch (currentRoute.name) {
       case "calendar":
-        return <Calendar />;
+        return <Calendar route={currentRoute} navigate={navigate} />;
       case "timesheet":
-        return <MyTimesheet />;
+        return (
+          <MyTimesheet
+            route={currentRoute}
+            navigate={navigate}
+            replace={replace}
+          />
+        );
       case "apps":
         return <Apps />;
       case "entries":
-        return <TimeEntries />;
+        return (
+          <TimeEntries
+            route={currentRoute}
+            navigate={navigate}
+            replace={replace}
+          />
+        );
       case "timesheets":
         return <Timesheets />;
       case "projects":
-        return <Projects />;
+        return (
+          <Projects
+            route={currentRoute}
+            navigate={navigate}
+            replace={replace}
+          />
+        );
       case "invoices":
         return <Invoices />;
       case "settings":

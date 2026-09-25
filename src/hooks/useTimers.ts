@@ -1,8 +1,8 @@
-import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
 import type { Timer } from "../lib/timers";
+import { useTauriEvent } from "./useTauriEvent";
 
 export interface TimersApi {
   timers: Timer[];
@@ -40,15 +40,10 @@ export function useTimers(): TimersApi {
 
   // The tray can pause a timer without the frontend asking, so Rust broadcasts
   // the authoritative list and we replace state from it.
-  useEffect(() => {
-    const pending = listen<Timer[]>(api.TIMERS_CHANGED, (event) => {
-      setTimers(event.payload);
-      setError(null);
-    });
-    return () => {
-      void pending.then((unlisten) => unlisten());
-    };
-  }, []);
+  useTauriEvent<Timer[]>(api.TIMERS_CHANGED, (payload) => {
+    setTimers(payload);
+    setError(null);
+  });
 
   // Every command answers with the full list, so state is replaced, never
   // patched — the UI cannot invent a timer that is not on disk.

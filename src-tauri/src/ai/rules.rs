@@ -26,7 +26,8 @@ pub struct Rule {
     pub category_id: Option<String>,
     pub project_id: Option<String>,
     pub priority: i64,
-    /// manual | suggested | app (an Apps-page default)
+    /// manual | suggested | hint (from a project's AI hints) | app (an
+    /// Apps-page default)
     pub origin: String,
 }
 
@@ -55,15 +56,15 @@ impl Rule {
             "path_prefix" => "path",
             other => other,
         };
-        let origin = if self.origin == "app" {
-            "Apps default"
-        } else {
-            "rule"
+        let origin = match self.origin.as_str() {
+            "app" => "Apps default",
+            "hint" => "project hint",
+            _ => "rule",
         };
         format!("{origin}: {kind} {}", self.pattern)
     }
 
-    fn matches(&self, segment: &ActivitySegment) -> bool {
+    pub(crate) fn matches(&self, segment: &ActivitySegment) -> bool {
         let pattern = self.pattern.trim();
         if pattern.is_empty() {
             return false;
@@ -102,6 +103,8 @@ impl Rule {
                     .map(|url| url.strip_prefix("file://").unwrap_or(url))
                     .is_some_and(|url| url.starts_with(&path))
                     || segment.title.contains(&path)
+                    // Terminals show the working directory as `~/Code/...`.
+                    || segment.title.contains(pattern)
             }
             _ => false,
         }

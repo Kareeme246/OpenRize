@@ -422,6 +422,9 @@ export type Route =
       groupBy?: TimesheetGroup;
     }
   | {
+      name: "timers";
+    }
+  | {
       name: "apps";
       scale?: CalendarScale;
       date?: string;

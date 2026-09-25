@@ -15,16 +15,19 @@ jobs:
     # default toolchain - see AGENTS.md "On-device AI sidecar".
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: pnpm/action-setup@v4
+      # v6.0.9
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
 
-      - uses: actions/setup-node@v4
+      # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24
           cache: pnpm
 
-      - uses: Swatinem/rust-cache@v2
+      # v2.9.2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
           workspaces: src-tauri
 
@@ -40,16 +43,19 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent openrize.app openrize.app.zip
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        # v3.0.2
+        uses: >-
+          softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
         with:
           files: |
             src-tauri/target/release/bundle/dmg/*.dmg
             src-tauri/target/release/bundle/macos/openrize.app.zip
           body: |
-            Unsigned macOS build - no Apple Developer signing or notarization yet.
+            Unsigned macOS build - no Apple Developer signing or notarization
+            yet.
 
-            On first launch, macOS Gatekeeper will refuse to open the app. Right-click
-            (or Control-click) `openrize.app` and choose **Open**, or go to
-            **System Settings > Privacy & Security** and click **Open Anyway**, then
-            confirm. You only need to do this once.
+            On first launch, macOS Gatekeeper will refuse to open the app.
+            Right-click (or Control-click) `openrize.app` and choose **Open**,
+            or go to **System Settings > Privacy & Security** and click
+            **Open Anyway**, then confirm. You only need to do this once.
           generate_release_notes: true

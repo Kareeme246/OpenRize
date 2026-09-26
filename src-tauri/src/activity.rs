@@ -1,9 +1,10 @@
 //! Activity capture — the automatic tracker.
 //!
-//! Samples the OS foreground window via macOS Accessibility API (`AXUIElement`)
-//! and user idle time (`user-idle3`) every second and folds consecutive
-//! samples into *segments*: one row per contiguous run of the same app + window
-//! title + url.
+//! Samples the OS foreground window via macOS Accessibility API (`AXUIElement`),
+//! whether that app keeps the display awake (IOKit power assertions, how a
+//! playing video shows up), and user idle time (`user-idle3`) every second and
+//! folds consecutive samples into *segments*: one row per contiguous run of the
+//! same app + window title + url.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -152,6 +153,8 @@ pub struct ActivityStore {
     capture_enabled: bool,
     idle_threshold_ms: u64,
     last_idle_ms: u64,
+    /// When the foreground app was last seen keeping the display awake.
+    watched_at_ms: Option<u64>,
     watch_since_ms: Option<u64>,
     tracking_hours: crate::settings::TrackingHours,
     manual_tracking: bool,
@@ -187,6 +190,7 @@ impl ActivityStore {
             capture_enabled: true,
             idle_threshold_ms: DEFAULT_IDLE_THRESHOLD_MS,
             last_idle_ms: 0,
+            watched_at_ms: None,
             watch_since_ms: None,
             tracking_hours: crate::settings::TrackingHours::default(),
             manual_tracking: false,
@@ -267,6 +271,21 @@ impl ActivityStore {
         idle_ms: u64,
         now: u64,
     ) -> Result<bool, String> {
+        if sample.as_ref().is_some_and(|s| s.keeps_display_awake) {
+            self.watched_at_ms = Some(now);
+        }
+        // Watching a video gives no input, so while an activity segment is
+        // open, the foreground app keeping the display awake counts as the
+        // user being there: idle runs from the last input or the last moment
+        // they were watching, whichever is later. That also rides out the
+        // gaps where a player briefly drops its assertion. It never ends a
+        // break, though: only input brings an idle user back.
+        let idle_ms = match (&self.current, self.watched_at_ms) {
+            (Some(current), Some(watched_at)) if current.kind == KIND_ACTIVITY => {
+                idle_ms.min(now.saturating_sub(watched_at))
+            }
+            _ => idle_ms,
+        };
         self.last_idle_ms = idle_ms;
 
         if !self.capture_enabled {
@@ -2249,6 +2268,7 @@ mod tests {
             bundle_id: None,
             url: None,
             domain: None,
+            keeps_display_awake: false,
         })
     }
 
@@ -2318,6 +2338,99 @@ mod tests {
         // The break is backdated to the last input, 90s before it was noticed.
         assert_eq!(snapshot.segments[0].ended_at, Some(10_000));
         assert_eq!(snapshot.break_ms, 120_000);
+    }
+
+    /// Ticks once a second through `[from, to)` with Zen in front. `inputs`
+    /// are the moments the user touched the keyboard or mouse, and
+    /// `watching` says whether Zen keeps the display awake at a moment.
+    fn watch_zen(
+        store: &mut ActivityStore,
+        (from, to): (u64, u64),
+        inputs: &[u64],
+        watching: impl Fn(u64) -> bool,
+    ) {
+        for now in (from..to).step_by(1_000) {
+            let last_input = inputs.iter().rev().find(|&&at| at <= now).unwrap();
+            let mut zen = sample("Zen", "").unwrap();
+            zen.keeps_display_awake = watching(now);
+            store.tick(Some(zen), now - last_input, now).unwrap();
+        }
+    }
+
+    /// Three hours of a show in Zen, touched only now and then, the way the
+    /// evening of 2026-09-25 was captured: the player drops its display
+    /// assertion for 40 seconds every 10 minutes (between episodes, ads) and
+    /// the show is paused at 3h, after which nobody touches the Mac.
+    const SHOW_END: u64 = 180 * MIN;
+    const SHOW_INPUTS: [u64; 6] = [0, 21 * MIN, 47 * MIN, 88 * MIN, 131 * MIN, 170 * MIN];
+
+    fn show_playing(at: u64) -> bool {
+        at < SHOW_END && (at < 10 * MIN || at % (10 * MIN) >= 40_000)
+    }
+
+    #[test]
+    fn a_show_watched_in_the_foreground_is_one_continuous_session() {
+        let mut store = store();
+        watch_zen(
+            &mut store,
+            (0, SHOW_END + 10 * MIN),
+            &SHOW_INPUTS,
+            show_playing,
+        );
+
+        let segments = store.snapshot(0, SHOW_END + 10 * MIN).unwrap().segments;
+        let spans: Vec<_> = segments
+            .iter()
+            .map(|s| (s.kind.as_str(), s.started_at, s.ended_at))
+            .collect();
+        // The break starts when the show stopped playing, not at the last
+        // input 10 minutes before it.
+        let paused = SHOW_END - 1_000;
+        assert_eq!(
+            spans,
+            vec![(KIND_ACTIVITY, 0, Some(paused)), (KIND_BREAK, paused, None)]
+        );
+
+        let entries = store
+            .rebuild_time_entries_in_range(0, SHOW_END + 10 * MIN, SHOW_END + 10 * MIN)
+            .unwrap();
+        let entries: Vec<_> = entries
+            .iter()
+            .map(|e| (e.started_at, e.ended_at, e.status.as_str()))
+            .collect();
+        // Closed, so it is queued for classification.
+        assert_eq!(entries, vec![(0, paused, "processing")]);
+    }
+
+    #[test]
+    fn the_same_evening_without_a_display_assertion_is_idle() {
+        // The counterfactual: identical input, but Zen never keeps the
+        // display awake, so every stretch without input is a break and each
+        // input leaves only an instant of activity, too short to be an entry.
+        let mut store = store();
+        watch_zen(&mut store, (0, SHOW_END + 10 * MIN), &SHOW_INPUTS, |_| {
+            false
+        });
+
+        let snapshot = store.snapshot(0, SHOW_END + 10 * MIN).unwrap();
+        assert_eq!(snapshot.tracked_ms, 0);
+        let entries = store
+            .rebuild_time_entries_in_range(0, SHOW_END + 10 * MIN, SHOW_END + 10 * MIN)
+            .unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn a_video_does_not_end_an_idle_break() {
+        // Autoplay after the user left must not bring them back: only input
+        // ends a break.
+        let mut store = store();
+        watch_zen(&mut store, (0, 10 * MIN), &[0], |_| false);
+        watch_zen(&mut store, (10 * MIN, 20 * MIN), &[0], |_| true);
+
+        let snapshot = store.snapshot(0, 20 * MIN).unwrap();
+        assert_eq!(snapshot.current.unwrap().kind, KIND_BREAK);
+        assert_eq!(snapshot.segments.len(), 2);
     }
 
     #[test]

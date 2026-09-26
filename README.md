@@ -56,7 +56,7 @@ to your rules and a personal model it trains on your own reviews and keeps categ
 | **Projects** (with Clients) | ✅ Working | Active, Completed, Archived, and Clients tabs. Budgets, due dates, a per-project detail page, AI hints that become rules, and project discovery from repo paths, forge URLs, and editor titles. CSV import. |
 | **Invoices** | 🚧 Placeholder | Draft, sent, and paid invoices per client from approved billable project time. |
 | **Settings** | ✅ Working | Theme and accent, menu bar and close behavior, storage location, activity retention, expected hours per week, and Categories & AI (engine status, auto-accept threshold, custom instructions, AI effectiveness, personal model versions, Retrain now, Reset learned data). |
-| **Automatic capture** | ✅ Working | A background sampler records the foreground app, its window title (via Accessibility, not Screen Recording), and the URL in Safari and Chromium browsers. Idle and sleep time are not counted as work. |
+| **Automatic capture** | ✅ Working | A background sampler records the foreground app, its window title (via Accessibility, not Screen Recording), and the URL in Safari and Chromium browsers. Idle and sleep time are not counted as work; watching a video in the app in front is not idle. |
 | **AI categorization & review** | ✅ Working | Each entry gets a category and project suggestion with a confidence meter, a "Why" line, and pickable alternatives. Keyboard review mode, and auto-approve only when both fields clear your threshold. |
 | **Learning loop & calibration** | ✅ Working | Your accepts and corrections feed the personal model, offer a rule after 3 consistent corrections, trigger background retraining, and calibrate the confidence you see against how often you actually agree. |
 | **Menu-bar tray** | ✅ Working | A menu-bar glyph. Closing the window can hide OpenRize there so capture keeps running. |
@@ -123,11 +123,12 @@ the last snapshot Rust sent it; Rust pushes events when something changes.
 ```
 
 - **Capture** samples the foreground window in the background and folds consecutive samples into
-  segments. It closes out on idle and on sleep or lid-close, and holds an App Nap assertion so
-  sampling stays precise while the window is hidden.
-- **The entry builder** turns segments into time entries, the unit you review: it absorbs
-  micro-switches, closes on idle, breaks, and midnight, aims for about 30-minute entries, and never
-  touches an entry you have approved.
+  segments. It closes out on idle (no input, unless the app in front is keeping the display awake
+  to play video) and on sleep or lid-close, and holds an App Nap assertion so sampling stays
+  precise while the window is hidden.
+- **The entry builder** turns segments into time entries, the unit you review: one continuous
+  session is one entry whatever apps it spans, gaps of up to 5 minutes stay inside it, sessions
+  under 5 minutes are dropped, and it never touches an entry you have approved.
 - **The classification worker** extracts features (app and bundle id, window titles, domains,
   duration, time of day, previous entry) and runs three tiers. **T0** is your rules, including the
   ones generated from project AI hints. **T1** is personal: nearest neighbours over sentence

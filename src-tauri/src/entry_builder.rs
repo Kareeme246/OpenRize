@@ -2,11 +2,12 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-/// Inactivity at least this long ends a session; anything shorter is a short
+/// Inactivity longer than this ends a session; anything up to it is a short
 /// break inside it.
 pub const SHORT_BREAK_THRESHOLD_MS: u64 = 5 * 60 * 1000; // 5 min
-/// A finished session shorter than this is noise (a nudged mouse), not work.
-pub const MIN_SESSION_MS: u64 = 60 * 1000; // 1 min
+/// A finished session shorter than this is not worth tracking on its own (a
+/// nudged mouse, a glance at a notification).
+pub const MIN_SESSION_MS: u64 = 5 * 60 * 1000; // 5 min
 
 #[derive(Debug, Clone)]
 pub struct EntrySettings {
@@ -61,16 +62,17 @@ pub struct BuiltTimeEntry {
 ///
 /// Rules:
 /// 1. A session is one continuous stretch of activity, whatever apps it
-///    moves through. Only inactivity splits it: a gap of at least
+///    moves through. Only inactivity splits it: a gap longer than
 ///    `short_break_threshold_ms` (5 min) between one activity segment and
 ///    the next, whether the gap is an idle or manual break or time nothing
 ///    was captured, ends the session. Break segments carry no work, so the
-///    gap is measured between activity segments.
+///    gap is measured between activity segments, and the session spans the
+///    whole wall-clock range, short gaps included.
 /// 2. The last session stays `building` while it is live (a segment is still
-///    open, or the last one ended less than the threshold ago). Everything
+///    open, or the last one ended no more than the threshold ago). Everything
 ///    before it has closed and is `pending`, which is when it gets
 ///    categorized: once per session.
-/// 3. A closed session shorter than `min_duration_ms` (1 min) is dropped
+/// 3. A closed session shorter than `min_duration_ms` (5 min) is dropped
 ///    rather than becoming an entry of its own. Zero-length segments (an open
 ///    segment the app could not close before it quit) carry no time and are
 ///    ignored.
@@ -105,7 +107,7 @@ pub fn build_entries(
     let mut session_end = 0;
     for seg in work {
         let seg_end = seg.ended_at.unwrap_or(now);
-        if !session.is_empty() && seg.started_at.saturating_sub(session_end) >= gap {
+        if !session.is_empty() && seg.started_at.saturating_sub(session_end) > gap {
             push_closed(
                 &mut results,
                 &session,
@@ -126,7 +128,7 @@ pub fn build_entries(
 
     if !session.is_empty() {
         let live = session.iter().any(|seg| seg.ended_at.is_none())
-            || now.saturating_sub(session_end) < gap;
+            || now.saturating_sub(session_end) <= gap;
         if live {
             let mut entry = create_entry_from_segments(&session, session_end, now, &mut claimed);
             entry.status = "building".to_string();
@@ -333,7 +335,7 @@ mod tests {
         assert_eq!(live.len(), 1);
         assert_eq!(live[0].status, "building");
 
-        let closed = build_entries(&segs, &[], &settings, 65 * MIN);
+        let closed = build_entries(&segs, &[], &settings, 66 * MIN);
         assert_eq!(closed.len(), 1);
         assert_eq!(closed[0].status, "pending");
         assert_eq!(closed[0].started_at, 0);
@@ -342,11 +344,11 @@ mod tests {
     }
 
     #[test]
-    fn five_minutes_of_inactivity_starts_a_new_session() {
+    fn more_than_five_minutes_of_inactivity_starts_a_new_session() {
         let segs = vec![
             make_seg(1, "Code", "main.rs", "activity", 0, 10 * MIN),
-            make_seg(2, "Idle", "No activity", "break", 10 * MIN, 15 * MIN),
-            make_seg(3, "Slack", "chat", "activity", 15 * MIN, 25 * MIN),
+            make_seg(2, "Idle", "No activity", "break", 10 * MIN, 16 * MIN),
+            make_seg(3, "Slack", "chat", "activity", 16 * MIN, 25 * MIN),
             make_seg(4, "Code", "main.rs", "activity", 25 * MIN, 30 * MIN),
         ];
         let entries = build_entries(&segs, &[], &EntrySettings::default(), 30 * MIN);
@@ -354,23 +356,44 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert_eq!((entries[0].started_at, entries[0].ended_at), (0, 10 * MIN));
         assert_eq!(entries[0].status, "pending");
-        assert_eq!(entries[1].started_at, 15 * MIN);
+        assert_eq!(entries[1].started_at, 16 * MIN);
         assert_eq!(entries[1].segment_ids, vec![3, 4]);
         assert_eq!(entries[1].status, "building");
     }
 
     #[test]
-    fn a_break_under_five_minutes_stays_in_the_session() {
+    fn a_break_of_up_to_five_minutes_stays_in_the_session() {
         let segs = vec![
             make_seg(1, "Code", "main.rs", "activity", 0, 10 * MIN),
-            make_seg(2, "Idle", "No activity", "break", 10 * MIN, 14 * MIN),
-            make_seg(3, "Code", "main.rs", "activity", 14 * MIN, 20 * MIN),
+            make_seg(2, "Idle", "No activity", "break", 10 * MIN, 15 * MIN),
+            make_seg(3, "Code", "main.rs", "activity", 15 * MIN, 20 * MIN),
         ];
         let entries = build_entries(&segs, &[], &EntrySettings::default(), 20 * MIN);
 
         assert_eq!(entries.len(), 1);
         assert_eq!((entries[0].started_at, entries[0].ended_at), (0, 20 * MIN));
         assert_eq!(entries[0].segment_ids, vec![1, 3]);
+    }
+
+    #[test]
+    fn a_watched_show_broken_by_short_gaps_is_one_session() {
+        // Zen in front the whole time, with a glance at another app and
+        // short idle stretches: one session over the real wall-clock range.
+        let segs = vec![
+            make_seg(1, "Zen", "", "activity", 0, 40 * MIN),
+            make_seg(2, "Finder", "Desktop", "activity", 40 * MIN, 41 * MIN),
+            make_seg(3, "Zen", "", "activity", 41 * MIN, 80 * MIN),
+            make_seg(4, "Idle", "No activity", "break", 80 * MIN, 84 * MIN),
+            make_seg(5, "Zen", "", "activity", 84 * MIN, 120 * MIN),
+            make_seg(6, "Idle", "No activity", "break", 120 * MIN, 125 * MIN),
+            make_seg(7, "Zen", "", "activity", 125 * MIN, 180 * MIN),
+        ];
+        let entries = build_entries(&segs, &[], &EntrySettings::default(), 200 * MIN);
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!((entries[0].started_at, entries[0].ended_at), (0, 180 * MIN));
+        assert_eq!(entries[0].segment_ids, vec![1, 2, 3, 5, 7]);
+        assert_eq!(entries[0].description, "Zen");
     }
 
     #[test]
@@ -398,6 +421,10 @@ mod tests {
         );
         assert_eq!(
             build_entries(&segs, &[], &settings, 15 * MIN)[0].status,
+            "building"
+        );
+        assert_eq!(
+            build_entries(&segs, &[], &settings, 15 * MIN + 1)[0].status,
             "pending"
         );
     }
@@ -414,7 +441,7 @@ mod tests {
     }
 
     #[test]
-    fn a_session_under_a_minute_is_not_an_entry() {
+    fn a_session_under_five_minutes_is_not_an_entry() {
         let segs = vec![
             make_seg(1, "Code", "main.rs", "activity", 0, 10 * MIN),
             // A nudged mouse between two idle stretches.
@@ -426,11 +453,15 @@ mod tests {
                 20 * MIN,
                 20 * MIN + 20_000,
             ),
+            // A few minutes of real use, still under the floor.
+            make_seg(3, "Slack", "chat", "activity", 30 * MIN, 34 * MIN),
+            // Exactly the floor is kept.
+            make_seg(4, "Code", "main.rs", "activity", 45 * MIN, 50 * MIN),
         ];
-        let entries = build_entries(&segs, &[], &EntrySettings::default(), 40 * MIN);
+        let entries = build_entries(&segs, &[], &EntrySettings::default(), 60 * MIN);
 
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].segment_ids, vec![1]);
+        let kept: Vec<_> = entries.iter().map(|e| e.segment_ids.clone()).collect();
+        assert_eq!(kept, vec![vec![1], vec![4]]);
     }
 
     #[test]

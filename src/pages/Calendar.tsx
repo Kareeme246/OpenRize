@@ -32,6 +32,7 @@ import {
   blockState,
   countsAsWork,
   durationOf,
+  entryEnd,
   isReviewable,
   isTyping,
 } from "../lib/entries";
@@ -120,6 +121,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
 
   /** Reads the range without rebuilding (push events land here). */
   const refresh = useCallback(async (): Promise<void> => {
+    setNow(Date.now());
     const key = `${scale}:${startMs}`;
     try {
       if (scale === "month") {
@@ -191,6 +193,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
   }, [load]);
 
   useTauriEvent(api.ENTRIES_CHANGED, () => void refresh());
+  useTauriEvent(api.ACTIVITY_CHANGED, () => void refresh());
   useTauriEvent(api.SUGGESTION_READY, () => void refresh());
 
   useEffect(() => {
@@ -230,9 +233,9 @@ export function Calendar({ route, navigate }: CalendarProps) {
   const visible = useMemo(
     () =>
       entries.filter(
-        (entry) => entry.endedAt > startMs && entry.startedAt < endMs,
+        (entry) => entryEnd(entry, now) > startMs && entry.startedAt < endMs,
       ),
-    [entries, startMs, endMs],
+    [entries, startMs, endMs, now],
   );
   /** Entries waiting on the user, oldest first (review mode's queue). */
   const reviewQueue = useMemo(
@@ -366,7 +369,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
       }
     } else {
       for (const entry of visible) {
-        const ms = durationOf(entry);
+        const ms = durationOf(entry, now);
         const key = entry.categoryId ?? null;
         byCategory.set(key, (byCategory.get(key) ?? 0) + ms);
         if (countsAsWork(key, categoryById)) workMs += ms;
@@ -391,6 +394,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
     grid,
     range,
     daysInRange,
+    now,
   ]);
 
   const reviewPosition =
@@ -494,6 +498,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
               projectById={projectById}
               onSelect={select}
               onOpenDay={(day) => go({ scale: "day", date: day })}
+              now={now}
             />
           )}
           {scale === "month" && (

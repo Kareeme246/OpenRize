@@ -54,12 +54,21 @@ export function isInFlight(entry: TimeEntry): boolean {
   return state === "processing" || state === "building";
 }
 
-export function durationOf(entry: TimeEntry): number {
-  return Math.max(0, entry.endedAt - entry.startedAt);
+export function entryEnd(entry: TimeEntry, now: number = Date.now()): number {
+  return entry.status === "building"
+    ? Math.max(entry.endedAt, now)
+    : entry.endedAt;
 }
 
-export function totalDuration(entries: TimeEntry[]): number {
-  return entries.reduce((sum, entry) => sum + durationOf(entry), 0);
+export function durationOf(entry: TimeEntry, now: number = Date.now()): number {
+  return Math.max(0, entryEnd(entry, now) - entry.startedAt);
+}
+
+export function totalDuration(
+  entries: TimeEntry[],
+  now: number = Date.now(),
+): number {
+  return entries.reduce((sum, entry) => sum + durationOf(entry, now), 0);
 }
 
 /** Whether time in this category counts toward work hours. */
@@ -75,11 +84,12 @@ export function countsAsWork(
 export function workDuration(
   entries: TimeEntry[],
   categoryById: Map<string, Category>,
+  now: number = Date.now(),
 ): number {
   return entries.reduce(
     (sum, entry) =>
       countsAsWork(entry.categoryId, categoryById)
-        ? sum + durationOf(entry)
+        ? sum + durationOf(entry, now)
         : sum,
     0,
   );

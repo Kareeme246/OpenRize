@@ -67,6 +67,7 @@ interface EntryBlockProps {
    */
   narrow?: boolean;
   onSelect: (id: string) => void;
+  now?: number;
 }
 
 /**
@@ -84,6 +85,7 @@ export function EntryBlock({
   project,
   narrow = false,
   onSelect,
+  now,
 }: EntryBlockProps) {
   const state = blockState(entry);
   const railColor =
@@ -92,8 +94,12 @@ export function EntryBlock({
       : category.color;
   const confidence = confidenceOf(entry);
   const density = densityFor(height);
-  const duration = formatDuration(entry.endedAt - entry.startedAt);
-  const timeText = `${formatTime(entry.startedAt)}–${formatTime(entry.endedAt)} · ${
+  const end =
+    state === "building"
+      ? Math.max(entry.startedAt, now ?? entry.endedAt)
+      : entry.endedAt;
+  const duration = formatDuration(end - entry.startedAt);
+  const timeText = `${formatTime(entry.startedAt)}–${formatTime(end)} · ${
     state === "building" ? "building" : duration
   }`;
   const description =

@@ -30,6 +30,7 @@ export default function App() {
   const currentRoute = nav.entries[nav.cursor] || { name: "calendar" };
 
   const [captureEnabled, setCaptureEnabledState] = useState(true);
+  const [trackingActive, setTrackingActive] = useState(true);
   const [currentApp, setCurrentApp] = useState<string | undefined>(undefined);
   const [pendingCount, setPendingCount] = useState(0);
 
@@ -86,8 +87,13 @@ export default function App() {
       .fetchActivitySnapshot(0)
       .then((snapshot) => {
         setCaptureEnabledState(snapshot.captureEnabled);
+        if (snapshot.trackingActive !== undefined) {
+          setTrackingActive(snapshot.trackingActive);
+        }
         if (snapshot.current) {
           setCurrentApp(snapshot.current.app);
+        } else {
+          setCurrentApp(undefined);
         }
       })
       .catch((err) => {
@@ -97,8 +103,13 @@ export default function App() {
 
   const adoptCapture = (payload: ActivityTick | ActivitySnapshot): void => {
     setCaptureEnabledState(payload.captureEnabled);
+    if (payload.trackingActive !== undefined) {
+      setTrackingActive(payload.trackingActive);
+    }
     if (payload.current) {
       setCurrentApp(payload.current.app);
+    } else {
+      setCurrentApp(undefined);
     }
   };
   useTauriEvent<ActivityTick>(api.ACTIVITY_TICK, adoptCapture);
@@ -127,9 +138,12 @@ export default function App() {
 
   const handleToggleCapture = async () => {
     try {
-      const next = !captureEnabled;
+      const next = !trackingActive;
       await api.setCaptureEnabled(next);
-      setCaptureEnabledState(next);
+      setTrackingActive(next);
+      if (next) {
+        setCaptureEnabledState(true);
+      }
     } catch (err) {
       console.error("Failed to toggle capture", err);
     }
@@ -193,6 +207,7 @@ export default function App() {
               pendingCount={pendingCount}
               currentApp={currentApp}
               captureEnabled={captureEnabled}
+              trackingActive={trackingActive}
               onToggleCapture={handleToggleCapture}
             />
             <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">

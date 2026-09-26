@@ -117,7 +117,7 @@ pub fn set_capture_enabled(app: AppHandle, enabled: bool) -> Result<(), String> 
     {
         let state = app.state::<AppState>();
         let mut store = state.activity.lock().map_err(|error| error.to_string())?;
-        store.set_capture_enabled(enabled)?;
+        store.set_capture_enabled(enabled, crate::timers::now_epoch_ms())?;
     }
     activity::emit_full(&app);
     Ok(())
@@ -694,6 +694,14 @@ pub fn update_settings(app: AppHandle, settings: Settings) -> Result<Settings, S
 
     if next.retention_days != previous.retention_days {
         let _ = sweep_retention(&app);
+    }
+
+    if next.tracking_hours != previous.tracking_hours {
+        let state = app.state::<AppState>();
+        if let Ok(mut store) = state.activity.lock() {
+            store.set_tracking_hours(next.tracking_hours.clone());
+        }
+        activity::emit_full(&app);
     }
 
     let _ = app.emit(crate::EVENT_SETTINGS_CHANGED, &next);

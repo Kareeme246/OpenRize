@@ -74,6 +74,8 @@ pub struct ActivitySnapshot {
     pub idle_ms: u64,
     pub idle_threshold_ms: u64,
     pub capture_enabled: bool,
+    pub in_tracking_hours: bool,
+    pub tracking_active: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -87,6 +89,8 @@ pub struct ActivityTick {
     pub idle_ms: u64,
     pub idle_threshold_ms: u64,
     pub capture_enabled: bool,
+    pub in_tracking_hours: bool,
+    pub tracking_active: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -131,6 +135,8 @@ pub struct LiveState {
     idle_threshold_ms: u64,
     last_idle_ms: u64,
     watch_since_ms: Option<u64>,
+    in_tracking_hours: bool,
+    tracking_active: bool,
 }
 
 struct Totals {
@@ -147,6 +153,8 @@ pub struct ActivityStore {
     idle_threshold_ms: u64,
     last_idle_ms: u64,
     watch_since_ms: Option<u64>,
+    tracking_hours: crate::settings::TrackingHours,
+    manual_tracking: bool,
 }
 
 impl ActivityStore {
@@ -180,6 +188,8 @@ impl ActivityStore {
             idle_threshold_ms: DEFAULT_IDLE_THRESHOLD_MS,
             last_idle_ms: 0,
             watch_since_ms: None,
+            tracking_hours: crate::settings::TrackingHours::default(),
+            manual_tracking: false,
         };
         store.capture_enabled = store
             .read_setting("capture_enabled")
@@ -243,6 +253,14 @@ impl ActivityStore {
         Ok(())
     }
 
+    pub fn set_tracking_hours(&mut self, hours: crate::settings::TrackingHours) {
+        self.tracking_hours = hours;
+    }
+
+    pub fn is_in_tracking_window(&self, now: u64) -> bool {
+        self.tracking_hours.is_inside_window(now)
+    }
+
     pub fn tick(
         &mut self,
         sample: Option<WindowSample>,
@@ -252,10 +270,27 @@ impl ActivityStore {
         self.last_idle_ms = idle_ms;
 
         if !self.capture_enabled {
+            self.manual_tracking = false;
             return self.close_current(now);
         }
 
+        let in_window = self.tracking_hours.is_inside_window(now);
         let idle = idle_ms >= self.idle_threshold_ms;
+        let is_active_work = self
+            .current
+            .as_ref()
+            .is_some_and(|cur| cur.kind == KIND_ACTIVITY);
+
+        // Outside tracking hours with no active work session and no manual override:
+        // suppress new capture. Close any idle break that was open.
+        if !in_window && !self.manual_tracking && !is_active_work {
+            if self.current.is_some() {
+                self.close_current(now)?;
+                return Ok(true);
+            }
+            return Ok(false);
+        }
+
         let current = self.current.as_ref().map(|cur| {
             (
                 cur.app.clone(),
@@ -269,6 +304,9 @@ impl ActivityStore {
 
         match current {
             None => {
+                if !in_window && !self.manual_tracking {
+                    return Ok(false);
+                }
                 if idle {
                     self.open(
                         "Idle",
@@ -305,6 +343,13 @@ impl ActivityStore {
                     let started_at = self.current.as_ref().map_or(now, |cur| cur.started_at);
                     let idle_since = now.saturating_sub(idle_ms).max(started_at);
                     self.close_current(idle_since)?;
+                    self.manual_tracking = false;
+
+                    // If outside window, do not open an Idle break segment
+                    if !in_window {
+                        return Ok(true);
+                    }
+
                     return self.open(
                         "Idle",
                         "No activity",
@@ -319,6 +364,9 @@ impl ActivityStore {
 
                 if kind == KIND_BREAK && label.as_deref() == Some(IDLE_LABEL) {
                     self.close_current(now)?;
+                    if !in_window && !self.manual_tracking {
+                        return Ok(true);
+                    }
                     return match sample {
                         Some(sample) => self.open(
                             &sample.app,
@@ -372,6 +420,7 @@ impl ActivityStore {
         if kind != KIND_FOCUS && kind != KIND_BREAK {
             return Err(format!("cannot start a session of kind {kind}"));
         }
+        self.manual_tracking = true;
         self.close_current(now)?;
         let display = label.map(str::trim).filter(|text| !text.is_empty());
         let app = if kind == KIND_FOCUS { "Focus" } else { "Break" };
@@ -380,16 +429,34 @@ impl ActivityStore {
     }
 
     pub fn stop_session(&mut self, now: u64) -> Result<bool, String> {
+        self.manual_tracking = false;
         self.close_current(now)
     }
 
     pub fn close_active_segment(&mut self, now: u64) -> Result<bool, String> {
+        self.manual_tracking = false;
         self.close_current(now)
     }
 
-    pub fn set_capture_enabled(&mut self, enabled: bool) -> Result<(), String> {
-        self.capture_enabled = enabled;
-        self.write_setting("capture_enabled", if enabled { "true" } else { "false" })
+    pub fn set_capture_enabled(&mut self, enabled: bool, now: u64) -> Result<(), String> {
+        if enabled {
+            self.capture_enabled = true;
+            self.write_setting("capture_enabled", "true")?;
+            if !self.is_in_tracking_window(now) {
+                self.manual_tracking = true;
+            }
+        } else {
+            if self.manual_tracking && !self.is_in_tracking_window(now) {
+                self.manual_tracking = false;
+                self.close_current(now)?;
+            } else {
+                self.manual_tracking = false;
+                self.capture_enabled = false;
+                self.write_setting("capture_enabled", "false")?;
+                self.close_current(now)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn set_idle_threshold_ms(&mut self, ms: u64) -> Result<(), String> {
@@ -434,22 +501,32 @@ impl ActivityStore {
         Ok(removed as u64)
     }
 
-    pub fn live_state(&self) -> LiveState {
+    pub fn live_state(&self, now: u64) -> LiveState {
+        let in_tracking_hours = self.tracking_hours.is_inside_window(now);
+        let tracking_active = self.capture_enabled
+            && (in_tracking_hours
+                || self.manual_tracking
+                || self
+                    .current
+                    .as_ref()
+                    .is_some_and(|c| c.kind == KIND_ACTIVITY));
         LiveState {
             current: self.current.clone(),
             capture_enabled: self.capture_enabled,
             idle_threshold_ms: self.idle_threshold_ms,
             last_idle_ms: self.last_idle_ms,
             watch_since_ms: self.watch_since_ms,
+            in_tracking_hours,
+            tracking_active,
         }
     }
 
     pub fn snapshot(&self, since_ms: u64, now: u64) -> Result<ActivitySnapshot, String> {
-        build_snapshot(&self.conn, &self.live_state(), since_ms, now)
+        build_snapshot(&self.conn, &self.live_state(now), since_ms, now)
     }
 
     pub fn tick_summary(&self, now: u64) -> Result<ActivityTick, String> {
-        let live = self.live_state();
+        let live = self.live_state(now);
         let since_ms = live.watch_since_ms.unwrap_or(0);
         build_tick(&self.conn, &live, since_ms, now)
     }
@@ -1997,6 +2074,8 @@ fn build_snapshot(
         idle_ms: live.last_idle_ms,
         idle_threshold_ms: live.idle_threshold_ms,
         capture_enabled: live.capture_enabled,
+        in_tracking_hours: live.in_tracking_hours,
+        tracking_active: live.tracking_active,
     })
 }
 
@@ -2018,6 +2097,8 @@ pub fn build_tick(
         idle_ms: live.last_idle_ms,
         idle_threshold_ms: live.idle_threshold_ms,
         capture_enabled: live.capture_enabled,
+        in_tracking_hours: live.in_tracking_hours,
+        tracking_active: live.tracking_active,
     })
 }
 
@@ -2030,7 +2111,7 @@ pub fn snapshot_for(app: &AppHandle, since_ms: u64) -> Result<ActivitySnapshot, 
             .lock()
             .map_err(|_| "activity store lock poisoned".to_string())?;
         store.watch_since_ms = Some(since_ms);
-        store.live_state()
+        store.live_state(now)
     };
     let reader = state
         .activity_reader
@@ -2048,7 +2129,7 @@ pub fn emit_full(app: &AppHandle) {
                 .activity
                 .lock()
                 .map_err(|_| "activity store lock poisoned".to_string())?;
-            store.live_state()
+            store.live_state(now)
         };
         let since_ms = live.watch_since_ms.unwrap_or(0);
         let reader = state
@@ -2073,7 +2154,7 @@ fn emit_tick(app: &AppHandle, now: u64) {
                 .activity
                 .lock()
                 .map_err(|_| "activity store lock poisoned".to_string())?;
-            store.live_state()
+            store.live_state(now)
         };
         let since_ms = live.watch_since_ms.unwrap_or(0);
         let reader = state
@@ -2155,8 +2236,10 @@ mod tests {
     use super::*;
 
     fn store() -> ActivityStore {
-        ActivityStore::from_conn(Connection::open_in_memory().expect("in-memory db"))
-            .expect("schema")
+        let mut s = ActivityStore::from_conn(Connection::open_in_memory().expect("in-memory db"))
+            .expect("schema");
+        s.tracking_hours.enabled = false;
+        s
     }
 
     fn sample(app: &str, title: &str) -> Option<WindowSample> {
@@ -2255,7 +2338,7 @@ mod tests {
     fn pausing_capture_closes_the_open_segment() {
         let mut store = store();
         store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
-        store.set_capture_enabled(false).unwrap();
+        store.set_capture_enabled(false, 5_000).unwrap();
         store.tick(sample("Code", "main.rs"), 0, 5_000).unwrap();
 
         let snapshot = store.snapshot(0, 5_000).unwrap();
@@ -2832,5 +2915,150 @@ mod tests {
         let entry = store.get_entry_detail(&id).unwrap().entry;
         assert_eq!(entry.status, "approved");
         assert_eq!(entry.category_id.as_deref(), Some("coding"));
+    }
+
+    #[test]
+    fn outside_tracking_hours_suppresses_new_capture() {
+        use chrono::TimeZone;
+        let mut store =
+            ActivityStore::from_conn(Connection::open_in_memory().expect("in-memory db"))
+                .expect("schema");
+        store.set_tracking_hours(crate::settings::TrackingHours {
+            enabled: true,
+            per_day: false,
+            default_start: "07:00".to_string(),
+            default_end: "19:00".to_string(),
+            ..crate::settings::TrackingHours::default()
+        });
+
+        let dt = chrono::Local
+            .with_ymd_and_hms(2026, 9, 25, 20, 0, 0)
+            .single()
+            .expect("local dt");
+        let now = dt.timestamp_millis() as u64;
+
+        let changed = store.tick(sample("Code", "main.rs"), 0, now).unwrap();
+        assert!(!changed);
+        let snapshot = store.snapshot(0, now).unwrap();
+        assert!(snapshot.current.is_none());
+        assert!(snapshot.segments.is_empty());
+        assert!(!snapshot.in_tracking_hours);
+        assert!(!snapshot.tracking_active);
+    }
+
+    #[test]
+    fn session_in_progress_finishes_naturally_outside_window() {
+        use chrono::TimeZone;
+        let mut store =
+            ActivityStore::from_conn(Connection::open_in_memory().expect("in-memory db"))
+                .expect("schema");
+        store.set_idle_threshold_ms(300_000).unwrap();
+        store.set_tracking_hours(crate::settings::TrackingHours {
+            enabled: true,
+            per_day: false,
+            default_start: "07:00".to_string(),
+            default_end: "19:00".to_string(),
+            ..crate::settings::TrackingHours::default()
+        });
+
+        // Start session at 18:58 (inside window)
+        let dt_start = chrono::Local
+            .with_ymd_and_hms(2026, 9, 25, 18, 58, 0)
+            .single()
+            .expect("local dt");
+        let start_ms = dt_start.timestamp_millis() as u64;
+        store.tick(sample("Code", "main.rs"), 0, start_ms).unwrap();
+        assert!(store.snapshot(0, start_ms).unwrap().current.is_some());
+
+        // At 19:02 (outside window): switch to Slack. Session continues!
+        let dt_outside = chrono::Local
+            .with_ymd_and_hms(2026, 9, 25, 19, 2, 0)
+            .single()
+            .expect("local dt");
+        let outside_ms = dt_outside.timestamp_millis() as u64;
+        store
+            .tick(sample("Slack", "#general"), 0, outside_ms)
+            .unwrap();
+
+        let live = store.live_state(outside_ms);
+        assert!(!live.in_tracking_hours);
+        assert!(live.tracking_active);
+        assert_eq!(live.current.as_ref().unwrap().app, "Slack");
+
+        // At 19:10: idle detected (idle for 5 min, since 19:05). Idle ends it naturally.
+        let dt_idle = chrono::Local
+            .with_ymd_and_hms(2026, 9, 25, 19, 10, 0)
+            .single()
+            .expect("local dt");
+        let idle_ms = dt_idle.timestamp_millis() as u64;
+        let changed = store
+            .tick(sample("Slack", "#general"), 300_000, idle_ms)
+            .unwrap();
+        assert!(changed);
+
+        let snapshot = store.snapshot(0, idle_ms).unwrap();
+        assert!(snapshot.current.is_none());
+        assert!(!snapshot.tracking_active);
+
+        let dt_cutoff = chrono::Local
+            .with_ymd_and_hms(2026, 9, 25, 19, 5, 0)
+            .single()
+            .expect("local dt");
+        assert_eq!(
+            snapshot.segments.last().unwrap().ended_at,
+            Some(dt_cutoff.timestamp_millis() as u64)
+        );
+
+        // Further activity outside window does not start new capture
+        let dt_later = chrono::Local
+            .with_ymd_and_hms(2026, 9, 25, 19, 15, 0)
+            .single()
+            .expect("local dt");
+        let later_ms = dt_later.timestamp_millis() as u64;
+        store.tick(sample("Code", "main.rs"), 0, later_ms).unwrap();
+        assert!(store.snapshot(0, later_ms).unwrap().current.is_none());
+    }
+
+    #[test]
+    fn manual_tracking_works_outside_window() {
+        use chrono::TimeZone;
+        let mut store =
+            ActivityStore::from_conn(Connection::open_in_memory().expect("in-memory db"))
+                .expect("schema");
+        store.set_tracking_hours(crate::settings::TrackingHours {
+            enabled: true,
+            per_day: false,
+            default_start: "07:00".to_string(),
+            default_end: "19:00".to_string(),
+            ..crate::settings::TrackingHours::default()
+        });
+
+        let dt = chrono::Local
+            .with_ymd_and_hms(2026, 9, 25, 20, 0, 0)
+            .single()
+            .expect("local dt");
+        let now = dt.timestamp_millis() as u64;
+
+        store.set_capture_enabled(true, now).unwrap();
+        assert!(store.manual_tracking);
+
+        store.tick(sample("Code", "main.rs"), 0, now).unwrap();
+        let snapshot = store.snapshot(0, now).unwrap();
+        assert!(snapshot.current.is_some());
+        assert_eq!(snapshot.current.unwrap().app, "Code");
+        assert!(snapshot.tracking_active);
+
+        store.set_capture_enabled(false, now + 10_000).unwrap();
+        assert!(!store.manual_tracking);
+        assert!(store.capture_enabled);
+
+        let snapshot = store.snapshot(0, now + 10_000).unwrap();
+        assert!(snapshot.current.is_none());
+        assert!(!snapshot.tracking_active);
+
+        store
+            .tick(sample("Code", "main.rs"), 0, now + 20_000)
+            .unwrap();
+        assert!(store.snapshot(0, now + 20_000).unwrap().current.is_none());
     }
 }

@@ -13,6 +13,97 @@ export type CloseBehavior = "quit" | "hide";
 /** What the AI suggests for each entry (Rize's "Suggestion level"). */
 export type AiSuggest = "category" | "categoryProject";
 
+export interface DaySchedule {
+  enabled: boolean;
+  start: string;
+  end: string;
+}
+
+export interface TrackingHours {
+  enabled: boolean;
+  perDay: boolean;
+  defaultStart: string;
+  defaultEnd: string;
+  monday: DaySchedule;
+  tuesday: DaySchedule;
+  wednesday: DaySchedule;
+  thursday: DaySchedule;
+  friday: DaySchedule;
+  saturday: DaySchedule;
+  sunday: DaySchedule;
+}
+
+export const DEFAULT_DAY_SCHEDULE: DaySchedule = {
+  enabled: true,
+  start: "07:00",
+  end: "19:00",
+};
+
+export const DEFAULT_TRACKING_HOURS: TrackingHours = {
+  enabled: true,
+  perDay: false,
+  defaultStart: "07:00",
+  defaultEnd: "19:00",
+  monday: { ...DEFAULT_DAY_SCHEDULE },
+  tuesday: { ...DEFAULT_DAY_SCHEDULE },
+  wednesday: { ...DEFAULT_DAY_SCHEDULE },
+  thursday: { ...DEFAULT_DAY_SCHEDULE },
+  friday: { ...DEFAULT_DAY_SCHEDULE },
+  saturday: { ...DEFAULT_DAY_SCHEDULE },
+  sunday: { ...DEFAULT_DAY_SCHEDULE },
+};
+
+/** Whether the given date is inside the configured tracking hours window. */
+export function isInsideTrackingHours(
+  th: TrackingHours,
+  date: Date = new Date(),
+): boolean {
+  if (!th.enabled) return true;
+  const dayNames: (
+    | "sunday"
+    | "monday"
+    | "tuesday"
+    | "wednesday"
+    | "thursday"
+    | "friday"
+    | "saturday"
+  )[] = [
+    "sunday",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+  ];
+  const dayKey = dayNames[date.getDay()];
+  if (!dayKey) return true;
+  const [start, end, enabled] = th.perDay
+    ? [th[dayKey].start, th[dayKey].end, th[dayKey].enabled]
+    : [th.defaultStart, th.defaultEnd, true];
+
+  if (!enabled || start === end) return false;
+
+  const [sh, sm] = start.split(":").map(Number);
+  const [eh, em] = end.split(":").map(Number);
+  if (
+    sh === undefined ||
+    sm === undefined ||
+    eh === undefined ||
+    em === undefined
+  ) {
+    return false;
+  }
+  const startMins = sh * 60 + sm;
+  const endMins = eh * 60 + em;
+  const curMins = date.getHours() * 60 + date.getMinutes();
+
+  if (startMins < endMins) {
+    return curMins >= startMins && curMins < endMins;
+  }
+  return curMins >= startMins || curMins < endMins;
+}
+
 export interface Settings {
   theme: Theme;
   accent: Accent;
@@ -28,6 +119,7 @@ export interface Settings {
   aiCustomPrompt: string;
   /** Expected work hours per week; a day's target is a fifth of it. */
   weeklyTargetHours: number;
+  trackingHours: TrackingHours;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -41,6 +133,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoAcceptPercent: 95,
   aiCustomPrompt: "",
   weeklyTargetHours: 40,
+  trackingHours: DEFAULT_TRACKING_HOURS,
 };
 
 /** A working day's share of the weekly target, in milliseconds. */

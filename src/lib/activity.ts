@@ -31,6 +31,8 @@ export interface ActivitySnapshot {
   idleMs: number;
   idleThresholdMs: number;
   captureEnabled: boolean;
+  inTrackingHours?: boolean;
+  trackingActive?: boolean;
 }
 
 /**

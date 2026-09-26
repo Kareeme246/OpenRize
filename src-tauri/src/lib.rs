@@ -76,11 +76,12 @@ pub fn run() {
 
             let store = TimerStore::load(&dir)?;
             let timers = store.snapshot()?;
-            let activity = ActivityStore::load(&dir)?;
+            let mut activity = ActivityStore::load(&dir)?;
             let activity_reader = ActivityStore::open_reader(&dir)?;
             let settings = SettingsStore::load(&settings::config_dir())
                 .map_err(|error| -> Box<dyn std::error::Error> { error.into() })?;
             let preferences = settings.snapshot();
+            activity.set_tracking_hours(preferences.tracking_hours.clone());
 
             app.manage(AppState {
                 store: Mutex::new(store),

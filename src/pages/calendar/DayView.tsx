@@ -15,7 +15,7 @@ import {
   timelineFor,
 } from "./timeline";
 
-const QUARTER = 900_000;
+const SNAP_MS = 300_000;
 
 interface DayViewProps {
   dayStart: number;
@@ -73,7 +73,7 @@ export function DayView({
   const [draft, setDraft] = useState<{ start: number; end: number } | null>(
     null,
   );
-  const press = useRef<number | null>(null);
+  const press = useRef<{ y: number; time: number } | null>(null);
   const hourHeightRef = useRef(hourHeight);
   hourHeightRef.current = hourHeight;
   const hoursInDay = dayLength(dayStart);
@@ -152,18 +152,28 @@ export function DayView({
     return Math.max(dayStart, Math.min(dayEnd, dayStart + offset * 3_600_000));
   };
   const startAt = (time: number): number =>
-    Math.min(dayEnd - QUARTER, Math.floor(time / QUARTER) * QUARTER);
-  const endAt = (time: number): number =>
-    Math.max(
-      dayStart + QUARTER,
-      Math.min(dayEnd, Math.round(time / QUARTER) * QUARTER),
-    );
+    Math.min(dayEnd - SNAP_MS, Math.floor(time / SNAP_MS) * SNAP_MS);
   const dragRange = (
-    start: number,
-    end: number,
-  ): { start: number; end: number } => {
-    const from = Math.min(start, end);
-    return { start: from, end: Math.max(from + QUARTER, Math.max(start, end)) };
+    startY: number,
+    startTime: number,
+    currentY: number,
+    currentTime: number,
+  ): { start: number; end: number } | null => {
+    if (Math.abs(currentY - startY) < 3) return null;
+    if (currentY >= startY) {
+      const start = Math.max(
+        dayStart,
+        Math.floor(startTime / SNAP_MS) * SNAP_MS,
+      );
+      const end = Math.min(dayEnd, Math.round(currentTime / SNAP_MS) * SNAP_MS);
+      return end - start >= SNAP_MS ? { start, end } : null;
+    }
+    const end = Math.min(dayEnd, Math.ceil(startTime / SNAP_MS) * SNAP_MS);
+    const start = Math.max(
+      dayStart,
+      Math.round(currentTime / SNAP_MS) * SNAP_MS,
+    );
+    return end - start >= SNAP_MS ? { start, end } : null;
   };
 
   return (
@@ -235,24 +245,37 @@ export function DayView({
             className="absolute inset-0 w-full cursor-cell touch-none"
             onPointerDown={(event) => {
               if (event.button !== 0) return;
-              const start = startAt(timeAt(event.clientY));
-              press.current = start;
-              setDraft({ start, end: start + QUARTER });
+              press.current = {
+                y: event.clientY,
+                time: timeAt(event.clientY),
+              };
+              setDraft(null);
               event.currentTarget.setPointerCapture(event.pointerId);
             }}
             onPointerMove={(event) => {
               if (press.current === null) return;
-              setDraft(dragRange(press.current, endAt(timeAt(event.clientY))));
+              setDraft(
+                dragRange(
+                  press.current.y,
+                  press.current.time,
+                  event.clientY,
+                  timeAt(event.clientY),
+                ),
+              );
             }}
             onPointerUp={(event) => {
               if (press.current === null) return;
               const range = dragRange(
-                press.current,
-                endAt(timeAt(event.clientY)),
+                press.current.y,
+                press.current.time,
+                event.clientY,
+                timeAt(event.clientY),
               );
               press.current = null;
               setDraft(null);
-              onCreate(range.start, range.end);
+              if (range) {
+                onCreate(range.start, range.end);
+              }
             }}
             onPointerCancel={() => {
               press.current = null;
@@ -262,9 +285,9 @@ export function DayView({
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
                 const start = startAt(
-                  Math.max(dayStart, Math.min(now, dayEnd - QUARTER)),
+                  Math.max(dayStart, Math.min(now, dayEnd - SNAP_MS)),
                 );
-                onCreate(start, start + QUARTER);
+                onCreate(start, start + SNAP_MS);
               }
             }}
           />
@@ -276,10 +299,14 @@ export function DayView({
             />
           ))}
           {entries.map((entry) => {
+            const end =
+              entry.status === "building"
+                ? Math.min(Math.max(entry.startedAt, now), dayEnd)
+                : entry.endedAt;
             const { top, height: entryHeight } = place(
               timeline,
               entry.startedAt,
-              entry.endedAt,
+              end,
               dayStart,
               "elapsed",
             );
@@ -299,6 +326,7 @@ export function DayView({
                   entry.projectId ? projectById.get(entry.projectId) : undefined
                 }
                 onSelect={onSelect}
+                now={now}
               />
             );
           })}

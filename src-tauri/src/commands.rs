@@ -136,23 +136,43 @@ pub fn set_idle_threshold(app: AppHandle, minutes: u64) -> Result<(), String> {
 
 #[tauri::command]
 pub fn start_session(app: AppHandle, kind: String, label: Option<String>) -> Result<(), String> {
-    {
+    let now = now_epoch_ms();
+    let changed = {
         let state = app.state::<AppState>();
         let mut store = state.activity.lock().map_err(|error| error.to_string())?;
-        store.start_session(&kind, label.as_deref(), now_epoch_ms())?;
-    }
+        store.start_session(&kind, label.as_deref(), now)?;
+        store.rebuild_range(
+            now.saturating_sub(crate::activity::REBUILD_WINDOW_MS),
+            now,
+            now,
+        )?
+    };
     activity::emit_full(&app);
+    if changed {
+        entries_changed(&app);
+    }
+    crate::ai::nudge(&app);
     Ok(())
 }
 
 #[tauri::command]
 pub fn stop_session(app: AppHandle) -> Result<(), String> {
-    {
+    let now = now_epoch_ms();
+    let changed = {
         let state = app.state::<AppState>();
         let mut store = state.activity.lock().map_err(|error| error.to_string())?;
-        store.stop_session(now_epoch_ms())?;
-    }
+        store.stop_session(now)?;
+        store.rebuild_range(
+            now.saturating_sub(crate::activity::REBUILD_WINDOW_MS),
+            now,
+            now,
+        )?
+    };
     activity::emit_full(&app);
+    if changed {
+        entries_changed(&app);
+    }
+    crate::ai::nudge(&app);
     Ok(())
 }
 

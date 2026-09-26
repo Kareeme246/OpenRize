@@ -7,6 +7,7 @@ interface SidebarProps {
   pendingCount?: number;
   currentApp?: string;
   captureEnabled?: boolean;
+  trackingActive?: boolean;
   onToggleCapture?: () => void;
 }
 
@@ -59,6 +60,7 @@ export function Sidebar({
   pendingCount = 0,
   currentApp,
   captureEnabled = true,
+  trackingActive = captureEnabled,
   onToggleCapture,
 }: SidebarProps) {
   const currentName = currentRoute.name;
@@ -179,24 +181,32 @@ export function Sidebar({
         <div className="flex items-center gap-2 rounded-lg bg-surface px-2.5 py-1.5 text-[11.5px]">
           <span
             className={`size-2 shrink-0 rounded-full ${
-              captureEnabled ? "bg-accent animate-pulse" : "bg-review"
+              trackingActive ? "bg-accent animate-pulse" : "bg-review"
             }`}
           />
           <span className="min-w-0 flex-1 truncate text-fg-muted font-medium">
-            {captureEnabled
+            {trackingActive
               ? currentApp
                 ? `Tracking · ${currentApp}`
                 : "Tracking active"
-              : "Tracking paused"}
+              : !captureEnabled
+                ? "Tracking paused"
+                : "Outside tracking hours"}
           </span>
           {onToggleCapture && (
             <button
               type="button"
               onClick={onToggleCapture}
-              title={captureEnabled ? "Pause tracking" : "Resume tracking"}
+              title={
+                trackingActive
+                  ? "Pause tracking"
+                  : captureEnabled
+                    ? "Start tracking"
+                    : "Resume tracking"
+              }
               className="rounded p-1 text-fg-soft hover:bg-surface-strong hover:text-fg transition-colors"
             >
-              {captureEnabled ? (
+              {trackingActive ? (
                 <svg
                   viewBox="0 0 24 24"
                   className="size-3.5 fill-current"

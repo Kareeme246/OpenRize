@@ -322,6 +322,8 @@ export interface ActivitySnapshot {
   idleMs: number;
   idleThresholdMs: number;
   captureEnabled: boolean;
+  inTrackingHours?: boolean;
+  trackingActive?: boolean;
 }
 
 export interface ActivityTick {
@@ -333,6 +335,8 @@ export interface ActivityTick {
   idleMs: number;
   idleThresholdMs: number;
   captureEnabled: boolean;
+  inTrackingHours?: boolean;
+  trackingActive?: boolean;
 }
 
 export interface AppContribution {

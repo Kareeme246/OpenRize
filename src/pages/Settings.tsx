@@ -26,7 +26,11 @@ import {
   type Accent,
   type AiSuggest,
   type CloseBehavior,
+  type DaySchedule,
+  isInsideTrackingHours,
+  type Settings as SettingsType,
   type Theme,
+  type TrackingHours,
 } from "../lib/settings";
 import type { AiStatus } from "../lib/types";
 
@@ -237,6 +241,204 @@ function CustomInstructions({
         placeholder="No custom instructions"
       />
     </SettingBlock>
+  );
+}
+
+type DayKey =
+  | "monday"
+  | "tuesday"
+  | "wednesday"
+  | "thursday"
+  | "friday"
+  | "saturday"
+  | "sunday";
+
+const DAYS_OF_WEEK: { key: DayKey; label: string }[] = [
+  { key: "monday", label: "Monday" },
+  { key: "tuesday", label: "Tuesday" },
+  { key: "wednesday", label: "Wednesday" },
+  { key: "thursday", label: "Thursday" },
+  { key: "friday", label: "Friday" },
+  { key: "saturday", label: "Saturday" },
+  { key: "sunday", label: "Sunday" },
+];
+
+function TrackingHoursSetting({
+  settings,
+  update,
+}: {
+  settings: SettingsType;
+  update: (patch: Partial<SettingsType>) => void;
+}) {
+  const th = settings.trackingHours;
+  const inHours = isInsideTrackingHours(th);
+
+  const updateHours = (patch: Partial<TrackingHours>): void => {
+    update({
+      trackingHours: {
+        ...th,
+        ...patch,
+      },
+    });
+  };
+
+  const updateDay = (dayKey: DayKey, patch: Partial<DaySchedule>): void => {
+    updateHours({
+      [dayKey]: {
+        ...th[dayKey],
+        ...patch,
+      },
+    });
+  };
+
+  return (
+    <SettingGroup title="Tracking hours">
+      <SettingRow
+        title="Schedule tracking hours"
+        description="Only capture activity during scheduled hours; outside them, tracking stays paused unless manually started"
+      >
+        <Toggle
+          checked={th.enabled}
+          label="Schedule tracking hours"
+          onChange={(enabled) => updateHours({ enabled })}
+        />
+      </SettingRow>
+
+      {th.enabled &&
+        (!th.perDay ? (
+          <>
+            <SettingRow
+              title="Daily window"
+              description="7:00 AM to 7:00 PM by default, applying to every day"
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="time"
+                  aria-label="Daily tracking start time"
+                  value={th.defaultStart}
+                  onChange={(e) =>
+                    updateHours({ defaultStart: e.target.value })
+                  }
+                  className="h-7 rounded-md border border-line bg-surface px-2 py-1 text-[12px] text-fg outline-hidden focus:border-accent"
+                />
+                <span className="text-[12px] text-fg-faint">to</span>
+                <input
+                  type="time"
+                  aria-label="Daily tracking end time"
+                  value={th.defaultEnd}
+                  onChange={(e) => updateHours({ defaultEnd: e.target.value })}
+                  className="h-7 rounded-md border border-line bg-surface px-2 py-1 text-[12px] text-fg outline-hidden focus:border-accent"
+                />
+              </div>
+            </SettingRow>
+            <div className="flex items-center justify-between border-b border-line px-4 py-2.5 last:border-b-0">
+              <span className="font-mono text-[10.5px] text-fg-faint">
+                {inHours
+                  ? "Currently within tracking window"
+                  : "Currently outside tracking window"}
+              </span>
+              <button
+                type="button"
+                onClick={() => updateHours({ perDay: true })}
+                className="flex items-center gap-1 text-[12px] font-medium text-accent hover:underline cursor-pointer"
+              >
+                Customize per day
+                <svg
+                  viewBox="0 0 24 24"
+                  className="size-3.5 fill-none stroke-current stroke-2"
+                  aria-hidden="true"
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+              <span className="text-[11.5px] text-fg-faint">
+                Set hours for each day of the week. Unchecked days will not
+                track.
+              </span>
+              <button
+                type="button"
+                onClick={() => updateHours({ perDay: false })}
+                className="flex items-center gap-1 text-[12px] font-medium text-accent hover:underline cursor-pointer"
+              >
+                Collapse to single window
+                <svg
+                  viewBox="0 0 24 24"
+                  className="size-3.5 fill-none stroke-current stroke-2"
+                  aria-hidden="true"
+                >
+                  <polyline points="18 15 12 9 6 15" />
+                </svg>
+              </button>
+            </div>
+            {DAYS_OF_WEEK.map(({ key, label }) => {
+              const day = th[key];
+              return (
+                <div
+                  key={key}
+                  className="flex items-center justify-between gap-4 border-b border-line px-4 py-2.5 last:border-b-0"
+                >
+                  <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={day.enabled}
+                      onChange={(e) =>
+                        updateDay(key, { enabled: e.target.checked })
+                      }
+                      className="rounded border-line text-accent focus:ring-accent"
+                    />
+                    <span
+                      className={`text-[13px] font-medium ${
+                        day.enabled ? "text-fg" : "text-fg-faint"
+                      }`}
+                    >
+                      {label}
+                    </span>
+                  </label>
+                  {day.enabled ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="time"
+                        aria-label={`${label} tracking start time`}
+                        value={day.start}
+                        onChange={(e) =>
+                          updateDay(key, { start: e.target.value })
+                        }
+                        className="h-7 rounded-md border border-line bg-surface px-2 py-1 text-[12px] text-fg outline-hidden focus:border-accent"
+                      />
+                      <span className="text-[12px] text-fg-faint">to</span>
+                      <input
+                        type="time"
+                        aria-label={`${label} tracking end time`}
+                        value={day.end}
+                        onChange={(e) =>
+                          updateDay(key, { end: e.target.value })
+                        }
+                        className="h-7 rounded-md border border-line bg-surface px-2 py-1 text-[12px] text-fg outline-hidden focus:border-accent"
+                      />
+                    </div>
+                  ) : (
+                    <span className="text-[12px] text-fg-faint italic">
+                      No tracking
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+            <div className="flex items-center justify-between border-b border-line px-4 py-2.5 last:border-b-0">
+              <span className="font-mono text-[10.5px] text-fg-faint">
+                {inHours
+                  ? "Currently within tracking window"
+                  : "Currently outside tracking window"}
+              </span>
+            </div>
+          </>
+        ))}
+    </SettingGroup>
   );
 }
 
@@ -531,6 +733,8 @@ export function Settings() {
           />
         </SettingRow>
       </SettingGroup>
+
+      <TrackingHoursSetting settings={settings} update={update} />
 
       <SettingGroup title="Work hours">
         <SettingRow

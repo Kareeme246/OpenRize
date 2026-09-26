@@ -4,7 +4,7 @@ import {
   isSameDay,
   localDateString,
 } from "../../lib/dates";
-import { durationOf, isReviewable } from "../../lib/entries";
+import { durationOf, entryEnd, isReviewable } from "../../lib/entries";
 import { formatDuration } from "../../lib/format";
 import type { Category, Project, TimeEntry } from "../../lib/types";
 import { NowLine, useMinuteClock } from "./DayView";
@@ -22,6 +22,7 @@ interface WeekViewProps {
   projectById: Map<string, Project>;
   onSelect: (id: string) => void;
   onOpenDay: (date: string) => void;
+  now?: number;
 }
 
 /**
@@ -37,8 +38,10 @@ export function WeekView({
   projectById,
   onSelect,
   onOpenDay,
+  now: propsNow,
 }: WeekViewProps) {
-  const now = useMinuteClock();
+  const clockNow = useMinuteClock();
+  const now = propsNow ?? clockNow;
   const days = Array.from({ length: 7 }, (_, index) =>
     addDays(weekStart, index),
   );
@@ -52,7 +55,7 @@ export function WeekView({
       day,
       start,
       entries: list,
-      totalMs: list.reduce((sum, entry) => sum + durationOf(entry), 0),
+      totalMs: list.reduce((sum, entry) => sum + durationOf(entry, now), 0),
       pending: list.filter(isReviewable).length,
     };
   });
@@ -65,7 +68,7 @@ export function WeekView({
       },
       ...column.entries.map((entry) => ({
         start: entry.startedAt,
-        end: entry.endedAt,
+        end: entryEnd(entry, now),
         dayStart: column.start,
       })),
     ]),
@@ -159,10 +162,11 @@ export function WeekView({
                   />
                 ))}
                 {column.entries.map((entry) => {
+                  const end = entryEnd(entry, now);
                   const { top, height } = place(
                     timeline,
                     entry.startedAt,
-                    entry.endedAt,
+                    end,
                     column.start,
                     "wall",
                     3,
@@ -186,6 +190,7 @@ export function WeekView({
                           : undefined
                       }
                       onSelect={onSelect}
+                      now={now}
                     />
                   );
                 })}

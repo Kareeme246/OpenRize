@@ -1,6 +1,6 @@
 [package]
 name = "openrize"
-version = "0.3.7"
+version = "0.3.8"
 description = "Automatic, private, local-first time tracking for your Mac"
 authors = ["Kareem Elgohry <kareemdev52@gmail.com>"]
 edition = "2021"

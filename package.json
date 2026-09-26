@@ -1,7 +1,7 @@
 {
   "name": "openrize",
   "private": true,
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "Automatic, private, local-first time tracking for your Mac",
   "license": "AGPL-3.0",
   "packageManager": "pnpm@12.5.1",

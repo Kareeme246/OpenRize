@@ -27,7 +27,10 @@ export interface ActivitySnapshot {
   focusMs: number;
   breakMs: number;
   unreviewed: number;
-  /** How long the user has been idle right now, per the OS. */
+  /**
+   * How long the user has been idle right now: since their last input, or
+   * since the app in front last kept the display awake to play video.
+   */
   idleMs: number;
   idleThresholdMs: number;
   captureEnabled: boolean;

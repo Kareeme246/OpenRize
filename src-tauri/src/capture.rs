@@ -10,6 +10,11 @@ pub struct WindowSample {
     pub bundle_id: Option<String>,
     pub url: Option<String>,
     pub domain: Option<String>,
+    /// The app holds a power assertion keeping the display awake, which is
+    /// how a browser playing video or a call app tells macOS someone is
+    /// watching. Watching gives no keyboard or mouse input, so this is the
+    /// only sign the user is still there.
+    pub keeps_display_awake: bool,
 }
 
 #[cfg(target_os = "macos")]
@@ -17,6 +22,14 @@ pub struct WindowSample {
 struct __AXUIElement(c_void);
 #[cfg(target_os = "macos")]
 type AXUIElementRef = *mut __AXUIElement;
+
+#[cfg(target_os = "macos")]
+#[link(name = "IOKit", kind = "framework")]
+extern "C" {
+    fn IOPMCopyAssertionsByProcess(
+        assertions_by_pid: *mut core_foundation_sys::dictionary::CFDictionaryRef,
+    ) -> i32;
+}
 
 #[cfg(target_os = "macos")]
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -64,6 +77,7 @@ pub fn read_active_window() -> Option<WindowSample> {
         bundle_id,
         url,
         domain,
+        keeps_display_awake: keeps_display_awake(pid),
     })
 }
 
@@ -113,6 +127,58 @@ fn get_window_title_ax(pid: libc::pid_t) -> Option<String> {
         let title = title_cf.to_string();
         Some(title)
     }
+}
+
+/// Whether `pid` holds an active display-sleep assertion, directly or through
+/// a system service acting on its behalf. Only the assertion's type is read:
+/// its name (for example "video-playing") is never stored.
+#[cfg(target_os = "macos")]
+fn keeps_display_awake(pid: libc::pid_t) -> bool {
+    use core_foundation::array::CFArray;
+    use core_foundation::base::CFType;
+    use core_foundation::dictionary::CFDictionary;
+    use core_foundation::number::CFNumber;
+
+    // IOPMLib.h: kIOPMAssertionTypePreventUserIdleDisplaySleep and its
+    // deprecated alias kIOPMAssertionTypeNoDisplaySleep, which Firefox-based
+    // browsers such as Zen still use for video.
+    const DISPLAY_TYPES: [&str; 2] = ["PreventUserIdleDisplaySleep", "NoDisplaySleepAssertion"];
+    const LEVEL_OFF: i64 = 0;
+
+    let mut by_pid_ref: core_foundation_sys::dictionary::CFDictionaryRef = std::ptr::null();
+    // SAFETY: on success the call hands us a +1 dictionary, released by the
+    // wrapper below.
+    if unsafe { IOPMCopyAssertionsByProcess(&mut by_pid_ref) } != 0 || by_pid_ref.is_null() {
+        return false;
+    }
+    let by_pid: CFDictionary<CFNumber, CFArray<CFDictionary<CFString, CFType>>> =
+        unsafe { CFDictionary::wrap_under_create_rule(by_pid_ref) };
+
+    let key = |name: &'static str| CFString::from_static_string(name);
+    let number = |assertion: &CFDictionary<CFString, CFType>, name: &'static str| {
+        assertion
+            .find(key(name))
+            .and_then(|value| value.downcast::<CFNumber>())
+            .and_then(|value| value.to_i64())
+    };
+
+    let (owners, lists) = by_pid.get_keys_and_values();
+    owners.into_iter().zip(lists).any(|(owner, list)| {
+        // SAFETY: the dictionary maps CFNumber pids to CFArrays of assertion
+        // dictionaries, and both outlive this borrow.
+        let owner = unsafe { CFNumber::wrap_under_get_rule(owner as _) }.to_i64();
+        let list: CFArray<CFDictionary<CFString, CFType>> =
+            unsafe { CFArray::wrap_under_get_rule(list as _) };
+        list.iter().any(|assertion| {
+            let is_display = assertion
+                .find(key("AssertType"))
+                .and_then(|value| value.downcast::<CFString>())
+                .is_some_and(|kind| DISPLAY_TYPES.contains(&kind.to_string().as_str()));
+            let on = number(&assertion, "AssertLevel") != Some(LEVEL_OFF);
+            let holder = number(&assertion, "AssertionOnBehalfOfPID").or(owner);
+            is_display && on && holder == Some(i64::from(pid))
+        })
+    })
 }
 
 #[cfg(target_os = "macos")]
@@ -247,3 +313,36 @@ pub fn register_sleep_listeners(app: tauri::AppHandle) {
 
 #[cfg(not(target_os = "macos"))]
 pub fn register_sleep_listeners(_app: tauri::AppHandle) {}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::keeps_display_awake;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_display_assertion_is_attributed_to_the_process_holding_it() {
+        // `caffeinate -d` holds a PreventUserIdleDisplaySleep assertion, the
+        // same kind a browser takes while it plays video.
+        let mut caffeinate = std::process::Command::new("caffeinate")
+            .args(["-d", "-t", "30"])
+            .spawn()
+            .expect("caffeinate ships with macOS");
+        let pid = caffeinate.id() as libc::pid_t;
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut seen = keeps_display_awake(pid);
+        while !seen && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+            seen = keeps_display_awake(pid);
+        }
+        let this_process = keeps_display_awake(std::process::id() as libc::pid_t);
+        caffeinate.kill().ok();
+        caffeinate.wait().ok();
+
+        assert!(seen, "caffeinate's display assertion was not found");
+        assert!(
+            !this_process,
+            "a process with no assertion counted as watching"
+        );
+    }
+}

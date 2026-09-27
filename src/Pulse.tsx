@@ -383,12 +383,13 @@ function TodaySummary({
           ms,
         };
       })
-      .filter((slice) => slice.ms >= 60_000)
+      .filter((slice) => slice.ms > 0)
       .sort((a, b) => b.ms - a.ms);
     return { workMs: work, slices: sorted };
   }, [entries, categoryById, now]);
 
   const progress = targetMs > 0 ? workMs / targetMs : 0;
+  const percent = Math.round(progress * 100);
   const left = targetMs - workMs;
 
   return (
@@ -398,7 +399,7 @@ function TodaySummary({
           viewBox={`0 0 ${RING} ${RING}`}
           className="size-16"
           role="img"
-          aria-label={`${Math.round(progress * 100)}% of today's target`}
+          aria-label={`${percent}% of today's target`}
         >
           <circle
             cx={RING / 2}
@@ -408,7 +409,8 @@ function TodaySummary({
             strokeWidth={RING_STROKE}
             className="stroke-line"
           />
-          {progress > 0 && (
+          {/* A round cap draws a dot even for a sliver; "0%" gets no arc. */}
+          {percent > 0 && (
             <circle
               cx={RING / 2}
               cy={RING / 2}
@@ -428,7 +430,7 @@ function TodaySummary({
             textAnchor="middle"
             className="fill-fg-strong font-bold text-[11px] tabular-nums"
           >
-            {Math.round(progress * 100)}%
+            {percent}%
           </text>
         </svg>
         <div className="min-w-0">

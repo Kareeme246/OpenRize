@@ -43,6 +43,8 @@ export const SUGGESTION_READY = "suggestion-ready";
 /** Payload: `AiStatus`. */
 export const AI_STATUS_CHANGED = "ai-status-changed";
 export const ENERGY_CHANGED = "energy-changed";
+/** Main window only: the Pulse panel asked for today's review queue. */
+export const OPEN_REVIEW = "open-review";
 
 /** Tauri rejects with a string; React errors are Error objects. Handle both. */
 export function describeError(error: unknown): string {
@@ -74,6 +76,22 @@ export async function setLaunchAtLogin(
   enabled: boolean,
 ): Promise<LoginItemState> {
   return await invoke<LoginItemState>("set_launch_at_login", { enabled });
+}
+
+// --- Pulse panel ---
+
+/** Sizes the menu-bar panel to its content, keeping it under the icon. */
+export async function resizePulsePanel(height: number): Promise<void> {
+  await invoke("resize_pulse_panel", { height });
+}
+
+export async function hidePulsePanel(): Promise<void> {
+  await invoke("hide_pulse_panel");
+}
+
+/** Closes the panel and brings the main window forward. */
+export async function openMainWindow(review: boolean): Promise<void> {
+  await invoke("open_main_window", { review });
 }
 
 // --- Activity & Capture ---

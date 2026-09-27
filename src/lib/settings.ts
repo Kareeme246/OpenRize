@@ -53,55 +53,74 @@ export const DEFAULT_TRACKING_HOURS: TrackingHours = {
   sunday: { ...DEFAULT_DAY_SCHEDULE },
 };
 
+const DAY_KEYS = [
+  "sunday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+] as const;
+
+/** `"07:30"` -> 450, or undefined when malformed. */
+function minutesOf(clock: string): number | undefined {
+  const [hours, minutes] = clock.split(":").map(Number);
+  if (hours === undefined || minutes === undefined) return undefined;
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return undefined;
+  return hours * 60 + minutes;
+}
+
+/**
+ * A day's tracking window in minutes after midnight, or null when that day
+ * does not track. `end` below `start` means the window runs past midnight.
+ */
+function dayWindow(
+  th: TrackingHours,
+  date: Date,
+): { start: number; end: number } | null {
+  const dayKey = DAY_KEYS[date.getDay()];
+  if (!dayKey) return null;
+  const [start, end, enabled] = th.perDay
+    ? [th[dayKey].start, th[dayKey].end, th[dayKey].enabled]
+    : [th.defaultStart, th.defaultEnd, true];
+  if (!enabled || start === end) return null;
+  const startMins = minutesOf(start);
+  const endMins = minutesOf(end);
+  if (startMins === undefined || endMins === undefined) return null;
+  return { start: startMins, end: endMins };
+}
+
 /** Whether the given date is inside the configured tracking hours window. */
 export function isInsideTrackingHours(
   th: TrackingHours,
   date: Date = new Date(),
 ): boolean {
   if (!th.enabled) return true;
-  const dayNames: (
-    | "sunday"
-    | "monday"
-    | "tuesday"
-    | "wednesday"
-    | "thursday"
-    | "friday"
-    | "saturday"
-  )[] = [
-    "sunday",
-    "monday",
-    "tuesday",
-    "wednesday",
-    "thursday",
-    "friday",
-    "saturday",
-  ];
-  const dayKey = dayNames[date.getDay()];
-  if (!dayKey) return true;
-  const [start, end, enabled] = th.perDay
-    ? [th[dayKey].start, th[dayKey].end, th[dayKey].enabled]
-    : [th.defaultStart, th.defaultEnd, true];
-
-  if (!enabled || start === end) return false;
-
-  const [sh, sm] = start.split(":").map(Number);
-  const [eh, em] = end.split(":").map(Number);
-  if (
-    sh === undefined ||
-    sm === undefined ||
-    eh === undefined ||
-    em === undefined
-  ) {
-    return false;
-  }
-  const startMins = sh * 60 + sm;
-  const endMins = eh * 60 + em;
+  const window = dayWindow(th, date);
+  if (!window) return false;
   const curMins = date.getHours() * 60 + date.getMinutes();
-
-  if (startMins < endMins) {
-    return curMins >= startMins && curMins < endMins;
+  if (window.start < window.end) {
+    return curMins >= window.start && curMins < window.end;
   }
-  return curMins >= startMins || curMins < endMins;
+  return curMins >= window.start || curMins < window.end;
+}
+
+/** When the schedule next starts tracking, within a week; null if never. */
+export function nextTrackingStart(
+  th: TrackingHours,
+  now: Date = new Date(),
+): Date | null {
+  if (!th.enabled) return null;
+  for (let offset = 0; offset <= 7; offset++) {
+    const day = new Date(now);
+    day.setDate(day.getDate() + offset);
+    const window = dayWindow(th, day);
+    if (!window) continue;
+    day.setHours(0, window.start, 0, 0);
+    if (day.getTime() > now.getTime()) return day;
+  }
+  return null;
 }
 
 export interface Settings {

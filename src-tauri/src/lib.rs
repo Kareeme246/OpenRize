@@ -8,6 +8,7 @@ mod login_item;
 mod migrations;
 mod models;
 mod projects;
+mod pulse;
 mod reports;
 mod settings;
 mod timers;
@@ -44,6 +45,10 @@ pub const EVENT_SETTINGS_CHANGED: &str = "settings-changed";
 /// Emitted whenever time entries are modified or rebuilt.
 pub const EVENT_ENTRIES_CHANGED: &str = "entries-changed";
 
+/// Sent to the main window when the Pulse panel's review button asks it to
+/// open today's review queue.
+pub const EVENT_OPEN_REVIEW: &str = "open-review";
+
 /// Shared application state.
 pub struct AppState {
     pub store: Mutex<TimerStore>,
@@ -52,8 +57,9 @@ pub struct AppState {
     /// writer's mutex so a query never blocks behind (or blocks) the
     /// sampler's tick — see activity.rs's module doc, decision A6.
     pub activity_reader: Mutex<Connection>,
-    /// Whether the OpenRize window itself is focused. Drives the push
-    /// cadence to the frontend; the underlying sampling rate is unaffected.
+    /// Whether an OpenRize window (main or the Pulse panel) is focused.
+    /// Drives the push cadence to the frontend; the underlying sampling rate
+    /// is unaffected.
     pub foreground: AtomicBool,
     pub settings: Mutex<SettingsStore>,
 }
@@ -92,6 +98,7 @@ pub fn run() {
                 settings: Mutex::new(settings),
             });
             app.manage(ai::AiRuntime::default());
+            app.manage(pulse::PulseState::default());
 
             if preferences.tray_enabled {
                 tray::init(app.handle(), &timers)?;
@@ -113,6 +120,11 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| match event {
+            // The panel has no close control; anything that asks just hides it.
+            WindowEvent::CloseRequested { api, .. } if window.label() == pulse::LABEL => {
+                api.prevent_close();
+                let _ = window.hide();
+            }
             // Closing is a preference: either end the app, or hide to the menu
             // bar so a background tracker keeps running. With the tray off a
             // hidden window would be unreachable, so that combination quits.
@@ -126,13 +138,23 @@ pub fn run() {
                     app.exit(0);
                 }
             }
-            // Drives the activity push cadence (1Hz focused / 30s
-            // backgrounded — see activity.rs)
+            // Drives the activity push cadence (1Hz while any OpenRize window
+            // is focused / 30s otherwise — see activity.rs). Recomputed from
+            // every window, so the order of one window's blur and the next
+            // one's focus does not matter.
             WindowEvent::Focused(is_focused) => {
+                let app = window.app_handle();
+                if !*is_focused && window.label() == pulse::LABEL {
+                    pulse::on_blur(app);
+                }
+                let focused = app
+                    .webview_windows()
+                    .values()
+                    .any(|window| window.is_focused().unwrap_or(false));
                 let state = window.state::<AppState>();
-                let was_foreground = state.foreground.swap(*is_focused, Ordering::SeqCst);
-                if *is_focused && !was_foreground {
-                    activity::emit_full(window.app_handle());
+                let was_foreground = state.foreground.swap(focused, Ordering::SeqCst);
+                if focused && !was_foreground {
+                    activity::emit_full(app);
                 }
             }
             _ => {}
@@ -199,6 +221,9 @@ pub fn run() {
             commands::get_energy_summary,
             commands::query_energy_history,
             commands::reset_energy_history,
+            commands::resize_pulse_panel,
+            commands::hide_pulse_panel,
+            commands::open_main_window,
         ])
         .build(tauri::generate_context!())
         .expect("error while building OpenRize")

@@ -660,6 +660,29 @@ pub fn import_projects_csv(app: AppHandle, text: String) -> Result<ImportSummary
     crate::projects::import_csv(&mut store, &text, now)
 }
 
+// --- Pulse panel -------------------------------------------------------
+
+#[tauri::command]
+pub fn resize_pulse_panel(app: AppHandle, height: f64) {
+    crate::pulse::resize(&app, height);
+}
+
+#[tauri::command]
+pub fn hide_pulse_panel(app: AppHandle) {
+    crate::pulse::hide(&app);
+}
+
+/// The panel's doors into the app: closes the panel and brings the main
+/// window forward, on today's review queue when `review` is set.
+#[tauri::command]
+pub fn open_main_window(app: AppHandle, review: bool) {
+    crate::pulse::hide(&app);
+    tray::show_main_window(&app);
+    if review {
+        let _ = app.emit_to("main", crate::EVENT_OPEN_REVIEW, ());
+    }
+}
+
 // --- Preferences -------------------------------------------------------
 
 #[tauri::command]

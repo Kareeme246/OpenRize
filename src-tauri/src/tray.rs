@@ -1,12 +1,14 @@
 //! The macOS menu-bar icon. Icon only, no text (decision T1): the glyph shape
-//! carries idle vs active, and the menu carries the running timers.
+//! carries idle vs active. Left click opens the Pulse panel (pulse.rs); right
+//! click opens the native menu with the running timers, Open, and Quit.
 
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuBuilder, MenuEvent, MenuItemBuilder};
-use tauri::tray::TrayIconBuilder;
+use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, Wry};
 
 use crate::timers::Timer;
+use crate::AppState;
 
 pub const TRAY_ID: &str = "openrize";
 const OPEN_WINDOW: &str = "open-window";
@@ -41,15 +43,13 @@ fn glyph(active: bool) -> Image<'static> {
 }
 
 pub fn init(app: &AppHandle, timers: &[Timer]) -> tauri::Result<()> {
-    let menu = build_menu(app, timers)?;
-
+    // No menu here: see `show_menu`.
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(glyph(any_running(timers)))
         .icon_as_template(true)
         .tooltip(tooltip(timers))
-        .menu(&menu)
-        .show_menu_on_left_click(true)
         .on_menu_event(on_menu_event)
+        .on_tray_icon_event(on_tray_icon_event)
         .build(app)?;
 
     Ok(())
@@ -64,6 +64,8 @@ pub fn set_enabled(app: &AppHandle, enabled: bool, timers: &[Timer]) -> tauri::R
         (true, false) => init(app, timers),
         (false, true) => {
             app.remove_tray_by_id(TRAY_ID);
+            // The panel belongs to the icon; it never outlives it.
+            crate::pulse::destroy(app);
             Ok(())
         }
         _ => Ok(()),
@@ -71,14 +73,13 @@ pub fn set_enabled(app: &AppHandle, enabled: bool, timers: &[Timer]) -> tauri::R
 }
 
 /// Repaints the tray from a snapshot, then tells the frontend what changed.
-/// Called on every mutation, never on a timer: a native menu is expensive to
-/// rebuild and nothing here is clock-driven.
+/// Called on every mutation, never on a timer: nothing here is clock-driven.
+/// The menu is built when it opens, so it needs no refresh.
 pub fn refresh(app: &AppHandle, timers: &[Timer]) -> tauri::Result<()> {
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         // Sets icon and template flag together; doing it in two calls flickers.
         tray.set_icon_with_as_template(Some(glyph(any_running(timers))), true)?;
         tray.set_tooltip(Some(tooltip(timers)))?;
-        tray.set_menu(Some(build_menu(app, timers)?))?;
     }
 
     // The tray can pause a timer behind the window's back, so the authoritative
@@ -89,6 +90,7 @@ pub fn refresh(app: &AppHandle, timers: &[Timer]) -> tauri::Result<()> {
 
 pub fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
     }
@@ -137,6 +139,54 @@ fn build_menu(app: &AppHandle, timers: &[Timer]) -> tauri::Result<Menu<Wry>> {
 
 fn disabled(app: &AppHandle, id: &str, text: &str) -> tauri::Result<tauri::menu::MenuItem<Wry>> {
     MenuItemBuilder::with_id(id, text).enabled(false).build(app)
+}
+
+/// Mouse down, like a native menu-bar item: the panel or menu opens as the
+/// button goes down, not after it comes back up.
+fn on_tray_icon_event(tray: &TrayIcon, event: TrayIconEvent) {
+    let TrayIconEvent::Click {
+        rect,
+        button,
+        button_state: MouseButtonState::Down,
+        ..
+    } = event
+    else {
+        return;
+    };
+    match button {
+        MouseButton::Left => crate::pulse::toggle(tray.app_handle(), rect),
+        MouseButton::Right => show_menu(tray),
+        MouseButton::Middle => {}
+    }
+}
+
+/// Opens the native menu, attached to the icon only while it is open. With a
+/// menu attached, macOS opens it on every click, left included, which would
+/// leave no click for the panel (`show_menu_on_left_click(false)` does not
+/// stop it). Built fresh from the timers, so it is never stale.
+fn show_menu(tray: &TrayIcon) {
+    let app = tray.app_handle();
+    crate::pulse::hide(app);
+    let timers = app
+        .state::<AppState>()
+        .store
+        .lock()
+        .ok()
+        .and_then(|store| store.snapshot().ok())
+        .unwrap_or_default();
+    let menu = match build_menu(app, &timers) {
+        Ok(menu) => menu,
+        Err(error) => {
+            eprintln!("could not build the tray menu: {error}");
+            return;
+        }
+    };
+    if tray.set_menu(Some(menu)).is_err() {
+        return;
+    }
+    // Opens the menu; it tracks the mouse modally and returns once closed.
+    let _ = tray.with_inner_tray_icon(|inner| inner.show_menu());
+    let _ = tray.set_menu(None::<Menu<Wry>>);
 }
 
 fn on_menu_event(app: &AppHandle, event: MenuEvent) {

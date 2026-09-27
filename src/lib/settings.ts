@@ -216,6 +216,13 @@ export const ACCENTS: Record<Accent, AccentPalette> = {
 
 export const ACCENT_ORDER = Object.keys(ACCENTS) as Accent[];
 
+/** Mirror of `LoginItemState` in src-tauri/src/login_item.rs. */
+export type LoginItemState =
+  | "enabled"
+  | "disabled"
+  | "requiresApproval"
+  | "unsupported";
+
 export interface StoragePaths {
   configFile: string;
   dataDir: string;

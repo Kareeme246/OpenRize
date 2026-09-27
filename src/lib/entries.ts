@@ -60,6 +60,19 @@ export function entryEnd(entry: TimeEntry, now: number = Date.now()): number {
     : entry.endedAt;
 }
 
+/**
+ * The session recording right now, if any: the building entry that has
+ * started. The Calendar pins its now line to this entry's live edge.
+ */
+export function recordingEntry(
+  entries: TimeEntry[],
+  now: number = Date.now(),
+): TimeEntry | undefined {
+  return entries.find(
+    (entry) => entry.status === "building" && entry.startedAt <= now,
+  );
+}
+
 export function durationOf(entry: TimeEntry, now: number = Date.now()): number {
   return Math.max(0, entryEnd(entry, now) - entry.startedAt);
 }

@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { EmptyState } from "../../components/Page";
+import { recordingEntry } from "../../lib/entries";
+import { formatDuration, formatTime } from "../../lib/format";
 import type {
   ActivitySegment,
   Category,
@@ -81,6 +83,27 @@ export function DayView({
   const timeline = timelineFor([], "elapsed", hourHeight, hoursInDay, true);
   const entryById = new Map(entries.map((entry) => [entry.id, entry]));
   const nowOffset = hourOffset(now, dayStart, "elapsed");
+  const showNow = now >= dayStart && now < dayEnd;
+  const recording = showNow ? recordingEntry(entries, now) : undefined;
+  const liveEnd = (entry: TimeEntry): number =>
+    entry.status === "building"
+      ? Math.min(Math.max(entry.startedAt, now), dayEnd)
+      : entry.endedAt;
+  // While a session records, the now line rides its live bottom edge (the
+  // middle of the hairline gap under the block) instead of floating a few
+  // pixels off it.
+  const nowTop = recording
+    ? (() => {
+        const { top, height } = place(
+          timeline,
+          recording.startedAt,
+          liveEnd(recording),
+          dayStart,
+          "elapsed",
+        );
+        return top + height + 1;
+      })()
+    : nowOffset * hourHeight;
 
   useLayoutEffect(() => {
     const element = viewport.current;
@@ -92,14 +115,25 @@ export function DayView({
     return () => observer.disconnect();
   }, []);
 
-  // Open at 9 AM to 5 PM; zoom changes only scale, not the 5 AM day bounds.
+  // Open at 9 AM to 5 PM, or centred on now when today's now line falls
+  // outside those hours; zoom changes only scale, not the 5 AM day bounds.
+  const nowHours = useRef<number | null>(null);
+  nowHours.current = showNow ? nowOffset : null;
   useLayoutEffect(() => {
     const element = viewport.current;
     if (!element || height <= 0) return;
     const size = height / 8;
     setHourHeight(size);
+    const nine = hourOffset(
+      new Date(dayStart).setHours(9),
+      dayStart,
+      "elapsed",
+    );
+    const current = nowHours.current;
     element.scrollTop =
-      hourOffset(new Date(dayStart).setHours(9), dayStart, "elapsed") * size;
+      current !== null && (current < nine || current > nine + 8)
+        ? Math.max(0, current * size - height / 2)
+        : nine * size;
   }, [dayStart, height]);
 
   useEffect(() => {
@@ -299,14 +333,10 @@ export function DayView({
             />
           ))}
           {entries.map((entry) => {
-            const end =
-              entry.status === "building"
-                ? Math.min(Math.max(entry.startedAt, now), dayEnd)
-                : entry.endedAt;
             const { top, height: entryHeight } = place(
               timeline,
               entry.startedAt,
-              end,
+              liveEnd(entry),
               dayStart,
               "elapsed",
             );
@@ -327,6 +357,7 @@ export function DayView({
                 }
                 onSelect={onSelect}
                 now={now}
+                recording={entry.id === recording?.id}
               />
             );
           })}
@@ -339,8 +370,11 @@ export function DayView({
               }}
             />
           )}
-          {now >= dayStart && now < dayEnd && (
-            <NowLine top={nowOffset * hourHeight} />
+          {showNow && (
+            <NowLine
+              top={nowTop}
+              recording={recording && { startedAt: recording.startedAt, now }}
+            />
           )}
           {entries.length === 0 && !loading && (
             <div className="pointer-events-none absolute inset-x-0 top-16">
@@ -364,15 +398,49 @@ export function DayView({
   );
 }
 
-export function NowLine({ top }: { top: number }) {
+interface NowLineProps {
+  top: number;
+  /**
+   * The session being recorded, when there is one: the line then sits on
+   * its growing bottom edge, pulses, and (unless `compact`) is tagged with
+   * how long the recording has run.
+   */
+  recording?: { startedAt: number; now: number };
+  /** Week columns: no room for the tag, so the pulse alone carries it. */
+  compact?: boolean;
+}
+
+/** The current time across a timeline column, centred on `top`. */
+export function NowLine({ top, recording, compact = false }: NowLineProps) {
+  if (!recording) {
+    return (
+      <div
+        className="pointer-events-none absolute right-0 left-0 z-30 flex -translate-y-1/2 items-center"
+        style={{ top: `${top}px` }}
+        aria-hidden="true"
+      >
+        <span className="-ml-1 size-2 rounded-full bg-danger" />
+        <span className="h-px flex-1 bg-danger/70" />
+      </div>
+    );
+  }
+  const elapsed = formatDuration(recording.now - recording.startedAt);
   return (
     <div
-      className="pointer-events-none absolute right-0 left-0 z-30 flex items-center"
+      className="pointer-events-none absolute right-0 left-0 z-30 flex -translate-y-1/2 items-center"
       style={{ top: `${top}px` }}
-      aria-hidden="true"
+      title={`Recording since ${formatTime(recording.startedAt)}`}
     >
-      <span className="-ml-1 size-2 rounded-full bg-danger" />
-      <span className="h-px flex-1 bg-danger/70" />
+      <span className="recording-dot -ml-1 size-2 shrink-0 rounded-full bg-danger" />
+      <span className="h-0.5 flex-1 rounded-full bg-danger" />
+      {compact ? (
+        <span className="sr-only">Recording, {elapsed}</span>
+      ) : (
+        <span className="-ml-px flex shrink-0 items-center gap-1 rounded-full bg-danger py-0.5 pr-2 pl-1.5 font-semibold text-[10px] text-canvas leading-none tabular-nums shadow-sm">
+          <span className="recording-dot size-1.5 rounded-full bg-canvas" />
+          Recording · {elapsed}
+        </span>
+      )}
     </div>
   );
 }

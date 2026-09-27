@@ -4,6 +4,7 @@ mod capture;
 mod commands;
 mod energy;
 mod entry_builder;
+mod login_item;
 mod migrations;
 mod models;
 mod projects;
@@ -153,6 +154,8 @@ pub fn run() {
             commands::get_settings,
             commands::update_settings,
             commands::storage_paths,
+            commands::launch_at_login,
+            commands::set_launch_at_login,
             commands::list_categories,
             commands::create_category,
             commands::update_category,

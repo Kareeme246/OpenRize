@@ -1,10 +1,16 @@
+import { useLayoutEffect, useRef } from "react";
 import {
   addDays,
   currentCalendarDay,
   isSameDay,
   localDateString,
 } from "../../lib/dates";
-import { durationOf, entryEnd, isReviewable } from "../../lib/entries";
+import {
+  durationOf,
+  entryEnd,
+  isReviewable,
+  recordingEntry,
+} from "../../lib/entries";
 import { formatDuration } from "../../lib/format";
 import type { Category, Project, TimeEntry } from "../../lib/types";
 import { NowLine, useMinuteClock } from "./DayView";
@@ -77,6 +83,25 @@ export function WeekView({
     29,
   );
   const today = currentCalendarDay(new Date(now));
+  const weekStartMs = weekStart.getTime();
+
+  // The current week opens with today's now line in the middle of the view.
+  const viewport = useRef<HTMLDivElement>(null);
+  const nowTopRef = useRef(0);
+  nowTopRef.current =
+    (hourOffset(now, currentCalendarDay(new Date(now)).getTime(), "wall") -
+      timeline.startHour) *
+    HOUR_HEIGHT_PX;
+  useLayoutEffect(() => {
+    const element = viewport.current;
+    const current = Date.now();
+    const weekEnd = addDays(new Date(weekStartMs), 7).getTime();
+    if (!element || current < weekStartMs || current >= weekEnd) return;
+    element.scrollTop = Math.max(
+      0,
+      nowTopRef.current - element.clientHeight / 2,
+    );
+  }, [weekStartMs]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -121,7 +146,10 @@ export function WeekView({
         })}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-3">
+      <div
+        ref={viewport}
+        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-3"
+      >
         <div
           className="relative grid grid-cols-[56px_repeat(7,minmax(0,1fr))]"
           style={{ height: `${timeline.height}px` }}
@@ -143,6 +171,23 @@ export function WeekView({
           {columns.map((column) => {
             const isToday = isSameDay(column.day, today);
             const nowOffset = hourOffset(now, column.start, "wall");
+            const recording = isToday
+              ? recordingEntry(column.entries, now)
+              : undefined;
+            // Pinned to the recording block's live edge, as in the Day view.
+            const nowTop = recording
+              ? (() => {
+                  const { top, height } = place(
+                    timeline,
+                    recording.startedAt,
+                    entryEnd(recording, now),
+                    column.start,
+                    "wall",
+                    3,
+                  );
+                  return top + height + 1;
+                })()
+              : (nowOffset - timeline.startHour) * HOUR_HEIGHT_PX;
             const weekend =
               column.day.getDay() === 0 || column.day.getDay() === 6;
             return (
@@ -191,6 +236,7 @@ export function WeekView({
                       }
                       onSelect={onSelect}
                       now={now}
+                      recording={entry.id === recording?.id}
                     />
                   );
                 })}
@@ -198,7 +244,11 @@ export function WeekView({
                   nowOffset >= timeline.startHour &&
                   nowOffset <= timeline.endHour && (
                     <NowLine
-                      top={(nowOffset - timeline.startHour) * HOUR_HEIGHT_PX}
+                      top={nowTop}
+                      compact
+                      recording={
+                        recording && { startedAt: recording.startedAt, now }
+                      }
                     />
                   )}
               </div>

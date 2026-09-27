@@ -195,6 +195,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* The menu-bar panel's window is clear: the card draws its own rounded
+   corners, and macOS shades the window from the card's shape. */
+html.pulse-window,
+html.pulse-window body {
+  background: transparent;
+}
+
 /* Calendar block states (see the design board, D1). */
 @keyframes entry-shimmer {
   from {

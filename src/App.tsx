@@ -5,6 +5,7 @@ import { TopBar } from "./components/TopBar";
 import { SettingsProvider } from "./hooks/useSettings";
 import { useTauriEvent } from "./hooks/useTauriEvent";
 import * as api from "./lib/api";
+import { currentCalendarDay, localDateString } from "./lib/dates";
 import type { ActivitySnapshot, ActivityTick, Route } from "./lib/types";
 import { Apps } from "./pages/Apps";
 import { Calendar } from "./pages/Calendar";
@@ -33,6 +34,9 @@ export default function App() {
   const [trackingActive, setTrackingActive] = useState(true);
   const [currentApp, setCurrentApp] = useState<string | undefined>(undefined);
   const [pendingCount, setPendingCount] = useState(0);
+  // Bumped to remount the Calendar, so a review request always starts fresh
+  // on today, even when that exact route is already showing.
+  const [calendarMount, setCalendarMount] = useState(0);
 
   const navigate = useCallback((next: Route): void => {
     setNav((previous) => {
@@ -136,6 +140,17 @@ export default function App() {
   useTauriEvent(api.ENTRIES_CHANGED, updatePending);
   useTauriEvent(api.SUGGESTION_READY, updatePending);
 
+  // The menu-bar panel's "N to review" button.
+  useTauriEvent(api.OPEN_REVIEW, () => {
+    navigate({
+      name: "calendar",
+      scale: "day",
+      date: localDateString(currentCalendarDay(new Date())),
+      review: true,
+    });
+    setCalendarMount((count) => count + 1);
+  });
+
   const handleToggleCapture = async () => {
     try {
       const next = !trackingActive;
@@ -152,7 +167,13 @@ export default function App() {
   const renderView = (): ReactElement => {
     switch (currentRoute.name) {
       case "calendar":
-        return <Calendar route={currentRoute} navigate={navigate} />;
+        return (
+          <Calendar
+            key={calendarMount}
+            route={currentRoute}
+            navigate={navigate}
+          />
+        );
       case "timesheet":
         return (
           <MyTimesheet

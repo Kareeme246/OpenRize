@@ -68,6 +68,8 @@ interface EntryBlockProps {
   narrow?: boolean;
   onSelect: (id: string) => void;
   now?: number;
+  /** The session capturing right now; the now line rides its bottom edge. */
+  recording?: boolean;
 }
 
 /**
@@ -86,8 +88,11 @@ export function EntryBlock({
   narrow = false,
   onSelect,
   now,
+  recording = false,
 }: EntryBlockProps) {
-  const state = blockState(entry);
+  // The live session reads as recording even while the AI already has a
+  // look at it; "Categorizing…" would contradict the now line's tag.
+  const state: BlockState = recording ? "building" : blockState(entry);
   const railColor =
     state === "processing" || state === "needsYou" || !category
       ? "var(--fg-faint)"
@@ -99,8 +104,9 @@ export function EntryBlock({
       ? Math.max(entry.startedAt, now ?? entry.endedAt)
       : entry.endedAt;
   const duration = formatDuration(end - entry.startedAt);
+  const liveLabel = recording ? "recording" : "building";
   const timeText = `${formatTime(entry.startedAt)}–${formatTime(end)} · ${
-    state === "building" ? "building" : duration
+    state === "building" ? liveLabel : duration
   }`;
   const description =
     state === "processing"
@@ -197,7 +203,7 @@ export function EntryBlock({
         selected
           ? "z-20 shadow-lg ring-2 ring-accent"
           : "z-10 hover:border-fg-soft/40"
-      } ${BLOCK_CLASSES[state]}`}
+      } ${recording ? "border-dashed border-danger/45 bg-danger/5" : BLOCK_CLASSES[state]}`}
       style={{
         top: `${top}px`,
         height: `${height}px`,
@@ -218,7 +224,7 @@ export function EntryBlock({
               : (category?.name ??
                 (state === "approved" ? "Uncategorized" : BAND_LABEL.low))
           }
-          duration={state === "building" ? "building" : duration}
+          duration={state === "building" ? liveLabel : duration}
           approvedMark={approvedMark}
         />
       ) : (

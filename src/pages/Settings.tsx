@@ -1,5 +1,5 @@
-import { openPath } from "@tauri-apps/plugin-opener";
-import { type ReactNode, useCallback, useState } from "react";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import {
   AiEffectiveness,
   PersonalModels,
@@ -28,6 +28,7 @@ import {
   type CloseBehavior,
   type DaySchedule,
   isInsideTrackingHours,
+  type LoginItemState,
   type Settings as SettingsType,
   type Theme,
   type TrackingHours,
@@ -151,6 +152,81 @@ function SettingGroup({
         {children}
       </div>
     </section>
+  );
+}
+
+const LOGIN_ITEMS_SETTINGS =
+  "x-apple.systempreferences:com.apple.LoginItems-Settings.extension";
+
+/**
+ * Mirrors macOS's login item rather than a stored preference: it is re-read
+ * whenever the window regains focus, because the user can switch it off in
+ * System Settings behind the app's back.
+ */
+function LaunchAtLoginRow({
+  onError,
+}: {
+  onError: (message: string | null) => void;
+}) {
+  const [state, setState] = useState<LoginItemState | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const read = (): void => {
+      api
+        .launchAtLogin()
+        .then(setState)
+        .catch((cause: unknown) => onError(describeError(cause)));
+    };
+    read();
+    window.addEventListener("focus", read);
+    return () => window.removeEventListener("focus", read);
+  }, [onError]);
+
+  const change = (enabled: boolean): void => {
+    setBusy(true);
+    onError(null);
+    api
+      .setLaunchAtLogin(enabled)
+      .then(setState)
+      .catch((cause: unknown) => onError(describeError(cause)))
+      .finally(() => setBusy(false));
+  };
+
+  const pending = state === "requiresApproval";
+  return (
+    <SettingRow
+      title="Launch at login"
+      description={
+        state === "unsupported"
+          ? "Needs macOS 13 or later"
+          : pending
+            ? "Allow OpenRize under Login Items in System Settings to finish"
+            : "Start OpenRize in the background when you log in"
+      }
+    >
+      <div className="flex shrink-0 items-center gap-3">
+        {pending && (
+          <button
+            type="button"
+            onClick={() => {
+              openUrl(LOGIN_ITEMS_SETTINGS).catch((cause: unknown) =>
+                onError(describeError(cause)),
+              );
+            }}
+            className="rounded-md border border-line px-2.5 py-1 text-[11.5px] text-fg-soft transition-colors hover:bg-surface hover:text-fg"
+          >
+            Open Login Items
+          </button>
+        )}
+        <Toggle
+          checked={state === "enabled" || pending}
+          label="Launch at login"
+          disabled={state === null || state === "unsupported" || busy}
+          onChange={change}
+        />
+      </div>
+    </SettingRow>
   );
 }
 
@@ -445,6 +521,7 @@ function TrackingHoursSetting({
 export function Settings() {
   const { settings, storage, error, update } = useSettings();
   const [openError, setOpenError] = useState<string | null>(null);
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   const openStorage = (): void => {
     if (storage === null) return;
@@ -487,7 +564,8 @@ export function Settings() {
   } = useEnergy(energyDays);
 
   const trayOff = !settings.trayEnabled;
-  const problem = error ?? openError ?? aiError ?? metricsError ?? energyError;
+  const problem =
+    error ?? openError ?? loginError ?? aiError ?? metricsError ?? energyError;
 
   return (
     <main className="flex h-full min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain p-5.5">
@@ -530,11 +608,7 @@ export function Settings() {
       </SettingGroup>
 
       <SettingGroup title="General">
-        <SettingRow
-          title="Launch at login"
-          description="Start OpenRize when you log in"
-          status="not-implemented"
-        />
+        <LaunchAtLoginRow onError={setLoginError} />
         <SettingRow
           title="Menu bar icon"
           description="Keep a tray icon with quick controls"

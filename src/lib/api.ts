@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Settings, StoragePaths } from "./settings";
+import type { LoginItemState, Settings, StoragePaths } from "./settings";
 import type { Timer } from "./timers";
 import type {
   ActivitySnapshot,
@@ -63,6 +63,17 @@ export async function updateSettings(settings: Settings): Promise<Settings> {
 
 export async function storagePaths(): Promise<StoragePaths> {
   return await invoke<StoragePaths>("storage_paths");
+}
+
+/** What macOS says about launching at login; it can change behind the app. */
+export async function launchAtLogin(): Promise<LoginItemState> {
+  return await invoke<LoginItemState>("launch_at_login");
+}
+
+export async function setLaunchAtLogin(
+  enabled: boolean,
+): Promise<LoginItemState> {
+  return await invoke<LoginItemState>("set_launch_at_login", { enabled });
 }
 
 // --- Activity & Capture ---

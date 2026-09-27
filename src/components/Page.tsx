@@ -108,6 +108,11 @@ export interface TabOption<T extends string> {
   value: T;
   label: string;
   count?: number;
+  /**
+   * A 24px-viewBox stroke glyph. With one, the tab shows only the icon (the
+   * label becomes its accessible name and tooltip) and sits at the far end.
+   */
+  icon?: ReactNode;
 }
 
 /** Underlined tabs, the review panel's style, with optional counts. */
@@ -136,14 +141,33 @@ export function Tabs<T extends string>({
             type="button"
             role="tab"
             aria-selected={active}
+            aria-label={tab.icon ? tab.label : undefined}
+            title={tab.icon ? tab.label : undefined}
             onClick={() => onChange(tab.value)}
             className={`-mb-px flex items-center gap-1.5 border-b-2 pb-2 transition-colors ${
+              tab.icon ? "ml-auto px-0.5" : ""
+            } ${
               active
                 ? "border-accent font-semibold text-fg-strong"
                 : "border-transparent text-fg-soft hover:text-fg"
             }`}
           >
-            {tab.label}
+            {tab.icon ? (
+              <svg
+                viewBox="0 0 24 24"
+                className="size-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.8}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                {tab.icon}
+              </svg>
+            ) : (
+              tab.label
+            )}
             {tab.count !== undefined && (
               <span
                 className={`rounded-full px-1.5 font-mono text-[10.5px] tabular-nums ${

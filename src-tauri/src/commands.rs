@@ -6,6 +6,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::activity::{self, ActivitySnapshot};
 use crate::ai::metrics::AiMetrics;
 use crate::ai::{self, AiRuntime, AiStatus};
+use crate::login_item::{self, LoginItemState};
 use crate::models::{
     AppRecord, Category, Client, EntryDetail, NewCategory, NewClient, NewProject, NewTimeEntry,
     Project, RuleSuggestion, TimeEntry, UpdateCategory, UpdateClient, UpdateProject,
@@ -729,6 +730,17 @@ pub struct StoragePaths {
     pub config_file: String,
     pub data_dir: String,
     pub database_file: String,
+}
+
+/// Whether macOS will launch OpenRize at login (see login_item.rs).
+#[tauri::command]
+pub fn launch_at_login() -> LoginItemState {
+    login_item::state()
+}
+
+#[tauri::command]
+pub fn set_launch_at_login(enabled: bool) -> Result<LoginItemState, String> {
+    login_item::set(enabled)
 }
 
 #[tauri::command]

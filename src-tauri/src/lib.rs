@@ -14,6 +14,7 @@ mod reports;
 mod settings;
 mod timers;
 mod tray;
+mod updater;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -78,6 +79,7 @@ impl AppState {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
@@ -100,6 +102,9 @@ pub fn run() {
             });
             app.manage(ai::AiRuntime::default());
             app.manage(pulse::PulseState::default());
+            app.manage(updater::UpdaterState::new(
+                app.package_info().version.to_string(),
+            ));
 
             if preferences.tray_enabled {
                 tray::init(app.handle(), &timers)?;
@@ -113,6 +118,7 @@ pub fn run() {
             energy::spawn_sampler(app.handle().clone(), dir.join(activity::DB_FILE));
             capture::register_sleep_listeners(app.handle().clone());
             spawn_retention_sweeper(app.handle().clone());
+            updater::spawn_scheduler(app.handle().clone());
             // One sweep on startup, so a long-dormant install is cleaned before
             // the first hour-long wait elapses.
             if let Err(error) = commands::sweep_retention(app.handle()) {
@@ -156,6 +162,7 @@ pub fn run() {
                 let was_foreground = state.foreground.swap(focused, Ordering::SeqCst);
                 if focused && !was_foreground {
                     activity::emit_full(app);
+                    updater::on_focus(app);
                 }
             }
             _ => {}
@@ -231,6 +238,9 @@ pub fn run() {
             commands::resize_pulse_panel,
             commands::hide_pulse_panel,
             commands::open_main_window,
+            commands::update_status,
+            commands::check_for_updates,
+            commands::install_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while building OpenRize")

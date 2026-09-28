@@ -82,12 +82,16 @@ export function EntryReviewSheet({
           onClose={close}
           onAccept={() => accept(detail.entry.id)}
           onReject={() => reject(detail.entry.id)}
+          onUnapprove={() => void review.unapprove()}
           onSplit={() => void review.split()}
           onDelete={() => void review.remove()}
           onRetry={() => void review.retry()}
           onSetField={(field, valueId) => void review.setField(field, valueId)}
           onToggleBillable={() => void review.toggleBillable()}
           onSaveDescription={(text) => void review.saveDescription(text)}
+          onSetTimes={(startedAt, endedAt) =>
+            void review.setTimes(startedAt, endedAt)
+          }
           onResolveRule={(suggestion, acceptRule) =>
             void review.resolveRule(suggestion, acceptRule)
           }

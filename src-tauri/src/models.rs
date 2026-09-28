@@ -201,6 +201,11 @@ pub struct NewTimeEntry {
     pub category_id: Option<String>,
     pub project_id: Option<String>,
     pub billable: Option<bool>,
+    /// Leaves a labeled entry pending for the user to review instead of
+    /// approving it, without queueing AI classification (Calendar's
+    /// drag-to-create placeholder).
+    #[serde(default)]
+    pub review: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

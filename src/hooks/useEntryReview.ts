@@ -23,9 +23,12 @@ export interface EntryReview {
   /** Resolves true once approved, false when it failed. */
   accept: (id: string) => Promise<boolean>;
   reject: (id: string) => Promise<boolean>;
+  /** Returns the open approved entry to pending so it can be edited. */
+  unapprove: () => Promise<void>;
   setField: (field: SuggestionField, valueId: string | null) => Promise<void>;
   toggleBillable: () => Promise<void>;
   saveDescription: (description: string) => Promise<void>;
+  setTimes: (startedAt: number, endedAt: number) => Promise<void>;
   /** Splits the open entry and opens its first half. */
   split: () => Promise<void>;
   remove: () => Promise<void>;
@@ -95,6 +98,11 @@ export function useEntryReview(initialId?: string): EntryReview {
     [run],
   );
 
+  const unapprove = useCallback(async (): Promise<void> => {
+    if (!detail) return;
+    await run(() => api.unapproveTimeEntries([detail.entry.id]));
+  }, [detail, run]);
+
   const setField = useCallback(
     async (field: SuggestionField, valueId: string | null): Promise<void> => {
       const id = selectedRef.current;
@@ -124,6 +132,16 @@ export function useEntryReview(initialId?: string): EntryReview {
     async (description: string): Promise<void> => {
       if (!detail || description === "") return;
       await run(() => api.updateTimeEntry(detail.entry.id, { description }));
+    },
+    [detail, run],
+  );
+
+  const setTimes = useCallback(
+    async (startedAt: number, endedAt: number): Promise<void> => {
+      if (!detail) return;
+      await run(() =>
+        api.updateTimeEntry(detail.entry.id, { startedAt, endedAt }),
+      );
     },
     [detail, run],
   );
@@ -171,9 +189,11 @@ export function useEntryReview(initialId?: string): EntryReview {
     select,
     accept,
     reject,
+    unapprove,
     setField,
     toggleBillable,
     saveDescription,
+    setTimes,
     split,
     remove,
     retry,

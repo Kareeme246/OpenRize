@@ -557,6 +557,10 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
               entries={selectedEntries}
               categories={catalog.categories}
               onApprove={() => approveIds(selectedEntries)}
+              onUnapprove={(ids) => {
+                void act(() => api.unapproveTimeEntries(ids));
+                setSelected(new Set());
+              }}
               onSetCategory={(categoryId) =>
                 void act(() =>
                   api.updateTimeEntries(
@@ -828,6 +832,7 @@ function BulkBar({
   entries,
   categories,
   onApprove,
+  onUnapprove,
   onSetCategory,
   onSetBillable,
   onDelete,
@@ -836,6 +841,7 @@ function BulkBar({
   entries: TimeEntry[];
   categories: Category[];
   onApprove: () => void;
+  onUnapprove: (ids: string[]) => void;
   onSetCategory: (categoryId: string) => void;
   onSetBillable: (billable: boolean) => void;
   onDelete: () => void;
@@ -844,6 +850,9 @@ function BulkBar({
   const approvable = entries.filter(
     (entry) =>
       entry.categoryId && !isInFlight(entry) && entry.status !== "approved",
+  );
+  const unapprovable = entries.filter(
+    (entry) => entry.status === "approved" && !entry.invoiceId,
   );
   return (
     <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-accent/30 bg-accent-soft px-3 py-2 text-[12px]">
@@ -863,6 +872,16 @@ function BulkBar({
       >
         Approve {approvable.length}
       </button>
+      {unapprovable.length > 0 && (
+        <button
+          type="button"
+          onClick={() => onUnapprove(unapprovable.map((entry) => entry.id))}
+          className={BUTTON_SECONDARY}
+          title="Return approved entries to pending to edit them"
+        >
+          Unapprove {unapprovable.length}
+        </button>
+      )}
       <Picker
         ariaLabel="Set category"
         value=""

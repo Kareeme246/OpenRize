@@ -235,7 +235,7 @@ export function Apps() {
 
           {/* Table */}
           <div className="flex-1 overflow-hidden rounded-xl border border-line bg-surface">
-            <div className="overflow-x-auto">
+            <div className="h-full overflow-x-auto">
               <table className="w-full border-collapse text-left text-xs">
                 <thead>
                   <tr className="border-b border-line bg-surface-strong/60 text-fg-muted font-medium">

@@ -1119,9 +1119,59 @@ mod tests {
     #[test]
     fn a_null_patch_clears_optional_fields() {
         let patch: crate::models::UpdateProject =
-            serde_json::from_str(r#"{"clientId": null, "hourlyRate": 90}"#).unwrap();
+            serde_json::from_str(r#"{"clientId": null, "hourlyRate": 90, "dueDate": null}"#)
+                .unwrap();
         assert_eq!(patch.client_id, Some(None));
         assert_eq!(patch.hourly_rate, Some(Some(90.0)));
-        assert_eq!(patch.due_date, None);
+        assert_eq!(patch.due_date, Some(None));
+    }
+
+    #[test]
+    fn optional_due_date_is_preserved_on_create_and_cleared_on_update() {
+        let mut store = store();
+        let proj = store
+            .create_project(
+                crate::models::NewProject {
+                    client_id: None,
+                    name: "No Due Date".to_string(),
+                    color: "#75a4e5".to_string(),
+                    description: None,
+                    ai_hints: None,
+                    status: None,
+                    due_date: None,
+                    budget_kind: None,
+                    budget_value: None,
+                    budget_period: None,
+                    billable_default: None,
+                    hourly_rate: None,
+                },
+                1_000,
+            )
+            .unwrap();
+        assert_eq!(proj.due_date, None);
+
+        let updated = store
+            .update_project(
+                &proj.id,
+                crate::models::UpdateProject {
+                    due_date: Some(Some(50_000)),
+                    ..Default::default()
+                },
+                2_000,
+            )
+            .unwrap();
+        assert_eq!(updated.due_date, Some(50_000));
+
+        let cleared = store
+            .update_project(
+                &proj.id,
+                crate::models::UpdateProject {
+                    due_date: Some(None),
+                    ..Default::default()
+                },
+                3_000,
+            )
+            .unwrap();
+        assert_eq!(cleared.due_date, None);
     }
 }

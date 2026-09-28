@@ -26,3 +26,32 @@ test("project-day totals split at local edges and only approved billable time is
     { projectId: "b", days: [3_600_000, 0], approvedMs: 3_600_000, billableMs: 0 },
   ]);
 });
+
+test("blank week produces empty project rows", () => {
+  const edges = [0, 86_400_000, 172_800_000];
+  const rows = projectWeek([], edges);
+  assert.deepEqual(rows, []);
+});
+
+test("entries entirely outside edges produce empty project rows", () => {
+  const edges = [86_400_000, 172_800_000];
+  const rows = projectWeek(
+    [
+      {
+        id: "e1",
+        projectId: "p1",
+        startedAt: 0,
+        endedAt: 3_600_000,
+        status: "approved",
+        billable: true,
+        source: "manual",
+        createdAt: 0,
+        updatedAt: 0,
+        description: "work",
+        descriptionOrigin: "user",
+      },
+    ],
+    edges,
+  );
+  assert.deepEqual(rows, []);
+});

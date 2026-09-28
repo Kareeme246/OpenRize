@@ -7,6 +7,7 @@ import {
   PageHeader,
   SkeletonRows,
 } from "../components/Page";
+import { Picker } from "../components/Picker";
 import { useCatalog } from "../hooks/useCatalog";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import * as api from "../lib/api";
@@ -138,23 +139,28 @@ export function Invoices() {
             New invoice
           </h2>
           <div className="flex flex-wrap items-end gap-3 text-xs text-fg-soft">
-            <label className="flex min-w-40 flex-1 flex-col gap-1">
-              Client
-              <select
-                className="rounded-md border border-line bg-surface px-2 py-1.5 text-fg"
+            <div className="flex min-w-40 flex-1 flex-col gap-1">
+              <label htmlFor="invoice-client" className="text-xs text-fg-soft">
+                Client
+              </label>
+              <Picker
+                id="invoice-client"
+                ariaLabel="Client"
                 value={clientId}
-                onChange={(event) => setClientId(event.target.value)}
-              >
-                <option value="">Select a client</option>
-                {catalog.clients
-                  .filter((item) => !item.deletedAt)
-                  .map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
+                onChange={setClientId}
+                placeholder="Select a client"
+                options={[
+                  { value: "", label: "Select a client" },
+                  ...catalog.clients
+                    .filter((item) => !item.deletedAt)
+                    .map((item) => ({
+                      value: item.id,
+                      label: item.name,
+                    })),
+                ]}
+                variant="field"
+              />
+            </div>
             <label className="flex flex-col gap-1">
               From{" "}
               <input

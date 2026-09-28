@@ -2734,6 +2734,50 @@ mod tests {
     }
 
     #[test]
+    fn manual_drag_session_with_break_label_bypasses_ai_categorization() {
+        let mut store = store();
+        let cat = store
+            .create_category(
+                crate::models::NewCategory {
+                    name: "Break".to_string(),
+                    color: "#64748b".to_string(),
+                    description: None,
+                    ai_prompt: None,
+                    billable_default: Some(false),
+                    counts_as_work: Some(false),
+                    sort: None,
+                },
+                1_000,
+            )
+            .unwrap();
+        let entry = store
+            .create_manual_entry(
+                NewTimeEntry {
+                    started_at: 1_000,
+                    ended_at: 10 * MIN,
+                    description: "Untitled session".to_string(),
+                    category_id: Some(cat.id),
+                    project_id: None,
+                    billable: None,
+                },
+                11 * MIN,
+            )
+            .unwrap();
+        assert_eq!(entry.status, "approved");
+        assert_eq!(entry.description, "Untitled session");
+        assert_eq!(entry.project_id, None);
+        let has_classify_job: bool = store
+            .conn()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM classify_jobs WHERE entry_id = ?1 AND kind = 'classify')",
+                rusqlite::params![entry.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!has_classify_job);
+    }
+
+    #[test]
     fn a_closed_entry_is_queued_for_classification() {
         let mut store = store();
         tracked_morning(&mut store);

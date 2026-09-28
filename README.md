@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/readme/screenshot-placeholder.svg" width="880" alt="OpenRize app screenshot (placeholder)">
+  <img width="1535" height="1013" alt="OpenRize app screenshot" src="https://github.com/user-attachments/assets/4936944b-d20c-4507-9240-bb57c0b2cc39" />
 </p>
 
 OpenRize is the open, local-first answer to [Rize.io](https://rize.io): time tracking that
@@ -34,14 +34,14 @@ The categorizing is done by AI that runs entirely on your Mac and learns from ev
 
 ---
 
-## ⚠️ Beta - read this first
+## Early release - read this first
 
 The core product works end to end: OpenRize captures your activity in the background, folds it
 into reviewable time entries, suggests a category and project for each one with an on-device model,
 and learns from what you accept and correct. You can review your day on a calendar, approve a whole
-timesheet, slice your time in reports, and manage projects and clients.
+timesheet, slice your time in reports, manage projects and clients, and even automatically generate invoices.
 
-It is still beta, and it only runs on macOS for now.
+It is still early and it only runs on macOS for now.
 
 ## Where it stands
 
@@ -49,12 +49,12 @@ It is still beta, and it only runs on macOS for now.
 uses the macOS Accessibility API and the AI runs in a macOS-only Swift sidecar, so nothing outside
 macOS has been verified.
 
-| Platform | Supported |
-| --- | --- |
-| 🍎 macOS (Apple Silicon) | ✅ Built and tested |
-| 🍎 macOS (Intel) | 🔶 Untested - no Foundation Model on Intel, so AI would run rules + personal model only |
-| 🪟 Windows | ❌ Untested - capture and the AI sidecar are macOS-specific |
-| 🐧 Linux | ❌ Untested - capture and the AI sidecar are macOS-specific |
+| Platform | Supported | Planned |
+| --- | --- | --- |
+| 🍎 macOS (Apple Silicon) | ✅ Built and tested | Completed |
+| 🍎 macOS (Intel) | 🔶 Untested - no Foundation Model on Intel, so AI would run rules + personal model only | Not Planned |
+| 🪟 Windows | ❌ Untested - capture and the AI sidecar are macOS-specific | Future- on demand |
+| 🐧 Linux | ❌ Untested - capture and the AI sidecar are macOS-specific | Future- on demand |
 
 The full AI tier needs macOS 26+ with Apple Intelligence turned on. Without it, OpenRize falls back
 to your rules and a personal model it trains on your own reviews and keeps categorizing.
@@ -68,9 +68,9 @@ to your rules and a personal model it trains on your own reviews and keeps categ
 | **Timers** | ✅ Working | Manual stopwatches: any number of named timers, running concurrently, that keep going across views and restarts. |
 | **Apps** | ✅ Working | Every detected app, with its category and project mapping and an exclusion toggle. |
 | **Time Entries** | ✅ Working | Any range with filters and full-text search over descriptions and window titles. A pivot table, charts by project, category, and app, a sortable log, saved views, and CSV or JSON export. |
-| **Timesheets** | 🚧 Placeholder | Projects x days grid. |
+| **Timesheets** | ✅ Working | Projects x days grid. |
 | **Projects** (with Clients) | ✅ Working | Active, Completed, Archived, and Clients tabs. Budgets, due dates, a per-project detail page, AI hints that become rules, and project discovery from repo paths, forge URLs, and editor titles. CSV import. |
-| **Invoices** | 🚧 Placeholder | Draft, sent, and paid invoices per client from approved billable project time. |
+| **Invoices** | ✅ Working | Draft, sent, and paid invoices per client from approved billable project time. |
 | **Settings** | ✅ Working | Theme and accent, menu bar and close behavior, storage location, activity retention, expected hours per week, and Categories & AI (engine status, auto-accept threshold, custom instructions, AI effectiveness, personal model versions, Retrain now, Reset learned data). |
 | **Automatic capture** | ✅ Working | A background sampler records the foreground app, its window title (via Accessibility, not Screen Recording), and the URL in Safari and Chromium browsers. Idle and sleep time are not counted as work; watching a video in the app in front is not idle. |
 | **AI categorization & review** | ✅ Working | Each entry gets a category and project suggestion with a confidence meter, a "Why" line, and pickable alternatives. Keyboard review mode, and auto-approve only when both fields clear your threshold. |
@@ -167,9 +167,7 @@ Stack: [Tauri 2](https://tauri.app) · Rust · SQLite · Swift · [React 19](htt
 ## Building from source
 
 Packaged builds are available from the [Releases](https://github.com/Kareeme246/OpenRize/releases)
-page. They are unsigned for now, so macOS will refuse to open the `.app` on first launch - right-click
-it and choose **Open** (or System Settings > Privacy & Security > **Open Anyway**) to run it once and
-clear the warning.
+page.
 
 To build from source instead, first install the
 [Tauri prerequisites](https://tauri.app/start/prerequisites/) (on macOS: Xcode command line tools

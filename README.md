@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <img width="1535" height="1013" alt="OpenRize app screenshot" src="docs/assets/readme/openrize-app.png" />
+  <img width="1604" height="1050" alt="OpenRize app screenshot" src="docs/assets/readme/openrize-app.png" />
 </p>
 
 OpenRize is the open, local-first answer to [Rize.io](https://rize.io): time tracking that

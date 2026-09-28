@@ -693,6 +693,9 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
                             void act(() => api.updateTimeEntry(entry.id, patch))
                           }
                           onAccept={() => approveIds([entry])}
+                          onUnapprove={() =>
+                            void act(() => api.unapproveTimeEntries([entry.id]))
+                          }
                           onOpenInCalendar={() =>
                             navigate({
                               name: "calendar",
@@ -950,6 +953,7 @@ interface TimesheetRowProps {
     billable?: boolean;
   }) => void;
   onAccept: () => void;
+  onUnapprove: () => void;
   onOpenInCalendar: () => void;
   onSplit: () => void;
   onDelete: () => void;
@@ -1022,6 +1026,7 @@ function TimesheetRow({
   onOpen,
   onUpdate,
   onAccept,
+  onUnapprove,
   onOpenInCalendar,
   onSplit,
   onDelete,
@@ -1120,8 +1125,11 @@ function TimesheetRow({
               setDraft(entry.description);
               setEditing(true);
             }}
-            title="Edit description"
-            className={`min-w-0 truncate text-left hover:text-accent ${
+            title={
+              isApproved ? "Unapprove to edit this entry" : "Edit description"
+            }
+            disabled={isApproved}
+            className={`min-w-0 truncate text-left hover:text-accent disabled:cursor-default disabled:hover:text-fg-strong ${
               inFlight ? "text-fg-soft" : "text-fg-strong"
             }`}
           >
@@ -1141,6 +1149,7 @@ function TimesheetRow({
             color={project?.color}
             placeholder="No project"
             confidence={unconfirmed ? entry.ai?.projectConfidence : undefined}
+            disabled={isApproved}
             options={projectOptions}
             onChange={(projectId) => onUpdate({ projectId })}
           />
@@ -1154,6 +1163,7 @@ function TimesheetRow({
           color={category?.color}
           placeholder="Choose…"
           confidence={unconfirmed ? entry.ai?.categoryConfidence : undefined}
+          disabled={isApproved}
           options={categoryOptions}
           onChange={(categoryId) => onUpdate({ categoryId })}
         />
@@ -1169,7 +1179,14 @@ function TimesheetRow({
             onUpdate({ billable: !entry.billable });
           }}
           aria-pressed={entry.billable}
-          title={entry.billable ? "Billable" : "Not billable"}
+          disabled={isApproved}
+          title={
+            isApproved
+              ? "Unapprove to edit this entry"
+              : entry.billable
+                ? "Billable"
+                : "Not billable"
+          }
           className={`mx-auto flex size-6 items-center justify-center rounded font-semibold text-[11px] transition-colors ${
             entry.billable
               ? "bg-accent/20 text-accent"
@@ -1181,14 +1198,29 @@ function TimesheetRow({
       )}
       <span className="flex items-center justify-end gap-1">
         {isApproved ? (
-          <span
-            className="text-[11px] text-accent"
-            title={`Approved by ${entry.approvedBy ?? "you"}`}
-          >
-            {entry.approvedBy === "auto" || entry.approvedBy === "rule"
-              ? `✓ ${entry.approvedBy}`
-              : "✓ Approved"}
-          </span>
+          <>
+            <span
+              className="text-[11px] text-accent"
+              title={`Approved by ${entry.approvedBy ?? "you"}`}
+            >
+              {entry.approvedBy === "auto" || entry.approvedBy === "rule"
+                ? `✓ ${entry.approvedBy}`
+                : "✓ Approved"}
+            </span>
+            {!entry.invoiceId && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onUnapprove();
+                }}
+                title="Return this entry to pending so it can be edited"
+                className="rounded-md border border-line px-2 py-0.5 font-semibold text-[11px] text-fg-soft hover:bg-surface hover:text-fg"
+              >
+                Unapprove
+              </button>
+            )}
+          </>
         ) : (
           <button
             type="button"

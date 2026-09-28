@@ -35,7 +35,7 @@ export function Timers({ api: propApi }: TimersProps = {}) {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-canvas text-fg">
-      <PageHeader title="Timers">
+      <PageHeader title="Stopwatches">
         <div className="flex items-center gap-4 font-mono text-[12px]">
           <div className="flex items-center gap-1.5">
             <span className="font-semibold text-accent">{runningCount}</span>
@@ -81,7 +81,7 @@ export function Timers({ api: propApi }: TimersProps = {}) {
         ) : api.timers.length === 0 ? (
           <div className="rounded-xl border border-dashed border-line p-8">
             <EmptyState
-              title="No trackers yet"
+              title="No stopwatches yet"
               hint="Name one above and it starts counting when you press Start."
             />
           </div>

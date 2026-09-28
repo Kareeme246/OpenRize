@@ -285,6 +285,26 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
     }
 
+    if current_version < 3 {
+        let tx = conn.transaction()?;
+        tx.execute_batch(
+            "DROP TRIGGER protect_invoiced_time;
+             CREATE TRIGGER protect_invoiced_time BEFORE UPDATE OF started_at, ended_at, description, project_id, status, billable, deleted_at ON time_entries
+             WHEN OLD.invoice_id IS NOT NULL AND (
+               NEW.started_at IS NOT OLD.started_at OR NEW.ended_at IS NOT OLD.ended_at OR
+               NEW.description IS NOT OLD.description OR
+               (NEW.project_id IS NOT OLD.project_id AND NOT (
+                 NEW.project_id IS NULL AND EXISTS (
+                   SELECT 1 FROM projects WHERE id = OLD.project_id AND deleted_at IS NOT NULL
+                 )
+               )) OR
+               NEW.status IS NOT OLD.status OR NEW.billable IS NOT OLD.billable OR NEW.deleted_at IS NOT OLD.deleted_at
+             ) BEGIN SELECT RAISE(ABORT, 'Invoiced time cannot be edited; delete its draft invoice first'); END;
+             PRAGMA user_version = 3;",
+        )?;
+        tx.commit()?;
+    }
+
     Ok(())
 }
 
@@ -447,7 +467,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 2);
+        assert_eq!(v, 3);
 
         let cat_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM categories;", [], |r| r.get(0))
@@ -462,7 +482,7 @@ mod tests {
     }
 
     #[test]
-    fn fresh_schema_matches_legacy_schema_upgraded_to_v2() {
+    fn fresh_schema_matches_legacy_schema_upgraded_to_v3() {
         let mut fresh = Connection::open_in_memory().unwrap();
         run_migrations(&mut fresh).unwrap();
 

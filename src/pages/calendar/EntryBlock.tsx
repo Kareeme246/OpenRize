@@ -30,6 +30,10 @@ function densityFor(height: number): Density {
 
 function blockStyle(state: BlockState, color: string): CSSProperties {
   switch (state) {
+    case "approved":
+      return {
+        backgroundColor: `color-mix(in srgb, ${color} 24%, var(--bg-panel))`,
+      };
     case "pending":
       return {
         backgroundImage: `repeating-linear-gradient(135deg, color-mix(in srgb, ${color} 14%, var(--bg-panel)) 0 6px, color-mix(in srgb, ${color} 7%, var(--bg-panel)) 6px 12px)`,
@@ -46,7 +50,7 @@ function blockStyle(state: BlockState, color: string): CSSProperties {
 }
 
 const BLOCK_CLASSES: Record<BlockState, string> = {
-  approved: "border-line bg-panel shadow-xs",
+  approved: "border-line shadow-xs",
   pending: "border-dashed border-review/60",
   needsYou: "border-dashed border-line",
   failed: "border-dashed border-danger/50",

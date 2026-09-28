@@ -132,6 +132,8 @@ pub fn build_entries(
         if live {
             let mut entry = create_entry_from_segments(&session, session_end, now, &mut claimed);
             entry.status = "building".to_string();
+            // An ongoing session isn't named after its apps until it closes.
+            entry.description = UNTITLED_SESSION.to_string();
             results.push(entry);
         } else {
             push_closed(
@@ -229,6 +231,9 @@ fn create_entry_from_segments(
         segment_ids,
     }
 }
+
+/// The name an ongoing session carries until it closes.
+const UNTITLED_SESSION: &str = "Untitled session";
 
 fn generate_description(segments: &[&SegmentInput]) -> String {
     let mut app_counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
@@ -334,6 +339,7 @@ mod tests {
         let live = build_entries(&segs, &[], &settings, 60 * MIN + 30_000);
         assert_eq!(live.len(), 1);
         assert_eq!(live[0].status, "building");
+        assert_eq!(live[0].description, UNTITLED_SESSION);
 
         let closed = build_entries(&segs, &[], &settings, 66 * MIN);
         assert_eq!(closed.len(), 1);

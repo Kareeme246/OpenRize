@@ -397,6 +397,21 @@ pub fn approve_time_entries(app: AppHandle, ids: Vec<String>) -> Result<Vec<Time
     Ok(entries)
 }
 
+/// Returns the entries, back to pending, so a caller adopts them without a
+/// refetch.
+#[tauri::command]
+pub fn unapprove_time_entries(app: AppHandle, ids: Vec<String>) -> Result<Vec<TimeEntry>, String> {
+    let now = now_epoch_ms();
+    let entries = {
+        let state = app.state::<AppState>();
+        let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+        store.unapprove_time_entries(&ids, now)?;
+        store.time_entries(&ids)?
+    };
+    entries_changed(&app);
+    Ok(entries)
+}
+
 /// One patch applied to many entries (My Timesheet's bulk bar). Returns the
 /// updated entries.
 #[tauri::command]

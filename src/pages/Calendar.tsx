@@ -475,10 +475,18 @@ export function Calendar({ route, navigate }: CalendarProps) {
               }}
               onCreate={async (startedAt, endedAt) => {
                 try {
+                  const categories =
+                    catalog.categories.length > 0
+                      ? catalog.categories
+                      : await api.listCategories();
+                  const breakCategory = categories.find(
+                    (c) => c.name.toLowerCase() === "break",
+                  );
                   await api.createTimeEntry({
                     startedAt,
                     endedAt,
-                    description: "",
+                    description: "Untitled session",
+                    categoryId: breakCategory?.id,
                   });
                   await refresh();
                 } catch (cause) {

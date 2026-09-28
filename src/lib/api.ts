@@ -31,6 +31,7 @@ import type {
   UpdateCategory,
   UpdateClient,
   UpdateProject,
+  UpdateStatus,
   UpdateTimeEntry,
 } from "./types";
 
@@ -46,6 +47,8 @@ export const AI_STATUS_CHANGED = "ai-status-changed";
 export const ENERGY_CHANGED = "energy-changed";
 /** Main window only: the Pulse panel asked for today's review queue. */
 export const OPEN_REVIEW = "open-review";
+/** Payload: `UpdateStatus`. */
+export const UPDATE_STATUS = "update-status";
 
 /** Tauri rejects with a string; React errors are Error objects. Handle both. */
 export function describeError(error: unknown): string {
@@ -456,4 +459,19 @@ export function queryEnergyHistory(
 
 export function resetEnergyHistory(): Promise<EnergySummary> {
   return invoke<EnergySummary>("reset_energy_history");
+}
+
+// --- Updates ---
+
+export function updateStatus(): Promise<UpdateStatus> {
+  return invoke<UpdateStatus>("update_status");
+}
+
+export function checkForUpdates(): Promise<UpdateStatus> {
+  return invoke<UpdateStatus>("check_for_updates");
+}
+
+/** Resolves only if the install fails to restart; otherwise the app relaunches. */
+export function installUpdate(): Promise<void> {
+  return invoke<void>("install_update");
 }

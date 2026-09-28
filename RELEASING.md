@@ -24,7 +24,13 @@ To cut a release:
    the same `cliff.toml` to generate GitHub Release notes and builds a signed,
    notarized macOS `.dmg`/`.app` with `pnpm tauri build`.
 3. Watch the `Release` workflow. When it finishes, it publishes the GitHub
-   Release with the `.dmg` and zipped `.app` attached.
+   Release with the `.dmg` and zipped `.app` attached, plus the in-app
+   updater's `openrize.app.tar.gz` and `latest.json`.
+
+Publishing a release ships it to every installed copy: the app checks
+`releases/latest/download/latest.json` hourly (see `src-tauri/src/updater.rs`)
+and offers the update in the sidebar and Settings. Drafts and pre-releases are
+never offered, because `releases/latest` skips them.
 
 ## Signing and notarization secrets
 
@@ -40,6 +46,8 @@ notarizes with an App Store Connect API key. It needs these repository secrets
 | `APPLE_API_KEY` | App Store Connect API key ID |
 | `APPLE_API_ISSUER` | App Store Connect issuer ID |
 | `APPLE_API_PRIVATE_KEY` | full contents of the `AuthKey_<KEYID>.p8` file |
+| `TAURI_SIGNING_PRIVATE_KEY` | full contents of the updater's minisign private key |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | password chosen when generating that key |
 
 To produce them:
 
@@ -57,6 +65,15 @@ To produce them:
 3. **API key**: at App Store Connect > Users and Access > Integrations >
    Team Keys, create a key with the **Developer** role. Note the key ID and
    issuer ID and download the `.p8` (it can only be downloaded once).
+
+4. **Updater key**: `pnpm tauri signer generate -w ~/.tauri/openrize.key`.
+   Paste the private key file's contents into `TAURI_SIGNING_PRIVATE_KEY` and
+   the `.pub` file's contents into `plugins.updater.pubkey` in
+   `src-tauri/tauri.conf.json`. Installed copies only accept updates signed by
+   the key whose public half they shipped with, so back the private key up:
+   losing it means every user has to download the next release by hand.
+   Local `pnpm tauri build` runs need the same variables, since
+   `createUpdaterArtifacts` is on.
 
 The app's hardened-runtime entitlements live in `src-tauri/Entitlements.plist`
 and privacy prompt strings in `src-tauri/Info.plist`; any new API that macOS

@@ -4,6 +4,7 @@ import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { SettingsProvider } from "./hooks/useSettings";
 import { useTauriEvent } from "./hooks/useTauriEvent";
+import { useUpdates } from "./hooks/useUpdates";
 import * as api from "./lib/api";
 import { currentCalendarDay, localDateString } from "./lib/dates";
 import type { ActivitySnapshot, ActivityTick, Route } from "./lib/types";
@@ -37,6 +38,10 @@ export default function App() {
   // Bumped to remount the Calendar, so a review request always starts fresh
   // on today, even when that exact route is already showing.
   const [calendarMount, setCalendarMount] = useState(0);
+  // Bumped by the sidebar's "Update available", so Settings scrolls to its
+  // Updates section even when Settings is already open.
+  const [revealUpdates, setRevealUpdates] = useState(0);
+  const updates = useUpdates();
 
   const navigate = useCallback((next: Route): void => {
     setNav((previous) => {
@@ -207,7 +212,13 @@ export default function App() {
       case "invoices":
         return <Invoices />;
       case "settings":
-        return <Settings />;
+        return (
+          <Settings
+            route={currentRoute}
+            updates={updates}
+            revealUpdates={revealUpdates}
+          />
+        );
     }
   };
 
@@ -230,6 +241,11 @@ export default function App() {
               captureEnabled={captureEnabled}
               trackingActive={trackingActive}
               onToggleCapture={handleToggleCapture}
+              updateVersion={updates?.available?.version}
+              onOpenUpdate={() => {
+                navigate({ name: "settings", section: "updates" });
+                setRevealUpdates((count) => count + 1);
+              }}
             />
             <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
               {renderView()}

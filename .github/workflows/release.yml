@@ -75,8 +75,10 @@ jobs:
 
       # The Tauri CLI imports APPLE_CERTIFICATE into a temporary keychain,
       # signs the app and the ML sidecar with the Developer ID identity, then
-      # notarizes and staples using the App Store Connect API key. See
-      # RELEASING.md for how these secrets are produced.
+      # notarizes and staples using the App Store Connect API key. It also
+      # packs the in-app updater's openrize.app.tar.gz and signs it with the
+      # TAURI_SIGNING_PRIVATE_KEY minisign key. See RELEASING.md for how these
+      # secrets are produced.
       - name: Write App Store Connect API key
         env:
           APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
@@ -92,6 +94,9 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: >-
+            ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Verify signature and notarization
         run: |
@@ -105,6 +110,31 @@ jobs:
           cd src-tauri/target/release/bundle/macos
           ditto -c -k --sequesterRsrc --keepParent openrize.app openrize.app.zip
 
+      # The in-app updater reads this from releases/latest/download/latest.json
+      # (plugins.updater.endpoints in tauri.conf.json). CI only builds on
+      # Apple Silicon, so darwin-aarch64 is the only platform.
+      - name: Write updater manifest
+        env:
+          TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          bundle=src-tauri/target/release/bundle/macos
+          jq -n \
+            --arg version "${TAG#v}" \
+            --rawfile notes release-notes.md \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg url "https://github.com/$REPOSITORY/releases/download/$TAG/openrize.app.tar.gz" \
+            --rawfile signature "$bundle/openrize.app.tar.gz.sig" \
+            '{
+              version: $version,
+              notes: $notes,
+              pub_date: $pub_date,
+              platforms: {
+                "darwin-aarch64": { url: $url, signature: $signature }
+              }
+            }' > latest.json
+          cat latest.json
+
       - name: Create GitHub Release
         # v3.0.2
         uses: >-
@@ -113,5 +143,7 @@ jobs:
           files: |
             src-tauri/target/release/bundle/dmg/*.dmg
             src-tauri/target/release/bundle/macos/openrize.app.zip
+            src-tauri/target/release/bundle/macos/openrize.app.tar.gz
+            latest.json
           body: |
             ${{ steps.git-cliff.outputs.content }}

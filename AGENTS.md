@@ -43,10 +43,11 @@ is a decision, not an oversight.
 `.github/workflows/verify.yml` runs `pnpm verify` (check only) on pull requests, on a
 `macos-26` runner - `cargo clippy` compiles the Swift sidecar below, which needs Xcode 26+;
 verify that GitHub-hosted image still provides it before changing the runner label.
-`.github/workflows/release.yml` builds and publishes an unsigned macOS `.dmg`/`.app` to a
-GitHub Release on `v*` tags - no signing or notarization yet. Every user-facing change
-bumps the patch version in the same PR and uses a Conventional Commit subject; see
-`RELEASING.md` for the release and changelog procedure.
+`.github/workflows/release.yml` builds a signed, notarized macOS `.dmg`/`.app` on `v*` tags
+and publishes it to a GitHub Release, along with the `latest.json` manifest the in-app
+updater (`src-tauri/src/updater.rs`) reads - publishing a release ships it to every user.
+Every user-facing change bumps the patch version in the same PR and uses a Conventional
+Commit subject; see `RELEASING.md` for the release and changelog procedure.
 
 ## On-device AI sidecar
 

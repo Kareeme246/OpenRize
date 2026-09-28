@@ -17,6 +17,7 @@ use crate::reports::{self, EntryFilter, ExportFormat, ExportResult, GroupBy, Rol
 use crate::settings::Settings;
 use crate::timers::{now_epoch_ms, Timer};
 use crate::tray;
+use crate::updater::{self, UpdateStatus, UpdaterState};
 use crate::AppState;
 
 type Timers = Result<Vec<Timer>, String>;
@@ -885,4 +886,23 @@ pub fn reset_energy_history(app: AppHandle) -> Result<crate::energy::EnergySumma
         crate::energy::get_summary(&conn, crate::energy::DEFAULT_HISTORY_DAYS, None, None)?;
     let _ = app.emit(crate::energy::EVENT_ENERGY_CHANGED, &summary);
     Ok(summary)
+}
+
+// --- Updates -----------------------------------------------------------
+
+#[tauri::command]
+pub fn update_status(app: AppHandle) -> Result<UpdateStatus, String> {
+    app.state::<UpdaterState>().snapshot()
+}
+
+#[tauri::command]
+pub async fn check_for_updates(app: AppHandle) -> Result<UpdateStatus, String> {
+    updater::check(&app, true).await;
+    app.state::<UpdaterState>().snapshot()
+}
+
+/// Downloads and installs the available update, then restarts into it.
+#[tauri::command]
+pub async fn install_update(app: AppHandle) -> Result<(), String> {
+    updater::install(&app).await
 }

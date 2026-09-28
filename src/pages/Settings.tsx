@@ -1,5 +1,11 @@
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   AiEffectiveness,
   PersonalModels,
@@ -20,6 +26,7 @@ import { useEnergy } from "../hooks/useEnergy";
 import { useSettings } from "../hooks/useSettings";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
+import { formatRelative, formatShortDate } from "../lib/format";
 import {
   ACCENT_ORDER,
   ACCENTS,
@@ -33,7 +40,7 @@ import {
   type Theme,
   type TrackingHours,
 } from "../lib/settings";
-import type { AiStatus } from "../lib/types";
+import type { AiStatus, ReleaseNotes, Route, UpdateStatus } from "../lib/types";
 
 const THEME_OPTIONS: SegmentedOption<Theme>[] = [
   { value: "system", label: "System" },
@@ -518,7 +525,189 @@ function TrackingHoursSetting({
   );
 }
 
-export function Settings() {
+/** "Checking…", "Downloading 42%", or when the last check ran. */
+function updateSummary(status: UpdateStatus, now: number): string {
+  switch (status.phase.kind) {
+    case "checking":
+      return "Checking for updates…";
+    case "downloading": {
+      const { downloaded, total } = status.phase;
+      return total
+        ? `Downloading ${Math.min(100, Math.round((downloaded / total) * 100))}%…`
+        : "Downloading…";
+    }
+    case "installing":
+      return "Installing - OpenRize will restart";
+    case "idle":
+      break;
+  }
+  if (status.available) {
+    return `Version ${status.available.version} is available. You have ${status.currentVersion}.`;
+  }
+  return status.lastCheckedMs === null
+    ? `You have ${status.currentVersion}`
+    : `Up to date · Checked ${formatRelative(status.lastCheckedMs, now).toLowerCase()}`;
+}
+
+/**
+ * git-cliff writes Markdown; shown as plain text, minus the heading and bold
+ * markers that would otherwise read as noise.
+ */
+function plainNotes(notes: string): string {
+  return (
+    notes
+      .split("\n")
+      // The "## [0.4.7] - 2026-09-28" title repeats the row's own header.
+      .filter((line) => !/^##\s*\[[^\]]*\]/.test(line))
+      .map((line) =>
+        line
+          .replace(/^#+\s*/, "")
+          .replace(/\*\*(.+?)\*\*/g, "$1")
+          .replace(/^(\s*)[-*]\s+/, "$1• "),
+      )
+      .join("\n")
+      .trim()
+  );
+}
+
+function ReleaseNotesList({ releases }: { releases: ReleaseNotes[] }) {
+  return (
+    <div className="max-h-56 overflow-y-auto overscroll-contain rounded-lg border border-line bg-inset-soft">
+      {releases.map((release) => (
+        <div
+          key={release.version}
+          className="border-b border-line-soft px-3 py-2.5 last:border-b-0"
+        >
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="font-mono text-[11.5px] font-semibold text-fg">
+              {release.version}
+            </span>
+            {release.publishedAt && (
+              <span className="text-[11px] text-fg-faint">
+                {formatShortDate(Date.parse(release.publishedAt))}
+              </span>
+            )}
+          </div>
+          <pre className="mt-1.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-fg-muted">
+            {plainNotes(release.notes) || "No release notes."}
+          </pre>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The updater's status and controls. The Rust side checks on its own
+ * schedule (see src-tauri/src/updater.rs); this only shows the result.
+ */
+function UpdatesSetting({
+  status,
+  reveal,
+}: {
+  status: UpdateStatus | null;
+  /** Scrolls the section into view whenever it changes (and is truthy). */
+  reveal: number;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [requestError, setRequestError] = useState<string | null>(null);
+
+  // Scrolls only Settings' own scroller: scrollIntoView would also shift the
+  // overflow-hidden app shell around it.
+  useEffect(() => {
+    const section = ref.current;
+    const scroller = section?.closest("main");
+    if (reveal === 0 || !section || !scroller) return;
+    const offset =
+      section.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top;
+    scroller.scrollTo({ top: scroller.scrollTop + offset - 22 });
+  }, [reveal]);
+
+  // Keeps "Checked 5 min ago" honest while the page stays open.
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+  useEffect(() => {
+    if (status?.lastCheckedMs) setNow(Date.now());
+  }, [status?.lastCheckedMs]);
+
+  const check = (): void => {
+    setRequestError(null);
+    api
+      .checkForUpdates()
+      .catch((cause: unknown) => setRequestError(describeError(cause)));
+  };
+  const install = (): void => {
+    setRequestError(null);
+    api
+      .installUpdate()
+      .catch((cause: unknown) => setRequestError(describeError(cause)));
+  };
+
+  const busy = status !== null && status.phase.kind !== "idle";
+  const error = requestError ?? status?.error ?? null;
+  const available = status?.available ?? null;
+
+  return (
+    <div ref={ref}>
+      <SettingGroup title="Updates">
+        <SettingRow
+          title="OpenRize updates"
+          description={
+            status === null ? "Loading…" : updateSummary(status, now)
+          }
+        >
+          {available ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={install}
+              className="shrink-0 rounded-lg bg-accent px-3 py-1.5 font-semibold text-[12px] text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Install &amp; restart
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={busy || status === null}
+              onClick={check}
+              className="shrink-0 rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] text-fg-muted hover:bg-surface-strong disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Check for updates
+            </button>
+          )}
+        </SettingRow>
+        {error && (
+          <div className="border-b border-line px-4 py-2 text-[11.5px] text-danger last:border-b-0">
+            {error}
+          </div>
+        )}
+        {available && (
+          <SettingBlock
+            title="What's new"
+            description="Installing restarts OpenRize. A running tracking session ends and a new one starts when it reopens."
+          >
+            <ReleaseNotesList releases={available.releases} />
+          </SettingBlock>
+        )}
+      </SettingGroup>
+    </div>
+  );
+}
+
+export function Settings({
+  route,
+  updates,
+  revealUpdates,
+}: {
+  route: Extract<Route, { name: "settings" }>;
+  updates: UpdateStatus | null;
+  /** Bumped each time the sidebar asks for the Updates section. */
+  revealUpdates: number;
+}) {
   const { settings, storage, error, update } = useSettings();
   const [openError, setOpenError] = useState<string | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -828,6 +1017,11 @@ export function Settings() {
           status="not-implemented"
         />
       </SettingGroup>
+
+      <UpdatesSetting
+        status={updates}
+        reveal={route.section === "updates" ? revealUpdates : 0}
+      />
     </main>
   );
 }

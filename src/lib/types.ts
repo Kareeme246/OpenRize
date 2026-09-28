@@ -589,3 +589,32 @@ export interface EnergySummary {
   samplesCount: number;
   windowDays: number;
 }
+
+// --- Updates (src-tauri/src/updater.rs) ---
+
+export type UpdatePhase =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "downloading"; downloaded: number; total: number | null }
+  | { kind: "installing" };
+
+export interface ReleaseNotes {
+  version: string;
+  /** RFC 3339 publish time, when known. */
+  publishedAt: string | null;
+  notes: string;
+}
+
+export interface AvailableUpdate {
+  version: string;
+  /** Every release newer than the installed version, newest first. */
+  releases: ReleaseNotes[];
+}
+
+export interface UpdateStatus {
+  currentVersion: string;
+  lastCheckedMs: number | null;
+  phase: UpdatePhase;
+  available: AvailableUpdate | null;
+  error: string | null;
+}

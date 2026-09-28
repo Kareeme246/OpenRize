@@ -9,6 +9,9 @@ interface SidebarProps {
   captureEnabled?: boolean;
   trackingActive?: boolean;
   onToggleCapture?: () => void;
+  /** The newer version ready to install, when there is one. */
+  updateVersion?: string;
+  onOpenUpdate?: () => void;
 }
 
 interface NavTabProps {
@@ -62,6 +65,8 @@ export function Sidebar({
   captureEnabled = true,
   trackingActive = captureEnabled,
   onToggleCapture,
+  updateVersion,
+  onOpenUpdate,
 }: SidebarProps) {
   const currentName = currentRoute.name;
 
@@ -168,6 +173,23 @@ export function Sidebar({
 
       {/* Bottom Pinned Controls */}
       <div className="mt-auto flex shrink-0 flex-col gap-2 pt-2 border-t border-line">
+        {updateVersion !== undefined && onOpenUpdate && (
+          <button
+            type="button"
+            title={`OpenRize ${updateVersion} is available`}
+            onClick={onOpenUpdate}
+            className="flex w-full items-center gap-2.5 rounded-[9px] bg-success-soft px-2.5 py-2 text-left text-[13px] font-semibold text-success transition-colors hover:bg-success/20"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              className="size-4 shrink-0 fill-current"
+              aria-hidden="true"
+            >
+              <path d="M12 2.5l2.3 6.6 6.7 2.4-6.7 2.4L12 20.5l-2.3-6.6L3 11.5l6.7-2.4z" />
+            </svg>
+            <span className="min-w-0 flex-1 truncate">Update available</span>
+          </button>
+        )}
         <NavTab
           active={currentName === "settings"}
           label="Settings"

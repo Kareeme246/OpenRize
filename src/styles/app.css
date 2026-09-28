@@ -35,6 +35,10 @@
   --review: #e7b447;
   --danger: #e97e7b;
   --danger-soft: rgba(233, 126, 123, 0.12);
+  /* Fixed green for "good news" (e.g. an available update), independent of
+     the user's accent choice. */
+  --success: #5bcf8f;
+  --success-soft: rgba(91, 207, 143, 0.15);
 
   /* Accent defaults; overwritten inline from the chosen palette. */
   --accent: #5bcf8f;
@@ -96,6 +100,8 @@
   --review: #a76114;
   --danger: #c83d39;
   --danger-soft: rgba(200, 61, 57, 0.1);
+  --success: #237f4e;
+  --success-soft: rgba(35, 127, 78, 0.12);
 
   --accent: #237f4e;
   --accent-dim: #1a643c;
@@ -152,6 +158,8 @@
   --color-review: var(--review);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
 
   --color-accent: var(--accent);
   --color-accent-dim: var(--accent-dim);

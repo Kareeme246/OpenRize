@@ -457,129 +457,134 @@ export function Calendar({ route, navigate }: CalendarProps) {
         </div>
       )}
 
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_320px] gap-4 overflow-hidden p-4">
-        <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-sm">
-          {scale === "day" && (
-            <DayView
-              dayStart={startMs}
-              entries={visible}
-              segments={segments}
-              loading={loading}
-              selectedId={review.selectedId}
-              categoryById={categoryById}
-              projectById={projectById}
-              onSelect={select}
-              onEmpty={() => {
-                select(undefined);
-                setReviewing(false);
-              }}
-              onCreate={async (startedAt, endedAt) => {
-                try {
-                  const categories =
-                    catalog.categories.length > 0
-                      ? catalog.categories
-                      : await api.listCategories();
-                  const breakCategory = categories.find(
-                    (c) => c.name.toLowerCase() === "break",
-                  );
-                  await api.createTimeEntry({
-                    startedAt,
-                    endedAt,
-                    description: "Untitled session",
-                    categoryId: breakCategory?.id,
-                  });
-                  await refresh();
-                } catch (cause) {
-                  setError(describeError(cause));
-                }
-              }}
-              now={now}
-            />
-          )}
-          {scale === "week" && (
-            <WeekView
-              weekStart={range.start}
-              entries={visible}
-              loading={loading}
-              selectedId={review.selectedId}
-              categoryById={categoryById}
-              projectById={projectById}
-              onSelect={select}
-              onOpenDay={(day) => go({ scale: "day", date: day })}
-              now={now}
-            />
-          )}
-          {scale === "month" && (
-            <MonthView
-              gridStart={grid.start}
-              weeks={grid.weeks}
-              month={range.start.getMonth()}
-              cells={cells}
-              categoryById={categoryById}
-              onOpenDay={(day) => go({ scale: "day", date: day })}
-            />
-          )}
-        </div>
+      <div className="min-h-0 flex-1 overflow-hidden p-4">
+        <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_320px] overflow-hidden rounded-xl border border-line bg-panel shadow-sm">
+          <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
+            {scale === "day" && (
+              <DayView
+                dayStart={startMs}
+                entries={visible}
+                segments={segments}
+                loading={loading}
+                selectedId={review.selectedId}
+                categoryById={categoryById}
+                projectById={projectById}
+                onSelect={select}
+                onEmpty={() => {
+                  select(undefined);
+                  setReviewing(false);
+                }}
+                onCreate={async (startedAt, endedAt) => {
+                  try {
+                    const categories =
+                      catalog.categories.length > 0
+                        ? catalog.categories
+                        : await api.listCategories();
+                    const breakCategory = categories.find(
+                      (c) => c.name.toLowerCase() === "break",
+                    );
+                    await api.createTimeEntry({
+                      startedAt,
+                      endedAt,
+                      description: "Untitled session",
+                      categoryId: breakCategory?.id,
+                    });
+                    await refresh();
+                  } catch (cause) {
+                    setError(describeError(cause));
+                  }
+                }}
+                now={now}
+              />
+            )}
+            {scale === "week" && (
+              <WeekView
+                weekStart={range.start}
+                entries={visible}
+                loading={loading}
+                selectedId={review.selectedId}
+                categoryById={categoryById}
+                projectById={projectById}
+                onSelect={select}
+                onOpenDay={(day) => go({ scale: "day", date: day })}
+                now={now}
+              />
+            )}
+            {scale === "month" && (
+              <MonthView
+                gridStart={grid.start}
+                weeks={grid.weeks}
+                month={range.start.getMonth()}
+                cells={cells}
+                categoryById={categoryById}
+                onOpenDay={(day) => go({ scale: "day", date: day })}
+              />
+            )}
+          </div>
 
-        <aside className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-sm">
-          {review.detail ? (
-            <EntryReviewSheet
-              review={review}
-              categories={catalog.categories}
-              projects={catalog.projects}
-              reviewPosition={reviewPosition}
-              onAccept={(id) => void accept(id)}
-              onReject={(id) => void reject(id)}
-              onClose={() => {
-                select(undefined);
-                setReviewing(false);
-              }}
-            />
-          ) : reviewing ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-              <div className="text-[22px] text-accent">✓</div>
-              <div className="font-semibold text-[13px] text-fg-strong">
-                All caught up
+          <aside className="flex min-h-0 flex-col overflow-hidden border-l border-line bg-panel">
+            {review.detail ? (
+              <EntryReviewSheet
+                review={review}
+                categories={catalog.categories}
+                projects={catalog.projects}
+                reviewPosition={reviewPosition}
+                onAccept={(id) => void accept(id)}
+                onReject={(id) => void reject(id)}
+                onClose={() => {
+                  select(undefined);
+                  setReviewing(false);
+                }}
+              />
+            ) : reviewing ? (
+              <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+                <div className="text-[22px] text-accent">✓</div>
+                <div className="font-semibold text-[13px] text-fg-strong">
+                  All caught up
+                </div>
+                <div className="text-[11.5px] text-fg-soft">
+                  {formatDuration(summary.reviewedMs)} reviewed{" "}
+                  {scale === "day" ? "today" : "this week"}
+                  {processingCount > 0 &&
+                    ` · ${processingCount} still categorizing`}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReviewing(false)}
+                  className="mt-2 rounded-md border border-line px-3 py-1 text-[11.5px] text-fg-soft hover:bg-surface hover:text-fg"
+                >
+                  Back to summary
+                </button>
               </div>
-              <div className="text-[11.5px] text-fg-soft">
-                {formatDuration(summary.reviewedMs)} reviewed{" "}
-                {scale === "day" ? "today" : "this week"}
-                {processingCount > 0 &&
-                  ` · ${processingCount} still categorizing`}
-              </div>
-              <button
-                type="button"
-                onClick={() => setReviewing(false)}
-                className="mt-2 rounded-md border border-line px-3 py-1 text-[11.5px] text-fg-soft hover:bg-surface hover:text-fg"
-              >
-                Back to summary
-              </button>
-            </div>
-          ) : (
-            <RangeSummary
-              title={
-                scale === "day"
-                  ? "Day summary"
-                  : scale === "week"
-                    ? "Week summary"
-                    : "Month summary"
-              }
-              workMs={summary.workMs}
-              targetMs={targetMs}
-              targetLabel={formatTargetHours(targetMs)}
-              entries={summary.count}
-              toReview={summary.toReview}
-              processing={processingCount}
-              categories={summary.categories}
-              topApps={
-                scale === "day"
-                  ? timeByApp(segments, now).map(({ app, ms }) => ({ app, ms }))
-                  : undefined
-              }
-              onStartReview={scale === "month" ? undefined : startReviewMode}
-            />
-          )}
-        </aside>
+            ) : (
+              <RangeSummary
+                title={
+                  scale === "day"
+                    ? "Day summary"
+                    : scale === "week"
+                      ? "Week summary"
+                      : "Month summary"
+                }
+                workMs={summary.workMs}
+                targetMs={targetMs}
+                targetLabel={formatTargetHours(targetMs)}
+                entries={summary.count}
+                toReview={summary.toReview}
+                processing={processingCount}
+                categories={summary.categories}
+                topApps={
+                  scale === "day"
+                    ? timeByApp(segments, now).map(({ app, ms }) => ({
+                        app,
+                        ms,
+                      }))
+                    : undefined
+                }
+                onStartReview={scale === "month" ? undefined : startReviewMode}
+              />
+            )}
+          </aside>
+        </div>
       </div>
     </div>
   );

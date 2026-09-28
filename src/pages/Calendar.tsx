@@ -7,7 +7,6 @@ import {
   InlineError,
   PageHeader,
   ScaleControl,
-  Tabs,
 } from "../components/Page";
 import { useAiStatus } from "../hooks/useAiStatus";
 import { useCatalog } from "../hooks/useCatalog";
@@ -43,20 +42,12 @@ import type {
   ActivitySegment,
   CalendarScale,
   Category,
-  Project,
   RollupCell,
   Route,
   TimeEntry,
 } from "../lib/types";
 import { DayView } from "./calendar/DayView";
 import { MonthView } from "./calendar/MonthView";
-import { rangeMetrics } from "./calendar/metrics";
-import {
-  LabelsTab,
-  PANEL_TAB_OPTIONS,
-  TasksTab,
-  usePanelTab,
-} from "./calendar/PanelTabs";
 import { RangeSummary } from "./calendar/RangeSummary";
 import { WeekView } from "./calendar/WeekView";
 
@@ -65,22 +56,6 @@ type CalendarRoute = Extract<Route, { name: "calendar" }>;
 interface CalendarProps {
   route: CalendarRoute;
   navigate: (route: Route) => void;
-}
-
-/** Project totals for the Labels tab; no project is the `none` key. */
-function projectSlices(
-  totals: Map<string | null, number>,
-  projectById: Map<string, Project>,
-): Slice[] {
-  return [...totals.entries()].map(([id, ms]) => {
-    const project = id ? projectById.get(id) : undefined;
-    return {
-      key: project ? project.id : "none",
-      label: project?.name ?? "No project",
-      color: project?.color ?? "var(--fg-ghost)",
-      ms,
-    };
-  });
 }
 
 /** Category totals in catalog order for the day summary. */
@@ -134,8 +109,6 @@ export function Calendar({ route, navigate }: CalendarProps) {
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [segments, setSegments] = useState<ActivitySegment[]>([]);
   const [cells, setCells] = useState<RollupCell[]>([]);
-  const [projectCells, setProjectCells] = useState<RollupCell[]>([]);
-  const [panelTab, setPanelTab] = usePanelTab();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
@@ -152,19 +125,12 @@ export function Calendar({ route, navigate }: CalendarProps) {
     const key = `${scale}:${startMs}`;
     try {
       if (scale === "month") {
-        const filter = {
-          startMs: grid.start.getTime(),
-          endMs: grid.end.getTime(),
-        };
-        const edges = calendarDayEdges(grid.start, grid.end);
-        const [next, byProject] = await Promise.all([
-          api.entryRollup(filter, edges, "category"),
-          api.entryRollup(filter, edges, "project"),
-        ]);
-        if (shownKey.current === key) {
-          setCells(next);
-          setProjectCells(byProject);
-        }
+        const next = await api.entryRollup(
+          { startMs: grid.start.getTime(), endMs: grid.end.getTime() },
+          calendarDayEdges(grid.start, grid.end),
+          "category",
+        );
+        if (shownKey.current === key) setCells(next);
       } else {
         const [list, snapshot] = await Promise.all([
           api.listTimeEntries(startMs, endMs - 1),
@@ -383,24 +349,14 @@ export function Calendar({ route, navigate }: CalendarProps) {
       : scale === "week"
         ? 7
         : new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
-  const firstDay =
-    scale === "month"
-      ? calendarDayEdges(grid.start, range.start).length - 1
-      : 0;
   const summary = useMemo(() => {
     const byCategory = new Map<string | null, number>();
-    const byProject = new Map<string | null, number>();
     let workMs = 0;
     let reviewedMs = 0;
     let count = 0;
     let toReview = 0;
     if (scale === "month") {
-      for (const cell of projectCells) {
-        if (cell.bucket < firstDay || cell.bucket >= firstDay + daysInRange)
-          continue;
-        const key = cell.key ?? null;
-        byProject.set(key, (byProject.get(key) ?? 0) + cell.ms);
-      }
+      const firstDay = calendarDayEdges(grid.start, range.start).length - 1;
       for (const cell of cells) {
         if (cell.bucket < firstDay || cell.bucket >= firstDay + daysInRange)
           continue;
@@ -416,8 +372,6 @@ export function Calendar({ route, navigate }: CalendarProps) {
         const ms = durationOf(entry, now);
         const key = entry.categoryId ?? null;
         byCategory.set(key, (byCategory.get(key) ?? 0) + ms);
-        const project = entry.projectId ?? null;
-        byProject.set(project, (byProject.get(project) ?? 0) + ms);
         if (countsAsWork(key, categoryById)) workMs += ms;
         if (entry.status === "approved") reviewedMs += ms;
       }
@@ -426,7 +380,6 @@ export function Calendar({ route, navigate }: CalendarProps) {
     }
     return {
       categories: categorySlices(byCategory, categoryById),
-      projects: projectSlices(byProject, projectById),
       workMs,
       reviewedMs,
       count,
@@ -435,12 +388,11 @@ export function Calendar({ route, navigate }: CalendarProps) {
   }, [
     scale,
     cells,
-    projectCells,
-    firstDay,
     visible,
     reviewQueue,
     categoryById,
-    projectById,
+    grid,
+    range,
     daysInRange,
     now,
   ]);
@@ -596,56 +548,28 @@ export function Calendar({ route, navigate }: CalendarProps) {
               </button>
             </div>
           ) : (
-            <>
-              <div className="px-4 pt-3.5">
-                <Tabs
-                  label="Calendar panel"
-                  tabs={PANEL_TAB_OPTIONS}
-                  value={panelTab}
-                  onChange={setPanelTab}
-                />
-              </div>
-              {panelTab === "labels" && (
-                <LabelsTab
-                  categories={summary.categories}
-                  projects={summary.projects}
-                />
-              )}
-              {panelTab === "tasks" && (
-                <TasksTab onManage={() => navigate({ name: "timers" })} />
-              )}
-              {panelTab === "metrics" && (
-                <RangeSummary
-                  workMs={summary.workMs}
-                  targetMs={targetMs}
-                  targetLabel={formatTargetHours(targetMs)}
-                  entries={summary.count}
-                  toReview={summary.toReview}
-                  processing={processingCount}
-                  metrics={rangeMetrics({
-                    scale,
-                    entries: visible,
-                    segments,
-                    cells,
-                    firstDay,
-                    days: daysInRange,
-                    workMs: summary.workMs,
-                    now,
-                  })}
-                  topApps={
-                    scale === "day"
-                      ? timeByApp(segments, now).map(({ app, ms }) => ({
-                          app,
-                          ms,
-                        }))
-                      : undefined
-                  }
-                  onStartReview={
-                    scale === "month" ? undefined : startReviewMode
-                  }
-                />
-              )}
-            </>
+            <RangeSummary
+              title={
+                scale === "day"
+                  ? "Day summary"
+                  : scale === "week"
+                    ? "Week summary"
+                    : "Month summary"
+              }
+              workMs={summary.workMs}
+              targetMs={targetMs}
+              targetLabel={formatTargetHours(targetMs)}
+              entries={summary.count}
+              toReview={summary.toReview}
+              processing={processingCount}
+              categories={summary.categories}
+              topApps={
+                scale === "day"
+                  ? timeByApp(segments, now).map(({ app, ms }) => ({ app, ms }))
+                  : undefined
+              }
+              onStartReview={scale === "month" ? undefined : startReviewMode}
+            />
           )}
         </aside>
       </div>

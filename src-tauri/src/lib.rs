@@ -4,6 +4,7 @@ mod capture;
 mod commands;
 mod energy;
 mod entry_builder;
+mod invoices;
 mod login_item;
 mod migrations;
 mod models;
@@ -190,6 +191,11 @@ pub fn run() {
             commands::create_client,
             commands::update_client,
             commands::delete_client,
+            // Local invoice lifecycle.
+            commands::list_invoices,
+            commands::create_invoice,
+            commands::set_invoice_status,
+            commands::delete_draft_invoice,
             commands::list_time_entries,
             commands::get_entry_detail,
             commands::update_time_entry,

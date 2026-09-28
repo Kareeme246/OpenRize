@@ -220,6 +220,10 @@ impl ActivityStore {
         &self.conn
     }
 
+    pub(crate) fn conn_mut(&mut self) -> &mut Connection {
+        &mut self.conn
+    }
+
     fn read_setting(&self, key: &str) -> Option<String> {
         self.conn
             .query_row(
@@ -893,7 +897,7 @@ impl ActivityStore {
                     .map_err(|e| e.to_string())?;
                 if invoiced {
                     return Err(
-                        "This project has invoiced time, so its client can't change. Void the invoice first."
+                        "This project has invoiced time, so its client can't change. Delete its draft invoice first."
                             .to_string(),
                     );
                 }

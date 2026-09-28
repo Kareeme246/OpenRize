@@ -112,6 +112,29 @@ export interface UpdateProject {
   hourlyRate?: number | null;
 }
 
+export interface InvoiceLine {
+  entryId: string;
+  projectName: string;
+  description: string;
+  startedAt: number;
+  endedAt: number;
+  rate: number;
+  amountCents: number;
+}
+
+export interface Invoice {
+  id: string;
+  clientId: string;
+  clientName: string;
+  clientEmail?: string;
+  clientAddress?: string;
+  currency: string;
+  status: "draft" | "sent" | "paid";
+  createdAt: number;
+  updatedAt: number;
+  lines: InvoiceLine[];
+}
+
 export interface TimeEntry {
   id: string;
   startedAt: number;

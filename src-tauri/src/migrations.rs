@@ -249,6 +249,42 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
     }
 
+    if current_version < 2 {
+        let tx = conn.transaction()?;
+        tx.execute_batch(
+            "CREATE TABLE invoices (
+               id TEXT PRIMARY KEY,
+               client_id TEXT NOT NULL,
+               client_name TEXT NOT NULL,
+               client_email TEXT,
+               client_address TEXT,
+               currency TEXT NOT NULL,
+               status TEXT NOT NULL CHECK (status IN ('draft', 'sent', 'paid')),
+               created_at INTEGER NOT NULL,
+               updated_at INTEGER NOT NULL
+             );
+             CREATE TABLE invoice_lines (
+               entry_id TEXT PRIMARY KEY,
+               invoice_id TEXT NOT NULL REFERENCES invoices(id),
+               project_name TEXT NOT NULL,
+               description TEXT NOT NULL,
+               started_at INTEGER NOT NULL,
+               ended_at INTEGER NOT NULL,
+               rate REAL NOT NULL,
+               amount_cents INTEGER NOT NULL
+             );
+             CREATE INDEX idx_invoice_lines_invoice ON invoice_lines(invoice_id);
+             CREATE TRIGGER protect_invoiced_time BEFORE UPDATE OF started_at, ended_at, description, project_id, status, billable, deleted_at ON time_entries
+             WHEN OLD.invoice_id IS NOT NULL AND (
+               NEW.started_at IS NOT OLD.started_at OR NEW.ended_at IS NOT OLD.ended_at OR
+               NEW.description IS NOT OLD.description OR NEW.project_id IS NOT OLD.project_id OR
+               NEW.status IS NOT OLD.status OR NEW.billable IS NOT OLD.billable OR NEW.deleted_at IS NOT OLD.deleted_at
+             ) BEGIN SELECT RAISE(ABORT, 'Invoiced time cannot be edited; delete its draft invoice first'); END;
+             PRAGMA user_version = 2;",
+        )?;
+        tx.commit()?;
+    }
+
     Ok(())
 }
 
@@ -411,7 +447,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 1);
+        assert_eq!(v, 2);
 
         let cat_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM categories;", [], |r| r.get(0))
@@ -426,7 +462,7 @@ mod tests {
     }
 
     #[test]
-    fn fresh_schema_matches_schema_migrated_through_v7() {
+    fn fresh_schema_matches_legacy_schema_upgraded_to_v2() {
         let mut fresh = Connection::open_in_memory().unwrap();
         run_migrations(&mut fresh).unwrap();
 
@@ -437,7 +473,10 @@ mod tests {
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
         assert_eq!(v, 7);
-
+        // The shipped pre-invoice schema is equivalent to legacy v7, but its
+        // user_version was reset to 1. Reproduce an upgrade of that install.
+        legacy.execute_batch("PRAGMA user_version = 1;").unwrap();
+        run_migrations(&mut legacy).unwrap();
         assert_eq!(schema_snapshot(&fresh), schema_snapshot(&legacy));
     }
 

@@ -195,7 +195,7 @@ export default function App() {
           />
         );
       case "timesheets":
-        return <Timesheets />;
+        return <Timesheets navigate={navigate} />;
       case "projects":
         return (
           <Projects

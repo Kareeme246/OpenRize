@@ -174,7 +174,6 @@ export function ProjectDetail({
     rate !== undefined
       ? ((stats?.billableMs ?? 0) / 3_600_000) * rate
       : undefined;
-  const hasEntries = (stats?.entries ?? 0) > 0;
   const due = project.dueDate
     ? `Due ${formatShortDate(project.dueDate)}`
     : undefined;
@@ -233,12 +232,7 @@ export function ProjectDetail({
             <button
               type="button"
               onClick={() => setConfirmDelete(true)}
-              disabled={hasEntries}
-              title={
-                hasEntries
-                  ? "Only a project without entries can be deleted. Archive it instead."
-                  : "Delete project"
-              }
+              title="Delete project"
               className={`${BUTTON_SECONDARY} text-danger`}
             >
               Delete
@@ -479,7 +473,7 @@ export function ProjectDetail({
       {confirmDelete && (
         <ConfirmDialog
           title={`Delete ${project.name}?`}
-          body="The project and its AI-hint rules are removed. It has no entries, so no tracked time changes."
+          body="All time entries will remain in your timesheet but will no longer be linked to this project. The project and its rules will be removed. This cannot be undone."
           confirmLabel="Delete"
           onCancel={() => setConfirmDelete(false)}
           onConfirm={() => void remove()}

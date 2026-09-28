@@ -1059,10 +1059,10 @@ mod tests {
     }
 
     #[test]
-    fn a_project_with_entries_cannot_be_deleted() {
+    fn deleting_a_project_unlinks_its_entries_and_rules() {
         let mut store = store();
         let project = store
-            .create_project(new_project("OpenRize", None), 1)
+            .create_project(new_project("OpenRize", Some("figma.com")), 1)
             .unwrap();
         store
             .conn()
@@ -1072,12 +1072,50 @@ mod tests {
                 [&project.id],
             )
             .unwrap();
-        assert!(store.delete_project(&project.id, 2).is_err());
-        let empty = store
-            .create_project(new_project("Empty", Some("figma.com")), 1)
+        store
+            .conn()
+            .execute(
+                "INSERT INTO time_entries (id, started_at, ended_at, description, project_id, status, source, billable, invoice_id, created_at, updated_at)
+                 VALUES ('invoiced', 0, 1, 'x', ?1, 'approved', 'auto', 1, 'inv', 0, 0);",
+                [&project.id],
+            )
             .unwrap();
-        store.delete_project(&empty.id, 2).unwrap();
-        assert!(hint_rules(store.conn(), &empty.id).is_empty());
+        assert!(store
+            .conn()
+            .execute(
+                "UPDATE time_entries SET project_id = NULL WHERE id = 'invoiced';",
+                [],
+            )
+            .is_err());
+        store.delete_project(&project.id, 2).unwrap();
+        let linked_count: i64 = store
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM time_entries WHERE project_id = ?1;",
+                [&project.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(linked_count, 0);
+        let preserved_invoice: Option<String> = store
+            .conn()
+            .query_row(
+                "SELECT invoice_id FROM time_entries WHERE id = 'invoiced';",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(preserved_invoice.as_deref(), Some("inv"));
+        assert!(hint_rules(store.conn(), &project.id).is_empty());
+        let deleted_at: Option<i64> = store
+            .conn()
+            .query_row(
+                "SELECT deleted_at FROM projects WHERE id = ?1;",
+                [&project.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(deleted_at, Some(2));
     }
 
     #[test]

@@ -47,6 +47,7 @@ const EVENT_LABELS: Record<string, string> = {
   suggested: "Suggested",
   accepted: "Accepted",
   rejected: "Rejected",
+  unapproved: "Unapproved",
   edited: "Edited",
   split: "Split",
   merged: "Merged",
@@ -73,12 +74,14 @@ export interface EntryReviewPanelProps {
   onClose: () => void;
   onAccept: () => void;
   onReject: () => void;
+  onUnapprove: () => void;
   onSplit: () => void;
   onDelete: () => void;
   onRetry: () => void;
   onSetField: (field: SuggestionField, valueId: string | null) => void;
   onToggleBillable: () => void;
   onSaveDescription: (description: string) => void;
+  onSetTimes: (startedAt: number, endedAt: number) => void;
   onResolveRule: (suggestion: RuleSuggestion, accept: boolean) => void;
   formatTime: (epochMs: number) => string;
   formatDuration: (ms: number) => string;
@@ -195,12 +198,14 @@ export function EntryReviewPanel({
   onClose,
   onAccept,
   onReject,
+  onUnapprove,
   onSplit,
   onDelete,
   onRetry,
   onSetField,
   onToggleBillable,
   onSaveDescription,
+  onSetTimes,
   onResolveRule,
   formatTime,
   formatDuration,
@@ -248,13 +253,16 @@ export function EntryReviewPanel({
     job?.state === "queued" ||
     job?.state === "running";
   const approved = entry.status === "approved";
+  const invoiced = entry.invoiceId !== undefined && entry.invoiceId !== null;
+  // Approved entries are frozen; unapprove one to edit it again.
+  const locked = approved;
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (isTyping(event.target)) return;
       const key = event.key.toLowerCase();
-      if (/^[1-9]$/.test(key) && active && !approved) {
+      if (/^[1-9]$/.test(key) && active && !locked) {
         const option = active.options[Number(key) - 1];
         if (option) {
           event.preventDefault();
@@ -273,7 +281,7 @@ export function EntryReviewPanel({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [active, approved, onSetField, suggestProjects]);
+  }, [active, locked, onSetField, suggestProjects]);
 
   const nameOf = (field: SuggestionField, valueId?: string): string => {
     if (field === "category") {
@@ -284,6 +292,13 @@ export function EntryReviewPanel({
       return hasActive ? "No project" : "No projects yet";
     }
     return projects.find((p) => p.id === valueId)?.name ?? "Unknown";
+  };
+
+  /** Saves new bounds; an end at or before the start is refused. */
+  const commitTimes = (startedAt: number, endedAt: number): boolean => {
+    if (endedAt <= startedAt) return false;
+    onSetTimes(startedAt, endedAt);
+    return true;
   };
 
   const saveDescription = (): void => {
@@ -314,9 +329,23 @@ export function EntryReviewPanel({
 
       <div className="flex-1 space-y-3 overflow-y-auto p-4">
         <div className="flex items-center justify-between text-[12px] text-fg-soft">
-          <span>
-            {formatTime(entry.startedAt)}–{formatTime(entry.endedAt)} ·{" "}
-            {formatDuration(entry.endedAt - entry.startedAt)}
+          <span className="flex items-center gap-1">
+            <TimeField
+              epochMs={entry.startedAt}
+              label="Start time"
+              disabled={locked}
+              onCommit={(startedAt) => commitTimes(startedAt, entry.endedAt)}
+            />
+            <span>–</span>
+            <TimeField
+              epochMs={entry.endedAt}
+              label="End time"
+              disabled={locked}
+              onCommit={(endedAt) => commitTimes(entry.startedAt, endedAt)}
+            />
+            <span className="ml-1">
+              · {formatDuration(entry.endedAt - entry.startedAt)}
+            </span>
           </span>
           <button
             type="button"
@@ -411,7 +440,7 @@ export function EntryReviewPanel({
             model={model}
             active={model.field === activeField}
             processing={processing}
-            locked={approved}
+            locked={locked}
             onActivate={() => setActiveField(model.field)}
             onPick={(valueId) => onSetField(model.field, valueId)}
             nameOf={(valueId) => nameOf(model.field, valueId)}
@@ -449,14 +478,29 @@ export function EntryReviewPanel({
             {approved ? "Approved ✓" : "Accept"}{" "}
             {!approved && <span className="text-[10px] opacity-70">⌘↵</span>}
           </button>
-          <button
-            type="button"
-            onClick={onReject}
-            disabled={approved}
-            className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Reject <span className="text-[10px] opacity-70">⌘⌫</span>
-          </button>
+          {approved ? (
+            <button
+              type="button"
+              onClick={onUnapprove}
+              disabled={invoiced}
+              title={
+                invoiced
+                  ? "Invoiced entries can't be unapproved"
+                  : "Return to pending to edit"
+              }
+              className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Unapprove
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onReject}
+              className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+            >
+              Reject <span className="text-[10px] opacity-70">⌘⌫</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={onSplit}
@@ -588,6 +632,66 @@ export function EntryReviewPanel({
         </div>
       </div>
     </div>
+  );
+}
+
+/** `HH:MM` in local time, the value format of `<input type="time">`. */
+function toTimeValue(epochMs: number): string {
+  const date = new Date(epochMs);
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/**
+ * An inline start/end time editor. Keeps the boundary's calendar day and
+ * commits on Enter or blur; Esc reverts.
+ */
+function TimeField({
+  epochMs,
+  label,
+  disabled,
+  onCommit,
+}: {
+  epochMs: number;
+  label: string;
+  disabled: boolean;
+  /** Returns false to refuse the value and revert the field. */
+  onCommit: (epochMs: number) => boolean;
+}) {
+  const [value, setValue] = useState(() => toTimeValue(epochMs));
+  useEffect(() => setValue(toTimeValue(epochMs)), [epochMs]);
+
+  const commit = (): void => {
+    const match = /^(\d{2}):(\d{2})$/.exec(value);
+    if (!match) {
+      setValue(toTimeValue(epochMs));
+      return;
+    }
+    const next = new Date(epochMs);
+    next.setHours(Number(match[1]), Number(match[2]), 0, 0);
+    if (next.getTime() !== epochMs && !onCommit(next.getTime())) {
+      setValue(toTimeValue(epochMs));
+    }
+  };
+
+  return (
+    <input
+      type="time"
+      aria-label={label}
+      value={value}
+      disabled={disabled}
+      onChange={(event) => setValue(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.currentTarget.blur();
+        } else if (event.key === "Escape") {
+          event.stopPropagation();
+          setValue(toTimeValue(epochMs));
+        }
+      }}
+      className="rounded border border-transparent bg-transparent px-1 py-0.5 font-mono text-[12px] text-fg-soft outline-hidden transition-colors hover:border-line focus:border-accent focus:bg-canvas disabled:hover:border-transparent"
+    />
   );
 }
 

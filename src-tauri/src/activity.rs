@@ -1470,6 +1470,29 @@ impl ActivityStore {
         Ok(())
     }
 
+    /// Returns approved entries to pending, keeping their category and
+    /// project so they can be edited and approved again. Invoiced time stays
+    /// frozen. Does not re-run AI classification.
+    pub fn unapprove_time_entries(&mut self, ids: &[String], now: u64) -> Result<(), String> {
+        for id in ids {
+            let entry = self.time_entry(id)?;
+            if entry.invoice_id.is_some() {
+                return Err("Invoiced entries cannot be unapproved".to_string());
+            }
+            if entry.status != "approved" {
+                continue;
+            }
+            self.conn
+                .execute(
+                    "UPDATE time_entries SET status = 'pending', approved_by = NULL, updated_at = ?1 WHERE id = ?2;",
+                    params![now as i64, id],
+                )
+                .map_err(|e| e.to_string())?;
+            self.log_event(id, "unapproved", "user", None, now);
+        }
+        Ok(())
+    }
+
     /// Queues an entry for (re)classification, e.g. "Couldn't categorize ·
     /// Retry".
     pub fn queue_classification(&mut self, id: &str, now: u64) -> Result<(), String> {
@@ -1624,8 +1647,9 @@ impl ActivityStore {
         }
         let id = uuid::Uuid::now_v7().to_string();
         let billable = new_entry.billable.unwrap_or(false) as i64;
-        let status = if unclassified { "pending" } else { "approved" };
-        let approved_by = if unclassified { None } else { Some("user") };
+        let pending = unclassified || new_entry.review;
+        let status = if pending { "pending" } else { "approved" };
+        let approved_by = if pending { None } else { Some("user") };
 
         self.conn.execute(
             "INSERT INTO time_entries (id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, created_at, updated_at, description_origin)
@@ -1647,8 +1671,9 @@ impl ActivityStore {
         self.log_event(&id, "created", "user", None, now);
         if unclassified && new_entry.ended_at <= now {
             crate::ai::store::enqueue(&self.conn, &id, crate::ai::store::JOB_CLASSIFY, now)?;
-        } else if !unclassified {
-            // A labeled hand-made entry contributes to kNN.
+        } else if !pending {
+            // A labeled hand-made entry contributes to kNN; one left for
+            // review is embedded once it is approved.
             crate::ai::store::enqueue(&self.conn, &id, crate::ai::store::JOB_EMBED, now)?;
         }
 
@@ -2300,10 +2325,8 @@ mod tests {
         let entries = store
             .rebuild_time_entries_in_range(0, 5_000, 5_000)
             .unwrap();
-        let code_entry = entries
-            .iter()
-            .find(|entry| entry.description.contains("Code"))
-            .unwrap();
+        // The session covering the Code segment starts first.
+        let code_entry = entries.first().unwrap();
 
         store.delete_time_entry(&code_entry.id, 6_000).unwrap();
 
@@ -2717,6 +2740,7 @@ mod tests {
                     category_id: None,
                     project_id: None,
                     billable: None,
+                    review: false,
                 },
                 2_000,
             )
@@ -2734,7 +2758,7 @@ mod tests {
     }
 
     #[test]
-    fn manual_drag_session_with_break_label_bypasses_ai_categorization() {
+    fn manual_drag_session_stays_pending_without_ai_categorization() {
         let mut store = store();
         let cat = store
             .create_category(
@@ -2756,25 +2780,38 @@ mod tests {
                     started_at: 1_000,
                     ended_at: 10 * MIN,
                     description: "Untitled session".to_string(),
-                    category_id: Some(cat.id),
+                    category_id: Some(cat.id.clone()),
                     project_id: None,
                     billable: None,
+                    review: true,
                 },
                 11 * MIN,
             )
             .unwrap();
-        assert_eq!(entry.status, "approved");
+        assert_eq!(entry.status, "pending");
+        assert_eq!(entry.category_id, Some(cat.id.clone()));
         assert_eq!(entry.description, "Untitled session");
         assert_eq!(entry.project_id, None);
         let has_classify_job: bool = store
             .conn()
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM classify_jobs WHERE entry_id = ?1 AND kind = 'classify')",
+                "SELECT EXISTS(SELECT 1 FROM classify_jobs WHERE entry_id = ?1 AND kind IN ('classify', 'embed'))",
                 rusqlite::params![entry.id],
                 |row| row.get(0),
             )
             .unwrap();
         assert!(!has_classify_job);
+
+        store
+            .approve_time_entries(std::slice::from_ref(&entry.id), "user", 12 * MIN)
+            .unwrap();
+        store
+            .unapprove_time_entries(std::slice::from_ref(&entry.id), 13 * MIN)
+            .unwrap();
+        let reopened = store.time_entry(&entry.id).unwrap();
+        assert_eq!(reopened.status, "pending");
+        assert_eq!(reopened.approved_by, None);
+        assert_eq!(reopened.category_id, Some(cat.id));
     }
 
     #[test]

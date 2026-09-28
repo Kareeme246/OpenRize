@@ -487,6 +487,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
                     endedAt,
                     description: "Untitled session",
                     categoryId: breakCategory?.id,
+                    review: true,
                   });
                   await refresh();
                 } catch (cause) {

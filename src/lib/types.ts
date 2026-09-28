@@ -305,6 +305,8 @@ export interface NewTimeEntry {
   categoryId?: string;
   projectId?: string;
   billable?: boolean;
+  /** Keep a labeled entry pending for review, without AI classification. */
+  review?: boolean;
 }
 
 export interface UpdateTimeEntry {

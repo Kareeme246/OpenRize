@@ -200,6 +200,7 @@ pub fn run() {
             commands::get_entry_detail,
             commands::update_time_entry,
             commands::approve_time_entries,
+            commands::unapprove_time_entries,
             commands::reject_time_entry,
             commands::split_time_entry,
             commands::delete_time_entry,

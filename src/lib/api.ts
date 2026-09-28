@@ -277,6 +277,13 @@ export async function approveTimeEntries(ids: string[]): Promise<TimeEntry[]> {
   return await invoke<TimeEntry[]>("approve_time_entries", { ids });
 }
 
+/** Returns approved entries to pending for editing; no AI re-run. */
+export async function unapproveTimeEntries(
+  ids: string[],
+): Promise<TimeEntry[]> {
+  return await invoke<TimeEntry[]>("unapprove_time_entries", { ids });
+}
+
 /** One patch applied to many entries; returns them updated. */
 export async function updateTimeEntries(
   ids: string[],

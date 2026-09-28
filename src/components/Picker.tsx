@@ -7,6 +7,14 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
+
+type MenuPosition = {
+  left: number;
+  minWidth: number;
+  top?: number;
+  bottom?: number;
+};
 
 function OptionDot({ color, size = 7 }: { color: string; size?: number }) {
   return (
@@ -96,8 +104,9 @@ export function Picker<T extends string | number>({
   const ariaLabel = ariaLabelProp || ariaLabelAlt;
   const explicitColor = displayColorProp || color;
   const [isOpen, setIsOpen] = useState(false);
-  const [openUpward, setOpenUpward] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  const [menuPosition, setMenuPosition] = useState<MenuPosition | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -115,11 +124,13 @@ export function Picker<T extends string | number>({
     if (!isOpen) return;
 
     function handlePointerDown(event: PointerEvent) {
+      const target = event.target as Node;
       if (
-        containerRef.current &&
-        !containerRef.current.contains(event.target as Node)
+        !containerRef.current?.contains(target) &&
+        !listboxRef.current?.contains(target)
       ) {
         setIsOpen(false);
+        setPortalTarget(null);
       }
     }
 
@@ -128,6 +139,7 @@ export function Picker<T extends string | number>({
         event.preventDefault();
         event.stopPropagation();
         setIsOpen(false);
+        setPortalTarget(null);
         triggerRef.current?.focus();
       }
     }
@@ -147,7 +159,18 @@ export function Picker<T extends string | number>({
       const rect = triggerRef.current.getBoundingClientRect();
       const spaceBelow = window.innerHeight - rect.bottom;
       const spaceAbove = rect.top;
-      setOpenUpward(spaceBelow < 240 && spaceAbove > spaceBelow);
+      const openUp = spaceBelow < 240 && spaceAbove > spaceBelow;
+      const dialog = containerRef.current?.closest("dialog");
+      setPortalTarget(
+        dialog instanceof HTMLDialogElement ? dialog : document.body,
+      );
+      setMenuPosition({
+        left: rect.left,
+        minWidth: rect.width,
+        ...(openUp
+          ? { bottom: window.innerHeight - rect.top + 4 }
+          : { top: rect.bottom + 4 }),
+      });
     }
     setIsOpen(true);
     setHighlightedIndex(selectedIndex >= 0 ? selectedIndex : 0);
@@ -155,6 +178,7 @@ export function Picker<T extends string | number>({
 
   const closeMenu = useCallback(() => {
     setIsOpen(false);
+    setPortalTarget(null);
     triggerRef.current?.focus();
   }, []);
 
@@ -163,6 +187,7 @@ export function Picker<T extends string | number>({
       if (option.disabled) return;
       onChange(option.value);
       setIsOpen(false);
+      setPortalTarget(null);
       triggerRef.current?.focus();
     },
     [onChange],
@@ -336,6 +361,7 @@ export function Picker<T extends string | number>({
     : triggerClasses;
 
   let flatIndexCounter = 0;
+  const menuTarget = portalTarget;
 
   return (
     <div
@@ -386,126 +412,132 @@ export function Picker<T extends string | number>({
         </svg>
       </button>
 
-      {isOpen && (
-        <div
-          ref={listboxRef}
-          id={listboxId}
-          role="listbox"
-          aria-label={ariaLabel || label}
-          className={`absolute z-50 min-w-full max-h-60 w-max max-w-xs overflow-y-auto overscroll-contain rounded-lg border border-line bg-panel p-1 shadow-xl shadow-black/50 ${
-            openUpward ? "bottom-full mb-1" : "top-full mt-1"
-          }`}
-        >
-          {options.map((item, itemIdx) => {
-            if (isGroup(item)) {
-              return (
-                <div key={item.group || itemIdx} className="py-1">
-                  <div className="px-2 py-1 font-semibold text-[10px] uppercase tracking-wider text-fg-faint">
-                    {item.group}
-                  </div>
-                  {item.options.map((opt) => {
-                    const currentIndex = flatIndexCounter++;
-                    const isSelected = opt.value === value;
-                    const isHighlighted = currentIndex === highlightedIndex;
-
-                    return (
-                      <button
-                        key={String(opt.value)}
-                        type="button"
-                        id={`${listboxId}-opt-${currentIndex}`}
-                        role="option"
-                        aria-selected={isSelected}
-                        aria-disabled={opt.disabled}
-                        data-picker-index={currentIndex}
-                        disabled={opt.disabled}
-                        onClick={() => selectOption(opt)}
-                        onPointerEnter={() => setHighlightedIndex(currentIndex)}
-                        className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] transition-colors ${
-                          opt.disabled
-                            ? "pointer-events-none opacity-40 text-fg-faint"
-                            : isHighlighted
-                              ? "bg-surface-strong text-fg-strong"
-                              : isSelected
-                                ? "bg-surface text-accent font-medium"
-                                : "text-fg-muted hover:bg-surface hover:text-fg"
-                        }`}
-                      >
-                        <span className="flex min-w-0 flex-1 items-center gap-2 truncate">
-                          {opt.color && (
-                            <OptionDot color={opt.color} size={7} />
-                          )}
-                          <span className="truncate">{opt.label}</span>
-                        </span>
-                        {isSelected && (
-                          <svg
-                            viewBox="0 0 24 24"
-                            aria-hidden="true"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth={2.5}
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            className="size-3.5 shrink-0 text-accent"
-                          >
-                            <path d="M20 6 9 17l-5-5" />
-                          </svg>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              );
+      {isOpen &&
+        menuTarget &&
+        createPortal(
+          <div
+            ref={listboxRef}
+            id={listboxId}
+            role="listbox"
+            aria-label={ariaLabel || label}
+            style={
+              menuPosition ? { ...menuPosition, position: "fixed" } : undefined
             }
+            className="fixed z-50 min-w-full max-h-60 w-max max-w-xs overflow-y-auto overscroll-contain rounded-lg border border-line bg-panel p-1 shadow-xl shadow-black/50"
+          >
+            {options.map((item, itemIdx) => {
+              if (isGroup(item)) {
+                return (
+                  <div key={item.group || itemIdx} className="py-1">
+                    <div className="px-2 py-1 font-semibold text-[10px] uppercase tracking-wider text-fg-faint">
+                      {item.group}
+                    </div>
+                    {item.options.map((opt) => {
+                      const currentIndex = flatIndexCounter++;
+                      const isSelected = opt.value === value;
+                      const isHighlighted = currentIndex === highlightedIndex;
 
-            const currentIndex = flatIndexCounter++;
-            const isSelected = item.value === value;
-            const isHighlighted = currentIndex === highlightedIndex;
+                      return (
+                        <button
+                          key={String(opt.value)}
+                          type="button"
+                          id={`${listboxId}-opt-${currentIndex}`}
+                          role="option"
+                          aria-selected={isSelected}
+                          aria-disabled={opt.disabled}
+                          data-picker-index={currentIndex}
+                          disabled={opt.disabled}
+                          onClick={() => selectOption(opt)}
+                          onPointerEnter={() =>
+                            setHighlightedIndex(currentIndex)
+                          }
+                          className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] transition-colors ${
+                            opt.disabled
+                              ? "pointer-events-none opacity-40 text-fg-faint"
+                              : isHighlighted
+                                ? "bg-surface-strong text-fg-strong"
+                                : isSelected
+                                  ? "bg-surface text-accent font-medium"
+                                  : "text-fg-muted hover:bg-surface hover:text-fg"
+                          }`}
+                        >
+                          <span className="flex min-w-0 flex-1 items-center gap-2 truncate">
+                            {opt.color && (
+                              <OptionDot color={opt.color} size={7} />
+                            )}
+                            <span className="truncate">{opt.label}</span>
+                          </span>
+                          {isSelected && (
+                            <svg
+                              viewBox="0 0 24 24"
+                              aria-hidden="true"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth={2.5}
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              className="size-3.5 shrink-0 text-accent"
+                            >
+                              <path d="M20 6 9 17l-5-5" />
+                            </svg>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              }
 
-            return (
-              <button
-                key={String(item.value)}
-                type="button"
-                id={`${listboxId}-opt-${currentIndex}`}
-                role="option"
-                aria-selected={isSelected}
-                aria-disabled={item.disabled}
-                data-picker-index={currentIndex}
-                disabled={item.disabled}
-                onClick={() => selectOption(item)}
-                onPointerEnter={() => setHighlightedIndex(currentIndex)}
-                className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] transition-colors ${
-                  item.disabled
-                    ? "pointer-events-none opacity-40 text-fg-faint"
-                    : isHighlighted
-                      ? "bg-surface-strong text-fg-strong"
-                      : isSelected
-                        ? "bg-surface text-accent font-medium"
-                        : "text-fg-muted hover:bg-surface hover:text-fg"
-                }`}
-              >
-                <span className="flex min-w-0 flex-1 items-center gap-2 truncate">
-                  {item.color && <OptionDot color={item.color} size={7} />}
-                  <span className="truncate">{item.label}</span>
-                </span>
-                {isSelected && (
-                  <svg
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={2.5}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="size-3.5 shrink-0 text-accent"
-                  >
-                    <path d="M20 6 9 17l-5-5" />
-                  </svg>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      )}
+              const currentIndex = flatIndexCounter++;
+              const isSelected = item.value === value;
+              const isHighlighted = currentIndex === highlightedIndex;
+
+              return (
+                <button
+                  key={String(item.value)}
+                  type="button"
+                  id={`${listboxId}-opt-${currentIndex}`}
+                  role="option"
+                  aria-selected={isSelected}
+                  aria-disabled={item.disabled}
+                  data-picker-index={currentIndex}
+                  disabled={item.disabled}
+                  onClick={() => selectOption(item)}
+                  onPointerEnter={() => setHighlightedIndex(currentIndex)}
+                  className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] transition-colors ${
+                    item.disabled
+                      ? "pointer-events-none opacity-40 text-fg-faint"
+                      : isHighlighted
+                        ? "bg-surface-strong text-fg-strong"
+                        : isSelected
+                          ? "bg-surface text-accent font-medium"
+                          : "text-fg-muted hover:bg-surface hover:text-fg"
+                  }`}
+                >
+                  <span className="flex min-w-0 flex-1 items-center gap-2 truncate">
+                    {item.color && <OptionDot color={item.color} size={7} />}
+                    <span className="truncate">{item.label}</span>
+                  </span>
+                  {isSelected && (
+                    <svg
+                      viewBox="0 0 24 24"
+                      aria-hidden="true"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2.5}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="size-3.5 shrink-0 text-accent"
+                    >
+                      <path d="M20 6 9 17l-5-5" />
+                    </svg>
+                  )}
+                </button>
+              );
+            })}
+          </div>,
+          menuTarget,
+        )}
     </div>
   );
 }

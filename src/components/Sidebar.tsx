@@ -157,7 +157,7 @@ export function Sidebar({
           </span>
           <NavTab
             active={currentName === "timers"}
-            label="Timers"
+            label="Stopwatches"
             onSelect={() => onNavigate({ name: "timers" })}
           >
             <circle cx="12" cy="13" r="8" />

@@ -970,28 +970,26 @@ impl ActivityStore {
         Ok(proj)
     }
 
-    /// Only a project with no entries can be deleted; one with history is
-    /// completed or archived instead, so its time keeps its project.
+    /// Soft-deletes a project and unlinks its time entries and rules.
+    /// Historical time remains intact, but is no longer assigned to a project.
     pub fn delete_project(&mut self, id: &str, now: u64) -> Result<(), String> {
-        let has_entries: bool = self
-            .conn
-            .query_row(
-                "SELECT EXISTS (SELECT 1 FROM time_entries WHERE project_id = ?1 AND deleted_at IS NULL);",
-                params![id],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        if has_entries {
-            return Err("This project has time entries. Archive it instead.".to_string());
-        }
-        self.conn
-            .execute(
-                "UPDATE projects SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2;",
-                params![now as i64, id],
-            )
-            .map_err(|e| e.to_string())?;
-        crate::projects::sync_hint_rules(&self.conn, id, None, now)?;
-        Ok(())
+        let tx = self.conn.transaction().map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE projects SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2;",
+            params![now as i64, id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE time_entries SET project_id = NULL, updated_at = ?1 WHERE project_id = ?2;",
+            params![now as i64, id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE rules SET deleted_at = ?1, updated_at = ?1 WHERE project_id = ?2 AND deleted_at IS NULL;",
+            params![now as i64, id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())
     }
 
     fn get_project(&self, id: &str) -> Result<Project, String> {

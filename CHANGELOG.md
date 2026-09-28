@@ -2,7 +2,17 @@
 
 All notable changes are documented here. Entries are generated from commit history.
 
-## [unreleased]
+## [0.4.7] - 2026-09-28
+
+### Features
+- **updates:** Add in-app updater with sidebar notice and Settings changelog (#46)
+
+### Bug Fixes
+- **capture:** Allow idle sleep and stop recording while the Mac is locked or asleep (#45)
+
+### Other Changes
+- Update README.md
+## [0.4.5] - 2026-09-28
 
 ### Features
 - Allow deleting projects and unapproving timesheet entries (#42)
@@ -10,6 +20,9 @@ All notable changes are documented here. Entries are generated from commit histo
 
 ### Bug Fixes
 - **calendar:** Hide suggestion rationale (#43)
+
+### Documentation
+- Update changelog for v0.4.5
 ## [0.4.2] - 2026-09-28
 
 ### Features

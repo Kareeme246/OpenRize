@@ -5,6 +5,14 @@ All notable changes are documented here. Entries are generated from commit histo
 ## [unreleased]
 
 ### Features
+- Allow deleting projects and unapproving timesheet entries (#42)
+- **release:** Sign and notarize macOS builds, rename identifier to com.offlinestudios.openrize (#44)
+
+### Bug Fixes
+- **calendar:** Hide suggestion rationale (#43)
+## [0.4.2] - 2026-09-28
+
+### Features
 - **calendar:** Live-updating recording session and 5-min drag snap (#32)
 - **settings:** Add tracking hours schedule and capture gating (#33)
 - **calendar:** Add panel tabs, a recording now line, and launch at login (#35)
@@ -19,6 +27,7 @@ All notable changes are documented here. Entries are generated from commit histo
 
 ### Documentation
 - **readme:** Centered header with logo, tagline, nav links, and badges (#40)
+- Update changelog for v0.4.2
 
 ### Other Changes
 - Remove local skill

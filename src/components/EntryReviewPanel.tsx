@@ -781,13 +781,6 @@ function FieldSection({
         )}
       </div>
 
-      {suggestion?.rationale && (
-        <p className="mt-2 rounded-md bg-inset-soft px-2 py-1.5 text-[11px] text-fg-muted leading-snug">
-          <span className="font-semibold text-fg-soft">Why: </span>
-          {suggestion.rationale}
-        </p>
-      )}
-
       {active &&
         !locked &&
         (isProjectEmpty ? (

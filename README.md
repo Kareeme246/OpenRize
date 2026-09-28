@@ -1,15 +1,31 @@
-# OpenRize
+<p align="center">
+  <img src="app-icon.png" width="220" alt="OpenRize logo">
+</p>
 
-**A real answer to "where did my day go?" - automatic, private, local-first time tracking for your Mac. Free, open-source, no account, no screenshots, no keystrokes.**
+<h1 align="center">OpenRize</h1>
 
-[![Status](https://img.shields.io/badge/status-beta%20%C2%B7%20core%20shipped-E8734A?style=for-the-badge)](#where-it-stands)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-2aea83?style=for-the-badge)](LICENSE)
-[![Built with Tauri 2](https://img.shields.io/badge/Built%20with-Tauri%202-24C8DB?style=for-the-badge)](https://tauri.app)
-[![Rust](https://img.shields.io/badge/Rust-backend-000000?style=for-the-badge&logo=rust)](https://www.rust-lang.org)
+<p align="center">
+  A real answer to "where did my day go?"<br>
+  Automatic, private, local-first time tracking for your Mac.<br>
+  Free, open source, no account, no screenshots, no keystrokes.
+</p>
 
-<div align="center">
-<img src="app-icon.png" width="140" alt="OpenRize - the Chrono Bloom app icon" />
-</div>
+<p align="center">
+  <a href="https://github.com/Kareeme246/OpenRize/releases/latest">Install</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#privacy">Privacy</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Kareeme246/OpenRize/releases"><img src="https://img.shields.io/github/v/release/Kareeme246/OpenRize?label=release&color=2aea83" alt="Latest release"></a>
+  <a href="#where-it-stands"><img src="https://img.shields.io/badge/macOS-Apple%20Silicon-black" alt="macOS, Apple Silicon"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License AGPL 3.0"></a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/readme/screenshot-placeholder.svg" width="880" alt="OpenRize app screenshot (placeholder)">
+</p>
 
 OpenRize is the open, local-first answer to [Rize.io](https://rize.io): time tracking that
 watches what you're actually working on and sorts it into categories and projects - without
@@ -62,7 +78,7 @@ to your rules and a personal model it trains on your own reviews and keeps categ
 | **Menu-bar tray** | ✅ Working | A menu-bar glyph. Closing the window can hide OpenRize there so capture keeps running. |
 | **Sync server** | ❌ Not started | If there is demand, a self-hostable server for syncing between machines and organization level features. |
 
-## Local-first
+## Privacy
 
 - **No account.** There is nothing to sign up for and nobody to sign up with.
 - **No telemetry.** OpenRize makes no network calls. Not "anonymized" - none.

@@ -5,6 +5,26 @@ All notable changes are documented here. Entries are generated from commit histo
 ## [unreleased]
 
 ### Features
+- **calendar:** Live-updating recording session and 5-min drag snap (#32)
+- **settings:** Add tracking hours schedule and capture gating (#33)
+- **calendar:** Add panel tabs, a recording now line, and launch at login (#35)
+- **tray:** Add the Pulse glance panel under the menu-bar icon (#36)
+- Add project timesheets and client invoices (#37)
+- **calendar:** Split the day view into Time Entries, Labels, and Project lanes (#38)
+
+### Bug Fixes
+- **capture:** Count foreground video as presence and keep sessions continuous (#34)
+- Resolve invoice picker, project due date, timesheet flicker, app scroll, and session defaults (#39)
+- Editable entry times, unapprove flow, pending drag sessions, untitled live sessions (#41)
+
+### Documentation
+- **readme:** Centered header with logo, tagline, nav links, and badges (#40)
+
+### Other Changes
+- Remove local skill
+## [0.3.6] - 2026-09-25
+
+### Features
 - **timers:** Rust timer store with persistence and tests
 - **tray:** Macos menu-bar icon reflecting active timers
 - **ui:** App shell with header and sidebar
@@ -26,9 +46,12 @@ All notable changes are documented here. Entries are generated from commit histo
 
 ### Documentation
 - Rewrite README for the shipped P0-P4 core (#16)
+- Update changelog for v0.3.6
 
 ### Maintenance
 - Add generated changelog and release version guard (#26)
+- Pin git-cliff to v2.14.2 in release workflow (#30)
+- Bump git-cliff-action to v4.9.1 (#31)
 
 ### Other Changes
 - Init create tauri app

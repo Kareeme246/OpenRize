@@ -291,6 +291,55 @@ pub fn delete_client(app: AppHandle, id: String) -> Result<(), String> {
     store.delete_client(&id, now)
 }
 
+// --- Invoices -----------------------------------------------------------
+
+#[tauri::command]
+pub fn list_invoices(app: AppHandle) -> Result<Vec<crate::invoices::Invoice>, String> {
+    let state = app.state::<AppState>();
+    let store = state.activity.lock().map_err(|e| e.to_string())?;
+    crate::invoices::list(store.conn())
+}
+
+#[tauri::command]
+pub fn create_invoice(
+    app: AppHandle,
+    client_id: String,
+    start_ms: u64,
+    end_ms: u64,
+) -> Result<crate::invoices::Invoice, String> {
+    let invoice = {
+        let state = app.state::<AppState>();
+        let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+        crate::invoices::create(
+            store.conn_mut(),
+            &client_id,
+            start_ms,
+            end_ms,
+            now_epoch_ms(),
+        )?
+    };
+    entries_changed(&app);
+    Ok(invoice)
+}
+
+#[tauri::command]
+pub fn set_invoice_status(app: AppHandle, id: String, status: String) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let store = state.activity.lock().map_err(|e| e.to_string())?;
+    crate::invoices::set_status(store.conn(), &id, &status, now_epoch_ms())
+}
+
+#[tauri::command]
+pub fn delete_draft_invoice(app: AppHandle, id: String) -> Result<(), String> {
+    {
+        let state = app.state::<AppState>();
+        let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+        crate::invoices::delete_draft(store.conn_mut(), &id)?;
+    }
+    entries_changed(&app);
+    Ok(())
+}
+
 // --- P1: Time Entries ---------------------------------------------------
 
 /// Tells views to refetch, and wakes the AI worker: an entry mutation can

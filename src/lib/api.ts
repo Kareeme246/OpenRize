@@ -15,6 +15,7 @@ import type {
   ExportResult,
   HintPreview,
   ImportSummary,
+  Invoice,
   NewCategory,
   NewClient,
   NewProject,
@@ -225,6 +226,31 @@ export async function updateClient(
 
 export async function deleteClient(id: string): Promise<void> {
   await invoke("delete_client", { id });
+}
+
+// --- Invoices ---
+
+export async function listInvoices(): Promise<Invoice[]> {
+  return await invoke<Invoice[]>("list_invoices");
+}
+
+export async function createInvoice(
+  clientId: string,
+  startMs: number,
+  endMs: number,
+): Promise<Invoice> {
+  return await invoke<Invoice>("create_invoice", { clientId, startMs, endMs });
+}
+
+export async function setInvoiceStatus(
+  id: string,
+  status: "sent" | "paid",
+): Promise<void> {
+  await invoke("set_invoice_status", { id, status });
+}
+
+export async function deleteDraftInvoice(id: string): Promise<void> {
+  await invoke("delete_draft_invoice", { id });
 }
 
 // --- Time Entries ---

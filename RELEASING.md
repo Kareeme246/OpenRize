@@ -21,10 +21,44 @@ To cut a release:
    git push origin main vX.Y.Z
    ```
    The release workflow rejects a tag unless all three versions match. It uses
-   the same `cliff.toml` to generate GitHub Release notes and builds an unsigned
-   macOS `.dmg`/`.app` with `pnpm tauri build`.
+   the same `cliff.toml` to generate GitHub Release notes and builds a signed,
+   notarized macOS `.dmg`/`.app` with `pnpm tauri build`.
 3. Watch the `Release` workflow. When it finishes, it publishes the GitHub
-   Release with the `.dmg` and zipped `.app` attached. There is no Apple
-   Developer signing or notarization yet. On first launch, right-click (or
-   Control-click) `openrize.app` and choose **Open**, or go to **System Settings
-   > Privacy & Security** and click **Open Anyway**, then confirm.
+   Release with the `.dmg` and zipped `.app` attached.
+
+## Signing and notarization secrets
+
+The release workflow signs with a Developer ID Application certificate and
+notarizes with an App Store Connect API key. It needs these repository secrets
+(Settings > Secrets and variables > Actions):
+
+| Secret | Value |
+| --- | --- |
+| `APPLE_CERTIFICATE` | base64 of the exported Developer ID Application `.p12` |
+| `APPLE_CERTIFICATE_PASSWORD` | password chosen when exporting the `.p12` |
+| `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: Name (TEAMID)` |
+| `APPLE_API_KEY` | App Store Connect API key ID |
+| `APPLE_API_ISSUER` | App Store Connect issuer ID |
+| `APPLE_API_PRIVATE_KEY` | full contents of the `AuthKey_<KEYID>.p8` file |
+
+To produce them:
+
+1. **Certificate** (Account Holder only): in Keychain Access, choose
+   Certificate Assistant > Request a Certificate From a Certificate Authority,
+   save to disk. At developer.apple.com > Certificates, create a
+   **Developer ID Application** certificate from that request, download it and
+   double-click to install. `Apple Development` certificates cannot be used for
+   distribution outside the App Store.
+2. In Keychain Access > My Certificates, right-click the Developer ID
+   certificate (with its private key) > Export as `.p12` with a password, then
+   `base64 -i cert.p12 | pbcopy` for `APPLE_CERTIFICATE`.
+   `security find-identity -v -p codesigning` prints the exact
+   `APPLE_SIGNING_IDENTITY` string.
+3. **API key**: at App Store Connect > Users and Access > Integrations >
+   Team Keys, create a key with the **Developer** role. Note the key ID and
+   issuer ID and download the `.p8` (it can only be downloaded once).
+
+The app's hardened-runtime entitlements live in `src-tauri/Entitlements.plist`
+and privacy prompt strings in `src-tauri/Info.plist`; any new API that macOS
+gates behind an entitlement (Apple Events, camera, etc.) must be added there or
+it silently fails in signed builds.

@@ -101,7 +101,7 @@ scripts/app-drive.sh wait  -s "$SID" "Start tracking"
 scripts/app-drive.sh click -s "$SID" "Start tracking"
 
 # read the Rust side back out of this instance's own database
-sqlite3 "$HOME/Library/Application Support/com.elgohr.openrize.drive${SID#d}/activity.db" \
+sqlite3 "$HOME/Library/Application Support/com.offlinestudios.openrize.drive${SID#d}/activity.db" \
   "select label, started_at is not null from timers;"
 # -> End to end|1
 
@@ -129,7 +129,7 @@ Each session gets:
 
 - **its own free port**, chosen at random and checked before use, so Vite dev
   servers never collide;
-- **its own Tauri `identifier`** (`com.elgohr.openrize.driveNNNNN`), which is what
+- **its own Tauri `identifier`** (`com.offlinestudios.openrize.driveNNNNN`), which is what
   scopes `app_data_dir`, so `activity.db` and its timers are private to the session;
 - **its own `XDG_CONFIG_HOME`**, because `settings.rs::config_dir()` resolves to
   `~/.config/openrize` and is *not* identifier-scoped. Without this override an

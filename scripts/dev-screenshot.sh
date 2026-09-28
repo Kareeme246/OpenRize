@@ -36,7 +36,7 @@ find_free_port() {
 PORT="$(find_free_port)"
 
 echo "==> starting isolated tauri dev on port $PORT (log: $LOG_FILE)" >&2
-CONFIG_OVERRIDE=$(printf '{"identifier":"com.elgohr.openrize.devshot%s","build":{"beforeDevCommand":"pnpm exec vite --port %s --strictPort","devUrl":"http://localhost:%s"}}' "$PORT" "$PORT" "$PORT")
+CONFIG_OVERRIDE=$(printf '{"identifier":"com.offlinestudios.openrize.devshot%s","build":{"beforeDevCommand":"pnpm exec vite --port %s --strictPort","devUrl":"http://localhost:%s"}}' "$PORT" "$PORT" "$PORT")
 
 pnpm tauri dev --no-watch -c "$CONFIG_OVERRIDE" >"$LOG_FILE" 2>&1 &
 DEV_PGID=$!

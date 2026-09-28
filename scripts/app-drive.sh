@@ -146,7 +146,7 @@ cmd_start() {
 
   local id="d$port"
   local dir="$SESSION_ROOT/$id"
-  local identifier="com.elgohr.openrize.drive$port"
+  local identifier="com.offlinestudios.openrize.drive$port"
   rm -rf "$dir"
   mkdir -p "$dir/config" "$dir/shots"
 

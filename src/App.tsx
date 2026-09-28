@@ -2,6 +2,7 @@ import { type ReactElement, useCallback, useEffect, useState } from "react";
 import { NotImplementedProvider } from "./components/NotImplemented";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
+import { useMediaQuery } from "./hooks/useMediaQuery";
 import { SettingsProvider } from "./hooks/useSettings";
 import { useTauriEvent } from "./hooks/useTauriEvent";
 import { useUpdates } from "./hooks/useUpdates";
@@ -17,6 +18,24 @@ import { Settings } from "./pages/Settings";
 import { TimeEntries } from "./pages/TimeEntries";
 import { Timers } from "./pages/Timers";
 import { Timesheets } from "./pages/Timesheets";
+
+const SIDEBAR_COLLAPSED_KEY = "openrize.sidebarCollapsed";
+
+/** Below this window width the sidebar starts collapsed to leave the page room. */
+const AUTO_COLLAPSE_QUERY = "(max-width: 959px)";
+
+/**
+ * Sidebar width is a per-viewer convenience, so it lives in localStorage.
+ * `undefined` means the user never chose, so the window width decides.
+ */
+function readSidebarChoice(): boolean | undefined {
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+    return raw === null ? undefined : raw === "1";
+  } catch {
+    return undefined;
+  }
+}
 
 /** Browser-style history: a stack plus where the user is standing in it. */
 interface NavState {
@@ -41,7 +60,20 @@ export default function App() {
   // Bumped by the sidebar's "Update available", so Settings scrolls to its
   // Updates section even when Settings is already open.
   const [revealUpdates, setRevealUpdates] = useState(0);
+  const [sidebarChoice, setSidebarChoice] = useState(readSidebarChoice);
+  const narrowWindow = useMediaQuery(AUTO_COLLAPSE_QUERY);
+  const sidebarCollapsed = sidebarChoice ?? narrowWindow;
   const updates = useUpdates();
+
+  const toggleSidebar = useCallback((): void => {
+    const next = !sidebarCollapsed;
+    setSidebarChoice(next);
+    try {
+      window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
+    } catch {
+      // Storage can be unavailable; the choice still holds for this session.
+    }
+  }, [sidebarCollapsed]);
 
   const navigate = useCallback((next: Route): void => {
     setNav((previous) => {
@@ -231,13 +263,22 @@ export default function App() {
             canGoForward={nav.cursor < nav.entries.length - 1}
             onBack={back}
             onForward={forward}
+            sidebarCollapsed={sidebarCollapsed}
+            onToggleSidebar={toggleSidebar}
           />
-          <div className="grid min-h-0 flex-1 grid-cols-[224px_minmax(0,1fr)] overflow-hidden">
+          <div
+            className={`grid min-h-0 flex-1 overflow-hidden transition-[grid-template-columns] duration-150 ${
+              sidebarCollapsed
+                ? "grid-cols-[56px_minmax(0,1fr)]"
+                : "grid-cols-[224px_minmax(0,1fr)]"
+            }`}
+          >
             <Sidebar
               currentRoute={currentRoute}
               onNavigate={navigate}
               pendingCount={pendingCount}
               currentApp={currentApp}
+              collapsed={sidebarCollapsed}
               captureEnabled={captureEnabled}
               trackingActive={trackingActive}
               onToggleCapture={handleToggleCapture}

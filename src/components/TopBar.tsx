@@ -1,8 +1,12 @@
+import type { ReactNode } from "react";
+
 interface TopBarProps {
   canGoBack: boolean;
   canGoForward: boolean;
   onBack: () => void;
   onForward: () => void;
+  sidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
 }
 
 const isMac = navigator.userAgent.includes("Mac");
@@ -18,6 +22,8 @@ export function TopBar({
   canGoForward,
   onBack,
   onForward,
+  sidebarCollapsed,
+  onToggleSidebar,
 }: TopBarProps) {
   return (
     <header
@@ -39,6 +45,19 @@ export function TopBar({
           onClick={onForward}
           path="M9 5l7 7-7 7"
         />
+        <IconButton
+          label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          onClick={onToggleSidebar}
+          large
+        >
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M9 4v16" />
+          {sidebarCollapsed ? (
+            <path d="M14 10l2 2-2 2" />
+          ) : (
+            <path d="M16 10l-2 2 2 2" />
+          )}
+        </IconButton>
       </div>
 
       <span className="shrink-0 select-none font-mono text-[11.5px] font-semibold tracking-wide text-fg-soft">
@@ -62,17 +81,37 @@ function NavArrow({
   onClick: () => void;
 }) {
   return (
+    <IconButton label={label} disabled={!enabled} onClick={onClick}>
+      <path d={path} />
+    </IconButton>
+  );
+}
+
+function IconButton({
+  label,
+  disabled = false,
+  large = false,
+  onClick,
+  children,
+}: {
+  label: string;
+  disabled?: boolean;
+  large?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
     <button
       type="button"
       title={label}
       aria-label={label}
-      disabled={!enabled}
+      disabled={disabled}
       onClick={onClick}
       className="grid size-7 shrink-0 place-items-center rounded-lg text-fg-soft hover:bg-surface-strong disabled:pointer-events-none disabled:text-fg-ghost"
     >
       <svg
         viewBox="0 0 24 24"
-        className="size-3.5"
+        className={large ? "size-[18px]" : "size-3.5"}
         fill="none"
         stroke="currentColor"
         strokeWidth={2.2}
@@ -80,7 +119,7 @@ function NavArrow({
         strokeLinejoin="round"
         aria-hidden="true"
       >
-        <path d={path} />
+        {children}
       </svg>
     </button>
   );

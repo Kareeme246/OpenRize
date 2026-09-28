@@ -77,6 +77,9 @@ export function ProjectSheet({
   const [budgetPeriod, setBudgetPeriod] = useState(
     project?.budgetPeriod ?? "total",
   );
+  const [noDueDate, setNoDueDate] = useState(
+    project !== undefined ? !project.dueDate : false,
+  );
   const [due, setDue] = useState(
     project?.dueDate ? localDateString(new Date(project.dueDate)) : "",
   );
@@ -126,7 +129,7 @@ export function ProjectSheet({
         budgetKind,
         budgetValue: budgetKind === "none" ? null : Number(budgetValue),
         budgetPeriod,
-        dueDate: due ? parseLocalDate(due).getTime() : null,
+        dueDate: !noDueDate && due ? parseLocalDate(due).getTime() : null,
       };
       const saved = project
         ? await api.updateProject(project.id, fields)
@@ -372,13 +375,26 @@ export function ProjectSheet({
       </div>
 
       <Field label="Due date" htmlFor="project-due">
-        <input
-          id="project-due"
-          type="date"
-          value={due}
-          onChange={(event) => setDue(event.target.value)}
-          className={`${FIELD} max-w-48`}
-        />
+        <div className="flex items-center gap-3">
+          <input
+            id="project-due"
+            type="date"
+            disabled={noDueDate}
+            value={due}
+            onChange={(event) => setDue(event.target.value)}
+            className={`${FIELD} max-w-48 disabled:opacity-40`}
+          />
+          <label className="flex items-center gap-2 text-[13px] text-fg">
+            <input
+              id="project-no-due"
+              type="checkbox"
+              checked={noDueDate}
+              onChange={(event) => setNoDueDate(event.target.checked)}
+              className="accent-(--accent)"
+            />
+            No due date
+          </label>
+        </div>
       </Field>
     </Sheet>
   );

@@ -22,8 +22,11 @@ import type { Route, TimeEntry } from "../lib/types";
 
 export function Timesheets({ navigate }: { navigate: (route: Route) => void }) {
   const [week, setWeek] = useState(() => new Date());
-  const [entries, setEntries] = useState<TimeEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState<{
+    start: number;
+    edges: number[];
+    entries: TimeEntry[];
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const catalog = useCatalog();
   const range = useMemo(() => rangeFor("week", week), [week]);
@@ -36,21 +39,22 @@ export function Timesheets({ navigate }: { navigate: (route: Route) => void }) {
     try {
       const next = await api.listTimeEntries(start, end - 1);
       if (shownStart.current !== start) return;
-      setEntries(next);
+      setLoaded({ start, edges, entries: next });
       setError(null);
     } catch (cause) {
       if (shownStart.current === start) setError(api.describeError(cause));
-    } finally {
-      if (shownStart.current === start) setLoading(false);
     }
-  }, [start, end]);
+  }, [start, end, edges]);
   useEffect(() => {
-    setLoading(true);
     void refresh();
   }, [refresh]);
   useTauriEvent(api.ENTRIES_CHANGED, () => void refresh());
-  const rows = useMemo(() => projectWeek(entries, edges), [entries, edges]);
-  const totals = edges
+  const displayEdges = loaded?.edges ?? edges;
+  const rows = useMemo(
+    () => (loaded ? projectWeek(loaded.entries, loaded.edges) : []),
+    [loaded],
+  );
+  const totals = displayEdges
     .slice(1)
     .map((_, day) => rows.reduce((sum, row) => sum + row.days[day], 0));
   const total = totals.reduce((sum, ms) => sum + ms, 0);
@@ -81,7 +85,7 @@ export function Timesheets({ navigate }: { navigate: (route: Route) => void }) {
             />
           </div>
         )}
-        {loading ? (
+        {!loaded ? (
           <SkeletonRows />
         ) : rows.length === 0 ? (
           <EmptyState
@@ -96,7 +100,7 @@ export function Timesheets({ navigate }: { navigate: (route: Route) => void }) {
                   <th scope="col" className="min-w-48 px-4 py-3 font-medium">
                     Project / client
                   </th>
-                  {edges.slice(0, -1).map((edge) => (
+                  {displayEdges.slice(0, -1).map((edge) => (
                     <th
                       scope="col"
                       key={edge}
@@ -142,7 +146,10 @@ export function Timesheets({ navigate }: { navigate: (route: Route) => void }) {
                         )}
                       </th>
                       {row.days.map((ms, day) => (
-                        <td key={edges[day]} className="px-2 py-3 text-right">
+                        <td
+                          key={displayEdges[day]}
+                          className="px-2 py-3 text-right"
+                        >
                           {ms ? (
                             <button
                               type="button"
@@ -151,7 +158,9 @@ export function Timesheets({ navigate }: { navigate: (route: Route) => void }) {
                                 navigate({
                                   name: "timesheet",
                                   scale: "day",
-                                  date: localDateString(new Date(edges[day])),
+                                  date: localDateString(
+                                    new Date(displayEdges[day]),
+                                  ),
                                 })
                               }
                               title="Review this day"
@@ -181,7 +190,10 @@ export function Timesheets({ navigate }: { navigate: (route: Route) => void }) {
                     All projects
                   </th>
                   {totals.map((ms, day) => (
-                    <td key={edges[day]} className="px-2 py-3 text-right">
+                    <td
+                      key={displayEdges[day]}
+                      className="px-2 py-3 text-right"
+                    >
                       {ms ? formatDuration(ms) : "–"}
                     </td>
                   ))}

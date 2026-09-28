@@ -1,9 +1,9 @@
-import { BarRow } from "../../components/Charts";
+import { BarRow, Donut, type Slice } from "../../components/Charts";
 import { Progress, StatCard } from "../../components/Page";
 import { formatDuration, plural } from "../../lib/format";
-import type { Metric } from "./metrics";
 
 interface RangeSummaryProps {
+  title: string;
   /** Time in categories that count as work (and uncategorized time). */
   workMs: number;
   targetMs: number;
@@ -11,24 +11,24 @@ interface RangeSummaryProps {
   entries: number;
   toReview: number;
   processing: number;
-  metrics: Metric[];
+  categories: Slice[];
   topApps?: { app: string; ms: number }[];
   onStartReview?: () => void;
 }
 
 /**
- * The Calendar panel's productivity metrics tab: work hours against the
- * target, what's left to review, headline session numbers, and (for a day)
- * top apps. Time by label lives in the Labels tab.
+ * The Calendar's right panel when no entry is open: work hours against the
+ * target, what's left to review, time by category, and (for a day) top apps.
  */
 export function RangeSummary({
+  title,
   workMs,
   targetMs,
   targetLabel,
   entries,
   toReview,
   processing,
-  metrics,
+  categories,
   topApps,
   onStartReview,
 }: RangeSummaryProps) {
@@ -37,7 +37,9 @@ export function RangeSummary({
   const apps = (topApps ?? []).filter((app) => app.ms >= 60_000).slice(0, 5);
   const maxApp = apps[0]?.ms ?? 0;
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
+      <span className="font-semibold text-[13px] text-fg-strong">{title}</span>
+
       <StatCard
         label="Work hours"
         value={formatDuration(workMs)}
@@ -80,26 +82,7 @@ export function RangeSummary({
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-2">
-        {metrics.map((metric) => (
-          <div
-            key={metric.label}
-            className="min-w-0 rounded-lg border border-line bg-surface px-3 py-2.5"
-          >
-            <div className="truncate font-semibold text-[10px] text-fg-faint uppercase tracking-wider">
-              {metric.label}
-            </div>
-            <div className="mt-1 font-semibold text-[16px] text-fg-strong tabular-nums leading-tight">
-              {metric.value}
-            </div>
-            {metric.sub && (
-              <div className="mt-0.5 truncate text-[10.5px] text-fg-soft">
-                {metric.sub}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
+      <Donut slices={categories} title="Time by category" size={112} stacked />
 
       {apps.length > 0 && (
         <div className="space-y-2">

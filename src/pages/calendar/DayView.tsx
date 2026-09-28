@@ -69,6 +69,7 @@ export function DayView({
   now,
 }: DayViewProps) {
   const viewport = useRef<HTMLDivElement>(null);
+  const header = useRef<HTMLDivElement>(null);
   const column = useRef<HTMLButtonElement>(null);
   const [height, setHeight] = useState(600);
   const [hourHeight, setHourHeight] = useState(120);
@@ -108,7 +109,10 @@ export function DayView({
   useLayoutEffect(() => {
     const element = viewport.current;
     if (!element) return;
-    const resize = (): void => setHeight(element.clientHeight - 32);
+    const resize = (): void =>
+      setHeight(
+        element.clientHeight - (header.current?.offsetHeight ?? 0) - 32,
+      );
     const observer = new ResizeObserver(resize);
     observer.observe(element);
     resize();
@@ -217,184 +221,337 @@ export function DayView({
         if (!(event.target as HTMLElement).closest(".calendar-entry"))
           onEmpty();
       }}
-      className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4"
+      className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
     >
       <div
-        className="relative grid grid-cols-[48px_16px_minmax(0,1fr)] gap-2"
-        style={{ height: `${timeline.height}px` }}
+        ref={header}
+        className="sticky top-0 z-30 flex items-center gap-2 border-line border-b bg-panel px-4 py-2"
       >
-        <div className="relative select-none text-right font-medium text-[11px] text-fg-faint">
-          {timeline.hours.map((hour) => (
-            <div
-              key={`gutter-${hour}`}
-              className="absolute right-2 -translate-y-2 whitespace-nowrap"
-              style={{ top: `${hour * hourHeight}px` }}
+        <div className="w-12 shrink-0" />
+        <div className="w-4 shrink-0" />
+        <div className="flex min-w-0 flex-1">
+          <span className="min-w-0 flex-1 truncate font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
+            Time Entries
+          </span>
+          <span className="w-[114px] shrink-0 truncate border-line border-l px-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
+            Labels
+          </span>
+          <span className="w-[114px] shrink-0 truncate border-line border-l px-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
+            Projects
+          </span>
+          <span
+            className="flex w-[30px] shrink-0 items-center justify-center border-line border-l"
+            title="Productivity metrics"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              className="size-3.5 text-fg-faint"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.8}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-label="Productivity metrics"
             >
-              {gutterLabel(hour, dayStart, "elapsed")}
-            </div>
-          ))}
+              <path d="M3 3v16a2 2 0 0 0 2 2h16" />
+              <path d="M18 17V9" />
+              <path d="M13 17V5" />
+              <path d="M8 17v-3" />
+            </svg>
+          </span>
         </div>
+      </div>
+
+      <div className="relative p-4">
         <div
-          className="relative overflow-hidden rounded-full bg-surface"
-          role="img"
-          aria-label="Activity strip"
+          className="relative flex items-stretch gap-2"
+          style={{ height: `${timeline.height}px` }}
         >
-          {segments.map((segment) => {
-            if (segment.kind === "break") return null;
-            const end = segment.endedAt ?? Math.min(now, dayEnd);
-            const { top, height: segmentHeight } = place(
-              timeline,
-              segment.startedAt,
-              end,
-              dayStart,
-              "elapsed",
-              3,
-            );
-            const owner = segment.entryId
-              ? entryById.get(segment.entryId)
-              : undefined;
-            const category = owner?.categoryId
-              ? categoryById.get(owner.categoryId)
-              : undefined;
-            return (
+          <div className="relative w-12 shrink-0 select-none text-right font-medium text-[11px] text-fg-faint">
+            {timeline.hours.map((hour) => (
               <div
-                key={segment.id}
-                title={`${segment.app}: ${segment.title}`}
-                className="absolute right-0 left-0 rounded-xs"
-                style={{
-                  top: `${top}px`,
-                  height: `${segmentHeight}px`,
-                  backgroundColor: category?.color ?? "var(--fg-faint)",
-                }}
+                key={`gutter-${hour}`}
+                className="absolute right-2 -translate-y-2 whitespace-nowrap"
+                style={{ top: `${hour * hourHeight}px` }}
+              >
+                {gutterLabel(hour, dayStart, "elapsed")}
+              </div>
+            ))}
+          </div>
+          <div
+            className="relative w-4 shrink-0 overflow-hidden rounded-full bg-surface"
+            role="img"
+            aria-label="Activity strip"
+          >
+            {segments.map((segment) => {
+              if (segment.kind === "break") return null;
+              const end = segment.endedAt ?? Math.min(now, dayEnd);
+              const { top, height: segmentHeight } = place(
+                timeline,
+                segment.startedAt,
+                end,
+                dayStart,
+                "elapsed",
+                3,
+              );
+              const owner = segment.entryId
+                ? entryById.get(segment.entryId)
+                : undefined;
+              const category = owner?.categoryId
+                ? categoryById.get(owner.categoryId)
+                : undefined;
+              return (
+                <div
+                  key={segment.id}
+                  title={`${segment.app}: ${segment.title}`}
+                  className="absolute right-0 left-0 rounded-xs"
+                  style={{
+                    top: `${top}px`,
+                    height: `${segmentHeight}px`,
+                    backgroundColor: category?.color ?? "var(--fg-faint)",
+                  }}
+                />
+              );
+            })}
+          </div>
+
+          {/* Time Entries / Labels / Projects / Productivity lanes, sharing one
+              continuous set of hour lines and one now line across the whole
+              width instead of a copy per lane. */}
+          <div className="relative min-w-0 flex-1">
+            {timeline.hours.map((hour) => (
+              <div
+                key={`line-${hour}`}
+                className="pointer-events-none absolute right-0 left-0 border-line-soft border-b"
+                style={{ top: `${hour * hourHeight}px` }}
               />
-            );
-          })}
-        </div>
-        <div className="relative">
-          <button
-            ref={column}
-            type="button"
-            aria-label="Drag to add a session"
-            title="Drag to add a session"
-            className="absolute inset-0 w-full cursor-cell touch-none"
-            onPointerDown={(event) => {
-              if (event.button !== 0) return;
-              press.current = {
-                y: event.clientY,
-                time: timeAt(event.clientY),
-              };
-              setDraft(null);
-              event.currentTarget.setPointerCapture(event.pointerId);
-            }}
-            onPointerMove={(event) => {
-              if (press.current === null) return;
-              setDraft(
-                dragRange(
-                  press.current.y,
-                  press.current.time,
-                  event.clientY,
-                  timeAt(event.clientY),
-                ),
-              );
-            }}
-            onPointerUp={(event) => {
-              if (press.current === null) return;
-              const range = dragRange(
-                press.current.y,
-                press.current.time,
-                event.clientY,
-                timeAt(event.clientY),
-              );
-              press.current = null;
-              setDraft(null);
-              if (range) {
-                onCreate(range.start, range.end);
-              }
-            }}
-            onPointerCancel={() => {
-              press.current = null;
-              setDraft(null);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                const start = startAt(
-                  Math.max(dayStart, Math.min(now, dayEnd - SNAP_MS)),
-                );
-                onCreate(start, start + SNAP_MS);
-              }
-            }}
-          />
-          {timeline.hours.map((hour) => (
-            <div
-              key={`line-${hour}`}
-              className="pointer-events-none absolute right-0 left-0 border-line-soft border-b"
-              style={{ top: `${hour * hourHeight}px` }}
-            />
-          ))}
-          {entries.map((entry) => {
-            const { top, height: entryHeight } = place(
-              timeline,
-              entry.startedAt,
-              liveEnd(entry),
-              dayStart,
-              "elapsed",
-            );
-            return (
-              <EntryBlock
-                key={entry.id}
-                entry={entry}
-                top={top}
-                height={entryHeight}
-                selected={entry.id === selectedId}
-                category={
-                  entry.categoryId
+            ))}
+            {showNow && (
+              <NowLine
+                top={nowTop}
+                recording={recording && { startedAt: recording.startedAt, now }}
+              />
+            )}
+
+            <div className="flex h-full items-stretch">
+              <div className="relative min-w-0 flex-1">
+                <button
+                  ref={column}
+                  type="button"
+                  aria-label="Drag to add a session"
+                  title="Drag to add a session"
+                  className="absolute inset-0 w-full cursor-cell touch-none"
+                  onPointerDown={(event) => {
+                    if (event.button !== 0) return;
+                    press.current = {
+                      y: event.clientY,
+                      time: timeAt(event.clientY),
+                    };
+                    setDraft(null);
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                  }}
+                  onPointerMove={(event) => {
+                    if (press.current === null) return;
+                    setDraft(
+                      dragRange(
+                        press.current.y,
+                        press.current.time,
+                        event.clientY,
+                        timeAt(event.clientY),
+                      ),
+                    );
+                  }}
+                  onPointerUp={(event) => {
+                    if (press.current === null) return;
+                    const range = dragRange(
+                      press.current.y,
+                      press.current.time,
+                      event.clientY,
+                      timeAt(event.clientY),
+                    );
+                    press.current = null;
+                    setDraft(null);
+                    if (range) {
+                      onCreate(range.start, range.end);
+                    }
+                  }}
+                  onPointerCancel={() => {
+                    press.current = null;
+                    setDraft(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      const start = startAt(
+                        Math.max(dayStart, Math.min(now, dayEnd - SNAP_MS)),
+                      );
+                      onCreate(start, start + SNAP_MS);
+                    }
+                  }}
+                />
+                {entries.map((entry) => {
+                  const { top, height: entryHeight } = place(
+                    timeline,
+                    entry.startedAt,
+                    liveEnd(entry),
+                    dayStart,
+                    "elapsed",
+                  );
+                  return (
+                    <EntryBlock
+                      key={entry.id}
+                      entry={entry}
+                      top={top}
+                      height={entryHeight}
+                      selected={entry.id === selectedId}
+                      category={
+                        entry.categoryId
+                          ? categoryById.get(entry.categoryId)
+                          : undefined
+                      }
+                      project={
+                        entry.projectId
+                          ? projectById.get(entry.projectId)
+                          : undefined
+                      }
+                      onSelect={onSelect}
+                      now={now}
+                      recording={entry.id === recording?.id}
+                    />
+                  );
+                })}
+                {draft && (
+                  <div
+                    className="pointer-events-none absolute right-4 left-0 z-20 rounded-md border border-accent bg-accent/20"
+                    style={{
+                      top: `${((draft.start - dayStart) / 3_600_000) * hourHeight}px`,
+                      height: `${((draft.end - draft.start) / 3_600_000) * hourHeight}px`,
+                    }}
+                  />
+                )}
+                {entries.length === 0 && !loading && (
+                  <div className="pointer-events-none absolute inset-x-0 top-16">
+                    <EmptyState
+                      title={
+                        dayStart > now
+                          ? "Nothing here yet"
+                          : "No entries recorded for this day"
+                      }
+                      hint={
+                        dayStart > now
+                          ? "This day hasn't happened yet."
+                          : "Activity appears here automatically as you use your computer."
+                      }
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="relative w-[114px] shrink-0 border-line border-l">
+                {entries.map((entry) => {
+                  const { top, height: entryHeight } = place(
+                    timeline,
+                    entry.startedAt,
+                    liveEnd(entry),
+                    dayStart,
+                    "elapsed",
+                  );
+                  const category = entry.categoryId
                     ? categoryById.get(entry.categoryId)
-                    : undefined
-                }
-                project={
-                  entry.projectId ? projectById.get(entry.projectId) : undefined
-                }
-                onSelect={onSelect}
-                now={now}
-                recording={entry.id === recording?.id}
-              />
-            );
-          })}
-          {draft && (
-            <div
-              className="pointer-events-none absolute right-4 left-0 z-20 rounded-md border border-accent bg-accent/20"
-              style={{
-                top: `${((draft.start - dayStart) / 3_600_000) * hourHeight}px`,
-                height: `${((draft.end - draft.start) / 3_600_000) * hourHeight}px`,
-              }}
-            />
-          )}
-          {showNow && (
-            <NowLine
-              top={nowTop}
-              recording={recording && { startedAt: recording.startedAt, now }}
-            />
-          )}
-          {entries.length === 0 && !loading && (
-            <div className="pointer-events-none absolute inset-x-0 top-16">
-              <EmptyState
-                title={
-                  dayStart > now
-                    ? "Nothing here yet"
-                    : "No entries recorded for this day"
-                }
-                hint={
-                  dayStart > now
-                    ? "This day hasn't happened yet."
-                    : "Activity appears here automatically as you use your computer."
-                }
-              />
+                    : undefined;
+                  return (
+                    <LaneBlock
+                      key={entry.id}
+                      entryId={entry.id}
+                      top={top}
+                      height={entryHeight}
+                      selected={entry.id === selectedId}
+                      color={category?.color}
+                      label={category?.name ?? "Uncategorized"}
+                      onSelect={onSelect}
+                    />
+                  );
+                })}
+              </div>
+
+              <div className="relative w-[114px] shrink-0 border-line border-l">
+                {entries.map((entry) => {
+                  if (!entry.projectId) return null;
+                  const { top, height: entryHeight } = place(
+                    timeline,
+                    entry.startedAt,
+                    liveEnd(entry),
+                    dayStart,
+                    "elapsed",
+                  );
+                  const project = projectById.get(entry.projectId);
+                  return (
+                    <LaneBlock
+                      key={entry.id}
+                      entryId={entry.id}
+                      top={top}
+                      height={entryHeight}
+                      selected={entry.id === selectedId}
+                      color={project?.color}
+                      label={project?.name ?? "Unknown project"}
+                      onSelect={onSelect}
+                    />
+                  );
+                })}
+              </div>
+
+              <div className="w-[30px] shrink-0 border-line border-l" />
             </div>
-          )}
+          </div>
         </div>
       </div>
     </div>
+  );
+}
+
+interface LaneBlockProps {
+  entryId: string;
+  top: number;
+  height: number;
+  selected: boolean;
+  color?: string;
+  label: string;
+  onSelect: (id: string) => void;
+}
+
+/**
+ * A time entry's colour and name in the Labels or Projects lane, aligned to
+ * the same top/height as its block in the Time Entries lane.
+ */
+function LaneBlock({
+  entryId,
+  top,
+  height,
+  selected,
+  color,
+  label,
+  onSelect,
+}: LaneBlockProps) {
+  const tone = color ?? "var(--fg-faint)";
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(entryId)}
+      title={label}
+      aria-label={label}
+      className={`calendar-entry absolute right-1 left-0.5 overflow-hidden rounded-md border-l-[3px] px-1.5 text-left text-[10.5px] font-medium leading-tight transition-all ${
+        selected ? "z-20 ring-2 ring-accent" : "z-10 hover:border-fg-soft/40"
+      }`}
+      style={{
+        top: `${top}px`,
+        height: `${height}px`,
+        borderLeftColor: tone,
+        backgroundColor: `color-mix(in srgb, ${tone} 15%, var(--bg-panel))`,
+        color: tone,
+      }}
+    >
+      <span className="block truncate">{label}</span>
+    </button>
   );
 }
 

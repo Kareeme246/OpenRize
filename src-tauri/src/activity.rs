@@ -456,6 +456,23 @@ impl ActivityStore {
         self.close_current(now)
     }
 
+    /// Nobody is at the Mac (see `capture::user_is_away`): end the activity
+    /// segment now, not at the last input, and treat the time as idle until
+    /// the user is back.
+    pub fn tick_away(&mut self, now: u64) -> Result<bool, String> {
+        let closed = if self
+            .current
+            .as_ref()
+            .is_some_and(|cur| cur.kind == KIND_ACTIVITY)
+        {
+            self.close_active_segment(now)?
+        } else {
+            false
+        };
+        let threshold = self.idle_threshold_ms;
+        Ok(self.tick(None, threshold, now)? || closed)
+    }
+
     pub fn close_active_segment(&mut self, now: u64) -> Result<bool, String> {
         self.manual_tracking = false;
         self.close_current(now)
@@ -2236,6 +2253,7 @@ pub fn spawn_sampler(app: AppHandle) {
             std::thread::sleep(Duration::from_secs(SAMPLE_SECS));
 
             let now = now_epoch_ms();
+            let away = crate::capture::user_is_away();
             let sample = crate::capture::read_active_window();
             let idle_ms = read_idle_ms();
 
@@ -2254,7 +2272,13 @@ pub fn spawn_sampler(app: AppHandle) {
                 .activity
                 .lock()
                 .map_err(|_| "activity store lock poisoned".to_string())
-                .and_then(|mut store| store.tick(sample, idle_ms, now));
+                .and_then(|mut store| {
+                    if away {
+                        store.tick_away(now)
+                    } else {
+                        store.tick(sample, idle_ms, now)
+                    }
+                });
 
             match tick_result {
                 Ok(true) => {
@@ -2363,6 +2387,26 @@ mod tests {
         // The break is backdated to the last input, 90s before it was noticed.
         assert_eq!(snapshot.segments[0].ended_at, Some(10_000));
         assert_eq!(snapshot.break_ms, 120_000);
+    }
+
+    #[test]
+    fn going_away_ends_activity_at_once_and_holds_a_break_until_input() {
+        let mut store = store();
+        store.set_idle_threshold_ms(60_000).unwrap();
+        store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
+
+        // Locked 5s after the last input: the segment ends at the lock, not
+        // backdated to the input, and a background wake keeps it a break.
+        assert!(store.tick_away(10_000).unwrap());
+        assert!(!store.tick_away(11_000).unwrap());
+        let snapshot = store.snapshot(0, 11_000).unwrap();
+        assert_eq!(snapshot.segments[0].ended_at, Some(10_000));
+        assert_eq!(snapshot.current.unwrap().kind, KIND_BREAK);
+
+        store.tick(sample("Code", "main.rs"), 0, 20_000).unwrap();
+        let current = store.snapshot(0, 20_000).unwrap().current.unwrap();
+        assert_eq!(current.kind, KIND_ACTIVITY);
+        assert_eq!(current.started_at, 20_000);
     }
 
     /// Ticks once a second through `[from, to)` with Zen in front. `inputs`

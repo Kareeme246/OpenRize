@@ -32,6 +32,65 @@ extern "C" {
 }
 
 #[cfg(target_os = "macos")]
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGSessionCopyCurrentDictionary() -> core_foundation_sys::dictionary::CFDictionaryRef;
+    fn CGGetOnlineDisplayList(max: u32, displays: *mut u32, count: *mut u32) -> i32;
+    fn CGDisplayIsAsleep(display: u32) -> u32;
+}
+
+/// Nobody can be at the Mac: the screen is locked, the session is switched
+/// out, or every display is asleep. macOS briefly wakes a sleeping Mac for
+/// background work (Power Nap, iCloud) with the display off, and the idle
+/// clock alone can read as fresh input then.
+#[cfg(target_os = "macos")]
+pub fn user_is_away() -> bool {
+    screen_is_locked() || all_displays_asleep()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn user_is_away() -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
+fn screen_is_locked() -> bool {
+    use core_foundation::base::{CFType, TCFType};
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::dictionary::CFDictionary;
+
+    let raw = unsafe { CGSessionCopyCurrentDictionary() };
+    if raw.is_null() {
+        // No window-server session for this process: nobody is at the screen.
+        return true;
+    }
+    let session: CFDictionary<CFString, CFType> =
+        unsafe { CFDictionary::wrap_under_create_rule(raw) };
+    let flag = |key: &str| {
+        session
+            .find(CFString::new(key))
+            .and_then(|value| value.downcast::<CFBoolean>())
+            .map(bool::from)
+    };
+    flag("CGSSessionScreenIsLocked").unwrap_or(false)
+        || !flag("kCGSSessionOnConsoleKey").unwrap_or(true)
+}
+
+#[cfg(target_os = "macos")]
+fn all_displays_asleep() -> bool {
+    let mut displays = [0u32; 16];
+    let mut count = 0u32;
+    let status =
+        unsafe { CGGetOnlineDisplayList(displays.len() as u32, displays.as_mut_ptr(), &mut count) };
+    if status != 0 || count == 0 {
+        return false;
+    }
+    displays[..count as usize]
+        .iter()
+        .all(|&display| unsafe { CGDisplayIsAsleep(display) } != 0)
+}
+
+#[cfg(target_os = "macos")]
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
     fn AXUIElementCreateApplication(pid: libc::pid_t) -> AXUIElementRef;
@@ -246,12 +305,13 @@ pub struct AppNapAssertion {
 impl AppNapAssertion {
     pub fn begin(reason: &str) -> Self {
         use objc2_foundation::{NSActivityOptions, NSProcessInfo, NSString};
-        const NS_ACTIVITY_USER_INITIATED_ALLOWING_IDLE_SYSTEM_SLEEP: u64 = 0x00FFFFFF & !0x00000001;
 
         let process_info = NSProcessInfo::processInfo();
         let reason_str = NSString::from_str(reason);
+        // Keeps the sampler off App Nap without holding a
+        // PreventUserIdleSystemSleep assertion, so the Mac still idle-sleeps.
         let activity = process_info.beginActivityWithOptions_reason(
-            NSActivityOptions(NS_ACTIVITY_USER_INITIATED_ALLOWING_IDLE_SYSTEM_SLEEP),
+            NSActivityOptions::UserInitiatedAllowingIdleSystemSleep,
             &reason_str,
         );
         Self {

@@ -305,6 +305,28 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
     }
 
+    if current_version < 4 {
+        let tx = conn.transaction()?;
+        tx.execute(
+            "UPDATE categories SET color = '#52b788' WHERE color = '#e5995c';",
+            [],
+        )?;
+        tx.execute(
+            "UPDATE categories SET color = '#707bf0' WHERE color = '#e7b447';",
+            [],
+        )?;
+        tx.execute(
+            "UPDATE projects SET color = '#52b788' WHERE color = '#e5995c';",
+            [],
+        )?;
+        tx.execute(
+            "UPDATE projects SET color = '#707bf0' WHERE color = '#e7b447';",
+            [],
+        )?;
+        tx.execute("PRAGMA user_version = 4;", [])?;
+        tx.commit()?;
+    }
+
     Ok(())
 }
 
@@ -317,12 +339,12 @@ fn seed_default_categories(tx: &rusqlite::Transaction<'_>) -> Result<()> {
     let defaults = [
         ("Coding", "#75a4e5", "Writing, reviewing, debugging code", "Apply when writing, reviewing, or debugging code, using an IDE, terminal, or code editor.", 1, 1, 1),
         ("Research", "#56c2b1", "Documentation and technical research", "Reading documentation, investigating solutions, exploring tools and libraries.", 1, 1, 2),
-        ("Communication", "#e5995c", "Email, chat, and messaging", "Email, Slack, Discord, async messaging, team coordination.", 0, 1, 3),
+        ("Communication", "#52b788", "Email, chat, and messaging", "Email, Slack, Discord, async messaging, team coordination.", 0, 1, 3),
         ("Design", "#df84b5", "UI/UX, visual design, assets", "Working in Figma, design tools, creating mockups, UI components, styling.", 1, 1, 4),
         ("Writing", "#e4817d", "Docs, articles, specifications", "Writing prose, documentation, specifications, blog posts, proposals.", 1, 1, 5),
         ("Planning", "#9aa6b4", "Roadmaps, tasks, issue tracking", "Project planning, issue trackers, linear, github issues, backlog management.", 1, 1, 6),
         ("Administrative", "#bfa181", "Invoicing, accounts, setup", "Administrative tasks, billing, accounts, dev environment setup, file management.", 0, 1, 7),
-        ("Meetings", "#e7b447", "Calls, video conferences, syncs", "Zoom, Google Meet, video calls, live client meetings, team syncs.", 1, 1, 8),
+        ("Meetings", "#707bf0", "Calls, video conferences, syncs", "Zoom, Google Meet, video calls, live client meetings, team syncs.", 1, 1, 8),
         ("Learning", "#66b1df", "Courses, tutorials, reading", "Tutorials, educational courses, learning new frameworks and concepts.", 0, 1, 9),
         ("Review", "#9b87df", "Pull requests, code review", "Reviewing pull requests, inspecting diffs, giving feedback on changes.", 1, 1, 10),
         ("Debugging", "#e97e7b", "Bug reproduction, profiling, fixing", "Tracking bugs, stepping through debuggers, profiling performance bottlenecks.", 1, 1, 11),

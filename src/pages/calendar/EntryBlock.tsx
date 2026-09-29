@@ -54,7 +54,7 @@ function blockStyle(state: BlockState): CSSProperties {
 
 const BLOCK_CLASSES: Record<BlockState, string> = {
   approved: "border-line shadow-xs",
-  pending: "border-dashed border-review/60",
+  pending: "border-dashed border-line-strong",
   needsYou: "border-dashed border-line",
   failed: "border-dashed border-danger/50",
   processing: "entry-processing border-line",
@@ -82,7 +82,7 @@ interface EntryBlockProps {
 /**
  * One time entry on a Calendar timeline. Height follows duration; the block
  * takes the accent colour; the state shows as solid (approved),
- * hatched with a dashed amber border (pending), hatched gray (needs you),
+ * hatched with a dashed border (pending), hatched gray (needs you),
  * shimmering (categorizing), or dotted (still recording).
  */
 export function EntryBlock({
@@ -136,7 +136,7 @@ export function EntryBlock({
   const status = (
     <span className="ml-auto shrink-0 font-semibold text-[10px]">
       {state === "needsYou" && (
-        <span className="text-review">
+        <span className="text-fg-soft">
           {BAND_LABEL.low}
           {confidence !== undefined && ` · ${percent(confidence)}`}
         </span>
@@ -147,7 +147,7 @@ export function EntryBlock({
         </span>
       )}
       {state === "pending" && confidence === undefined && (
-        <span className="text-review">Pending</span>
+        <span className="text-fg-soft">Pending</span>
       )}
       {state === "failed" && (
         <span className="text-danger">Couldn't categorize · Retry</span>

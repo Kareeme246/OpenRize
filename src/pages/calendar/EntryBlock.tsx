@@ -81,7 +81,7 @@ interface EntryBlockProps {
 
 /**
  * One time entry on a Calendar timeline. Height follows duration; the block
- * takes the accent colour; the state shows as solid (approved),
+ * and its left rail take the accent colour; the state shows as solid (approved),
  * hatched with a dashed amber border (pending), hatched gray (needs you),
  * shimmering (categorizing), or dotted (still recording).
  */
@@ -100,6 +100,10 @@ export function EntryBlock({
   // The live session reads as recording even while the AI already has a
   // look at it; "Categorizing…" would contradict the now line's tag.
   const state: BlockState = recording ? "building" : blockState(entry);
+  const railColor =
+    state === "processing" || state === "needsYou"
+      ? "var(--fg-faint)"
+      : "var(--accent)";
   const confidence = confidenceOf(entry);
   const density = densityFor(height);
   const end =
@@ -211,6 +215,9 @@ export function EntryBlock({
       style={{
         top: `${top}px`,
         height: `${height}px`,
+        borderLeftWidth: narrow ? "3px" : "4px",
+        borderLeftStyle: "solid",
+        borderLeftColor: railColor,
         ...blockStyle(state),
       }}
     >

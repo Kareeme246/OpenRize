@@ -328,7 +328,7 @@ export function EntryReviewPanel({
       </div>
 
       <div className="flex-1 space-y-3 overflow-y-auto p-4">
-        <div className="flex items-center justify-between text-[12px] text-fg-soft">
+        <div className="flex items-center text-[12px] text-fg-soft">
           <span className="flex items-center gap-1">
             <TimeField
               epochMs={entry.startedAt}
@@ -347,17 +347,6 @@ export function EntryReviewPanel({
               · {formatDuration(entry.endedAt - entry.startedAt)}
             </span>
           </span>
-          <button
-            type="button"
-            onClick={onToggleBillable}
-            className={`rounded px-2 py-0.5 text-[11.5px] font-medium transition-colors ${
-              entry.billable
-                ? "bg-accent/20 font-semibold text-accent"
-                : "bg-surface text-fg-faint hover:text-fg"
-            }`}
-          >
-            $ Billable
-          </button>
         </div>
 
         <div className="rounded-lg border border-line bg-surface p-2.5">
@@ -446,6 +435,25 @@ export function EntryReviewPanel({
             nameOf={(valueId) => nameOf(model.field, valueId)}
           />
         ))}
+
+        <div className="flex items-center gap-2 rounded-lg border border-line p-2.5">
+          <span className="font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
+            Billable
+          </span>
+          <button
+            type="button"
+            onClick={onToggleBillable}
+            aria-pressed={entry.billable}
+            title={entry.billable ? "Billable" : "Not billable"}
+            className={`ml-auto flex size-6 items-center justify-center rounded font-semibold text-[11px] transition-colors ${
+              entry.billable
+                ? "bg-accent/20 text-accent"
+                : "text-fg-ghost hover:bg-surface hover:text-fg-soft"
+            }`}
+          >
+            {entry.billable ? "$" : "–"}
+          </button>
+        </div>
 
         {detail.ruleSuggestion && !approved && (
           <RulePrompt

@@ -297,9 +297,6 @@ export function DayView({
               const owner = segment.entryId
                 ? entryById.get(segment.entryId)
                 : undefined;
-              const category = owner?.categoryId
-                ? categoryById.get(owner.categoryId)
-                : undefined;
               return (
                 <div
                   key={segment.id}
@@ -308,7 +305,9 @@ export function DayView({
                   style={{
                     top: `${top}px`,
                     height: `${segmentHeight}px`,
-                    backgroundColor: category?.color ?? "var(--fg-faint)",
+                    backgroundColor: owner
+                      ? "var(--accent)"
+                      : "var(--fg-faint)",
                   }}
                 />
               );
@@ -539,13 +538,12 @@ function LaneBlock({
       onClick={() => onSelect(entryId)}
       title={label}
       aria-label={label}
-      className={`calendar-entry absolute right-1 left-0.5 overflow-hidden rounded-md border-l-[3px] px-1.5 text-left text-[10.5px] font-medium leading-tight transition-all ${
+      className={`calendar-entry absolute right-1 left-0.5 overflow-hidden rounded-md px-1.5 text-left text-[10.5px] font-medium leading-tight transition-all ${
         selected ? "z-20 ring-2 ring-accent" : "z-10 hover:border-fg-soft/40"
       }`}
       style={{
         top: `${top}px`,
         height: `${height}px`,
-        borderLeftColor: tone,
         backgroundColor: `color-mix(in srgb, ${tone} 15%, var(--bg-panel))`,
         color: tone,
       }}

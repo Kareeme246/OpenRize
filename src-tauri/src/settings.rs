@@ -47,6 +47,7 @@ pub enum SizeMode {
     #[default]
     Normal,
     Relaxed,
+    VeryRelaxed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -401,7 +402,7 @@ mod tests {
                 .set(Settings {
                     theme: Theme::Light,
                     accent: Accent::Orange,
-                    size_mode: SizeMode::Relaxed,
+                    size_mode: SizeMode::VeryRelaxed,
                     close_behavior: CloseBehavior::Quit,
                     tray_enabled: false,
                     retention_days: 30,
@@ -437,7 +438,7 @@ mod tests {
         let reloaded = SettingsStore::load(&dir).unwrap().snapshot();
         assert_eq!(reloaded.theme, Theme::Light);
         assert_eq!(reloaded.accent, Accent::Orange);
-        assert_eq!(reloaded.size_mode, SizeMode::Relaxed);
+        assert_eq!(reloaded.size_mode, SizeMode::VeryRelaxed);
         assert_eq!(reloaded.close_behavior, CloseBehavior::Quit);
         assert!(!reloaded.tray_enabled);
         assert_eq!(reloaded.retention_days, 30);

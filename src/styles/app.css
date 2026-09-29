@@ -87,6 +87,10 @@
   --ui-scale: 1.1;
 }
 
+:root[data-size-mode="veryRelaxed"] {
+  --ui-scale: 1.2;
+}
+
 /* Tailwind's arbitrary pixel typography does not follow the root rem size.
    Keep its original pixel values at Normal and scale them with the same factor
    as the rem-based type and icon utilities everywhere, including Pulse. */

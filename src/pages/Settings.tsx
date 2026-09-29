@@ -53,6 +53,7 @@ const SIZE_OPTIONS: SegmentedOption<SizeMode>[] = [
   { value: "compact", label: "Compact" },
   { value: "normal", label: "Normal" },
   { value: "relaxed", label: "Relaxed" },
+  { value: "veryRelaxed", label: "Very Relaxed" },
 ];
 
 const ACCENT_OPTIONS: SegmentedOption<Accent>[] = ACCENT_ORDER.map(
@@ -790,7 +791,7 @@ export function Settings({
             onChange={(theme) => update({ theme })}
           />
         </SettingRow>
-        <SettingRow
+        <SettingBlock
           title="Size mode"
           description="Scale text and icons throughout OpenRize"
         >
@@ -801,7 +802,7 @@ export function Settings({
             largeTarget
             onChange={(sizeMode) => update({ sizeMode })}
           />
-        </SettingRow>
+        </SettingBlock>
         <SettingRow
           title="Accent colour"
           description="Highlights, active states, and running timers across the app"

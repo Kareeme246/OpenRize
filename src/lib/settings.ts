@@ -9,7 +9,7 @@
 
 export type Theme = "system" | "light" | "dark";
 export type Accent = "green" | "blue" | "purple" | "orange";
-export type SizeMode = "compact" | "normal" | "relaxed";
+export type SizeMode = "compact" | "normal" | "relaxed" | "veryRelaxed";
 export type CloseBehavior = "quit" | "hide";
 /** What the AI suggests for each entry (Rize's "Suggestion level"). */
 export type AiSuggest = "category" | "categoryProject";

@@ -2,6 +2,25 @@
 
 All notable changes are documented here. Entries are generated from commit history.
 
+## [unreleased]
+
+### Features
+- **sidebar:** Collapsible sidebar that auto-collapses in narrow windows (#48)
+- **calendar:** Limit time by category to top three and group the rest under Other (#50)
+- **calendar:** Enlarge day summary text and drop duplicate review label (#52)
+- Add four UI size modes and responsive calendar review badge (#53)
+- **settings:** Make sections scrollable on one page (#54)
+
+### Bug Fixes
+- **calendar:** Wrap category and project chips instead of truncating them (#47)
+- **sidebar:** Use muted accent-soft for the selected nav item (#49)
+- **calendar:** Move billable toggle below project in entry review sidebar (#51)
+
+### Maintenance
+- **release:** Bump version to 0.4.15 (#55)
+
+### Other Changes
+- Update OpenRize description for clarity
 ## [0.4.7] - 2026-09-28
 
 ### Features
@@ -9,6 +28,9 @@ All notable changes are documented here. Entries are generated from commit histo
 
 ### Bug Fixes
 - **capture:** Allow idle sleep and stop recording while the Mac is locked or asleep (#45)
+
+### Documentation
+- Update changelog for v0.4.7
 
 ### Other Changes
 - Update README.md

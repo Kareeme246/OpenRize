@@ -31,15 +31,15 @@ function densityFor(height: number): Density {
   return "sliver";
 }
 
-function blockStyle(state: BlockState, color: string): CSSProperties {
+function blockStyle(state: BlockState): CSSProperties {
   switch (state) {
     case "approved":
       return {
-        backgroundColor: `color-mix(in srgb, ${color} 24%, var(--bg-panel))`,
+        backgroundColor: `color-mix(in srgb, var(--accent) 24%, var(--bg-panel))`,
       };
     case "pending":
       return {
-        backgroundImage: `repeating-linear-gradient(135deg, color-mix(in srgb, ${color} 14%, var(--bg-panel)) 0 6px, color-mix(in srgb, ${color} 7%, var(--bg-panel)) 6px 12px)`,
+        backgroundImage: `repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 14%, var(--bg-panel)) 0 6px, color-mix(in srgb, var(--accent) 7%, var(--bg-panel)) 6px 12px)`,
       };
     case "needsYou":
     case "failed":
@@ -80,8 +80,8 @@ interface EntryBlockProps {
 }
 
 /**
- * One time entry on a Calendar timeline. Height follows duration; the left
- * rail carries the category colour; the state shows as solid (approved),
+ * One time entry on a Calendar timeline. Height follows duration; the block
+ * takes the accent colour; the state shows as solid (approved),
  * hatched with a dashed amber border (pending), hatched gray (needs you),
  * shimmering (categorizing), or dotted (still recording).
  */
@@ -100,10 +100,6 @@ export function EntryBlock({
   // The live session reads as recording even while the AI already has a
   // look at it; "Categorizing…" would contradict the now line's tag.
   const state: BlockState = recording ? "building" : blockState(entry);
-  const railColor =
-    state === "processing" || state === "needsYou" || !category
-      ? "var(--fg-faint)"
-      : category.color;
   const confidence = confidenceOf(entry);
   const density = densityFor(height);
   const end =
@@ -215,10 +211,7 @@ export function EntryBlock({
       style={{
         top: `${top}px`,
         height: `${height}px`,
-        borderLeftWidth: narrow ? "3px" : "4px",
-        borderLeftStyle: "solid",
-        borderLeftColor: railColor,
-        ...blockStyle(state, railColor),
+        ...blockStyle(state),
       }}
     >
       {narrow ? (
@@ -238,18 +231,16 @@ export function EntryBlock({
       ) : (
         <>
           {density === "full" && (
-            <div className="flex h-full flex-col justify-between overflow-hidden">
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5 font-semibold text-[12px] text-fg-strong">
-                  {title}
-                  {approvedMark}
-                </div>
-                <div className="mt-0.5 truncate text-[11px] text-fg-soft">
-                  {timeText}
-                </div>
+            <div className="flex h-full min-w-0 flex-col overflow-hidden">
+              <div className="flex items-center gap-1.5 font-semibold text-[12px] text-fg-strong">
+                {title}
+                {approvedMark}
+              </div>
+              <div className="mt-0.5 truncate text-[11px] text-fg-soft">
+                {timeText}
               </div>
               <div
-                className={`flex items-center gap-1.5 overflow-hidden ${
+                className={`mt-1.5 flex items-center gap-1.5 overflow-hidden ${
                   wrapChips ? "flex-wrap" : ""
                 }`}
               >

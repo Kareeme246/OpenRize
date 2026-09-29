@@ -8,7 +8,7 @@ import type {
   Project,
   TimeEntry,
 } from "../../lib/types";
-import { EntryBlock } from "./EntryBlock";
+import { clampStyle, EntryBlock } from "./EntryBlock";
 import {
   dayLength,
   gutterLabel,
@@ -508,6 +508,9 @@ export function DayView({
   );
 }
 
+/** Line height of a lane label (10.5px, leading-tight). */
+const LANE_LINE = 13.125;
+
 interface LaneBlockProps {
   entryId: string;
   top: number;
@@ -548,7 +551,12 @@ function LaneBlock({
         color: tone,
       }}
     >
-      <span className="block truncate">{label}</span>
+      <span
+        className="min-w-0"
+        style={clampStyle(Math.max(1, Math.floor(height / LANE_LINE)))}
+      >
+        {label}
+      </span>
     </button>
   );
 }

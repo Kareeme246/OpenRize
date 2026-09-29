@@ -27,7 +27,7 @@
   <img width="1604" height="1050" alt="OpenRize app screenshot" src="docs/assets/readme/openrize-app.png" />
 </p>
 
-OpenRize is the open, local-first answer to [Rize.io](https://rize.io): time tracking that
+OpenRize is the free, private, and local-first answer to Rize.io: time tracking that
 watches what you're actually working on and sorts it into categories and projects - without
 logging a single keystroke, taking a single screenshot, or shipping a byte of your data anywhere.
 The categorizing is done by AI that runs entirely on your Mac and learns from every entry you review.

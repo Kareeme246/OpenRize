@@ -5,6 +5,15 @@ All notable changes are documented here. Entries are generated from commit histo
 ## [unreleased]
 
 ### Features
+- **calendar:** Remove AI review prompt from the day summary (#56)
+- **calendar:** Accent-colored entries, no left bars, labels under the time row (#57)
+- **ui:** Restrict review yellow-orange color to review call to action (#59)
+
+### Bug Fixes
+- **apps:** Fix timeline clipping, restore palette, and default to timeline tab (#58)
+## [0.4.15] - 2026-09-29
+
+### Features
 - **sidebar:** Collapsible sidebar that auto-collapses in narrow windows (#48)
 - **calendar:** Limit time by category to top three and group the rest under Other (#50)
 - **calendar:** Enlarge day summary text and drop duplicate review label (#52)
@@ -15,6 +24,9 @@ All notable changes are documented here. Entries are generated from commit histo
 - **calendar:** Wrap category and project chips instead of truncating them (#47)
 - **sidebar:** Use muted accent-soft for the selected nav item (#49)
 - **calendar:** Move billable toggle below project in entry review sidebar (#51)
+
+### Documentation
+- Update changelog for v0.4.15
 
 ### Maintenance
 - **release:** Bump version to 0.4.15 (#55)

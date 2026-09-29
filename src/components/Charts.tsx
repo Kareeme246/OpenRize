@@ -77,8 +77,7 @@ export function Donut({
     >
       <svg
         viewBox={`0 0 ${size} ${size}`}
-        width={size}
-        height={size}
+        style={{ width: `${size / 16}rem`, height: `${size / 16}rem` }}
         role="img"
         aria-label={`${title}: ${shown
           .map((s) => `${s.label} ${formatDuration(s.ms)}`)

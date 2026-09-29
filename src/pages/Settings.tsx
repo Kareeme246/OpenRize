@@ -37,6 +37,7 @@ import {
   isInsideTrackingHours,
   type LoginItemState,
   type Settings as SettingsType,
+  type SizeMode,
   type Theme,
   type TrackingHours,
 } from "../lib/settings";
@@ -46,6 +47,13 @@ const THEME_OPTIONS: SegmentedOption<Theme>[] = [
   { value: "system", label: "System" },
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
+];
+
+const SIZE_OPTIONS: SegmentedOption<SizeMode>[] = [
+  { value: "compact", label: "Compact" },
+  { value: "normal", label: "Normal" },
+  { value: "relaxed", label: "Relaxed" },
+  { value: "veryRelaxed", label: "Very Relaxed" },
 ];
 
 const ACCENT_OPTIONS: SegmentedOption<Accent>[] = ACCENT_ORDER.map(
@@ -783,6 +791,18 @@ export function Settings({
             onChange={(theme) => update({ theme })}
           />
         </SettingRow>
+        <SettingBlock
+          title="Size mode"
+          description="Scale text and icons throughout OpenRize"
+        >
+          <SegmentedControl
+            name="size-mode"
+            value={settings.sizeMode}
+            options={SIZE_OPTIONS}
+            largeTarget
+            onChange={(sizeMode) => update({ sizeMode })}
+          />
+        </SettingBlock>
         <SettingRow
           title="Accent colour"
           description="Highlights, active states, and running timers across the app"

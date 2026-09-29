@@ -12,6 +12,8 @@ interface SegmentedControlProps<T extends string | number> {
   options: SegmentedOption<T>[];
   onChange: (value: T) => void;
   disabled?: boolean;
+  /** Keep each segment at least 44pt tall for the size-mode control. */
+  largeTarget?: boolean;
 }
 
 /**
@@ -29,6 +31,7 @@ export function SegmentedControl<T extends string | number>({
   options,
   onChange,
   disabled = false,
+  largeTarget = false,
 }: SegmentedControlProps<T>) {
   return (
     <div
@@ -40,7 +43,7 @@ export function SegmentedControl<T extends string | number>({
         return (
           <label
             key={String(option.value)}
-            className={`flex cursor-pointer items-center gap-1.5 px-2.5 py-1.5 text-[12px] transition-colors ${
+            className={`flex cursor-pointer items-center gap-1.5 px-2.5 py-1.5 text-[12px] transition-colors ${largeTarget ? "min-h-[44px]" : ""} ${
               index > 0 ? "border-l border-line" : ""
             } ${
               checked

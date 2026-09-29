@@ -44,7 +44,7 @@ export function RangeSummary({
         label="Work hours"
         large
         value={formatDuration(workMs)}
-        sub={`${Math.round(progress * 100)}% of ${targetLabel} target · ${plural(entries, "entry", "entries")}`}
+        sub={`${Math.round(progress * 100)}% of ${targetLabel} · ${plural(entries, "entry", "entries")}`}
       >
         <div className="mt-2">
           <Progress value={progress} label="Work hours against target" />

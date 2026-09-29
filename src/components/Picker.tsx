@@ -21,7 +21,11 @@ function OptionDot({ color, size = 7 }: { color: string; size?: number }) {
     <span
       aria-hidden="true"
       className="inline-block shrink-0 rounded-full"
-      style={{ backgroundColor: color, width: size, height: size }}
+      style={{
+        backgroundColor: color,
+        width: `${size / 16}rem`,
+        height: `${size / 16}rem`,
+      }}
     />
   );
 }

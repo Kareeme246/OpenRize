@@ -394,7 +394,7 @@ function TodaySummary({
 
   return (
     <>
-      <div className="grid grid-cols-[64px_minmax(0,1fr)] items-center gap-3">
+      <div className="grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-3">
         <svg
           viewBox={`0 0 ${RING} ${RING}`}
           className="size-16"

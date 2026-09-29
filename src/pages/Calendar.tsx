@@ -422,12 +422,12 @@ export function Calendar({ route, navigate }: CalendarProps) {
   return (
     <div className="calendar-view flex h-full min-h-0 flex-col overflow-hidden bg-canvas text-fg">
       <PageHeader title={title}>
-        <div className="flex w-[180px] shrink-0 justify-end">
+        <div className="flex shrink-0 justify-end">
           {reviewQueue.length > 0 && (
             <button
               type="button"
               onClick={startReviewMode}
-              className="flex items-center gap-1.5 rounded-full border border-review/30 bg-review/15 px-3 py-1 font-semibold text-[12px] text-review transition-colors hover:bg-review/25"
+              className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-review/30 bg-review/15 px-3 py-1 font-semibold text-[12px] text-review transition-colors hover:bg-review/25"
             >
               <span>Review {reviewQueue.length} pending</span>
               <kbd className="rounded bg-review/20 px-1 text-[10px]">R</kbd>

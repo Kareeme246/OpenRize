@@ -1,4 +1,4 @@
-//! User preferences — theme, accent, close behavior, tray, retention.
+//! User preferences - theme, accent, size mode, close behavior, tray, retention.
 //!
 //! Storage policy: a single JSON file under the XDG config home
 //! (`$XDG_CONFIG_HOME/openrize/settings.json`, or `~/.config/openrize/...`).
@@ -38,6 +38,16 @@ pub enum Accent {
     Blue,
     Purple,
     Orange,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SizeMode {
+    Compact,
+    #[default]
+    Normal,
+    Relaxed,
+    VeryRelaxed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -243,6 +253,7 @@ impl TrackingHours {
 pub struct Settings {
     pub theme: Theme,
     pub accent: Accent,
+    pub size_mode: SizeMode,
     /// What the window's close button does while the tray is enabled.
     pub close_behavior: CloseBehavior,
     pub tray_enabled: bool,
@@ -265,6 +276,7 @@ impl Default for Settings {
         Self {
             theme: Theme::System,
             accent: Accent::default(),
+            size_mode: SizeMode::default(),
             close_behavior: CloseBehavior::Hide,
             tray_enabled: true,
             retention_days: 0,
@@ -390,6 +402,7 @@ mod tests {
                 .set(Settings {
                     theme: Theme::Light,
                     accent: Accent::Orange,
+                    size_mode: SizeMode::VeryRelaxed,
                     close_behavior: CloseBehavior::Quit,
                     tray_enabled: false,
                     retention_days: 30,
@@ -425,6 +438,7 @@ mod tests {
         let reloaded = SettingsStore::load(&dir).unwrap().snapshot();
         assert_eq!(reloaded.theme, Theme::Light);
         assert_eq!(reloaded.accent, Accent::Orange);
+        assert_eq!(reloaded.size_mode, SizeMode::VeryRelaxed);
         assert_eq!(reloaded.close_behavior, CloseBehavior::Quit);
         assert!(!reloaded.tray_enabled);
         assert_eq!(reloaded.retention_days, 30);
@@ -436,6 +450,12 @@ mod tests {
         assert!(reloaded.tracking_hours.per_day);
         assert_eq!(reloaded.tracking_hours.monday.start, "09:00");
         assert!(!reloaded.tracking_hours.tuesday.enabled);
+    }
+
+    #[test]
+    fn older_settings_default_to_normal_size() {
+        let loaded: Settings = serde_json::from_str(r#"{"theme":"dark","accent":"blue"}"#).unwrap();
+        assert_eq!(loaded.size_mode, SizeMode::Normal);
     }
 
     #[test]

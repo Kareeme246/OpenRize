@@ -33,8 +33,8 @@ test("time splits at local edges, and a midnight-spanning entry counts once in t
     ],
     edges,
     "project",
-    clientOf,
     pending,
+    clientOf,
   );
   const [row] = sheet.groups[0].rows;
   assert.deepEqual(cells(row.days), [0.75 * HOUR, 0.25 * HOUR]);
@@ -60,8 +60,8 @@ test("project rows group under their client, largest first, with none last", () 
     ],
     [0, 24 * HOUR],
     "project",
-    clientOf,
     pending,
+    clientOf,
   );
   assert.deepEqual(
     sheet.groups.map((group) => [group.key, group.rows.map((row) => row.key)]),
@@ -84,6 +84,25 @@ test("project rows group under their client, largest first, with none last", () 
   assert.deepEqual(cells(sheet.days), [10 * HOUR]);
 });
 
+test("without clientOf, project rows form one flat list, largest first", () => {
+  const sheet = buildSheet(
+    [
+      entry("1", { projectId: "a" }),
+      entry("2", { projectId: "c", endedAt: 3 * HOUR }),
+      entry("3", { endedAt: 5 * HOUR }),
+      entry("4", { projectId: "b", endedAt: 2 * HOUR }),
+    ],
+    [0, 24 * HOUR],
+    "project",
+    pending,
+  );
+  assert.deepEqual(
+    sheet.groups.map((group) => [group.key, group.rows.map((row) => row.key)]),
+    [["all", ["c", "b", "a", NONE]]],
+  );
+  assert.equal(sheet.groups[0].total.ms, 11 * HOUR);
+});
+
 test("category rows sit in one group and break down by project", () => {
   const sheet = buildSheet(
     [
@@ -93,8 +112,8 @@ test("category rows sit in one group and break down by project", () => {
     ],
     [0, 24 * HOUR],
     "category",
-    clientOf,
     pending,
+    clientOf,
   );
   assert.equal(sheet.groups.length, 1);
   assert.equal(sheet.groups[0].key, "all");
@@ -113,7 +132,7 @@ test("category rows sit in one group and break down by project", () => {
 test("blank or out-of-range weeks produce an empty sheet", () => {
   const edges = [24 * HOUR, 48 * HOUR];
   for (const entries of [[], [entry("early", { projectId: "a" })]]) {
-    const sheet = buildSheet(entries, edges, "project", clientOf, pending);
+    const sheet = buildSheet(entries, edges, "project", pending, clientOf);
     assert.deepEqual(sheet.groups, []);
     assert.deepEqual(sheet.total, { ms: 0, reviewMs: 0, review: 0 });
   }

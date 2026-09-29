@@ -557,7 +557,7 @@ export function SheetGrid({
             </tr>
           ) : (
             sheet.groups.flatMap((group) => [
-              ...(rows === "project"
+              ...(group.key !== "all"
                 ? [
                     <tr
                       key={`group/${group.key}`}

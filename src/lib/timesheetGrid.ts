@@ -135,9 +135,10 @@ function byTotal(a: Builder, b: Builder): number {
 }
 
 /**
- * The timesheet matrix: rows of projects (grouped under their client) or of
- * categories, one cell per bucket between `edges`, with row, group, and
- * column totals. Every entry lands in exactly one row, so the footer matches
+ * The timesheet matrix: rows of projects or of categories, one cell per
+ * bucket between `edges`, with row, group, and column totals. With
+ * `clientOf`, project rows group under their client; without it every row
+ * sits in one `all` group. Every entry lands in exactly one row, so the footer matches
  * the tracked time; entries on no project or category get a `NONE` row.
  * An entry spanning midnight counts in each day's review count but once in
  * a total's.
@@ -146,8 +147,8 @@ export function buildSheet(
   entries: TimeEntry[],
   edges: number[],
   rows: SheetRows,
-  clientOf: (projectId: string) => string | undefined,
   needsReview: (entry: TimeEntry) => boolean,
+  clientOf?: (projectId: string) => string | undefined,
 ): Sheet {
   const width = edges.length - 1;
   const groups = new Map<
@@ -170,7 +171,7 @@ export function buildSheet(
     const childKey =
       (rows === "project" ? entry.categoryId : entry.projectId) ?? NONE;
     const groupKey =
-      rows === "project"
+      rows === "project" && clientOf
         ? ((entry.projectId && clientOf(entry.projectId)) ?? NONE)
         : "all";
     let group = groups.get(groupKey);

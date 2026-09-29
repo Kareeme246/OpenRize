@@ -122,13 +122,23 @@ export function Timesheets({
     (projectId: string) => catalog.projectById.get(projectId)?.clientId,
     [catalog.projectById],
   );
+  const filtered = hasTimesheetFilters(filters);
   const entries = useMemo(
     () => (loaded ? filterEntries(loaded.entries, filters, clientOf) : []),
     [loaded, filters, clientOf],
   );
   const sheet = useMemo(
-    () => buildSheet(entries, shownEdges, rows, clientOf, isReviewable),
-    [entries, shownEdges, rows, clientOf],
+    // Week stays one flat list until the user narrows by client, project,
+    // or category; Day always groups project rows under their client.
+    () =>
+      buildSheet(
+        entries,
+        shownEdges,
+        rows,
+        isReviewable,
+        scale === "day" || filtered ? clientOf : undefined,
+      ),
+    [entries, shownEdges, rows, clientOf, scale, filtered],
   );
   const summary = useMemo(
     () =>
@@ -156,7 +166,6 @@ export function Timesheets({
     }
   };
 
-  const filtered = hasTimesheetFilters(filters);
   const unit = scale === "day" ? "day" : "week";
   const message = error ?? catalog.error ?? actionError;
 

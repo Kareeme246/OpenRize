@@ -232,7 +232,13 @@ export default function App() {
           />
         );
       case "timesheets":
-        return <Timesheets navigate={navigate} />;
+        return (
+          <Timesheets
+            route={currentRoute}
+            navigate={navigate}
+            replace={replace}
+          />
+        );
       case "projects":
         return (
           <Projects

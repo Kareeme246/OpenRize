@@ -1,83 +1,205 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  BUTTON_SECONDARY,
   DateStepper,
-  EmptyState,
   InlineError,
   PageHeader,
   SkeletonRows,
 } from "../components/Page";
+import {
+  SegmentedControl,
+  type SegmentedOption,
+} from "../components/SegmentedControl";
 import { useCatalog } from "../hooks/useCatalog";
+import { useSettings } from "../hooks/useSettings";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import * as api from "../lib/api";
 import {
-  addDays,
   dayEdges,
+  isoWeek,
   localDateString,
+  parseLocalDate,
   rangeFor,
-  rangeLabel,
+  stepDate,
 } from "../lib/dates";
-import { formatDuration } from "../lib/format";
-import { projectWeek } from "../lib/timesheetGrid";
-import type { Route, TimeEntry } from "../lib/types";
+import { isReviewable } from "../lib/entries";
+import { dailyTargetMs, weeklyTargetMs } from "../lib/settings";
+import {
+  buildSheet,
+  filterEntries,
+  hasTimesheetFilters,
+  summarize,
+} from "../lib/timesheetGrid";
+import type { Route, TimeEntry, TimesheetFilters } from "../lib/types";
+import { DaySummary } from "./timesheets/DaySummary";
+import { FilterBar } from "./timesheets/FilterBar";
+import { SheetGrid } from "./timesheets/SheetGrid";
 
-export function Timesheets({ navigate }: { navigate: (route: Route) => void }) {
-  const [week, setWeek] = useState(() => new Date());
-  const [loaded, setLoaded] = useState<{
-    start: number;
-    edges: number[];
-    entries: TimeEntry[];
-  } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+type TimesheetsRoute = Extract<Route, { name: "timesheets" }>;
+type Scale = NonNullable<TimesheetsRoute["scale"]>;
+
+const NO_FILTERS: TimesheetFilters = {};
+
+const SCALES: SegmentedOption<Scale>[] = [
+  { value: "day", label: "Day" },
+  { value: "week", label: "Week" },
+];
+
+/** `Week 39 - September 21, 2026` or `Wednesday, September 23`, as Rise titles them. */
+function crumbFor(scale: Scale, date: Date, start: Date): string {
+  if (scale === "day") {
+    return date.toLocaleDateString(undefined, {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+    });
+  }
+  return `Week ${isoWeek(date)} - ${start.toLocaleDateString(undefined, {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  })}`;
+}
+
+export function Timesheets({
+  route,
+  navigate,
+  replace,
+}: {
+  route: TimesheetsRoute;
+  navigate: (route: Route) => void;
+  replace: (route: Route) => void;
+}) {
+  const { settings } = useSettings();
   const catalog = useCatalog();
-  const range = useMemo(() => rangeFor("week", week), [week]);
+  const scale: Scale = route.scale ?? "week";
+  const rows = route.rows ?? "project";
+  const filters = route.filters ?? NO_FILTERS;
+  const date = useMemo(() => parseLocalDate(route.date), [route.date]);
+  const range = useMemo(() => rangeFor(scale, date), [scale, date]);
   const edges = useMemo(() => dayEdges(range.start, range.end), [range]);
   const start = range.start.getTime();
   const end = range.end.getTime();
-  const shownStart = useRef(start);
-  shownStart.current = start;
-  const refresh = useCallback(async () => {
+
+  const [loaded, setLoaded] = useState<{
+    start: number;
+    end: number;
+    entries: TimeEntry[];
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // Responses for a range the user already left are dropped.
+  const shown = useRef(`${start}-${end}`);
+  shown.current = `${start}-${end}`;
+  const refresh = useCallback(async (): Promise<void> => {
     try {
       const next = await api.listTimeEntries(start, end - 1);
-      if (shownStart.current !== start) return;
-      setLoaded({ start, edges, entries: next });
+      if (shown.current !== `${start}-${end}`) return;
+      setLoaded({ start, end, entries: next });
       setError(null);
     } catch (cause) {
-      if (shownStart.current === start) setError(api.describeError(cause));
+      if (shown.current === `${start}-${end}`) {
+        setError(api.describeError(cause));
+      }
     }
-  }, [start, end, edges]);
+  }, [start, end]);
   useEffect(() => {
     void refresh();
   }, [refresh]);
   useTauriEvent(api.ENTRIES_CHANGED, () => void refresh());
-  const displayEdges = loaded?.edges ?? edges;
-  const rows = useMemo(
-    () => (loaded ? projectWeek(loaded.entries, loaded.edges) : []),
-    [loaded],
+  useTauriEvent(api.SUGGESTION_READY, () => void refresh());
+
+  // Until the new range arrives, the grid keeps drawing the last one.
+  const shownEdges = useMemo(
+    () =>
+      loaded && (loaded.start !== start || loaded.end !== end)
+        ? dayEdges(new Date(loaded.start), new Date(loaded.end))
+        : edges,
+    [loaded, start, end, edges],
   );
-  const totals = displayEdges
-    .slice(1)
-    .map((_, day) => rows.reduce((sum, row) => sum + row.days[day], 0));
-  const total = totals.reduce((sum, ms) => sum + ms, 0);
+  const clientOf = useCallback(
+    (projectId: string) => catalog.projectById.get(projectId)?.clientId,
+    [catalog.projectById],
+  );
+  const filtered = hasTimesheetFilters(filters);
+  const entries = useMemo(
+    () => (loaded ? filterEntries(loaded.entries, filters, clientOf) : []),
+    [loaded, filters, clientOf],
+  );
+  const sheet = useMemo(
+    // Week stays one flat list until the user narrows by client, project,
+    // or category; Day always groups project rows under their client.
+    () =>
+      buildSheet(
+        entries,
+        shownEdges,
+        rows,
+        isReviewable,
+        scale === "day" || filtered ? clientOf : undefined,
+      ),
+    [entries, shownEdges, rows, clientOf, scale, filtered],
+  );
+  const summary = useMemo(
+    () =>
+      summarize(
+        entries,
+        shownEdges[0],
+        shownEdges[shownEdges.length - 1],
+        isReviewable,
+      ),
+    [entries, shownEdges],
+  );
+
+  const setRoute = (patch: Partial<TimesheetsRoute>): void =>
+    replace({ ...route, ...patch });
+  const go = (patch: Partial<TimesheetsRoute>): void =>
+    navigate({ ...route, ...patch });
+
+  const approve = async (entry: TimeEntry): Promise<void> => {
+    try {
+      await api.approveTimeEntries([entry.id]);
+      setActionError(null);
+      await refresh();
+    } catch (cause) {
+      setActionError(api.describeError(cause));
+    }
+  };
+
+  const unit = scale === "day" ? "day" : "week";
+  const message = error ?? catalog.error ?? actionError;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-base">
-      <PageHeader title="Timesheets" crumb={rangeLabel("week", week)}>
+    <div className="flex h-full min-h-0 flex-col bg-canvas text-fg">
+      <PageHeader title="Timesheets" crumb={crumbFor(scale, date, range.start)}>
         <DateStepper
-          unit="week"
+          unit={unit}
           onStep={(direction) =>
-            setWeek((date) => addDays(date, direction * 7))
+            go({ date: localDateString(stepDate(scale, date, direction)) })
           }
-          onToday={() => setWeek(new Date())}
+          onToday={() => go({ date: localDateString(new Date()) })}
+        />
+        <SegmentedControl
+          name="timesheets-scale"
+          value={scale}
+          options={SCALES}
+          onChange={(next) => go({ scale: next })}
         />
       </PageHeader>
-      <div className="min-h-0 flex-1 overflow-auto p-5">
-        <p className="mb-4 text-xs text-fg-soft">
-          Project time by day · Select a day to review or approve its entries.
-        </p>
-        {(error || catalog.error) && (
-          <div className="mb-4">
+      <div className="shrink-0 px-5 pt-4">
+        <FilterBar
+          catalog={catalog}
+          filters={filters}
+          onChange={(next) =>
+            setRoute({ filters: hasTimesheetFilters(next) ? next : undefined })
+          }
+        />
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto px-5 pt-3 pb-5">
+        {message && (
+          <div className="mb-3">
             <InlineError
-              message={error || catalog.error || ""}
+              message={message}
               onRetry={() => {
                 void refresh();
                 void catalog.reload();
@@ -87,122 +209,55 @@ export function Timesheets({ navigate }: { navigate: (route: Route) => void }) {
         )}
         {!loaded ? (
           <SkeletonRows />
-        ) : rows.length === 0 ? (
-          <EmptyState
-            title="No project time this week"
-            hint="Assign a project to a time entry to see it here."
-          />
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-line bg-panel">
-            <table className="w-full min-w-[750px] border-collapse text-left text-xs tabular-nums">
-              <thead className="border-b border-line bg-surface text-fg-soft">
-                <tr>
-                  <th scope="col" className="min-w-48 px-4 py-3 font-medium">
-                    Project / client
-                  </th>
-                  {displayEdges.slice(0, -1).map((edge) => (
-                    <th
-                      scope="col"
-                      key={edge}
-                      className="px-2 py-3 text-right font-medium"
-                    >
-                      {new Date(edge).toLocaleDateString(undefined, {
-                        weekday: "short",
-                        day: "numeric",
-                      })}
-                    </th>
-                  ))}
-                  <th scope="col" className="px-4 py-3 text-right font-medium">
-                    Total
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => {
-                  const project = catalog.projectById.get(row.projectId);
-                  const client = project?.clientId
-                    ? catalog.clientById.get(project.clientId)
-                    : undefined;
-                  return (
-                    <tr
-                      key={row.projectId}
-                      className="border-b border-line/60 last:border-0"
-                    >
-                      <th scope="row" className="px-4 py-3 font-medium text-fg">
-                        <span className="flex items-center gap-2">
-                          <span
-                            className="size-2 shrink-0 rounded-full"
-                            style={{
-                              backgroundColor:
-                                project?.color ?? "var(--fg-soft)",
-                            }}
-                          />
-                          {project?.name ?? "Unknown project"}
-                        </span>
-                        {client && (
-                          <span className="ml-4 text-[11px] font-normal text-fg-faint">
-                            {client.name}
-                          </span>
-                        )}
-                      </th>
-                      {row.days.map((ms, day) => (
-                        <td
-                          key={displayEdges[day]}
-                          className="px-2 py-3 text-right"
-                        >
-                          {ms ? (
-                            <button
-                              type="button"
-                              className="rounded px-1 text-fg hover:bg-accent-soft hover:text-accent"
-                              onClick={() =>
-                                navigate({
-                                  name: "timesheet",
-                                  scale: "day",
-                                  date: localDateString(
-                                    new Date(displayEdges[day]),
-                                  ),
-                                })
-                              }
-                              title="Review this day"
-                            >
-                              {formatDuration(ms)}
-                            </button>
-                          ) : (
-                            <span className="text-fg-faint">–</span>
-                          )}
-                        </td>
-                      ))}
-                      <td
-                        className="px-4 py-3 text-right font-semibold text-fg-strong"
-                        title={`${formatDuration(row.approvedMs)} approved · ${formatDuration(row.billableMs)} approved billable`}
-                      >
-                        {formatDuration(
-                          row.days.reduce((sum, ms) => sum + ms, 0),
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot className="border-t border-line bg-surface font-semibold text-fg">
-                <tr>
-                  <th scope="row" className="px-4 py-3">
-                    All projects
-                  </th>
-                  {totals.map((ms, day) => (
-                    <td
-                      key={displayEdges[day]}
-                      className="px-2 py-3 text-right"
-                    >
-                      {ms ? formatDuration(ms) : "–"}
-                    </td>
-                  ))}
-                  <td className="px-4 py-3 text-right">
-                    {formatDuration(total)}
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
+          <div className="space-y-4">
+            {scale === "day" && <DaySummary summary={summary} />}
+            <SheetGrid
+              sheet={sheet}
+              edges={shownEdges}
+              scale={scale}
+              rows={rows}
+              onRowsChange={(next) => setRoute({ rows: next })}
+              catalog={catalog}
+              targetMs={
+                scale === "day"
+                  ? dailyTargetMs(settings)
+                  : weeklyTargetMs(settings)
+              }
+              emptyTitle={
+                filtered
+                  ? "Nothing matches these filters"
+                  : `No time tracked this ${unit}`
+              }
+              emptyHint={
+                filtered
+                  ? undefined
+                  : "Tracked and added time shows up here by project and day."
+              }
+              emptyAction={
+                filtered ? (
+                  <button
+                    type="button"
+                    className={BUTTON_SECONDARY}
+                    onClick={() => setRoute({ filters: undefined })}
+                  >
+                    Clear filters
+                  </button>
+                ) : undefined
+              }
+              onOpenDay={(dayStart) =>
+                go({ scale: "day", date: localDateString(new Date(dayStart)) })
+              }
+              onReview={() =>
+                navigate({
+                  name: "timesheet",
+                  scale,
+                  date: localDateString(date),
+                  tab: "review",
+                })
+              }
+              onApprove={(entry) => void approve(entry)}
+            />
           </div>
         )}
       </div>

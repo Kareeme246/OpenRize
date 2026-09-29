@@ -58,7 +58,7 @@ function NavTab({ active, label, badge, onSelect, children }: NavTabProps) {
         collapsed ? "justify-center" : ""
       } ${
         active
-          ? "bg-accent/15 text-accent font-semibold"
+          ? "bg-accent-soft text-fg-strong font-semibold"
           : "text-fg-soft hover:bg-surface hover:text-fg"
       }`}
     >

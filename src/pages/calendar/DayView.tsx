@@ -297,9 +297,6 @@ export function DayView({
               const owner = segment.entryId
                 ? entryById.get(segment.entryId)
                 : undefined;
-              const category = owner?.categoryId
-                ? categoryById.get(owner.categoryId)
-                : undefined;
               return (
                 <div
                   key={segment.id}
@@ -308,7 +305,9 @@ export function DayView({
                   style={{
                     top: `${top}px`,
                     height: `${segmentHeight}px`,
-                    backgroundColor: category?.color ?? "var(--fg-faint)",
+                    backgroundColor: owner
+                      ? "var(--accent)"
+                      : "var(--fg-faint)",
                   }}
                 />
               );

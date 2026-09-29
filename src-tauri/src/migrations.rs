@@ -341,8 +341,23 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
     }
 
+    if current_version < 7 {
+        let tx = conn.transaction()?;
+        tx.execute_batch(CLIENT_ARCHIVE_V7)?;
+        tx.execute("PRAGMA user_version = 7;", [])?;
+        tx.commit()?;
+    }
+
     Ok(())
 }
+
+/// The Clients page: a client can be archived (kept, hidden from the active
+/// list and from the pickers that assign one) and carries free-form notes.
+/// Both columns are additive, so existing clients upgrade in place untouched.
+const CLIENT_ARCHIVE_V7: &str = "
+ALTER TABLE clients ADD COLUMN archived_at INTEGER;
+ALTER TABLE clients ADD COLUMN notes TEXT;
+";
 
 /// Real invoice documents. Rebuilds `invoices` and `invoice_lines` (their
 /// status CHECK and the one-row-per-entry primary key cannot be altered in
@@ -656,7 +671,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 6);
+        assert_eq!(v, 7);
 
         let cat_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM categories;", [], |r| r.get(0))
@@ -755,7 +770,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 6);
+        assert_eq!(v, 7);
 
         let ids: Vec<String> = conn
             .prepare("SELECT id FROM invoices ORDER BY id")
@@ -865,6 +880,7 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "CREATE TABLE time_entries (id TEXT PRIMARY KEY, invoice_id TEXT);
+             CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT NOT NULL);
              CREATE TABLE invoices (
                id TEXT PRIMARY KEY, client_id TEXT NOT NULL, client_name TEXT NOT NULL,
                client_email TEXT, client_address TEXT, currency TEXT NOT NULL,
@@ -953,7 +969,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 6);
+        assert_eq!(v, 7);
     }
 
     /// A database the v5 migration already ran on (with `legacy` rows kept) loses
@@ -963,6 +979,7 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "CREATE TABLE time_entries (id TEXT PRIMARY KEY, invoice_id TEXT);
+             CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT NOT NULL);
              CREATE TABLE invoices (
                id TEXT PRIMARY KEY, client_id TEXT NOT NULL, client_name TEXT NOT NULL,
                client_email TEXT, client_address TEXT, currency TEXT NOT NULL,
@@ -1067,7 +1084,108 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 6);
+        assert_eq!(v, 7);
+    }
+
+    /// A database as v6 shipped it: the fresh schema without the client
+    /// archive and notes columns, holding clients, projects, and tracked time.
+    #[test]
+    fn a_v6_database_upgrades_in_place_keeping_clients_projects_and_time() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE clients DROP COLUMN archived_at;
+             ALTER TABLE clients DROP COLUMN notes;
+             INSERT INTO clients (id, name, email, address, default_rate, currency, created_at, updated_at)
+               VALUES ('c1', 'Acme', 'a@x.test', '1 Main St.', 125.5, 'EUR', 10, 20);
+             INSERT INTO clients (id, name, created_at, updated_at, deleted_at)
+               VALUES ('c2', 'Gone', 10, 20, 30);
+             INSERT INTO projects (id, client_id, name, color, created_at, updated_at)
+               VALUES ('p1', 'c1', 'Swap', '#fff', 1, 1);
+             INSERT INTO time_entries (id, started_at, ended_at, description, project_id, status, billable, created_at, updated_at)
+               VALUES ('e1', 0, 3600000, 'Work', 'p1', 'approved', 1, 1, 1);
+             PRAGMA user_version = 6;",
+        )
+        .unwrap();
+        let clients_before = conn
+            .prepare("PRAGMA table_info(clients)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(!clients_before.iter().any(|name| name == "archived_at"));
+
+        run_migrations(&mut conn).unwrap();
+
+        let mut fresh = Connection::open_in_memory().unwrap();
+        run_migrations(&mut fresh).unwrap();
+        assert_eq!(schema_snapshot(&fresh), schema_snapshot(&conn));
+        let v: i32 = conn
+            .query_row("PRAGMA user_version;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 7);
+
+        type Row = (
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<f64>,
+            Option<String>,
+        );
+        let clients: Vec<Row> = conn
+            .prepare(
+                "SELECT id, name, email, address, default_rate, currency FROM clients ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            clients,
+            [
+                (
+                    "c1".into(),
+                    "Acme".into(),
+                    Some("a@x.test".into()),
+                    Some("1 Main St.".into()),
+                    Some(125.5),
+                    Some("EUR".into())
+                ),
+                ("c2".into(), "Gone".into(), None, None, None, None),
+            ]
+        );
+        // Nothing is archived by the upgrade, and the soft delete survives.
+        let flags: (i64, i64, Option<i64>) = conn
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM clients WHERE archived_at IS NOT NULL),
+                        (SELECT COUNT(*) FROM clients WHERE notes IS NOT NULL),
+                        (SELECT deleted_at FROM clients WHERE id = 'c2')",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(flags, (0, 0, Some(30)));
+        let linked: (String, String, i64) = conn
+            .query_row(
+                "SELECT p.client_id, e.project_id, e.ended_at - e.started_at
+                 FROM projects p JOIN time_entries e ON e.project_id = p.id",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(linked, ("c1".into(), "p1".into(), 3_600_000));
     }
 
     #[test]

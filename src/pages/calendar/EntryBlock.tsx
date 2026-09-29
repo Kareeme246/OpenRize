@@ -21,14 +21,189 @@ const NARROW_DENSITY_CLASSES: Record<Density, string> = {
   sliver: "rounded-xs p-0",
 };
 
-/** A full block this tall has room for its chips to wrap onto a second line. */
-const WRAP_CHIPS_MIN_HEIGHT = 96;
+/**
+ * Rendered line heights in px (font size x the inherited 1.5), pinned on the
+ * text with `leading-[...]` below so the room maths here matches the layout.
+ */
+const LINE = {
+  title: 18,
+  titleCompact: 17.25,
+  time: 16.5,
+  timeCompact: 15.75,
+  chipText: 15,
+  narrowTitle: 13.125,
+  narrowSub: 12.5,
+};
+/** A chip is one text line plus its py-0.5. */
+const CHIP_HEIGHT = LINE.chipText + 4;
+
+/** Vertical padding plus border a density spends inside the block's height. */
+const CHROME: Record<Density, number> = {
+  full: 22,
+  compact: 10,
+  line: 2,
+  sliver: 0,
+};
+const NARROW_CHROME: Record<Density, number> = {
+  full: 10,
+  compact: 6,
+  line: 2,
+  sliver: 0,
+};
+
+/** How many lines each wrappable element of a wide block may take. */
+interface LineBudget {
+  /** Description lines. */
+  title: number;
+  /** Text lines inside each category / project chip. */
+  chip: number;
+  /** Whether chips may flow onto further rows. */
+  wrapRow: boolean;
+}
+
+interface BudgetInput {
+  /** Height the block's content box has. */
+  room: number;
+  titleLine: number;
+  /** Height the content takes with every element on a single line. */
+  base: number;
+  /** Chips whose text can wrap (category, project). */
+  chips: number;
+  /** Everything sharing the chip row, which can stack when it wraps. */
+  rowItems: number;
+  rowLine: number;
+  rowGap: number;
+}
+
+/**
+ * Splits the room left over once every element has one line. The description
+ * gets the first spare line, then the chip row, then they take turns; an
+ * element only grows by a whole line that fits, so nothing is ever clipped
+ * mid-line and whatever cannot grow keeps truncating.
+ */
+function budgetLines({
+  room,
+  titleLine,
+  base,
+  chips,
+  rowItems,
+  rowLine,
+  rowGap,
+}: BudgetInput): LineBudget {
+  const budget: LineBudget = { title: 1, chip: 1, wrapRow: false };
+  let spare = room - base;
+  for (let turn = 0; turn < 32; turn++) {
+    let grew = false;
+    if (spare >= titleLine) {
+      budget.title++;
+      spare -= titleLine;
+      grew = true;
+    }
+    if (chips > 0) {
+      const cost =
+        !budget.wrapRow && rowItems > 1
+          ? (rowItems - 1) * (rowLine + rowGap)
+          : chips * LINE.chipText;
+      if (spare >= cost) {
+        if (!budget.wrapRow && rowItems > 1) budget.wrapRow = true;
+        else budget.chip++;
+        spare -= cost;
+        grew = true;
+      }
+    }
+    if (!grew) break;
+  }
+  return budget;
+}
+
+/** Wraps to at most `lines` lines, then cuts off with an ellipsis. */
+export function clampStyle(lines: number): CSSProperties {
+  return {
+    display: "-webkit-box",
+    WebkitBoxOrient: "vertical",
+    WebkitLineClamp: lines,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  };
+}
 
 function densityFor(height: number): Density {
   if (height >= 72) return "full";
   if (height >= 26) return "compact";
   if (height >= 12) return "line";
   return "sliver";
+}
+
+function wideBudget(
+  density: Density,
+  height: number,
+  chips: number,
+  hasStatus: boolean,
+): LineBudget {
+  const room = height - CHROME[density];
+  const chipRow = chips > 0 ? CHIP_HEIGHT : LINE.chipText;
+  if (density === "full") {
+    const rowItems = chips + (hasStatus ? 1 : 0);
+    return budgetLines({
+      room,
+      titleLine: LINE.title,
+      base: LINE.title + 2 + LINE.time + (rowItems > 0 ? 6 + chipRow : 0),
+      chips,
+      rowItems,
+      rowLine: chipRow,
+      rowGap: 6,
+    });
+  }
+  if (density === "compact" && height >= 40) {
+    return budgetLines({
+      room,
+      titleLine: LINE.titleCompact,
+      base: LINE.titleCompact + 2 + Math.max(chipRow, LINE.timeCompact),
+      chips,
+      rowItems: 1 + chips + (hasStatus ? 1 : 0),
+      rowLine: Math.max(chipRow, LINE.timeCompact),
+      rowGap: 2,
+    });
+  }
+  const titleLine = density === "compact" ? LINE.titleCompact : LINE.title;
+  return budgetLines({
+    room,
+    titleLine,
+    base: titleLine,
+    chips: 0,
+    rowItems: 0,
+    rowLine: 0,
+    rowGap: 0,
+  });
+}
+
+/** Week-column blocks: the first and second text rows share the spare room. */
+function narrowBudget(
+  density: Density,
+  height: number,
+): { first: number; second: number } {
+  const lines = { first: 1, second: 1 };
+  if (density === "line") return lines;
+  let spare =
+    height -
+    NARROW_CHROME[density] -
+    LINE.narrowTitle -
+    (height >= 38 ? LINE.narrowSub : 0);
+  for (let turn = 0; turn < 32; turn++) {
+    let grew = false;
+    if (spare >= LINE.narrowTitle) {
+      lines.first++;
+      spare -= LINE.narrowTitle;
+      grew = true;
+    }
+    if (height >= 38 && spare >= LINE.narrowSub) {
+      lines.second++;
+      spare -= LINE.narrowSub;
+      grew = true;
+    }
+    if (!grew) break;
+  }
+  return lines;
 }
 
 function blockStyle(state: BlockState): CSSProperties {
@@ -116,9 +291,15 @@ export function EntryBlock({
       ? "Categorizing…"
       : entry.description || "Untitled session";
 
+  const hasStatus =
+    state === "needsYou" || state === "pending" || state === "failed";
+  const chipCount =
+    state === "processing" ? 0 : (category ? 1 : 0) + (project ? 1 : 0);
+  const budget = wideBudget(density, height, chipCount, hasStatus);
   const title = (
     <span
-      className={`truncate ${state === "processing" ? "font-semibold text-accent" : ""}`}
+      className={`min-w-0 ${state === "processing" ? "font-semibold text-accent" : ""}`}
+      style={clampStyle(budget.title)}
     >
       {description}
     </span>
@@ -154,31 +335,35 @@ export function EntryBlock({
       )}
     </span>
   );
-  const wrapChips = density === "full" && height >= WRAP_CHIPS_MIN_HEIGHT;
+  const chipText = clampStyle(budget.chip);
   const chips = state !== "processing" && (
     <>
       {category && (
         <span
-          className="inline-flex shrink-0 items-center gap-1 rounded-sm px-1.5 py-0.5 font-medium text-[10px]"
+          className={`inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 font-medium text-[10px] leading-[15px] ${
+            budget.wrapRow ? "min-w-0 max-w-full" : "max-w-[55%] shrink-0"
+          }`}
           style={{
             backgroundColor: `color-mix(in srgb, ${category.color} 15%, transparent)`,
             color: category.color,
           }}
         >
           <span
-            className="size-1.5 rounded-full"
+            className="size-1.5 shrink-0 rounded-full"
             style={{ backgroundColor: category.color }}
           />
-          {category.name}
+          <span className="min-w-0" style={chipText}>
+            {category.name}
+          </span>
         </span>
       )}
       {project && (
-        <span className="inline-flex min-w-0 items-center gap-1 rounded-sm bg-surface px-1.5 py-0.5 font-medium text-[10px] text-fg-muted">
+        <span className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-sm bg-surface px-1.5 py-0.5 font-medium text-[10px] text-fg-muted leading-[15px]">
           <span
             className="size-1.5 shrink-0 rounded-full"
             style={{ backgroundColor: project.color }}
           />
-          <span className={wrapChips ? "break-words" : "truncate"}>
+          <span className="min-w-0" style={chipText}>
             {project.name}
             {state === "pending" && "?"}
           </span>
@@ -232,16 +417,16 @@ export function EntryBlock({
         <>
           {density === "full" && (
             <div className="flex h-full min-w-0 flex-col overflow-hidden">
-              <div className="flex items-center gap-1.5 font-semibold text-[12px] text-fg-strong">
+              <div className="flex items-center gap-1.5 font-semibold text-[12px] text-fg-strong leading-[18px]">
                 {title}
                 {approvedMark}
               </div>
-              <div className="mt-0.5 truncate text-[11px] text-fg-soft">
+              <div className="mt-0.5 truncate text-[11px] text-fg-soft leading-[16.5px]">
                 {timeText}
               </div>
               <div
                 className={`mt-1.5 flex items-center gap-1.5 overflow-hidden ${
-                  wrapChips ? "flex-wrap" : ""
+                  budget.wrapRow ? "flex-wrap" : ""
                 }`}
               >
                 {chips}
@@ -251,13 +436,17 @@ export function EntryBlock({
           )}
           {density === "compact" && (
             <div className="flex h-full flex-col justify-center gap-0.5 overflow-hidden">
-              <div className="flex items-center gap-1.5 font-semibold text-[11.5px] text-fg-strong">
+              <div className="flex items-center gap-1.5 font-semibold text-[11.5px] text-fg-strong leading-[17.25px]">
                 {title}
                 {approvedMark}
                 {height < 40 && status}
               </div>
               {height >= 40 && (
-                <div className="flex items-center gap-1.5 overflow-hidden text-[10.5px] text-fg-soft">
+                <div
+                  className={`flex items-center gap-x-1.5 gap-y-0.5 overflow-hidden text-[10.5px] text-fg-soft leading-[15.75px] ${
+                    budget.wrapRow ? "flex-wrap" : ""
+                  }`}
+                >
                   <span className="shrink-0">{timeText}</span>
                   {chips}
                   {status}
@@ -298,15 +487,27 @@ function NarrowContent({
   approvedMark: ReactNode;
 }) {
   if (density === "sliver") return null;
+  const lines = narrowBudget(density, height);
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden text-[10.5px] leading-tight">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden text-[10.5px] leading-[13.125px]">
       <div className="flex min-w-0 items-center gap-1 font-semibold text-fg-strong">
-        <span className="hidden truncate @[8.5rem]:inline">{description}</span>
-        <span className="truncate @[8.5rem]:hidden">{categoryName}</span>
+        <span className="hidden min-w-0 @[8.5rem]:block">
+          <span className="min-w-0" style={clampStyle(lines.first)}>
+            {description}
+          </span>
+        </span>
+        <span className="min-w-0 @[8.5rem]:hidden">
+          <span className="min-w-0" style={clampStyle(lines.first)}>
+            {categoryName}
+          </span>
+        </span>
         {approvedMark}
       </div>
       {height >= 38 && (
-        <div className="truncate text-[10px] text-fg-soft">
+        <div
+          className="text-[10px] text-fg-soft leading-[12.5px]"
+          style={clampStyle(lines.second)}
+        >
           <span className="hidden @[8.5rem]:inline">{categoryName} · </span>
           {duration}
         </div>

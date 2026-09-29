@@ -6,6 +6,7 @@ import type {
   AiMetrics,
   AiStatus,
   AppRecord,
+  BillableEntry,
   Category,
   Client,
   EnergySample,
@@ -16,6 +17,10 @@ import type {
   HintPreview,
   ImportSummary,
   Invoice,
+  InvoiceDraftInput,
+  InvoiceProfile,
+  InvoiceProfileInput,
+  InvoiceSummary,
   NewCategory,
   NewClient,
   NewProject,
@@ -233,27 +238,105 @@ export async function deleteClient(id: string): Promise<void> {
 
 // --- Invoices ---
 
-export async function listInvoices(): Promise<Invoice[]> {
-  return await invoke<Invoice[]>("list_invoices");
+export async function listInvoices(): Promise<InvoiceSummary[]> {
+  return await invoke<InvoiceSummary[]>("list_invoices");
 }
 
-export async function createInvoice(
+export async function getInvoice(id: string): Promise<Invoice> {
+  return await invoke<Invoice>("get_invoice", { id });
+}
+
+export async function listBillableEntries(
   clientId: string,
   startMs: number,
   endMs: number,
-): Promise<Invoice> {
-  return await invoke<Invoice>("create_invoice", { clientId, startMs, endMs });
+  invoiceId?: string,
+): Promise<BillableEntry[]> {
+  return await invoke<BillableEntry[]>("list_billable_entries", {
+    clientId,
+    startMs,
+    endMs,
+    invoiceId: invoiceId ?? null,
+  });
 }
 
-export async function setInvoiceStatus(
-  id: string,
-  status: "sent" | "paid",
-): Promise<void> {
-  await invoke("set_invoice_status", { id, status });
+/** The draft priced and validated by Rust, without storing it. */
+export async function quoteInvoice(draft: InvoiceDraftInput): Promise<Invoice> {
+  return await invoke<Invoice>("quote_invoice", { draft });
+}
+
+/** The DRAFT-watermarked PDF for a draft, straight from the Rust renderer. */
+export async function renderInvoicePreview(
+  draft: InvoiceDraftInput,
+): Promise<Uint8Array> {
+  const bytes = await invoke<ArrayBuffer>("render_invoice_preview", { draft });
+  return new Uint8Array(bytes);
+}
+
+/** The archived PDF of a finalized invoice. */
+export async function getInvoicePdf(id: string): Promise<Uint8Array> {
+  const bytes = await invoke<ArrayBuffer>("get_invoice_pdf", { id });
+  return new Uint8Array(bytes);
+}
+
+export async function saveInvoiceDraft(
+  draft: InvoiceDraftInput,
+): Promise<Invoice> {
+  return await invoke<Invoice>("save_invoice_draft", { draft });
+}
+
+export async function finalizeInvoice(id: string): Promise<Invoice> {
+  return await invoke<Invoice>("finalize_invoice", { id });
+}
+
+export async function setInvoicePaid(id: string, paid: boolean): Promise<void> {
+  await invoke("set_invoice_paid", { id, paid });
+}
+
+export async function voidInvoice(id: string): Promise<void> {
+  await invoke("void_invoice", { id });
 }
 
 export async function deleteDraftInvoice(id: string): Promise<void> {
   await invoke("delete_draft_invoice", { id });
+}
+
+/**
+ * Asks where to save an invoice PDF. Pass `id` for a finalized invoice or
+ * `draft` for a watermarked draft render. Resolves to the saved path, or null
+ * when the user cancels.
+ */
+export async function exportInvoicePdf(
+  target: { id: string } | { draft: InvoiceDraftInput },
+): Promise<string | null> {
+  return await invoke<string | null>("export_invoice_pdf", {
+    id: "id" in target ? target.id : null,
+    draft: "draft" in target ? target.draft : null,
+  });
+}
+
+export async function getInvoiceProfile(): Promise<InvoiceProfile> {
+  return await invoke<InvoiceProfile>("get_invoice_profile");
+}
+
+export async function updateInvoiceProfile(
+  profile: InvoiceProfileInput,
+): Promise<InvoiceProfile> {
+  return await invoke<InvoiceProfile>("update_invoice_profile", { profile });
+}
+
+/** The stored logo (PNG), or an empty array when none is set. */
+export async function getInvoiceLogo(): Promise<Uint8Array> {
+  return new Uint8Array(await invoke<ArrayBuffer>("get_invoice_logo"));
+}
+
+/** Sends the image bytes as the raw request body; Rust validates and resizes. */
+export async function setInvoiceLogo(image: Uint8Array): Promise<void> {
+  await invoke("set_invoice_logo", image);
+}
+
+export async function clearInvoiceLogo(): Promise<void> {
+  await invoke("clear_invoice_logo");
 }
 
 // --- Time Entries ---

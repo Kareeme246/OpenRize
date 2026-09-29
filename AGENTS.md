@@ -58,6 +58,17 @@ Tauri `externalBin` (`tauri.macos.conf.json`), so every Rust build needs
 Xcode 26+ command line tools. Bump `protocolVersion` in `Entry.swift` and
 `PROTOCOL_VERSION` in `ai/sidecar.rs` together when the wire format changes.
 
+## Invoices
+
+Invoices are drafts (editable, time reserved) that Finalize turns into numbered,
+frozen PDFs; see `src-tauri/src/invoices/mod.rs` for the lifecycle. Rust owns all
+money (integer USD cents, `invoices/money.rs`) and the one and only paper
+renderer (`invoices/pdf.rs`, `printpdf` + bundled Noto Sans). The editor shows
+those same bytes through pdf.js (`src/components/PdfViewer.tsx`), so do not add
+an HTML imitation of the paper or compute totals in TypeScript. Regenerate
+specimen PDFs for a visual check with
+`OPENRIZE_INVOICE_SAMPLES=<dir> cargo test --lib invoices::tests::renders`.
+
 ## Visually verifying UI changes
 
 Tauri has no supported WebDriver backend for macOS (only Linux/webkit2gtk and

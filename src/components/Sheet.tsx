@@ -59,7 +59,7 @@ export function Sheet({
     >
       <form
         onSubmit={submit}
-        className={`${WIDTHS[width]} flex max-w-[calc(100vw-2rem)] flex-col rounded-2xl border border-line bg-panel shadow-2xl`}
+        className={`${WIDTHS[width]} flex max-h-[calc(100vh-3rem)] max-w-[calc(100vw-2rem)] flex-col rounded-2xl border border-line bg-panel shadow-2xl`}
       >
         <div className="flex items-center justify-between border-line border-b px-5 py-3">
           <h2 className="font-semibold text-[14px] text-fg-strong">{title}</h2>
@@ -72,7 +72,9 @@ export function Sheet({
             ✕
           </button>
         </div>
-        <div className="space-y-3.5 px-5 py-4 text-[12px]">{children}</div>
+        <div className="min-h-0 flex-1 space-y-3.5 overflow-y-auto px-5 py-4 text-[12px]">
+          {children}
+        </div>
         {error && (
           <div
             role="alert"

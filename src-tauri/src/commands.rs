@@ -1,11 +1,14 @@
 //! IPC surface.
 
 use serde::Serialize;
+use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_dialog::DialogExt;
 
 use crate::activity::{self, ActivitySnapshot};
 use crate::ai::metrics::AiMetrics;
 use crate::ai::{self, AiRuntime, AiStatus};
+use crate::invoices::{self, profile, BillableEntry, DraftInput, Invoice, InvoiceSummary};
 use crate::login_item::{self, LoginItemState};
 use crate::models::{
     AppRecord, Category, Client, EntryDetail, NewCategory, NewClient, NewProject, NewTimeEntry,
@@ -294,51 +297,176 @@ pub fn delete_client(app: AppHandle, id: String) -> Result<(), String> {
 
 // --- Invoices -----------------------------------------------------------
 
-#[tauri::command]
-pub fn list_invoices(app: AppHandle) -> Result<Vec<crate::invoices::Invoice>, String> {
+/// Runs an invoice mutation on the writer connection.
+fn with_writer<T>(
+    app: &AppHandle,
+    run: impl FnOnce(&mut rusqlite::Connection) -> Result<T, String>,
+) -> Result<T, String> {
     let state = app.state::<AppState>();
-    let store = state.activity.lock().map_err(|e| e.to_string())?;
-    crate::invoices::list(store.conn())
+    let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+    run(store.conn_mut())
 }
 
 #[tauri::command]
-pub fn create_invoice(
+pub fn list_invoices(app: AppHandle) -> Result<Vec<InvoiceSummary>, String> {
+    with_reader(&app, invoices::list)
+}
+
+#[tauri::command]
+pub fn get_invoice(app: AppHandle, id: String) -> Result<Invoice, String> {
+    with_reader(&app, |conn| invoices::get(conn, &id))
+}
+
+#[tauri::command]
+pub fn list_billable_entries(
     app: AppHandle,
     client_id: String,
     start_ms: u64,
     end_ms: u64,
-) -> Result<crate::invoices::Invoice, String> {
-    let invoice = {
-        let state = app.state::<AppState>();
-        let mut store = state.activity.lock().map_err(|e| e.to_string())?;
-        crate::invoices::create(
-            store.conn_mut(),
-            &client_id,
-            start_ms,
-            end_ms,
-            now_epoch_ms(),
-        )?
-    };
-    entries_changed(&app);
-    Ok(invoice)
+    invoice_id: Option<String>,
+) -> Result<Vec<BillableEntry>, String> {
+    with_reader(&app, |conn| {
+        invoices::billable_entries(conn, &client_id, start_ms, end_ms, invoice_id.as_deref())
+    })
+}
+
+/// The draft resolved and priced, without storing it.
+#[tauri::command]
+pub fn quote_invoice(app: AppHandle, draft: DraftInput) -> Result<Invoice, String> {
+    with_reader(&app, |conn| invoices::quote(conn, &draft))
+}
+
+/// The DRAFT-watermarked PDF bytes for an unsaved or saved draft.
+#[tauri::command]
+pub fn render_invoice_preview(app: AppHandle, draft: DraftInput) -> Result<Response, String> {
+    with_reader(&app, |conn| invoices::render_draft(conn, &draft)).map(Response::new)
+}
+
+/// The archived PDF bytes of a finalized invoice.
+#[tauri::command]
+pub fn get_invoice_pdf(app: AppHandle, id: String) -> Result<Response, String> {
+    with_reader(&app, |conn| invoices::stored_pdf(conn, &id)).map(Response::new)
 }
 
 #[tauri::command]
-pub fn set_invoice_status(app: AppHandle, id: String, status: String) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    let store = state.activity.lock().map_err(|e| e.to_string())?;
-    crate::invoices::set_status(store.conn(), &id, &status, now_epoch_ms())
+pub fn save_invoice_draft(app: AppHandle, draft: DraftInput) -> Result<Invoice, String> {
+    let saved = with_writer(&app, |conn| {
+        invoices::save_draft(conn, &draft, now_epoch_ms())
+    })?;
+    entries_changed(&app);
+    Ok(saved)
+}
+
+#[tauri::command]
+pub fn finalize_invoice(app: AppHandle, id: String) -> Result<Invoice, String> {
+    let done = with_writer(&app, |conn| invoices::finalize(conn, &id, now_epoch_ms()))?;
+    entries_changed(&app);
+    Ok(done)
+}
+
+#[tauri::command]
+pub fn set_invoice_paid(app: AppHandle, id: String, paid: bool) -> Result<(), String> {
+    with_writer(&app, |conn| {
+        invoices::set_paid(conn, &id, paid, now_epoch_ms())
+    })?;
+    entries_changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn void_invoice(app: AppHandle, id: String) -> Result<(), String> {
+    with_writer(&app, |conn| invoices::void(conn, &id, now_epoch_ms()))?;
+    entries_changed(&app);
+    Ok(())
 }
 
 #[tauri::command]
 pub fn delete_draft_invoice(app: AppHandle, id: String) -> Result<(), String> {
-    {
-        let state = app.state::<AppState>();
-        let mut store = state.activity.lock().map_err(|e| e.to_string())?;
-        crate::invoices::delete_draft(store.conn_mut(), &id)?;
-    }
+    with_writer(&app, |conn| invoices::delete_draft(conn, &id))?;
     entries_changed(&app);
     Ok(())
+}
+
+/// Asks where to save an invoice PDF and writes it: a finalized invoice's
+/// archived bytes (`id`), or a fresh DRAFT render of `draft`. Returns the saved
+/// path, or `None` when the user cancels.
+#[tauri::command]
+pub async fn export_invoice_pdf(
+    app: AppHandle,
+    id: Option<String>,
+    draft: Option<DraftInput>,
+) -> Result<Option<String>, String> {
+    let (bytes, name) = with_reader(&app, |conn| match (&id, &draft) {
+        (Some(id), _) => {
+            let invoice = invoices::get(conn, id)?;
+            let name = invoices::file_name(
+                invoice.summary.number.as_deref(),
+                &invoice.summary.client_name,
+            );
+            Ok((invoices::stored_pdf(conn, id)?, name))
+        }
+        (None, Some(draft)) => Ok((
+            invoices::render_draft(conn, draft)?,
+            invoices::file_name(None, &draft.bill_to_name),
+        )),
+        (None, None) => Err("Nothing to export".to_string()),
+    })?;
+    let Some(picked) = app
+        .dialog()
+        .file()
+        .set_file_name(&name)
+        .add_filter("PDF", &["pdf"])
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+    let mut path = picked.into_path().map_err(|e| e.to_string())?;
+    if path.extension().is_none() {
+        path.set_extension("pdf");
+    }
+    let temp = path.with_extension("pdf.openrize-tmp");
+    std::fs::write(&temp, &bytes).map_err(|e| format!("Could not save the PDF: {e}"))?;
+    std::fs::rename(&temp, &path).map_err(|e| {
+        let _ = std::fs::remove_file(&temp);
+        format!("Could not save the PDF: {e}")
+    })?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+pub fn get_invoice_profile(app: AppHandle) -> Result<profile::InvoiceProfile, String> {
+    with_reader(&app, profile::get)
+}
+
+#[tauri::command]
+pub fn update_invoice_profile(
+    app: AppHandle,
+    profile: profile::ProfileInput,
+) -> Result<profile::InvoiceProfile, String> {
+    with_writer(&app, |conn| profile::update(conn, profile, now_epoch_ms()))
+}
+
+/// The logo image bytes (PNG), or an empty response when none is set.
+#[tauri::command]
+pub fn get_invoice_logo(app: AppHandle) -> Result<Response, String> {
+    with_reader(&app, |conn| {
+        Ok(profile::logo_bytes(conn)?.unwrap_or_default())
+    })
+    .map(Response::new)
+}
+
+/// Stores the raw bytes of the request body as the logo (PNG or JPEG in).
+#[tauri::command]
+pub fn set_invoice_logo(app: AppHandle, request: Request<'_>) -> Result<(), String> {
+    let InvokeBody::Raw(bytes) = request.body() else {
+        return Err("Expected the logo image bytes".into());
+    };
+    with_writer(&app, |conn| profile::set_logo(conn, bytes, now_epoch_ms()))
+}
+
+#[tauri::command]
+pub fn clear_invoice_logo(app: AppHandle) -> Result<(), String> {
+    with_writer(&app, |conn| profile::clear_logo(conn, now_epoch_ms()))
 }
 
 // --- P1: Time Entries ---------------------------------------------------

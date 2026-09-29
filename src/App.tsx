@@ -248,7 +248,13 @@ export default function App() {
           />
         );
       case "invoices":
-        return <Invoices />;
+        return (
+          <Invoices
+            route={currentRoute}
+            navigate={navigate}
+            replace={replace}
+          />
+        );
       case "settings":
         return (
           <Settings

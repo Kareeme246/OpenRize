@@ -29,7 +29,7 @@ const DISMISSED_KEY: &str = "project_suggestions_dismissed";
 /// The muted palette (design board, theme T), for projects created without a
 /// colour picker: imports and discovery.
 pub const PALETTE: [&str; 10] = [
-    "#75a4e5", "#56c2b1", "#e5995c", "#df84b5", "#e4817d", "#9aa6b4", "#bfa181", "#e7b447",
+    "#75a4e5", "#56c2b1", "#52b788", "#df84b5", "#e4817d", "#9aa6b4", "#bfa181", "#707bf0",
     "#66b1df", "#9b87df",
 ];
 

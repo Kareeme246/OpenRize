@@ -200,7 +200,7 @@ export function StatCard({
   value: string;
   sub?: ReactNode;
   active?: boolean;
-  tone?: "review" | "accent";
+  tone?: "review" | "accent" | "danger";
   /** Roomier type, for a card that is the focus of its panel. */
   large?: boolean;
   onClick?: () => void;
@@ -223,7 +223,9 @@ export function StatCard({
             ? "text-review"
             : tone === "accent"
               ? "text-accent"
-              : "text-fg-strong"
+              : tone === "danger"
+                ? "text-danger"
+                : "text-fg-strong"
         }`}
       >
         {value}
@@ -255,7 +257,7 @@ export function StatCard({
   );
 }
 
-/** A thin progress bar; amber once `warn` is reached, and when over 100%. */
+/** A thin progress bar; danger once `warn` is reached, and when over 100%. */
 export function Progress({
   value,
   warnAt,
@@ -277,7 +279,7 @@ export function Progress({
       className="h-1.5 w-full overflow-hidden rounded-full bg-surface-strong"
     >
       <div
-        className={`h-full rounded-full transition-all ${warn ? "bg-review" : "bg-accent"}`}
+        className={`h-full rounded-full transition-all ${warn ? "bg-danger" : "bg-accent"}`}
         style={{ width: `${Math.min(100, Math.max(0, value * 100))}%` }}
       />
     </div>

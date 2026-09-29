@@ -65,12 +65,12 @@
   /* Muted category palette tokens */
   --cat-1: #75a4e5;
   --cat-2: #56c2b1;
-  --cat-3: #e5995c;
+  --cat-3: #52b788;
   --cat-4: #df84b5;
   --cat-5: #e4817d;
   --cat-6: #9aa6b4;
   --cat-7: #bfa181;
-  --cat-8: #e7b447;
+  --cat-8: #707bf0;
   --cat-9: #66b1df;
   --cat-10: #9b87df;
   --cat-11: #e97e7b;
@@ -79,7 +79,7 @@
   /* Decision tiers (Settings → AI effectiveness), fixed order rule →
      personal → model. Validated with the dataviz palette checks. */
   --tier-rule: #5f8fd6;
-  --tier-personal: #cc7f43;
+  --tier-personal: #4ebfa8;
   --tier-model: #a07ad6;
 }
 
@@ -167,19 +167,19 @@
 
   --cat-1: #366acb;
   --cat-2: #1f7e72;
-  --cat-3: #b85a20;
+  --cat-3: #277a54;
   --cat-4: #bc417f;
   --cat-5: #c3413d;
   --cat-6: #687585;
   --cat-7: #8c6c4f;
-  --cat-8: #a76114;
+  --cat-8: #4350b8;
   --cat-9: #2580b8;
   --cat-10: #6b52c0;
   --cat-11: #c83d39;
   --cat-12: #475569;
 
   --tier-rule: #366acb;
-  --tier-personal: #b85a20;
+  --tier-personal: #1f7e72;
   --tier-model: #7e5bc8;
 }
 

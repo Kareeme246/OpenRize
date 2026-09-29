@@ -45,9 +45,9 @@ export function AiEngineBanner({ status }: { status: AiStatus | null }) {
   return (
     <div
       role="status"
-      className="flex shrink-0 items-center gap-3 border-b border-review/30 bg-review/10 px-5 py-2 text-[12px]"
+      className="flex shrink-0 items-center gap-3 border-b border-line bg-surface px-5 py-2 text-[12px]"
     >
-      <span className="size-1.5 shrink-0 rounded-full bg-review" />
+      <span className="size-1.5 shrink-0 rounded-full bg-accent" />
       <span className="min-w-0 flex-1 text-fg-muted">
         <span className="font-semibold text-fg">
           {llmUnavailableReason(status)}.
@@ -66,7 +66,7 @@ export function AiEngineBanner({ status }: { status: AiStatus | null }) {
               ),
             )
           }
-          className="shrink-0 rounded-md border border-review/40 px-2.5 py-1 text-[11.5px] font-semibold text-review hover:bg-review/15"
+          className="shrink-0 rounded-md border border-line-strong px-2.5 py-1 text-[11.5px] font-semibold text-fg hover:bg-surface-strong"
         >
           Turn on in System Settings
         </button>

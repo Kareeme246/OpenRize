@@ -114,7 +114,9 @@ export function Apps() {
           {excludedCount > 0 && (
             <span className="rounded-md border border-line bg-surface px-2.5 py-1 font-medium text-fg-soft">
               Excluded:{" "}
-              <span className="font-semibold text-review">{excludedCount}</span>
+              <span className="font-semibold text-fg-muted">
+                {excludedCount}
+              </span>
             </span>
           )}
         </div>
@@ -360,7 +362,7 @@ export function Apps() {
                             }
                             className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors ${
                               app.excluded
-                                ? "bg-review/20 text-review hover:bg-review/30"
+                                ? "bg-surface-strong text-fg-muted hover:bg-surface-2"
                                 : "bg-accent/15 text-accent hover:bg-accent/25"
                             }`}
                           >

@@ -57,5 +57,5 @@ export function budgetUsage(
   };
 }
 
-/** Amber from 80% of the budget. */
+/** Warning from 80% of the budget. */
 export const BUDGET_WARN = 0.8;

@@ -424,6 +424,16 @@ export type ProjectsTab = "active" | "completed" | "archived" | "clients";
 export type ProjectsRange = "week" | "month" | "30d" | "all";
 
 /** Time Entries' filter bar. Values are ids, or `none` for "no …". */
+/**
+ * Analyze > Timesheets' multi-select narrowing, by id. `"none"` matches an
+ * entry with no client, no project, or no category; an empty list matches all.
+ */
+export interface TimesheetFilters {
+  clientIds?: string[];
+  projectIds?: string[];
+  categoryIds?: string[];
+}
+
 export interface EntryFilters {
   categoryId?: string;
   projectId?: string;
@@ -472,9 +482,11 @@ export type Route =
     }
   | {
       name: "timesheets";
-      scale?: "week" | "month";
-      start?: string;
+      scale?: "day" | "week";
+      /** Local `YYYY-MM-DD` inside the day or week; today when absent. */
+      date?: string;
       rows?: "project" | "category";
+      filters?: TimesheetFilters;
     }
   | {
       name: "projects";

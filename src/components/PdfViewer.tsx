@@ -28,7 +28,7 @@ function loadPdfJs(): Promise<PdfJs> {
 
 const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 const PAGE_GAP = 16;
-const GUTTER = 24;
+const GUTTER = 8;
 
 interface PdfViewerProps {
   /** The PDF to show; the previous one stays until this one is ready. */
@@ -172,7 +172,7 @@ export function PdfViewer({
         ) : (
           <section
             aria-label={label}
-            className={`flex flex-col items-center py-6 transition-opacity duration-150 ${stale ? "opacity-70" : ""}`}
+            className={`flex flex-col items-center py-2 transition-opacity duration-150 ${stale ? "opacity-70" : ""}`}
             style={{ gap: PAGE_GAP, minWidth: pageWidth + GUTTER * 2 }}
           >
             {Array.from({ length: doc.numPages }, (_, index) => (

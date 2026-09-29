@@ -203,13 +203,15 @@ export function InvoiceList({
                     {invoice.status === "draft" && (
                       <button
                         type="button"
-                        className="rounded px-1.5 py-0.5 text-danger hover:bg-danger-soft"
+                        title="Delete draft"
+                        aria-label={`Delete draft invoice for ${invoice.clientName}`}
+                        className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1 text-[12px] text-danger transition-colors hover:bg-danger/10"
                         onClick={(event) => {
                           event.stopPropagation();
                           setDeleting(invoice);
                         }}
                       >
-                        Delete
+                        ✕
                       </button>
                     )}
                   </td>

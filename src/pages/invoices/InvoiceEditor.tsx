@@ -705,7 +705,7 @@ export function InvoiceEditor({
         )}
       </div>
       {wide ? (
-        <div className="grid min-h-0 flex-1 grid-cols-[minmax(380px,2fr)_3fr]">
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(380px,2fr)_minmax(0,3fr)]">
           <div className="min-h-0 border-line border-r">{editor}</div>
           <div className="min-h-0">{paper}</div>
         </div>

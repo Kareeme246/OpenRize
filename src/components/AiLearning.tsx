@@ -15,8 +15,8 @@ import type {
   ReliabilityBin,
 } from "../lib/types";
 
-const THRESHOLD_MIN = 80;
-const THRESHOLD_MAX = 99;
+const THRESHOLD_MIN = 50;
+const THRESHOLD_MAX = 100;
 /** Model suggestions show at most this until calibration starts. */
 const COLD_START_CAP_PERCENT = 90;
 const CALIBRATION_MIN = 50;
@@ -85,20 +85,37 @@ export function ThresholdSlider({
   onChange: (value: number) => void;
 }) {
   const [draft, setDraft] = useState(value);
+  const [exactDraft, setExactDraft] = useState(String(value));
+  const [exactEditing, setExactEditing] = useState(false);
   const id = useId();
 
-  useEffect(() => setDraft(value), [value]);
   useEffect(() => {
-    if (draft === value) return;
+    setDraft(value);
+    setExactDraft(String(value));
+  }, [value]);
+  useEffect(() => {
+    if (draft === value || exactEditing) return;
     const timer = setTimeout(() => onChange(draft), SAVE_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [draft, value, onChange]);
+  }, [draft, exactEditing, value, onChange]);
 
-  // A value set outside the usual range (settings.json allows 50-100) widens
-  // the track instead of being shown as something it isn't.
-  const min = Math.min(THRESHOLD_MIN, value);
-  const max = Math.max(THRESHOLD_MAX, value);
+  const min = THRESHOLD_MIN;
+  const max = THRESHOLD_MAX;
   const clamped = Math.min(max, Math.max(min, draft));
+  const setPercentDraft = (next: number): void => {
+    const normalized = Math.min(max, Math.max(min, Math.round(next)));
+    setDraft(normalized);
+    setExactDraft(String(normalized));
+  };
+  const commitExactDraft = (): void => {
+    const parsed = exactDraft.trim() === "" ? Number.NaN : Number(exactDraft);
+    const normalized = Number.isFinite(parsed)
+      ? Math.min(max, Math.max(min, Math.round(parsed)))
+      : clamped;
+    setDraft(normalized);
+    setExactDraft(String(normalized));
+    setExactEditing(false);
+  };
   const fill = ((clamped - min) / (max - min)) * 100;
 
   return (
@@ -114,23 +131,52 @@ export function ThresholdSlider({
           step={1}
           value={clamped}
           disabled={disabled}
-          onChange={(event) => setDraft(Number(event.target.value))}
+          onChange={(event) => setPercentDraft(Number(event.target.value))}
           style={{
             background: `linear-gradient(to right, var(--accent) ${fill}%, var(--bg-surface-2) ${fill}%)`,
           }}
-          className="threshold-range h-1.5 min-w-0 flex-1 cursor-pointer appearance-none rounded-full disabled:cursor-not-allowed"
+          className="threshold-range h-1.5 min-w-32 flex-1 cursor-pointer appearance-none rounded-full disabled:cursor-not-allowed"
         />
+        <label className="settings-threshold-exact flex shrink-0 items-center gap-1 text-[11px] text-fg-muted">
+          <input
+            type="number"
+            aria-label="Auto-accept threshold exact value"
+            min={min}
+            max={max}
+            step={1}
+            value={exactDraft}
+            disabled={disabled}
+            onFocus={() => setExactEditing(true)}
+            onChange={(event) => {
+              setExactDraft(event.target.value);
+              if (Number.isFinite(event.target.valueAsNumber)) {
+                setDraft(
+                  Math.min(
+                    max,
+                    Math.max(min, Math.round(event.target.valueAsNumber)),
+                  ),
+                );
+              }
+            }}
+            onBlur={commitExactDraft}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+            className="w-14 rounded-md border border-line bg-surface px-1.5 py-1 text-center font-mono text-[12px] tabular-nums text-fg outline-hidden focus-visible:ring-2 focus-visible:ring-accent"
+          />
+          <span aria-hidden="true">%</span>
+        </label>
         <label
           htmlFor={id}
           className="shrink-0 whitespace-nowrap text-right font-mono text-[12px] tabular-nums text-fg"
         >
           ≥ {clamped}%{" "}
-          <span className="text-fg-faint">
+          <span className="text-fg-muted">
             {calibrated ? "calibrated" : "capped"}
           </span>
         </label>
       </div>
-      <p className="mt-2 text-[11.5px] leading-relaxed text-fg-soft">
+      <p className="mt-2 text-[12px] leading-relaxed text-fg-muted">
         {previewText(metrics, clamped, calibrated)}
       </p>
     </div>
@@ -150,13 +196,13 @@ function Stat({
 }) {
   return (
     <div className="min-w-0 rounded-lg border border-line-soft bg-inset-soft px-3 py-2">
-      <div className="font-mono text-[10px] uppercase tracking-wider text-fg-faint">
+      <div className="font-mono text-[10.5px] uppercase tracking-wider text-fg-muted">
         {label}
       </div>
       <div className="mt-0.5 text-[17px] font-semibold tabular-nums text-fg-strong">
         {value}
       </div>
-      <div className="truncate text-[10.5px] text-fg-faint" title={detail}>
+      <div className="truncate text-[11px] text-fg-muted" title={detail}>
         {detail}
       </div>
     </div>
@@ -175,7 +221,7 @@ function TierSplit({ tiers }: { tiers: AiMetrics["tiers"] }) {
   const total = tiers.rule + tiers.personal + tiers.model;
   if (total === 0) {
     return (
-      <p className="text-[11.5px] text-fg-faint">
+      <p className="text-[12px] text-fg-muted">
         No decisions in this period yet.
       </p>
     );
@@ -208,7 +254,7 @@ function TierSplit({ tiers }: { tiers: AiMetrics["tiers"] }) {
             </span>
           </span>
         ))}
-        <span className="ml-auto font-mono text-[10.5px] text-fg-faint">
+        <span className="ml-auto font-mono text-[11px] text-fg-muted">
           {hovered === undefined
             ? `of ${plural(total, "decision")}`
             : `${hovered.label}: ${plural(tiers[hovered.key], "decision")}`}
@@ -266,8 +312,8 @@ function CalibrationChart({ bins }: { bins: ReliabilityBin[] }) {
               x={x(0) - 6}
               y={y(tick) + 3}
               textAnchor="end"
-              fontSize={9}
-              fill="var(--fg-faint)"
+              fontSize={10}
+              fill="var(--fg-muted)"
             >
               {Math.round(tick * 100)}%
             </text>
@@ -275,8 +321,8 @@ function CalibrationChart({ bins }: { bins: ReliabilityBin[] }) {
               x={x(tick)}
               y={CHART.height - CHART.bottom + 13}
               textAnchor="middle"
-              fontSize={9}
-              fill="var(--fg-faint)"
+              fontSize={10}
+              fill="var(--fg-muted)"
             >
               {Math.round(tick * 100)}%
             </text>
@@ -287,7 +333,7 @@ function CalibrationChart({ bins }: { bins: ReliabilityBin[] }) {
           y1={y(0)}
           x2={x(1)}
           y2={y(1)}
-          stroke="var(--fg-soft)"
+          stroke="var(--fg-muted)"
           strokeWidth={1}
           strokeDasharray="3 3"
         />
@@ -295,8 +341,8 @@ function CalibrationChart({ bins }: { bins: ReliabilityBin[] }) {
           x={x(0.2)}
           y={y(0.08)}
           textAnchor="start"
-          fontSize={9}
-          fill="var(--fg-soft)"
+          fontSize={10}
+          fill="var(--fg-muted)"
         >
           perfect calibration
         </text>
@@ -328,8 +374,8 @@ function CalibrationChart({ bins }: { bins: ReliabilityBin[] }) {
           x={x(0.5)}
           y={CHART.height - 2}
           textAnchor="middle"
-          fontSize={9.5}
-          fill="var(--fg-soft)"
+          fontSize={10}
+          fill="var(--fg-muted)"
         >
           Shown confidence
         </text>
@@ -337,8 +383,8 @@ function CalibrationChart({ bins }: { bins: ReliabilityBin[] }) {
           x={9}
           y={y(0.5)}
           textAnchor="middle"
-          fontSize={9.5}
-          fill="var(--fg-soft)"
+          fontSize={10}
+          fill="var(--fg-muted)"
           transform={`rotate(-90 9 ${y(0.5)})`}
         >
           Accepted
@@ -440,23 +486,23 @@ export function AiEffectiveness({
             Calibration: shown vs accepted
           </div>
           {expectedError !== undefined && (
-            <span className="shrink-0 font-mono text-[10.5px] text-fg-faint">
+            <span className="shrink-0 font-mono text-[11px] text-fg-muted">
               avg gap {Math.round(expectedError * 100)} pts
             </span>
           )}
         </div>
-        <p className="mb-2 text-[11.5px] text-fg-faint">
+        <p className="mb-2 text-[12px] text-fg-muted">
           {calibrationSummary(metrics, status)}
         </p>
         {samples === 0 ? (
-          <p className="rounded-lg border border-dashed border-line px-3 py-4 text-center text-[11.5px] text-fg-faint">
+          <p className="rounded-lg border border-dashed border-line px-3 py-4 text-center text-[12px] text-fg-muted">
             No reviewed model suggestions in the last {metrics.days} days yet.
             Rule matches are certain, so they aren't charted.
           </p>
         ) : (
           <div className="grid items-start gap-4 sm:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
             <CalibrationChart bins={bins} />
-            <ul className="flex flex-col gap-2 text-[11.5px] leading-relaxed text-fg-faint">
+            <ul className="flex flex-col gap-2 text-[12px] leading-relaxed text-fg-muted">
               <li>
                 Each dot groups suggestions shown at a similar confidence. Its
                 height is how many of them you accepted; bigger dots hold more
@@ -509,17 +555,17 @@ export function PersonalModels({
         <span>{modelLine("Category model", metrics.models.category)}</span>
         <span>{modelLine("Project model", metrics.models.project)}</span>
       </div>
-      <p className="text-[11.5px] text-fg-faint">
+      <p className="text-[12px] leading-relaxed text-fg-muted">
         Retrains in the background after {retrainAfter} new reviews or nightly,
         only while the Mac is idle, on power, and not in Low Power Mode. A new
         model replaces the old one only if it does at least as well on held-out
         entries.{" "}
-        <span className="text-fg-soft">
+        <span className="text-fg-muted">
           {plural(newLabels, "new review")} since the last training.
         </span>
       </p>
       {status?.retrainNote !== undefined && (
-        <p role="status" className="text-[11.5px] text-fg-soft">
+        <p role="status" className="text-[12px] text-fg-muted">
           {status.retrainNote}
         </p>
       )}

@@ -41,13 +41,13 @@ function StatCard({
 }) {
   return (
     <div className="min-w-0 rounded-lg border border-line-soft bg-inset-soft px-3 py-2">
-      <div className="font-mono text-[10px] uppercase tracking-wider text-fg-faint">
+      <div className="font-mono text-[10.5px] uppercase tracking-wider text-fg-muted">
         {label}
       </div>
       <div className="mt-0.5 text-[17px] font-semibold tabular-nums text-fg-strong">
         {value}
       </div>
-      <div className="truncate text-[10.5px] text-fg-faint" title={detail}>
+      <div className="truncate text-[11px] text-fg-muted" title={detail}>
         {detail}
       </div>
     </div>
@@ -74,7 +74,7 @@ export function BatteryEnergyMonitor({
 
   if (summary === null && loading) {
     return (
-      <div className="p-4 text-[11.5px] text-fg-faint">
+      <div className="p-4 text-[12px] text-fg-muted">
         Loading energy & battery telemetry…
       </div>
     );
@@ -82,7 +82,7 @@ export function BatteryEnergyMonitor({
 
   if (summary === null) {
     return (
-      <div className="p-4 text-[11.5px] text-fg-faint">
+      <div className="p-4 text-[12px] text-fg-muted">
         No energy telemetry recorded yet.
       </div>
     );
@@ -105,12 +105,12 @@ export function BatteryEnergyMonitor({
   return (
     <div className="flex flex-col">
       {/* Current Impact Row */}
-      <div className="flex items-center justify-between gap-4 border-b border-line px-4 py-3">
+      <div className="settings-battery-row flex items-center justify-between gap-4 border-b border-line px-4 py-3">
         <div className="min-w-0">
           <div className="text-[13px] font-medium text-fg">
             Current energy impact
           </div>
-          <div className="text-[11.5px] text-fg-faint">
+          <div className="text-[12px] leading-relaxed text-fg-muted">
             {summary.impactDescription}
           </div>
         </div>
@@ -128,12 +128,12 @@ export function BatteryEnergyMonitor({
       </div>
 
       {/* Battery Used Row */}
-      <div className="flex items-center justify-between gap-4 border-b border-line px-4 py-3">
+      <div className="settings-battery-row flex items-center justify-between gap-4 border-b border-line px-4 py-3">
         <div className="min-w-0">
           <div className="text-[13px] font-medium text-fg">
             Battery consumed
           </div>
-          <div className="text-[11.5px] text-fg-faint">
+          <div className="text-[12px] leading-relaxed text-fg-muted">
             {summary.onBattery
               ? `Running on battery (${summary.currentBatteryPct !== null && summary.currentBatteryPct !== undefined ? `${Math.round(summary.currentBatteryPct)}%` : "discharging"})`
               : "Connected to power (AC)"}
@@ -145,7 +145,7 @@ export function BatteryEnergyMonitor({
           <div className="font-mono text-[13px] font-semibold tabular-nums text-fg-strong">
             ~{summary.batteryUsedPct.toFixed(2)}%
           </div>
-          <div className="font-mono text-[10.5px] text-fg-faint">
+          <div className="font-mono text-[11px] text-fg-muted">
             ~{summary.batteryUsedMwh.toFixed(1)} mWh
           </div>
         </div>
@@ -158,7 +158,7 @@ export function BatteryEnergyMonitor({
             <div className="text-[13px] font-medium text-fg">
               Energy telemetry & benchmarks
             </div>
-            <div className="text-[11.5px] text-fg-faint">
+            <div className="text-[12px] text-fg-muted">
               Measured over the last{" "}
               {selectedDays === 1 ? "24 hours" : `${selectedDays} days`}
             </div>
@@ -185,7 +185,7 @@ export function BatteryEnergyMonitor({
               title={`Ambient tracking & UI: ${ambientPct.toFixed(1)}%`}
             />
           </div>
-          <div className="mt-1.5 flex items-center justify-between text-[11px] text-fg-faint">
+          <div className="settings-energy-legend mt-1.5 flex items-center justify-between text-[11.5px] text-fg-muted">
             <span className="flex items-center gap-1.5">
               <span className="size-2 rounded-[2px] bg-accent" />
               On-device AI classification:{" "}
@@ -226,8 +226,8 @@ export function BatteryEnergyMonitor({
         </div>
 
         {/* Benchmarking Actions */}
-        <div className="mt-3 flex items-center justify-between pt-2">
-          <span className="text-[11px] text-fg-faint">
+        <div className="settings-energy-actions mt-3 flex items-center justify-between gap-3 pt-2">
+          <span className="text-[11.5px] text-fg-muted">
             Telemetry persists in SQLite across restarts for repeatable
             benchmarks.
           </span>

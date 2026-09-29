@@ -51,6 +51,10 @@ pub struct Client {
     pub address: Option<String>,
     pub default_rate: Option<f64>,
     pub currency: Option<String>,
+    pub notes: Option<String>,
+    /// Set while the client is archived: kept, but out of the active list and
+    /// the pickers that assign a client. Its projects are untouched.
+    pub archived_at: Option<u64>,
     pub created_at: u64,
     pub updated_at: u64,
     pub deleted_at: Option<u64>,
@@ -64,16 +68,26 @@ pub struct NewClient {
     pub address: Option<String>,
     pub default_rate: Option<f64>,
     pub currency: Option<String>,
+    pub notes: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A patch: an absent field is left alone; the optional ones take `null` to
+/// clear. `archived` archives or restores.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateClient {
     pub name: Option<String>,
-    pub email: Option<String>,
-    pub address: Option<String>,
-    pub default_rate: Option<f64>,
-    pub currency: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub email: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub address: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub default_rate: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub currency: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub notes: Option<Option<String>>,
+    pub archived: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

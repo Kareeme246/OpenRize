@@ -723,6 +723,7 @@ pub fn import_csv(
                     address: None,
                     default_rate: None,
                     currency: None,
+                    notes: None,
                 },
                 now,
             )?;

@@ -185,22 +185,6 @@ export function AppsTimeline({ apps, categories, projects, onUpdate }: Props) {
           </div>
         )}
         <div
-          className="relative h-3 overflow-hidden rounded-sm bg-surface-strong"
-          aria-hidden="true"
-        >
-          {visible.map((segment) => (
-            <span
-              key={segment.id}
-              className="absolute inset-y-0"
-              style={{
-                left: position(segment.startedAt),
-                width: `max(2px, ${((segment.endedAt - segment.startedAt) / (end - start)) * 100}%)`,
-                backgroundColor: colors.get(segment.app),
-              }}
-            />
-          ))}
-        </div>
-        <div
           role="slider"
           tabIndex={0}
           aria-label="Activity playhead"
@@ -208,7 +192,7 @@ export function AppsTimeline({ apps, categories, projects, onUpdate }: Props) {
           aria-valuemax={end}
           aria-valuenow={Math.round(playhead ?? defaultTime)}
           aria-valuetext={`${formatTime(activeTime)}: ${activeApps.join(", ") || "No activity"}`}
-          className="relative mt-2 h-36 cursor-crosshair touch-none overflow-visible rounded-md border border-line bg-panel outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          className="relative mt-4 h-36 cursor-crosshair touch-none overflow-visible rounded-md border border-line bg-panel outline-none focus-visible:ring-2 focus-visible:ring-accent"
           onPointerDown={(event) => {
             dragging.current = true;
             event.currentTarget.setPointerCapture(event.pointerId);
@@ -277,10 +261,10 @@ export function AppsTimeline({ apps, categories, projects, onUpdate }: Props) {
             className="pointer-events-none absolute inset-y-0 z-20 border-l-2 border-accent"
             style={{ left: position(playhead ?? defaultTime) }}
           >
-            <span className="absolute -top-2 left-1/2 size-3 -translate-x-1/2 rounded-full border-2 border-panel bg-accent shadow-sm" />
+            <span className="absolute -top-1.5 left-1/2 size-3 -translate-x-1/2 rounded-full border-2 border-panel bg-accent shadow-sm" />
           </span>
           <span
-            className="pointer-events-none absolute -top-7 z-20 -translate-x-1/2 rounded bg-surface-strong px-2 py-1 text-[11px] font-medium tabular-nums text-fg-strong"
+            className="pointer-events-none absolute top-2 z-20 -translate-x-1/2 rounded bg-surface-strong/95 px-2 py-0.5 text-[11px] font-medium tabular-nums text-fg-strong shadow-sm backdrop-blur-xs"
             style={{
               left: `clamp(32px, ${position(activeTime)}, calc(100% - 32px))`,
             }}

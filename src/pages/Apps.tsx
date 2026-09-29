@@ -10,7 +10,7 @@ export function Apps() {
   const [apps, setApps] = useState<AppRecord[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [view, setView] = useState<"table" | "timeline">("table");
+  const [view, setView] = useState<"timeline" | "table">("timeline");
   const [search, setSearch] = useState("");
   const [filterKind, setFilterKind] = useState<"all" | "app" | "site">("all");
   const [filterExcluded, setFilterExcluded] = useState<
@@ -126,8 +126,8 @@ export function Apps() {
         <Tabs
           label="Apps views"
           tabs={[
-            { value: "table", label: "Table" },
             { value: "timeline", label: "Timeline" },
+            { value: "table", label: "Table" },
           ]}
           value={view}
           onChange={setView}

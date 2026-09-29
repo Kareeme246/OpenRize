@@ -577,7 +577,6 @@ export function Calendar({ route, navigate }: CalendarProps) {
                   ? timeByApp(segments, now).map(({ app, ms }) => ({ app, ms }))
                   : undefined
               }
-              onStartReview={scale === "month" ? undefined : startReviewMode}
             />
           )}
         </aside>

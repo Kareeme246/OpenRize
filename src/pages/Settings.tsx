@@ -80,6 +80,46 @@ const METRIC_RANGES: SegmentedOption<number>[] = [
   { value: 90, label: "90d" },
 ];
 
+type SettingsSection =
+  | "overview"
+  | "appearance"
+  | "general"
+  | "tracking"
+  | "suggestions"
+  | "data"
+  | "notifications"
+  | "advanced";
+
+const SETTINGS_SECTIONS: readonly SettingsSection[] = [
+  "overview",
+  "appearance",
+  "general",
+  "tracking",
+  "suggestions",
+  "data",
+  "notifications",
+  "advanced",
+];
+
+function parseSettingsSection(value: string | null): SettingsSection | null {
+  return SETTINGS_SECTIONS.find((section) => section === value) ?? null;
+}
+
+interface SettingsNavItem {
+  id: SettingsSection;
+  label: string;
+}
+
+const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
+  { id: "appearance", label: "Appearance" },
+  { id: "general", label: "General" },
+  { id: "tracking", label: "Tracking & work" },
+  { id: "suggestions", label: "Suggestions" },
+  { id: "data", label: "Data & storage" },
+  { id: "notifications", label: "Notifications" },
+  { id: "advanced", label: "Advanced settings" },
+];
+
 /** One line on which tiers are running and why. */
 function engineSummary(status: AiStatus | null): string {
   if (status === null || status.engine === "starting") {
@@ -122,10 +162,12 @@ function SettingRow({
   children?: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-line px-4 py-3 last:border-b-0">
+    <div className="setting-row flex items-center justify-between gap-4 border-b border-line px-4 py-3 last:border-b-0">
       <div className="min-w-0">
         <div className="text-[13px] font-medium text-fg">{title}</div>
-        <div className="text-[11.5px] text-fg-faint">{description}</div>
+        <div className="text-[12px] leading-relaxed text-fg-muted">
+          {description}
+        </div>
       </div>
       {children ?? (status !== undefined && <StatusBadge status={status} />)}
     </div>
@@ -143,9 +185,11 @@ function SettingBlock({
   children: ReactNode;
 }) {
   return (
-    <div className="border-b border-line px-4 py-3 last:border-b-0">
+    <div className="setting-block border-b border-line px-4 py-3 last:border-b-0">
       <div className="text-[13px] font-medium text-fg">{title}</div>
-      <div className="text-[11.5px] text-fg-faint">{description}</div>
+      <div className="text-[12px] leading-relaxed text-fg-muted">
+        {description}
+      </div>
       <div className="mt-3">{children}</div>
     </div>
   );
@@ -160,13 +204,32 @@ function SettingGroup({
 }) {
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="px-1 font-mono text-[10px] uppercase tracking-wider text-fg-faint">
+      <h2 className="px-1 font-mono text-[11px] font-semibold uppercase tracking-wider text-fg-muted">
         {title}
       </h2>
-      <div className="rounded-xl border border-line bg-linear-to-b from-surface to-transparent">
+      <div className="settings-group-card rounded-xl border border-settings-card-border bg-settings-card">
         {children}
       </div>
     </section>
+  );
+}
+
+function SettingsSectionHeading({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <header className="settings-section-heading border-b border-line pb-3">
+      <h2 className="font-sans text-[20px] font-semibold tracking-tight text-fg-strong">
+        {title}
+      </h2>
+      <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-fg-muted">
+        {description}
+      </p>
+    </header>
   );
 }
 
@@ -229,7 +292,7 @@ function LaunchAtLoginRow({
                 onError(describeError(cause)),
               );
             }}
-            className="rounded-md border border-line px-2.5 py-1 text-[11.5px] text-fg-soft transition-colors hover:bg-surface hover:text-fg"
+            className="rounded-md border border-line px-2.5 py-1 text-[11.5px] text-fg-muted transition-colors hover:bg-surface hover:text-fg"
           >
             Open Login Items
           </button>
@@ -248,7 +311,7 @@ function LaunchAtLoginRow({
 function PathLine({ label, path }: { label: string; path: string }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="font-mono text-[10px] uppercase tracking-wider text-fg-faint">
+      <span className="font-mono text-[10px] uppercase tracking-wider text-fg-muted">
         {label}
       </span>
       <code
@@ -264,10 +327,10 @@ function PathLine({ label, path }: { label: string; path: string }) {
 function FileLine({ label, path }: { label: string; path: string }) {
   return (
     <div className="flex items-center justify-between gap-3 text-[11.5px]">
-      <span className="shrink-0 text-fg-soft">{label}</span>
+      <span className="shrink-0 text-fg-muted">{label}</span>
       <span
         title={path}
-        className="min-w-0 truncate font-mono text-[11px] text-fg-faint"
+        className="min-w-0 truncate font-mono text-[11px] text-fg-muted"
       >
         {path}
       </span>
@@ -328,7 +391,7 @@ function CustomInstructions({
           setFocused(false);
           if (draft !== value) onSave(draft);
         }}
-        className="mt-2 w-full resize-y rounded-lg border border-line bg-surface px-2.5 py-2 text-[12px] text-fg outline-hidden placeholder:text-fg-faint focus:border-accent"
+        className="mt-2 w-full resize-y rounded-lg border border-line bg-surface px-2.5 py-2 text-[12px] text-fg outline-hidden placeholder:text-fg-muted focus:border-accent"
         placeholder="No custom instructions"
       />
     </SettingBlock>
@@ -402,28 +465,39 @@ function TrackingHoursSetting({
               title="Daily window"
               description="7:00 AM to 7:00 PM by default, applying to every day"
             >
-              <div className="flex items-center gap-2">
-                <input
-                  type="time"
-                  aria-label="Daily tracking start time"
-                  value={th.defaultStart}
-                  onChange={(e) =>
-                    updateHours({ defaultStart: e.target.value })
-                  }
-                  className="h-7 rounded-md border border-line bg-surface px-2 py-1 text-[12px] text-fg outline-hidden focus:border-accent"
-                />
-                <span className="text-[12px] text-fg-faint">to</span>
-                <input
-                  type="time"
-                  aria-label="Daily tracking end time"
-                  value={th.defaultEnd}
-                  onChange={(e) => updateHours({ defaultEnd: e.target.value })}
-                  className="h-7 rounded-md border border-line bg-surface px-2 py-1 text-[12px] text-fg outline-hidden focus:border-accent"
-                />
-              </div>
+              <fieldset className="settings-time-range m-0 flex min-w-0 items-end gap-2.5 border-0 p-0">
+                <legend className="sr-only">Daily tracking hours</legend>
+                <label className="flex flex-col gap-1">
+                  <span className="font-mono text-[10px] uppercase tracking-wider text-fg-muted">
+                    Start
+                  </span>
+                  <input
+                    type="time"
+                    value={th.defaultStart}
+                    onChange={(e) =>
+                      updateHours({ defaultStart: e.target.value })
+                    }
+                    className="h-7 rounded-md border border-line bg-surface px-2 py-1 text-[12px] text-fg outline-hidden focus:border-accent"
+                  />
+                </label>
+                <span className="pb-1 text-[12px] text-fg-muted">to</span>
+                <label className="flex flex-col gap-1">
+                  <span className="font-mono text-[10px] uppercase tracking-wider text-fg-muted">
+                    End
+                  </span>
+                  <input
+                    type="time"
+                    value={th.defaultEnd}
+                    onChange={(e) =>
+                      updateHours({ defaultEnd: e.target.value })
+                    }
+                    className="h-7 rounded-md border border-line bg-surface px-2 py-1 text-[12px] text-fg outline-hidden focus:border-accent"
+                  />
+                </label>
+              </fieldset>
             </SettingRow>
-            <div className="flex items-center justify-between border-b border-line px-4 py-2.5 last:border-b-0">
-              <span className="font-mono text-[10.5px] text-fg-faint">
+            <div className="settings-inline-note flex items-center justify-between border-b border-line px-4 py-2.5 last:border-b-0">
+              <span className="font-mono text-[10.5px] text-fg-muted">
                 {inHours
                   ? "Currently within tracking window"
                   : "Currently outside tracking window"}
@@ -446,8 +520,8 @@ function TrackingHoursSetting({
           </>
         ) : (
           <>
-            <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-              <span className="text-[11.5px] text-fg-faint">
+            <div className="settings-inline-note flex items-center justify-between border-b border-line px-4 py-2.5">
+              <span className="text-[12px] text-fg-muted">
                 Set hours for each day of the week. Unchecked days will not
                 track.
               </span>
@@ -471,7 +545,7 @@ function TrackingHoursSetting({
               return (
                 <div
                   key={key}
-                  className="flex items-center justify-between gap-4 border-b border-line px-4 py-2.5 last:border-b-0"
+                  className="settings-day-row flex items-center justify-between gap-4 border-b border-line px-4 py-2.5 last:border-b-0"
                 >
                   <label className="flex items-center gap-2.5 cursor-pointer select-none">
                     <input
@@ -484,7 +558,7 @@ function TrackingHoursSetting({
                     />
                     <span
                       className={`text-[13px] font-medium ${
-                        day.enabled ? "text-fg" : "text-fg-faint"
+                        day.enabled ? "text-fg" : "text-fg-muted"
                       }`}
                     >
                       {label}
@@ -501,7 +575,7 @@ function TrackingHoursSetting({
                         }
                         className="h-7 rounded-md border border-line bg-surface px-2 py-1 text-[12px] text-fg outline-hidden focus:border-accent"
                       />
-                      <span className="text-[12px] text-fg-faint">to</span>
+                      <span className="text-[12px] text-fg-muted">to</span>
                       <input
                         type="time"
                         aria-label={`${label} tracking end time`}
@@ -513,15 +587,15 @@ function TrackingHoursSetting({
                       />
                     </div>
                   ) : (
-                    <span className="text-[12px] text-fg-faint italic">
+                    <span className="text-[12px] text-fg-muted italic">
                       No tracking
                     </span>
                   )}
                 </div>
               );
             })}
-            <div className="flex items-center justify-between border-b border-line px-4 py-2.5 last:border-b-0">
-              <span className="font-mono text-[10.5px] text-fg-faint">
+            <div className="settings-inline-note flex items-center justify-between border-b border-line px-4 py-2.5 last:border-b-0">
+              <span className="font-mono text-[10.5px] text-fg-muted">
                 {inHours
                   ? "Currently within tracking window"
                   : "Currently outside tracking window"}
@@ -591,7 +665,7 @@ function ReleaseNotesList({ releases }: { releases: ReleaseNotes[] }) {
               {release.version}
             </span>
             {release.publishedAt && (
-              <span className="text-[11px] text-fg-faint">
+              <span className="text-[11px] text-fg-muted">
                 {formatShortDate(Date.parse(release.publishedAt))}
               </span>
             )}
@@ -609,29 +683,9 @@ function ReleaseNotesList({ releases }: { releases: ReleaseNotes[] }) {
  * The updater's status and controls. The Rust side checks on its own
  * schedule (see src-tauri/src/updater.rs); this only shows the result.
  */
-function UpdatesSetting({
-  status,
-  reveal,
-}: {
-  status: UpdateStatus | null;
-  /** Scrolls the section into view whenever it changes (and is truthy). */
-  reveal: number;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
+function UpdatesSetting({ status }: { status: UpdateStatus | null }) {
   const [now, setNow] = useState(() => Date.now());
   const [requestError, setRequestError] = useState<string | null>(null);
-
-  // Scrolls only Settings' own scroller: scrollIntoView would also shift the
-  // overflow-hidden app shell around it.
-  useEffect(() => {
-    const section = ref.current;
-    const scroller = section?.closest("main");
-    if (reveal === 0 || !section || !scroller) return;
-    const offset =
-      section.getBoundingClientRect().top -
-      scroller.getBoundingClientRect().top;
-    scroller.scrollTo({ top: scroller.scrollTop + offset - 22 });
-  }, [reveal]);
 
   // Keeps "Checked 5 min ago" honest while the page stays open.
   useEffect(() => {
@@ -660,49 +714,45 @@ function UpdatesSetting({
   const available = status?.available ?? null;
 
   return (
-    <div ref={ref}>
-      <SettingGroup title="Updates">
-        <SettingRow
-          title="OpenRize updates"
-          description={
-            status === null ? "Loading…" : updateSummary(status, now)
-          }
-        >
-          {available ? (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={install}
-              className="shrink-0 rounded-lg bg-accent px-3 py-1.5 font-semibold text-[12px] text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Install &amp; restart
-            </button>
-          ) : (
-            <button
-              type="button"
-              disabled={busy || status === null}
-              onClick={check}
-              className="shrink-0 rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] text-fg-muted hover:bg-surface-strong disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Check for updates
-            </button>
-          )}
-        </SettingRow>
-        {error && (
-          <div className="border-b border-line px-4 py-2 text-[11.5px] text-danger last:border-b-0">
-            {error}
-          </div>
-        )}
-        {available && (
-          <SettingBlock
-            title="What's new"
-            description="Installing restarts OpenRize. A running tracking session ends and a new one starts when it reopens."
+    <SettingGroup title="Updates">
+      <SettingRow
+        title="OpenRize updates"
+        description={status === null ? "Loading…" : updateSummary(status, now)}
+      >
+        {available ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={install}
+            className="shrink-0 rounded-lg bg-accent px-3 py-1.5 font-semibold text-[12px] text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <ReleaseNotesList releases={available.releases} />
-          </SettingBlock>
+            Install &amp; restart
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={busy || status === null}
+            onClick={check}
+            className="shrink-0 rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] text-fg-muted hover:bg-surface-strong disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Check for updates
+          </button>
         )}
-      </SettingGroup>
-    </div>
+      </SettingRow>
+      {error && (
+        <div className="border-b border-line px-4 py-2 text-[11.5px] text-danger last:border-b-0">
+          {error}
+        </div>
+      )}
+      {available && (
+        <SettingBlock
+          title="What's new"
+          description="Installing restarts OpenRize. A running tracking session ends and a new one starts when it reopens."
+        >
+          <ReleaseNotesList releases={available.releases} />
+        </SettingBlock>
+      )}
+    </SettingGroup>
   );
 }
 
@@ -760,288 +810,476 @@ export function Settings({
     resetHistory: resetEnergyHistory,
   } = useEnergy(energyDays);
 
+  const [activeSection, setActiveSection] =
+    useState<SettingsSection>("overview");
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  const selectSection = useCallback((section: SettingsSection): void => {
+    setActiveSection(section);
+    const content = contentRef.current;
+    const target = content?.querySelector<HTMLElement>(
+      `[data-settings-section="${section}"]`,
+    );
+    if (content === null || target === null || target === undefined) return;
+    const top =
+      target.getBoundingClientRect().top -
+      content.getBoundingClientRect().top +
+      content.scrollTop -
+      16;
+    content.scrollTo({
+      top: Math.max(0, top),
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+    });
+  }, []);
+
+  useEffect(() => {
+    if (route.section !== "updates" && revealUpdates === 0) return;
+    selectSection("overview");
+  }, [route.section, revealUpdates, selectSection]);
+
+  useEffect(() => {
+    const content = contentRef.current;
+    if (content === null) return;
+    const sections = Array.from(
+      content.querySelectorAll<HTMLElement>("[data-settings-section]"),
+    );
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const current = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort(
+            (first, second) =>
+              first.boundingClientRect.top - second.boundingClientRect.top,
+          )
+          .map((entry) =>
+            parseSettingsSection(
+              entry.target.getAttribute("data-settings-section"),
+            ),
+          )
+          .find((section) => section !== null);
+        if (current !== undefined && current !== null) {
+          setActiveSection(current);
+        }
+      },
+      { root: content, rootMargin: "-12% 0px -76% 0px", threshold: 0 },
+    );
+    sections.forEach((section) => {
+      observer.observe(section);
+    });
+    return () => observer.disconnect();
+  }, []);
+
   const trayOff = !settings.trayEnabled;
-  const problem =
-    error ?? openError ?? loginError ?? aiError ?? metricsError ?? energyError;
+  const sectionError =
+    activeSection === "general"
+      ? loginError
+      : activeSection === "data"
+        ? openError
+        : activeSection === "suggestions"
+          ? metricsError
+          : activeSection === "advanced"
+            ? (aiError ?? metricsError ?? energyError)
+            : null;
+  const problem = error ?? sectionError;
 
   return (
-    <main className="flex h-full min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain p-5.5">
-      <header>
-        <h1 className="text-[15px] font-semibold">Settings</h1>
-        <div className="font-mono text-[10.5px] text-fg-faint">
-          ⌘, opens this · changes save automatically
+    <main className="settings-page flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-canvas font-sans text-fg">
+      <header className="settings-header flex shrink-0 items-center justify-between gap-4 border-b border-line px-5 py-3">
+        <div>
+          <h1 className="text-[16px] font-semibold text-fg-strong">Settings</h1>
+          <p className="mt-0.5 text-[11px] text-fg-muted">
+            Preferences save automatically
+          </p>
         </div>
+        <span className="shrink-0 font-mono text-[10.5px] text-fg-muted">
+          ⌘, opens this
+        </span>
       </header>
 
       {problem !== null && (
         <p
           role="alert"
-          className="rounded-[10px] border border-danger/40 bg-danger-soft px-3.5 py-2.5 text-[13px] text-danger"
+          className="mx-5 mt-3 shrink-0 rounded-[10px] border border-danger/40 bg-danger-soft px-3.5 py-2.5 text-[13px] text-danger"
         >
           {problem}
         </p>
       )}
 
-      <SettingGroup title="Appearance">
-        <SettingRow title="Theme" description="Dark, light, or follow macOS">
-          <SegmentedControl
-            name="theme"
-            value={settings.theme}
-            options={THEME_OPTIONS}
-            onChange={(theme) => update({ theme })}
-          />
-        </SettingRow>
-        <SettingBlock
-          title="Size mode"
-          description="Scale text and icons throughout OpenRize"
-        >
-          <SegmentedControl
-            name="size-mode"
-            value={settings.sizeMode}
-            options={SIZE_OPTIONS}
-            largeTarget
-            onChange={(sizeMode) => update({ sizeMode })}
-          />
-        </SettingBlock>
-        <SettingRow
-          title="Accent colour"
-          description="Highlights, active states, and running timers across the app"
-        >
-          <SegmentedControl
-            name="accent"
-            value={settings.accent}
-            options={ACCENT_OPTIONS}
-            onChange={(accent) => update({ accent })}
-          />
-        </SettingRow>
-      </SettingGroup>
-
-      <SettingGroup title="General">
-        <LaunchAtLoginRow onError={setLoginError} />
-        <SettingRow
-          title="Menu bar icon"
-          description="Keep a tray icon with quick controls"
-        >
-          <Toggle
-            checked={settings.trayEnabled}
-            label="Menu bar icon"
-            onChange={(trayEnabled) => update({ trayEnabled })}
-          />
-        </SettingRow>
-        <SettingRow
-          title="When I close the window"
-          description={
-            trayOff
-              ? "Menu bar icon is off, so closing always quits"
-              : "What the close button does while OpenRize keeps tracking"
-          }
-        >
-          <SegmentedControl
-            name="close-behavior"
-            value={settings.closeBehavior}
-            options={CLOSE_OPTIONS}
-            onChange={(closeBehavior) => update({ closeBehavior })}
-          />
-        </SettingRow>
-      </SettingGroup>
-
-      <SettingGroup title="Categories & AI">
-        <SettingRow
-          title="Suggestion engine"
-          description={engineSummary(aiStatus)}
-        >
-          <span className="shrink-0 font-mono text-[10.5px] text-fg-faint">
-            {aiStatus === null
-              ? ""
-              : aiStatus.calibrated
-                ? `${aiStatus.outcomes} reviewed`
-                : `learning · ${aiStatus.outcomes}/50 reviewed`}
-          </span>
-        </SettingRow>
-        <SettingRow
-          title="What to suggest"
-          description="Suggest a category for each entry, or a project too"
-        >
-          <SegmentedControl
-            name="ai-suggest"
-            value={settings.aiSuggest}
-            options={SUGGEST_OPTIONS}
-            onChange={(aiSuggest) => update({ aiSuggest })}
-          />
-        </SettingRow>
-        <SettingRow
-          title="Auto-accept confident suggestions"
-          description={
-            aiStatus?.calibrated === false
-              ? "Starts after 50 reviewed suggestions; until then only rule matches auto-approve"
-              : "Approve entries whose every suggestion clears the threshold"
-          }
-        >
-          <Toggle
-            checked={settings.autoAccept}
-            label="Auto-accept confident suggestions"
-            onChange={(autoAccept) => update({ autoAccept })}
-          />
-        </SettingRow>
-        <SettingBlock
-          title="Auto-accept threshold"
-          description="Minimum calibrated confidence for an entry to skip review"
-        >
-          <ThresholdSlider
-            value={settings.autoAcceptPercent}
-            disabled={!settings.autoAccept}
-            metrics={metrics}
-            calibrated={aiStatus?.calibrated ?? false}
-            onChange={saveThreshold}
-          />
-        </SettingBlock>
-        <CustomInstructions
-          value={settings.aiCustomPrompt}
-          onSave={(aiCustomPrompt) => update({ aiCustomPrompt })}
-        />
-      </SettingGroup>
-
-      <SettingGroup title="AI effectiveness">
-        <div className="flex items-center justify-between gap-4 border-b border-line px-4 py-3">
-          <div className="min-w-0">
-            <div className="text-[13px] font-medium text-fg">
-              How suggestions are doing
-            </div>
-            <div className="text-[11.5px] text-fg-faint">
-              Measured on your own reviews, on this Mac
-            </div>
-          </div>
-          <SegmentedControl
-            name="ai-metrics-range"
-            value={metricDays}
-            options={METRIC_RANGES}
-            onChange={setMetricDays}
-          />
-        </div>
-        <div className="border-b border-line px-4 py-3">
-          {metrics === null ? (
-            <p className="text-[11.5px] text-fg-faint">Loading…</p>
-          ) : (
-            <AiEffectiveness metrics={metrics} status={aiStatus} />
-          )}
-        </div>
-        <SettingBlock
-          title="Personal model"
-          description="Classifiers trained on your approved entries"
-        >
-          {metrics === null ? (
-            <p className="text-[11.5px] text-fg-faint">Loading…</p>
-          ) : (
-            <PersonalModels
-              metrics={metrics}
-              status={aiStatus}
-              onRetrain={retrain}
-            />
-          )}
-        </SettingBlock>
-        <SettingRow
-          title="Reset learned data"
-          description="Forget the personal models, calibration, and similar-entry index. Entries, categories, projects, and rules stay."
+      <div className="settings-layout flex min-h-0 min-w-0 flex-1">
+        <nav
+          aria-label="Settings sections"
+          className="settings-nav w-48 shrink-0 overflow-y-auto border-r border-line bg-rail px-3 py-4"
         >
           <button
             type="button"
-            onClick={() => setConfirmReset(true)}
-            className="shrink-0 rounded-lg border border-danger/40 bg-danger-soft px-3 py-1.5 text-[12px] font-medium text-danger hover:bg-danger/20"
+            aria-current={activeSection === "overview" ? "location" : undefined}
+            onClick={() => selectSection("overview")}
+            className={`settings-nav-item ${activeSection === "overview" ? "settings-nav-item-active" : ""}`}
           >
-            Reset…
+            Overview
           </button>
-        </SettingRow>
-      </SettingGroup>
-      {confirmReset && (
-        <ConfirmDialog
-          title="Reset learned data?"
-          body="OpenRize forgets its personal models, calibration, and the index of similar entries. Your entries, categories, projects, and rules are kept. Suggestions start over from Apple's on-device model and your rules, and confidence is capped at 90% again until you review 50 more."
-          confirmLabel="Reset learned data"
-          onConfirm={resetLearned}
-          onCancel={() => setConfirmReset(false)}
-        />
-      )}
+          {SETTINGS_NAV_ITEMS.map((item) => (
+            <button
+              type="button"
+              key={item.id}
+              aria-current={activeSection === item.id ? "location" : undefined}
+              onClick={() => selectSection(item.id)}
+              className={`settings-nav-item ${activeSection === item.id ? "settings-nav-item-active" : ""}`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </nav>
 
-      <SettingGroup title="Battery & Energy">
-        <BatteryEnergyMonitor
-          summary={energySummary}
-          loading={energyLoading}
-          selectedDays={energyDays}
-          onRangeChange={setEnergyDays}
-          onReset={resetEnergyHistory}
-        />
-      </SettingGroup>
-
-      <SettingGroup title="Notifications">
-        <SettingRow
-          title="Long-run reminders"
-          description="Ping me when a tracker has been running unusually long"
-          status="not-implemented"
-        />
-      </SettingGroup>
-
-      <SettingGroup title="Data">
-        <SettingBlock
-          title="Storage location"
-          description="Where your trackers, activity history, and preferences live"
+        <div
+          ref={contentRef}
+          className="settings-content flex min-h-0 min-w-0 flex-1 flex-col gap-8 overflow-y-auto overscroll-contain p-5"
         >
-          {storage === null ? (
-            <p className="text-[11.5px] text-fg-faint">Locating…</p>
-          ) : (
-            <div className="flex flex-col gap-3">
-              <PathLine label="Data folder" path={storage.dataDir} />
-              <div className="flex flex-col gap-1.5">
-                <FileLine label="Database" path={storage.databaseFile} />
-                <FileLine label="Preferences" path={storage.configFile} />
-              </div>
-              <button
-                type="button"
-                onClick={openStorage}
-                className="self-start rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] text-fg-muted hover:bg-surface-strong"
+          <section
+            id="settings-section-overview"
+            data-settings-section="overview"
+            className="settings-page-section flex flex-col gap-4"
+          >
+            <SettingsSectionHeading
+              title="Overview"
+              description="Check for updates and see your current version."
+            />
+            <UpdatesSetting status={updates} />
+          </section>
+
+          <section
+            id="settings-section-appearance"
+            data-settings-section="appearance"
+            className="settings-page-section flex flex-col gap-4"
+          >
+            <SettingsSectionHeading
+              title="Appearance"
+              description="Set the reading theme and accent used across OpenRize."
+            />
+            <SettingGroup title="Theme & accent">
+              <SettingRow
+                title="Theme"
+                description="Dark, light, or follow macOS"
               >
-                Open folder in Finder
-              </button>
-            </div>
-          )}
-        </SettingBlock>
-        <SettingRow
-          title="Keep activity until"
-          description="Delete automatic activity history older than this. Manual trackers are never touched."
-        >
-          <Select
-            label="Keep activity until"
-            value={settings.retentionDays}
-            options={RETENTION_OPTIONS}
-            onChange={(retentionDays) => update({ retentionDays })}
-          />
-        </SettingRow>
-      </SettingGroup>
+                <SegmentedControl
+                  name="theme"
+                  value={settings.theme}
+                  options={THEME_OPTIONS}
+                  onChange={(theme) => update({ theme })}
+                />
+              </SettingRow>
+              <SettingBlock
+                title="Size mode"
+                description="Scale text and icons throughout OpenRize"
+              >
+                <SegmentedControl
+                  name="size-mode"
+                  value={settings.sizeMode}
+                  options={SIZE_OPTIONS}
+                  largeTarget
+                  onChange={(sizeMode) => update({ sizeMode })}
+                />
+              </SettingBlock>
+              <SettingRow
+                title="Accent colour"
+                description="Highlights, active states, and running timers"
+              >
+                <SegmentedControl
+                  name="accent"
+                  value={settings.accent}
+                  options={ACCENT_OPTIONS}
+                  onChange={(accent) => update({ accent })}
+                />
+              </SettingRow>
+            </SettingGroup>
+          </section>
 
-      <TrackingHoursSetting settings={settings} update={update} />
+          <section
+            id="settings-section-general"
+            data-settings-section="general"
+            className="settings-page-section flex flex-col gap-4"
+          >
+            <SettingsSectionHeading
+              title="General"
+              description="Control how OpenRize starts and behaves when its window closes."
+            />
+            <SettingGroup title="App behavior">
+              <LaunchAtLoginRow onError={setLoginError} />
+              <SettingRow
+                title="Menu bar icon"
+                description="Keep a tray icon with quick controls"
+              >
+                <Toggle
+                  checked={settings.trayEnabled}
+                  label="Menu bar icon"
+                  onChange={(trayEnabled) => update({ trayEnabled })}
+                />
+              </SettingRow>
+              <SettingRow
+                title="When I close the window"
+                description={
+                  trayOff
+                    ? "Menu bar icon is off, so closing always quits"
+                    : "What the close button does while OpenRize keeps tracking"
+                }
+              >
+                <SegmentedControl
+                  name="close-behavior"
+                  value={settings.closeBehavior}
+                  options={CLOSE_OPTIONS}
+                  onChange={(closeBehavior) => update({ closeBehavior })}
+                />
+              </SettingRow>
+            </SettingGroup>
+          </section>
 
-      <SettingGroup title="Work hours">
-        <SettingRow
-          title="Expected hours"
-          description="Your work week. The Calendar and My Timesheet measure against it; a day's target is a fifth of it."
-        >
-          <Select
-            label="Expected hours per week"
-            value={settings.weeklyTargetHours}
-            options={targetOptions(settings.weeklyTargetHours)}
-            onChange={(weeklyTargetHours) => update({ weeklyTargetHours })}
-          />
-        </SettingRow>
-        <SettingRow
-          title="Count toward Work Hours"
-          description="Choose which categories count as work rather than personal time"
-          status="not-implemented"
-        />
-      </SettingGroup>
+          <section
+            id="settings-section-tracking"
+            data-settings-section="tracking"
+            className="settings-page-section flex flex-col gap-4"
+          >
+            <SettingsSectionHeading
+              title="Tracking & work"
+              description="Choose when activity is captured and set the target used in work reports."
+            />
+            <TrackingHoursSetting settings={settings} update={update} />
+            <SettingGroup title="Work hours">
+              <SettingRow
+                title="Expected hours"
+                description="Your weekly work target. Calendar and My Timesheet use one fifth as the daily target."
+              >
+                <Select
+                  label="Expected hours per week"
+                  value={settings.weeklyTargetHours}
+                  options={targetOptions(settings.weeklyTargetHours)}
+                  onChange={(weeklyTargetHours) =>
+                    update({ weeklyTargetHours })
+                  }
+                />
+              </SettingRow>
+              <SettingRow
+                title="Count toward Work Hours"
+                description="Choose which categories count as work rather than personal time"
+                status="not-implemented"
+              />
+            </SettingGroup>
+          </section>
 
-      <UpdatesSetting
-        status={updates}
-        reveal={route.section === "updates" ? revealUpdates : 0}
-      />
+          <section
+            id="settings-section-suggestions"
+            data-settings-section="suggestions"
+            className="settings-page-section flex flex-col gap-4"
+          >
+            <SettingsSectionHeading
+              title="Suggestions"
+              description="Set everyday categorization and confident auto-accept behavior."
+            />
+            <SettingGroup title="Categories & AI">
+              <SettingRow
+                title="Suggestion engine"
+                description={engineSummary(aiStatus)}
+              >
+                <span className="shrink-0 font-mono text-[11px] text-fg-muted">
+                  {aiStatus === null
+                    ? ""
+                    : aiStatus.calibrated
+                      ? `${aiStatus.outcomes} reviewed`
+                      : `learning · ${aiStatus.outcomes}/50 reviewed`}
+                </span>
+              </SettingRow>
+              <SettingRow
+                title="What to suggest"
+                description="Suggest a category for each entry, or a project too"
+              >
+                <SegmentedControl
+                  name="ai-suggest"
+                  value={settings.aiSuggest}
+                  options={SUGGEST_OPTIONS}
+                  onChange={(aiSuggest) => update({ aiSuggest })}
+                />
+              </SettingRow>
+              <SettingRow
+                title="Auto-accept confident suggestions"
+                description={
+                  aiStatus?.calibrated === false
+                    ? "Starts after 50 reviewed suggestions; until then only rule matches auto-approve"
+                    : "Approve entries whose every suggestion clears the threshold"
+                }
+              >
+                <Toggle
+                  checked={settings.autoAccept}
+                  label="Auto-accept confident suggestions"
+                  onChange={(autoAccept) => update({ autoAccept })}
+                />
+              </SettingRow>
+              <SettingBlock
+                title="Auto-accept threshold"
+                description="Minimum calibrated confidence for an entry to skip review"
+              >
+                <ThresholdSlider
+                  value={settings.autoAcceptPercent}
+                  disabled={!settings.autoAccept}
+                  metrics={metrics}
+                  calibrated={aiStatus?.calibrated ?? false}
+                  onChange={saveThreshold}
+                />
+              </SettingBlock>
+              <CustomInstructions
+                value={settings.aiCustomPrompt}
+                onSave={(aiCustomPrompt) => update({ aiCustomPrompt })}
+              />
+            </SettingGroup>
+          </section>
+
+          <section
+            id="settings-section-data"
+            data-settings-section="data"
+            className="settings-page-section flex flex-col gap-4"
+          >
+            <SettingsSectionHeading
+              title="Data & storage"
+              description="Review where OpenRize stores local information and how long automatic activity is retained."
+            />
+            <SettingGroup title="Local data">
+              <SettingBlock
+                title="Storage location"
+                description="Where your trackers, activity history, and preferences live"
+              >
+                {storage === null ? (
+                  <p className="text-[12px] text-fg-muted">Locating…</p>
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    <PathLine label="Data folder" path={storage.dataDir} />
+                    <div className="flex flex-col gap-1.5">
+                      <FileLine label="Database" path={storage.databaseFile} />
+                      <FileLine label="Preferences" path={storage.configFile} />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={openStorage}
+                      className="self-start rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] text-fg-muted hover:bg-surface-strong"
+                    >
+                      Open folder in Finder
+                    </button>
+                  </div>
+                )}
+              </SettingBlock>
+              <SettingRow
+                title="Keep activity until"
+                description="Delete automatic activity history older than this. Manual trackers are never touched."
+              >
+                <Select
+                  label="Keep activity until"
+                  value={settings.retentionDays}
+                  options={RETENTION_OPTIONS}
+                  onChange={(retentionDays) => update({ retentionDays })}
+                />
+              </SettingRow>
+            </SettingGroup>
+          </section>
+
+          <section
+            id="settings-section-notifications"
+            data-settings-section="notifications"
+            className="settings-page-section flex flex-col gap-4"
+          >
+            <SettingsSectionHeading
+              title="Notifications"
+              description="Notification preferences will appear here when reminders are available."
+            />
+            <SettingGroup title="Reminders">
+              <SettingRow
+                title="Long-run reminders"
+                description="Ping me when a tracker has been running unusually long"
+                status="not-implemented"
+              />
+            </SettingGroup>
+          </section>
+
+          <section
+            id="settings-section-advanced"
+            data-settings-section="advanced"
+            className="settings-page-section flex flex-col gap-4"
+          >
+            <SettingsSectionHeading
+              title="Advanced settings"
+              description="AI effectiveness, personal-model maintenance, and Battery & Energy. Everyday tracking and suggestion controls remain in their own sections."
+            />
+            <SettingGroup title="AI effectiveness">
+              <div className="flex items-center justify-between gap-4 border-b border-line px-4 py-3">
+                <div className="min-w-0">
+                  <div className="text-[13px] font-medium text-fg">
+                    How suggestions are doing
+                  </div>
+                  <div className="text-[12px] leading-relaxed text-fg-muted">
+                    Measured on your own reviews, on this Mac
+                  </div>
+                </div>
+                <SegmentedControl
+                  name="ai-metrics-range"
+                  value={metricDays}
+                  options={METRIC_RANGES}
+                  onChange={setMetricDays}
+                />
+              </div>
+              <div className="border-b border-line px-4 py-3">
+                {metrics === null ? (
+                  <p className="text-[12px] text-fg-muted">Loading…</p>
+                ) : (
+                  <AiEffectiveness metrics={metrics} status={aiStatus} />
+                )}
+              </div>
+              <SettingBlock
+                title="Personal model"
+                description="Classifiers trained on your approved entries"
+              >
+                {metrics === null ? (
+                  <p className="text-[12px] text-fg-muted">Loading…</p>
+                ) : (
+                  <PersonalModels
+                    metrics={metrics}
+                    status={aiStatus}
+                    onRetrain={retrain}
+                  />
+                )}
+              </SettingBlock>
+              <SettingRow
+                title="Reset learned data"
+                description="Forget personal models, calibration, and the similar-entry index. Entries, categories, projects, and rules stay."
+              >
+                <button
+                  type="button"
+                  onClick={() => setConfirmReset(true)}
+                  className="shrink-0 rounded-lg border border-danger/40 bg-danger-soft px-3 py-1.5 text-[12px] font-medium text-danger hover:bg-danger/20"
+                >
+                  Reset…
+                </button>
+              </SettingRow>
+            </SettingGroup>
+
+            <SettingGroup title="Battery & Energy">
+              <BatteryEnergyMonitor
+                summary={energySummary}
+                loading={energyLoading}
+                selectedDays={energyDays}
+                onRangeChange={setEnergyDays}
+                onReset={resetEnergyHistory}
+              />
+            </SettingGroup>
+            {confirmReset && (
+              <ConfirmDialog
+                title="Reset learned data?"
+                body="OpenRize forgets its personal models, calibration, and the index of similar entries. Your entries, categories, projects, and rules are kept. Suggestions start over from Apple's on-device model and rules, and confidence is capped at 90% again until you review 50 more."
+                confirmLabel="Reset learned data"
+                onConfirm={resetLearned}
+                onCancel={() => setConfirmReset(false)}
+              />
+            )}
+          </section>
+        </div>
+      </div>
     </main>
   );
 }

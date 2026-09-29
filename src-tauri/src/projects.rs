@@ -227,6 +227,9 @@ pub struct ProjectStats {
     pub month_ms: u64,
     pub billable_ms: u64,
     pub billable_month_ms: u64,
+    /// Approved, billable time not yet on an invoice: what is ready to bill.
+    pub unbilled_ms: u64,
+    pub unbilled_entries: u32,
     pub last_activity: Option<u64>,
 }
 
@@ -247,7 +250,9 @@ pub fn project_stats(
                     SUM(CASE WHEN started_at >= ?3 THEN ended_at - started_at ELSE 0 END),
                     SUM(CASE WHEN billable = 1 THEN ended_at - started_at ELSE 0 END),
                     SUM(CASE WHEN billable = 1 AND started_at >= ?3 THEN ended_at - started_at ELSE 0 END),
-                    MAX(ended_at)
+                    MAX(ended_at),
+                    SUM(CASE WHEN status = 'approved' AND billable = 1 AND invoice_id IS NULL THEN ended_at - started_at ELSE 0 END),
+                    SUM(CASE WHEN status = 'approved' AND billable = 1 AND invoice_id IS NULL THEN 1 ELSE 0 END)
              FROM time_entries
              WHERE deleted_at IS NULL AND project_id IS NOT NULL
              GROUP BY project_id;",
@@ -269,6 +274,8 @@ pub fn project_stats(
                     billable_ms: ms(5)?,
                     billable_month_ms: ms(6)?,
                     last_activity: row.get::<_, Option<i64>>(7)?.map(|v| v as u64),
+                    unbilled_ms: ms(8)?,
+                    unbilled_entries: row.get::<_, i64>(9)?.max(0) as u32,
                 })
             },
         )

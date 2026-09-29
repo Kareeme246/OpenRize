@@ -59,6 +59,8 @@ interface ProjectDetailProps {
   catalog: Catalog;
   onBack: () => void;
   onEdit: () => void;
+  /** Start an invoice filled with this project's ready-to-bill time. */
+  onInvoice: () => void;
   onChanged: () => void;
 }
 
@@ -82,6 +84,7 @@ export function ProjectDetail({
   catalog,
   onBack,
   onEdit,
+  onInvoice,
   onChanged,
 }: ProjectDetailProps) {
   const review = useEntryReview();
@@ -301,6 +304,33 @@ export function ProjectDetail({
             }
           />
         </div>
+
+        {(stats?.unbilledEntries ?? 0) > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-accent/30 bg-accent-soft px-4 py-3 text-[12px]">
+            <p className="min-w-0 flex-1 text-fg">
+              <span className="font-semibold">
+                {formatDuration(stats?.unbilledMs ?? 0)} ready to invoice
+              </span>{" "}
+              across {stats?.unbilledEntries}{" "}
+              {stats?.unbilledEntries === 1
+                ? "approved entry"
+                : "approved entries"}
+              {rate !== undefined &&
+                ` at ${formatMoney(rate, currencyFor(client))}/h`}
+              {client === undefined &&
+                " · assign a client to invoice this time"}
+            </p>
+            {client !== undefined && (
+              <button
+                type="button"
+                onClick={onInvoice}
+                className="rounded-md bg-accent px-3 py-1.5 font-semibold text-[12px] text-accent-fg hover:opacity-90"
+              >
+                Create invoice
+              </button>
+            )}
+          </div>
+        )}
 
         {data === null ? (
           <div className="mt-4 rounded-xl border border-line bg-panel">

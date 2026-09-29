@@ -112,27 +112,126 @@ export interface UpdateProject {
   hourlyRate?: number | null;
 }
 
+export type InvoiceStatus = "draft" | "open" | "paid" | "void";
+export type InvoiceLineKind = "time" | "retainer" | "manual";
+
 export interface InvoiceLine {
+  id: string;
+  kind: InvoiceLineKind;
+  entryId?: string | null;
+  projectName: string;
+  description: string;
+  startedAt?: number | null;
+  endedAt?: number | null;
+  /** Hundredths: 150 is 1.50 hours (or 1.5 of any unit). */
+  quantityHundredths: number;
+  unit: string;
+  rateCents: number;
+  amountCents: number;
+}
+
+/** A row of the invoice list. Money is integer USD cents throughout. */
+export interface InvoiceSummary {
+  id: string;
+  number?: string | null;
+  clientId: string;
+  /** The name printed under Bill To. */
+  clientName: string;
+  status: InvoiceStatus;
+  currency: string;
+  /** `YYYY-MM-DD`. */
+  issueDate?: string | null;
+  dueDate?: string | null;
+  totalCents: number;
+  createdAt: number;
+  issuedAt?: number | null;
+  paidAt?: number | null;
+}
+
+export interface Invoice extends InvoiceSummary {
+  billToEmail?: string | null;
+  billToAddress?: string | null;
+  /** This invoice's own From block (see InvoiceDraftInput). */
+  fromName: string;
+  fromAddress: string;
+  fromEmail?: string | null;
+  fromPhone?: string | null;
+  termsDays?: number | null;
+  subject?: string | null;
+  notes?: string | null;
+  paymentInstructions?: string | null;
+  lines: InvoiceLine[];
+}
+
+export interface InvoiceLineInput {
+  kind: InvoiceLineKind;
+  entryId?: string;
+  description: string;
+  quantityHundredths?: number;
+  unit?: string;
+  rateCents?: number;
+}
+
+/** What the editor sends: choices only. Rust prices and validates it. */
+export interface InvoiceDraftInput {
+  id?: string;
+  clientId: string;
+  billToName: string;
+  billToAddress?: string;
+  billToEmail?: string;
+  /**
+   * The From block: defaulted from Invoice settings when the draft is created,
+   * then this invoice's own. Name and address are required to finalize.
+   */
+  fromName: string;
+  fromAddress: string;
+  fromEmail?: string;
+  fromPhone?: string;
+  issueDate: string;
+  termsDays: number;
+  subject?: string;
+  notes?: string;
+  paymentInstructions?: string;
+  lines: InvoiceLineInput[];
+}
+
+/** Approved, billable, uninvoiced time and the rate it would bill at. */
+export interface BillableEntry {
   entryId: string;
+  projectId: string;
   projectName: string;
   description: string;
   startedAt: number;
   endedAt: number;
-  rate: number;
-  amountCents: number;
+  quantityHundredths: number;
+  rateCents?: number | null;
+  amountCents?: number | null;
+  onThisInvoice: boolean;
 }
 
-export interface Invoice {
-  id: string;
-  clientId: string;
-  clientName: string;
-  clientEmail?: string;
-  clientAddress?: string;
-  currency: string;
-  status: "draft" | "sent" | "paid";
-  createdAt: number;
-  updatedAt: number;
-  lines: InvoiceLine[];
+export interface InvoiceProfile {
+  name: string;
+  address: string;
+  email?: string | null;
+  phone?: string | null;
+  paymentInstructions?: string | null;
+  defaultNotes?: string | null;
+  defaultTermsDays: number;
+  hasLogo: boolean;
+  numberYear: number;
+  nextNumber: number;
+}
+
+export interface InvoiceProfileInput {
+  name: string;
+  address: string;
+  email?: string;
+  phone?: string;
+  paymentInstructions?: string;
+  defaultNotes?: string;
+  defaultTermsDays: number;
+  /** Sets the next number for the current year; omit to leave it. */
+  nextNumber?: number;
 }
 
 export interface TimeEntry {
@@ -496,7 +595,10 @@ export type Route =
     }
   | {
       name: "invoices";
+      /** An existing invoice: an editor for a draft, the document otherwise. */
       invoiceId?: string;
+      /** A new invoice, optionally for a client and one project's time. */
+      compose?: { clientId?: string; projectId?: string };
     }
   | {
       name: "settings";
@@ -535,6 +637,9 @@ export interface ProjectStats {
   monthMs: number;
   billableMs: number;
   billableMonthMs: number;
+  /** Approved, billable time not yet on an invoice. */
+  unbilledMs: number;
+  unbilledEntries: number;
   lastActivity?: number | null;
 }
 

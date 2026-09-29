@@ -247,6 +247,12 @@ export function Projects({ route, navigate, replace }: ProjectsProps) {
           catalog={catalog}
           onBack={() => navigate({ name: "projects", tab, range })}
           onEdit={() => setEditing({ project: open })}
+          onInvoice={() =>
+            navigate({
+              name: "invoices",
+              compose: { clientId: open.clientId, projectId: open.id },
+            })
+          }
           onChanged={() => void reloadAll()}
         />
       ) : (

@@ -26,6 +26,7 @@ export function Donut({
   maxLegend = 6,
   stacked = false,
   showLegend = true,
+  large = false,
 }: {
   slices: Slice[];
   size?: number;
@@ -36,6 +37,8 @@ export function Donut({
   /** Ring above the legend, for narrow cards side by side. */
   stacked?: boolean;
   showLegend?: boolean;
+  /** Roomier legend type. */
+  large?: boolean;
 }) {
   const [hovered, setHovered] = useState<string | null>(null);
   const total = slices.reduce((sum, slice) => sum + slice.ms, 0);
@@ -137,8 +140,16 @@ export function Donut({
       </svg>
       {/* Capped so a wide card keeps each value near its label. */}
       {showLegend && (
-        <figcaption className="min-w-0 max-w-sm flex-1 space-y-1 text-[11.5px]">
-          <div className="mb-1.5 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
+        <figcaption
+          className={`min-w-0 max-w-sm flex-1 space-y-1 ${
+            large ? "text-[14px]" : "text-[11.5px]"
+          }`}
+        >
+          <div
+            className={`mb-1.5 font-semibold text-fg-faint uppercase tracking-wider ${
+              large ? "text-[12px]" : "text-[10.5px]"
+            }`}
+          >
             {title}
           </div>
           {shown.length === 0 && (
@@ -382,16 +393,23 @@ export function BarRow({
   maxMs,
   color = "var(--accent)",
   trailing,
+  large = false,
 }: {
   label: ReactNode;
   ms: number;
   maxMs: number;
   color?: string;
   trailing?: ReactNode;
+  /** Roomier type. */
+  large?: boolean;
 }) {
   return (
     <div className="space-y-1">
-      <div className="flex items-center justify-between gap-2 text-[11.5px]">
+      <div
+        className={`flex items-center justify-between gap-2 ${
+          large ? "text-[14px]" : "text-[11.5px]"
+        }`}
+      >
         <span className="min-w-0 truncate text-fg-muted">{label}</span>
         <span className="shrink-0 font-mono text-fg-soft tabular-nums">
           {trailing ?? formatDuration(ms)}

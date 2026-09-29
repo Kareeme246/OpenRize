@@ -38,10 +38,11 @@ export function RangeSummary({
   const maxApp = apps[0]?.ms ?? 0;
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
-      <span className="font-semibold text-[13px] text-fg-strong">{title}</span>
+      <span className="font-semibold text-[15px] text-fg-strong">{title}</span>
 
       <StatCard
         label="Work hours"
+        large
         value={formatDuration(workMs)}
         sub={`${Math.round(progress * 100)}% of ${targetLabel} target · ${plural(entries, "entry", "entries")}`}
       >
@@ -53,10 +54,7 @@ export function RangeSummary({
       {toReview > 0 ? (
         <div className="flex items-center justify-between gap-2 rounded-lg border border-review/30 bg-review/10 p-3">
           <div className="min-w-0">
-            <div className="font-semibold text-[12.5px] text-review">
-              {plural(toReview, "entry", "entries")} to review
-            </div>
-            <div className="text-[11px] text-fg-soft">
+            <div className="text-[13.5px] text-fg-soft">
               {processing > 0
                 ? `${processing} more categorizing`
                 : "Confirm the AI's suggestions"}
@@ -66,14 +64,14 @@ export function RangeSummary({
             <button
               type="button"
               onClick={onStartReview}
-              className="shrink-0 rounded bg-review px-2.5 py-1 font-bold text-[11px] text-canvas hover:opacity-90"
+              className="shrink-0 rounded bg-review px-2.5 py-1 font-bold text-[13px] text-canvas hover:opacity-90"
             >
               Start
             </button>
           )}
         </div>
       ) : (
-        <div className="rounded-lg border border-line bg-surface p-3 text-center text-[12px] text-fg-soft">
+        <div className="rounded-lg border border-line bg-surface p-3 text-center text-[14px] text-fg-soft">
           {processing > 0
             ? `Categorizing ${plural(processing, "entry", "entries")}…`
             : entries > 0
@@ -82,15 +80,27 @@ export function RangeSummary({
         </div>
       )}
 
-      <Donut slices={categories} title="Time by category" size={112} stacked />
+      <Donut
+        slices={categories}
+        title="Time by category"
+        size={112}
+        stacked
+        large
+      />
 
       {apps.length > 0 && (
         <div className="space-y-2">
-          <div className="font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
+          <div className="font-semibold text-[12px] text-fg-faint uppercase tracking-wider">
             Top apps
           </div>
           {apps.map((app) => (
-            <BarRow key={app.app} label={app.app} ms={app.ms} maxMs={maxApp} />
+            <BarRow
+              key={app.app}
+              label={app.app}
+              ms={app.ms}
+              maxMs={maxApp}
+              large
+            />
           ))}
         </div>
       )}

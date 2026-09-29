@@ -21,6 +21,9 @@ const NARROW_DENSITY_CLASSES: Record<Density, string> = {
   sliver: "rounded-xs p-0",
 };
 
+/** A full block this tall has room for its chips to wrap onto a second line. */
+const WRAP_CHIPS_MIN_HEIGHT = 96;
+
 function densityFor(height: number): Density {
   if (height >= 72) return "full";
   if (height >= 26) return "compact";
@@ -155,6 +158,7 @@ export function EntryBlock({
       )}
     </span>
   );
+  const wrapChips = density === "full" && height >= WRAP_CHIPS_MIN_HEIGHT;
   const chips = state !== "processing" && (
     <>
       {category && (
@@ -178,7 +182,7 @@ export function EntryBlock({
             className="size-1.5 shrink-0 rounded-full"
             style={{ backgroundColor: project.color }}
           />
-          <span className="truncate">
+          <span className={wrapChips ? "break-words" : "truncate"}>
             {project.name}
             {state === "pending" && "?"}
           </span>
@@ -244,7 +248,11 @@ export function EntryBlock({
                   {timeText}
                 </div>
               </div>
-              <div className="flex items-center gap-1.5 overflow-hidden">
+              <div
+                className={`flex items-center gap-1.5 overflow-hidden ${
+                  wrapChips ? "flex-wrap" : ""
+                }`}
+              >
                 {chips}
                 {status}
               </div>

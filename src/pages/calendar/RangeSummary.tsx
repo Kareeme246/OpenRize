@@ -86,6 +86,8 @@ export function RangeSummary({
         size={112}
         stacked
         large
+        maxLegend={3}
+        foldLone
       />
 
       {apps.length > 0 && (

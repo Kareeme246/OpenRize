@@ -82,7 +82,14 @@ export function RangeSummary({
         </div>
       )}
 
-      <Donut slices={categories} title="Time by category" size={112} stacked />
+      <Donut
+        slices={categories}
+        title="Time by category"
+        size={112}
+        stacked
+        maxLegend={3}
+        foldLone
+      />
 
       {apps.length > 0 && (
         <div className="space-y-2">

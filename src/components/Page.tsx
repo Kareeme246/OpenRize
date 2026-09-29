@@ -192,6 +192,7 @@ export function StatCard({
   sub,
   active,
   tone,
+  large,
   onClick,
   children,
 }: {
@@ -200,16 +201,24 @@ export function StatCard({
   sub?: ReactNode;
   active?: boolean;
   tone?: "review" | "accent";
+  /** Roomier type, for a card that is the focus of its panel. */
+  large?: boolean;
   onClick?: () => void;
   children?: ReactNode;
 }) {
   const body = (
     <>
-      <div className="font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
+      <div
+        className={`font-semibold text-fg-faint uppercase tracking-wider ${
+          large ? "text-[12px]" : "text-[10.5px]"
+        }`}
+      >
         {label}
       </div>
       <div
-        className={`mt-1 font-semibold text-[20px] tabular-nums leading-tight ${
+        className={`mt-1 font-semibold tabular-nums leading-tight ${
+          large ? "text-[28px]" : "text-[20px]"
+        } ${
           tone === "review"
             ? "text-review"
             : tone === "accent"
@@ -219,7 +228,13 @@ export function StatCard({
       >
         {value}
       </div>
-      {sub && <div className="mt-0.5 text-[11.5px] text-fg-soft">{sub}</div>}
+      {sub && (
+        <div
+          className={`mt-0.5 text-fg-soft ${large ? "text-[14px]" : "text-[11.5px]"}`}
+        >
+          {sub}
+        </div>
+      )}
       {children}
     </>
   );

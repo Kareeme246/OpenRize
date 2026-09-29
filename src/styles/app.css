@@ -259,7 +259,9 @@ body {
 /* The menu-bar panel's window is clear: the card draws its own rounded
    corners, and macOS shades the window from the card's shape. */
 html.pulse-window,
-html.pulse-window body {
+html.pulse-window body,
+html.reminder-window,
+html.reminder-window body {
   background: transparent;
 }
 

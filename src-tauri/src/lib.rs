@@ -1,5 +1,6 @@
 mod activity;
 mod ai;
+mod breaks;
 mod capture;
 mod commands;
 mod energy;
@@ -46,6 +47,9 @@ pub const EVENT_SETTINGS_CHANGED: &str = "settings-changed";
 
 /// Emitted whenever time entries are modified or rebuilt.
 pub const EVENT_ENTRIES_CHANGED: &str = "entries-changed";
+
+/// Sent to the main window when the break reminder asks for its settings.
+pub const EVENT_OPEN_BREAK_SETTINGS: &str = "open-break-settings";
 
 /// Sent to the main window when the Pulse panel's review button asks it to
 /// open today's review queue.
@@ -103,6 +107,7 @@ pub fn run() {
             });
             app.manage(ai::AiRuntime::default());
             app.manage(pulse::PulseState::default());
+            breaks::init(app.handle())?;
             app.manage(updater::UpdaterState::new(
                 app.package_info().version.to_string(),
             ));
@@ -251,6 +256,20 @@ pub fn run() {
             commands::reset_energy_history,
             commands::resize_pulse_panel,
             commands::hide_pulse_panel,
+            commands::break_state,
+            commands::start_break,
+            commands::end_break,
+            commands::snooze_break,
+            commands::skip_break,
+            commands::expand_break_reminder,
+            commands::extend_break,
+            commands::pause_break_reminders,
+            commands::list_breaks,
+            commands::resize_reminder_panel,
+            #[cfg(debug_assertions)]
+            commands::dev_sample_break_reminder,
+            commands::open_break_settings,
+            commands::preview_break_chime,
             commands::open_main_window,
             commands::update_status,
             commands::check_for_updates,
@@ -264,6 +283,7 @@ pub fn run() {
             // Close the open segment at the real quit time. Left open, the
             // next launch can only close it at its own start, losing its time.
             RunEvent::Exit => {
+                breaks::on_exit(app);
                 if let Ok(mut store) = app.state::<AppState>().activity.lock() {
                     let _ = store.close_active_segment(timers::now_epoch_ms());
                 }

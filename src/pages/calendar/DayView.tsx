@@ -1,5 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { EmptyState } from "../../components/Page";
+import {
+  type BreakEntry,
+  breakEnd,
+  breakLabel,
+  takenBreaks,
+} from "../../lib/breaks";
 import { recordingEntry } from "../../lib/entries";
 import { formatDuration, formatTime } from "../../lib/format";
 import type {
@@ -23,6 +29,8 @@ interface DayViewProps {
   dayStart: number;
   entries: TimeEntry[];
   segments: ActivitySegment[];
+  breaks: BreakEntry[];
+  scheduleLabels: Map<string, string>;
   loading: boolean;
   selectedId?: string;
   categoryById: Map<string, Category>;
@@ -59,6 +67,8 @@ export function DayView({
   dayStart,
   entries,
   segments,
+  breaks,
+  scheduleLabels,
   loading,
   selectedId,
   categoryById,
@@ -388,6 +398,26 @@ export function DayView({
                     }
                   }}
                 />
+                {takenBreaks(breaks).map((entry) => {
+                  const start = entry.startedAt ?? dayStart;
+                  const { top, height: bandHeight } = place(
+                    timeline,
+                    start,
+                    Math.min(breakEnd(entry, now), dayEnd),
+                    dayStart,
+                    "elapsed",
+                  );
+                  return (
+                    <BreakBand
+                      key={entry.id}
+                      entry={entry}
+                      top={top}
+                      height={bandHeight}
+                      label={breakLabel(entry, scheduleLabels)}
+                      now={now}
+                    />
+                  );
+                })}
                 {entries.map((entry) => {
                   const { top, height: entryHeight } = place(
                     timeline,
@@ -504,6 +534,48 @@ export function DayView({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+interface BreakBandProps {
+  entry: BreakEntry;
+  top: number;
+  height: number;
+  label: string;
+  now: number;
+  narrow?: boolean;
+}
+
+/** A taken break: a hatched band in the gap the segment leaves behind. */
+export function BreakBand({
+  entry,
+  top,
+  height,
+  label,
+  now,
+  narrow = false,
+}: BreakBandProps) {
+  const start = entry.startedAt ?? now;
+  const length = formatDuration(Math.max(0, breakEnd(entry, now) - start));
+  return (
+    <div
+      className="pointer-events-none absolute right-4 left-0 z-0 overflow-hidden rounded-md border border-break/40 px-2 font-medium text-[10.5px] text-break leading-tight"
+      style={{
+        top: `${top}px`,
+        height: `${height}px`,
+        backgroundImage:
+          "repeating-linear-gradient(135deg, color-mix(in srgb, var(--break) 22%, transparent) 0 5px, color-mix(in srgb, var(--break) 6%, transparent) 5px 10px)",
+      }}
+      title={`${label} · ${formatTime(start)} · ${length}`}
+      role="img"
+      aria-label={`${label}, ${length}`}
+    >
+      {height >= 16 && !narrow && (
+        <span className="block truncate pt-0.5">
+          {label} · {length}
+        </span>
+      )}
     </div>
   );
 }

@@ -18,6 +18,9 @@
   --bg-rail: #191c1b;
   --bg-bar: #161817;
   --bg-panel: #252827;
+  /* Settings cards are opaque and intentionally distinct from the canvas. */
+  --bg-settings-card: #2c322f;
+  --settings-card-border: rgba(255, 255, 255, 0.18);
   --bg-surface-1: rgba(255, 255, 255, 0.05);
   --bg-surface-2: rgba(255, 255, 255, 0.09);
   --bg-inset: rgba(0, 0, 0, 0.35);
@@ -33,6 +36,7 @@
 
   --line: rgba(255, 255, 255, 0.08);
   --line-soft: rgba(255, 255, 255, 0.04);
+  --line-strong: rgba(255, 255, 255, 0.2);
 
   /* Categorical colours that sit beside the accent without competing with it. */
   --break: #66b1df;
@@ -123,6 +127,8 @@
   --bg-rail: #ebeae5;
   --bg-bar: #e5e4df;
   --bg-panel: #fbfaf7;
+  --bg-settings-card: #fffefa;
+  --settings-card-border: rgba(30, 34, 32, 0.17);
   --bg-surface-1: rgba(30, 34, 32, 0.04);
   --bg-surface-2: rgba(30, 34, 32, 0.08);
   --bg-inset: rgba(30, 34, 32, 0.05);
@@ -138,6 +144,7 @@
 
   --line: rgba(30, 34, 32, 0.11);
   --line-soft: rgba(30, 34, 32, 0.06);
+  --line-strong: rgba(30, 34, 32, 0.2);
 
   --break: #2580b8;
   --review: #a76114;
@@ -181,6 +188,8 @@
   --color-rail: var(--bg-rail);
   --color-bar: var(--bg-bar);
   --color-panel: var(--bg-panel);
+  --color-settings-card: var(--bg-settings-card);
+  --color-settings-card-border: var(--settings-card-border);
   --color-surface: var(--bg-surface-1);
   --color-surface-strong: var(--bg-surface-2);
   --color-inset: var(--bg-inset);
@@ -196,6 +205,7 @@
 
   --color-line: var(--line);
   --color-line-soft: var(--line-soft);
+  --color-line-strong: var(--line-strong);
 
   --color-break: var(--break);
   --color-review: var(--review);
@@ -320,4 +330,149 @@ html.pulse-window body {
 .threshold-range:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 4px;
+}
+
+/* The settings surface opts out of the app-wide gradient and mono body type. */
+.settings-page {
+  font-family: var(--font-sans);
+}
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.settings-nav-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  border: 1px solid transparent;
+  border-left: 2px solid transparent;
+  border-radius: 0.55rem;
+  padding: 0.55rem 0.625rem;
+  color: var(--fg-muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: left;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.settings-nav-item:hover:not(.settings-nav-item-active) {
+  background: var(--bg-surface-1);
+  color: var(--fg-strong);
+}
+
+.settings-nav-item-active {
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--fg-strong);
+}
+
+.settings-nav-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.settings-section-heading h2 {
+  position: relative;
+  display: table;
+  padding-bottom: 0.35rem;
+  line-height: 1.25;
+}
+
+.settings-section-heading h2::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  content: "";
+}
+
+.settings-group-card {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.035);
+}
+
+@media (max-width: 720px) {
+  .settings-layout {
+    flex-direction: column;
+  }
+
+  .settings-nav {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    max-height: 8.5rem;
+    flex: 0 0 auto;
+    gap: 0.5rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 0.5rem 0.75rem;
+  }
+
+  .settings-nav > .settings-nav-item {
+    width: auto;
+    min-width: 7rem;
+    flex: 0 0 auto;
+    justify-content: center;
+    white-space: nowrap;
+  }
+
+  .settings-content {
+    padding: 1rem;
+  }
+
+  .setting-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+
+  .setting-row > :last-child {
+    align-self: flex-start;
+    max-width: 100%;
+  }
+
+  .settings-inline-note,
+  .settings-day-row {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+
+  .settings-day-row > label {
+    min-width: 6rem;
+  }
+
+  .settings-battery-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .settings-battery-row > :last-child {
+    align-self: flex-start;
+    text-align: left;
+  }
+
+  .settings-energy-legend,
+  .settings-energy-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-nav-item {
+    transition: none;
+  }
 }

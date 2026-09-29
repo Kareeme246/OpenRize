@@ -348,7 +348,7 @@ export function Picker<T extends string | number>({
     const empty = value === "";
     triggerClasses += ` h-6 min-w-0 max-w-full rounded-md border py-0 px-1.5 text-[11.5px] focus:border-accent disabled:cursor-default ${
       empty
-        ? "border-dashed border-review/50 bg-transparent text-review"
+        ? "border-dashed border-line bg-transparent text-fg-soft hover:border-line-strong hover:text-fg"
         : "border-line-soft bg-transparent text-fg-muted hover:border-line"
     }`;
   } else {

@@ -195,7 +195,7 @@ function groupLabel(
   if (by === "status") {
     return key === "approved"
       ? { label: "Approved", color: "var(--accent)" }
-      : { label: "Pending", color: "var(--review)" };
+      : { label: "Pending", color: "var(--fg-soft)" };
   }
   return key
     ? { label: key, color: assigned }
@@ -1160,7 +1160,7 @@ function StatusText({ entry }: { entry: TimeEntry }) {
     );
   }
   return (
-    <span className="shrink-0 text-[10.5px] text-review">
+    <span className="shrink-0 text-[10.5px] text-fg-soft">
       {state === "needsYou"
         ? "Needs you"
         : state === "processing" || state === "building"

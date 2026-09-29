@@ -254,7 +254,7 @@ export function Sidebar({
           >
             <span
               className={`size-2 shrink-0 rounded-full ${
-                trackingActive ? "bg-accent animate-pulse" : "bg-review"
+                trackingActive ? "bg-accent animate-pulse" : "bg-fg-soft"
               }`}
             />
             {!collapsed && (

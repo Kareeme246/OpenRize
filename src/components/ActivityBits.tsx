@@ -145,7 +145,7 @@ export function SegmentList({
                   </span>
                 )}
                 {!segment.reviewed && segment.kind === "activity" && (
-                  <span className="shrink-0 font-mono text-[9.5px] uppercase tracking-wider text-review/70">
+                  <span className="shrink-0 font-mono text-[9.5px] uppercase tracking-wider text-fg-faint">
                     Review
                   </span>
                 )}

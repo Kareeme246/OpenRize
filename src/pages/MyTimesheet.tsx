@@ -169,7 +169,7 @@ function groupEntries(
         () => ({
           key: category?.id ?? "needs",
           label: category?.name ?? "Needs you",
-          color: category?.color ?? "var(--review)",
+          color: category?.color ?? "var(--fg-ghost)",
           trailing: !category,
         }),
         entry,
@@ -448,7 +448,6 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
             <StatCard
               label="Pending review"
               value={formatDuration(totalDuration(toReview))}
-              tone={toReview.length > 0 ? "review" : undefined}
               sub={plural(toReview.length, "entry", "entries")}
             />
             <StatCard

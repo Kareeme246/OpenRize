@@ -523,7 +523,7 @@ function ProjectsTable({
                   : "–"}
               </span>
               <span
-                className={`text-[12px] ${overdue ? "font-semibold text-review" : "text-fg-soft"}`}
+                className={`text-[12px] ${overdue ? "font-semibold text-danger" : "text-fg-soft"}`}
               >
                 {project.dueDate ? formatShortDate(project.dueDate, now) : "–"}
               </span>
@@ -537,7 +537,7 @@ function ProjectsTable({
                       className={`truncate font-mono text-[11px] tabular-nums ${
                         budget.ratio !== undefined &&
                         budget.ratio >= BUDGET_WARN
-                          ? "text-review"
+                          ? "text-danger"
                           : "text-fg-soft"
                       }`}
                     >

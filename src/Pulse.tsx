@@ -320,7 +320,7 @@ function statusView(
 
   if (!live.captureEnabled) {
     return {
-      dot: "bg-review",
+      dot: "bg-fg-soft",
       text: "Tracking paused",
       detail: "Nothing is recorded until you resume",
       action: "resume",
@@ -329,7 +329,7 @@ function statusView(
 
   const next = nextStart();
   return {
-    dot: "bg-review",
+    dot: "bg-fg-soft",
     text: "Outside tracking hours",
     detail: next ? `Starts ${startsAt(next)}` : undefined,
     action: "resume",

@@ -13,8 +13,8 @@ const IMPACT_STYLES: Record<
     label: "Low",
   },
   medium: {
-    badge: "border-amber-500/40 bg-amber-500/10 text-amber-500",
-    dot: "bg-amber-500",
+    badge: "border-sky-500/40 bg-sky-500/10 text-sky-500",
+    dot: "bg-sky-500",
     label: "Medium",
   },
   high: {

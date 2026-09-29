@@ -22,17 +22,17 @@ export const BAND_LABEL: Record<Band, string> = {
   low: "Needs you",
 };
 
-/** Text colour per band: accent, neutral, and the review amber. */
+/** Text colour per band: accent, neutral, and muted. */
 export const BAND_TONE: Record<Band, string> = {
   high: "text-accent",
   medium: "text-fg-muted",
-  low: "text-review",
+  low: "text-fg-soft",
 };
 
 export const BAND_FILL: Record<Band, string> = {
   high: "bg-accent",
   medium: "bg-fg-soft",
-  low: "bg-review",
+  low: "bg-fg-ghost",
 };
 
 export function percent(confidence: number): string {

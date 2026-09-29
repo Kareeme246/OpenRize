@@ -272,7 +272,7 @@ export function ProjectDetail({
             }
             tone={
               budget?.ratio !== undefined && budget.ratio >= BUDGET_WARN
-                ? "review"
+                ? "danger"
                 : undefined
             }
             sub={budget?.label ?? "No budget"}
@@ -394,7 +394,7 @@ export function ProjectDetail({
                             {entry.description}
                           </span>
                           {entry.status !== "approved" && (
-                            <span className="shrink-0 text-[10.5px] text-review">
+                            <span className="shrink-0 text-[10.5px] text-fg-soft">
                               Pending
                             </span>
                           )}

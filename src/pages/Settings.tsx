@@ -90,66 +90,34 @@ type SettingsSection =
   | "notifications"
   | "advanced";
 
+const SETTINGS_SECTIONS: readonly SettingsSection[] = [
+  "overview",
+  "appearance",
+  "general",
+  "tracking",
+  "suggestions",
+  "data",
+  "notifications",
+  "advanced",
+];
+
+function parseSettingsSection(value: string | null): SettingsSection | null {
+  return SETTINGS_SECTIONS.find((section) => section === value) ?? null;
+}
+
 interface SettingsNavItem {
   id: SettingsSection;
   label: string;
-  hint?: string;
 }
 
-interface SettingsNavGroup {
-  label: string;
-  items: SettingsNavItem[];
-}
-
-const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
-  {
-    label: "Preferences",
-    items: [
-      { id: "appearance", label: "Appearance" },
-      { id: "general", label: "General" },
-      { id: "tracking", label: "Tracking & work" },
-      { id: "suggestions", label: "Suggestions" },
-      { id: "data", label: "Data & storage" },
-      { id: "notifications", label: "Notifications" },
-    ],
-  },
-  {
-    label: "Advanced",
-    items: [
-      {
-        id: "advanced",
-        label: "Advanced settings",
-        hint: "AI effectiveness, personal models, Battery & Energy",
-      },
-    ],
-  },
-];
-
-const OVERVIEW_LINKS: {
-  section: Exclude<SettingsSection, "overview" | "notifications">;
-  title: string;
-  description: string;
-}[] = [
-  {
-    section: "appearance",
-    title: "Appearance",
-    description: "Theme and accent colour",
-  },
-  {
-    section: "tracking",
-    title: "Tracking & work",
-    description: "Schedule and weekly target",
-  },
-  {
-    section: "suggestions",
-    title: "Suggestions",
-    description: "Category and project behavior",
-  },
-  {
-    section: "advanced",
-    title: "Advanced",
-    description: "AI effectiveness and Battery & Energy",
-  },
+const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
+  { id: "appearance", label: "Appearance" },
+  { id: "general", label: "General" },
+  { id: "tracking", label: "Tracking & work" },
+  { id: "suggestions", label: "Suggestions" },
+  { id: "data", label: "Data & storage" },
+  { id: "notifications", label: "Notifications" },
+  { id: "advanced", label: "Advanced settings" },
 ];
 
 /** One line on which tiers are running and why. */
@@ -254,7 +222,7 @@ function SettingsSectionHeading({
   description: string;
 }) {
   return (
-    <header className="settings-section-heading">
+    <header className="settings-section-heading border-b border-line pb-3">
       <h2 className="font-sans text-[20px] font-semibold tracking-tight text-fg-strong">
         {title}
       </h2>
@@ -846,16 +814,62 @@ export function Settings({
     useState<SettingsSection>("overview");
   const contentRef = useRef<HTMLDivElement>(null);
 
+  const selectSection = useCallback((section: SettingsSection): void => {
+    setActiveSection(section);
+    const content = contentRef.current;
+    const target = content?.querySelector<HTMLElement>(
+      `[data-settings-section="${section}"]`,
+    );
+    if (content === null || target === null || target === undefined) return;
+    const top =
+      target.getBoundingClientRect().top -
+      content.getBoundingClientRect().top +
+      content.scrollTop -
+      16;
+    content.scrollTo({
+      top: Math.max(0, top),
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+    });
+  }, []);
+
   useEffect(() => {
     if (route.section !== "updates" && revealUpdates === 0) return;
-    setActiveSection("overview");
-    contentRef.current?.scrollTo({ top: 0 });
-  }, [route.section, revealUpdates]);
+    selectSection("overview");
+  }, [route.section, revealUpdates, selectSection]);
 
-  const selectSection = (section: SettingsSection): void => {
-    setActiveSection(section);
-    contentRef.current?.scrollTo({ top: 0 });
-  };
+  useEffect(() => {
+    const content = contentRef.current;
+    if (content === null) return;
+    const sections = Array.from(
+      content.querySelectorAll<HTMLElement>("[data-settings-section]"),
+    );
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const current = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort(
+            (first, second) =>
+              first.boundingClientRect.top - second.boundingClientRect.top,
+          )
+          .map((entry) =>
+            parseSettingsSection(
+              entry.target.getAttribute("data-settings-section"),
+            ),
+          )
+          .find((section) => section !== null);
+        if (current !== undefined && current !== null) {
+          setActiveSection(current);
+        }
+      },
+      { root: content, rootMargin: "-12% 0px -76% 0px", threshold: 0 },
+    );
+    sections.forEach((section) => {
+      observer.observe(section);
+    });
+    return () => observer.disconnect();
+  }, []);
 
   const trayOff = !settings.trayEnabled;
   const sectionError =
@@ -884,6 +898,15 @@ export function Settings({
         </span>
       </header>
 
+      {problem !== null && (
+        <p
+          role="alert"
+          className="mx-5 mt-3 shrink-0 rounded-[10px] border border-danger/40 bg-danger-soft px-3.5 py-2.5 text-[13px] text-danger"
+        >
+          {problem}
+        </p>
+      )}
+
       <div className="settings-layout flex min-h-0 min-w-0 flex-1">
         <nav
           aria-label="Settings sections"
@@ -891,410 +914,370 @@ export function Settings({
         >
           <button
             type="button"
-            aria-current={activeSection === "overview" ? "page" : undefined}
+            aria-current={activeSection === "overview" ? "location" : undefined}
             onClick={() => selectSection("overview")}
             className={`settings-nav-item ${activeSection === "overview" ? "settings-nav-item-active" : ""}`}
           >
             Overview
           </button>
-          {SETTINGS_NAV_GROUPS.map((group) => (
-            <div className="settings-nav-group" key={group.label}>
-              <h2 className="settings-nav-group-title">{group.label}</h2>
-              {group.items.map((item) => (
-                <button
-                  type="button"
-                  key={item.id}
-                  aria-current={activeSection === item.id ? "page" : undefined}
-                  onClick={() => selectSection(item.id)}
-                  className={`settings-nav-item ${activeSection === item.id ? "settings-nav-item-active" : ""}`}
-                >
-                  <span>{item.label}</span>
-                  {item.hint && (
-                    <span className="settings-nav-item-hint">{item.hint}</span>
-                  )}
-                </button>
-              ))}
-            </div>
+          {SETTINGS_NAV_ITEMS.map((item) => (
+            <button
+              type="button"
+              key={item.id}
+              aria-current={activeSection === item.id ? "location" : undefined}
+              onClick={() => selectSection(item.id)}
+              className={`settings-nav-item ${activeSection === item.id ? "settings-nav-item-active" : ""}`}
+            >
+              {item.label}
+            </button>
           ))}
         </nav>
 
         <div
           ref={contentRef}
-          className="settings-content min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain p-5"
+          className="settings-content flex min-h-0 min-w-0 flex-1 flex-col gap-8 overflow-y-auto overscroll-contain p-5"
         >
-          {problem !== null && (
-            <p
-              role="alert"
-              className="mb-4 rounded-[10px] border border-danger/40 bg-danger-soft px-3.5 py-2.5 text-[13px] text-danger"
-            >
-              {problem}
-            </p>
-          )}
+          <section
+            id="settings-section-overview"
+            data-settings-section="overview"
+            className="settings-page-section flex flex-col gap-4"
+          >
+            <SettingsSectionHeading
+              title="Overview"
+              description="Check for updates and see your current version."
+            />
+            <UpdatesSetting status={updates} />
+          </section>
 
-          {activeSection === "overview" && (
-            <section className="flex flex-col gap-4">
-              <SettingsSectionHeading
-                title="Overview"
-                description="Updates and shortcuts to the settings you use most."
+          <section
+            id="settings-section-appearance"
+            data-settings-section="appearance"
+            className="settings-page-section flex flex-col gap-4"
+          >
+            <SettingsSectionHeading
+              title="Appearance"
+              description="Set the reading theme and accent used across OpenRize."
+            />
+            <SettingGroup title="Theme & accent">
+              <SettingRow
+                title="Theme"
+                description="Dark, light, or follow macOS"
+              >
+                <SegmentedControl
+                  name="theme"
+                  value={settings.theme}
+                  options={THEME_OPTIONS}
+                  onChange={(theme) => update({ theme })}
+                />
+              </SettingRow>
+              <SettingBlock
+                title="Size mode"
+                description="Scale text and icons throughout OpenRize"
+              >
+                <SegmentedControl
+                  name="size-mode"
+                  value={settings.sizeMode}
+                  options={SIZE_OPTIONS}
+                  largeTarget
+                  onChange={(sizeMode) => update({ sizeMode })}
+                />
+              </SettingBlock>
+              <SettingRow
+                title="Accent colour"
+                description="Highlights, active states, and running timers"
+              >
+                <SegmentedControl
+                  name="accent"
+                  value={settings.accent}
+                  options={ACCENT_OPTIONS}
+                  onChange={(accent) => update({ accent })}
+                />
+              </SettingRow>
+            </SettingGroup>
+          </section>
+
+          <section
+            id="settings-section-general"
+            data-settings-section="general"
+            className="settings-page-section flex flex-col gap-4"
+          >
+            <SettingsSectionHeading
+              title="General"
+              description="Control how OpenRize starts and behaves when its window closes."
+            />
+            <SettingGroup title="App behavior">
+              <LaunchAtLoginRow onError={setLoginError} />
+              <SettingRow
+                title="Menu bar icon"
+                description="Keep a tray icon with quick controls"
+              >
+                <Toggle
+                  checked={settings.trayEnabled}
+                  label="Menu bar icon"
+                  onChange={(trayEnabled) => update({ trayEnabled })}
+                />
+              </SettingRow>
+              <SettingRow
+                title="When I close the window"
+                description={
+                  trayOff
+                    ? "Menu bar icon is off, so closing always quits"
+                    : "What the close button does while OpenRize keeps tracking"
+                }
+              >
+                <SegmentedControl
+                  name="close-behavior"
+                  value={settings.closeBehavior}
+                  options={CLOSE_OPTIONS}
+                  onChange={(closeBehavior) => update({ closeBehavior })}
+                />
+              </SettingRow>
+            </SettingGroup>
+          </section>
+
+          <section
+            id="settings-section-tracking"
+            data-settings-section="tracking"
+            className="settings-page-section flex flex-col gap-4"
+          >
+            <SettingsSectionHeading
+              title="Tracking & work"
+              description="Choose when activity is captured and set the target used in work reports."
+            />
+            <TrackingHoursSetting settings={settings} update={update} />
+            <SettingGroup title="Work hours">
+              <SettingRow
+                title="Expected hours"
+                description="Your weekly work target. Calendar and My Timesheet use one fifth as the daily target."
+              >
+                <Select
+                  label="Expected hours per week"
+                  value={settings.weeklyTargetHours}
+                  options={targetOptions(settings.weeklyTargetHours)}
+                  onChange={(weeklyTargetHours) =>
+                    update({ weeklyTargetHours })
+                  }
+                />
+              </SettingRow>
+              <SettingRow
+                title="Count toward Work Hours"
+                description="Choose which categories count as work rather than personal time"
+                status="not-implemented"
               />
-              <UpdatesSetting status={updates} />
-              <section aria-labelledby="settings-shortcuts-heading">
-                <h3
-                  id="settings-shortcuts-heading"
-                  className="mb-2 px-1 font-mono text-[11px] font-semibold uppercase tracking-wider text-fg-muted"
-                >
-                  Settings areas
-                </h3>
-                <div className="settings-shortcut-grid grid grid-cols-2 gap-3">
-                  {OVERVIEW_LINKS.map((link) => (
+            </SettingGroup>
+          </section>
+
+          <section
+            id="settings-section-suggestions"
+            data-settings-section="suggestions"
+            className="settings-page-section flex flex-col gap-4"
+          >
+            <SettingsSectionHeading
+              title="Suggestions"
+              description="Set everyday categorization and confident auto-accept behavior."
+            />
+            <SettingGroup title="Categories & AI">
+              <SettingRow
+                title="Suggestion engine"
+                description={engineSummary(aiStatus)}
+              >
+                <span className="shrink-0 font-mono text-[11px] text-fg-muted">
+                  {aiStatus === null
+                    ? ""
+                    : aiStatus.calibrated
+                      ? `${aiStatus.outcomes} reviewed`
+                      : `learning · ${aiStatus.outcomes}/50 reviewed`}
+                </span>
+              </SettingRow>
+              <SettingRow
+                title="What to suggest"
+                description="Suggest a category for each entry, or a project too"
+              >
+                <SegmentedControl
+                  name="ai-suggest"
+                  value={settings.aiSuggest}
+                  options={SUGGEST_OPTIONS}
+                  onChange={(aiSuggest) => update({ aiSuggest })}
+                />
+              </SettingRow>
+              <SettingRow
+                title="Auto-accept confident suggestions"
+                description={
+                  aiStatus?.calibrated === false
+                    ? "Starts after 50 reviewed suggestions; until then only rule matches auto-approve"
+                    : "Approve entries whose every suggestion clears the threshold"
+                }
+              >
+                <Toggle
+                  checked={settings.autoAccept}
+                  label="Auto-accept confident suggestions"
+                  onChange={(autoAccept) => update({ autoAccept })}
+                />
+              </SettingRow>
+              <SettingBlock
+                title="Auto-accept threshold"
+                description="Minimum calibrated confidence for an entry to skip review"
+              >
+                <ThresholdSlider
+                  value={settings.autoAcceptPercent}
+                  disabled={!settings.autoAccept}
+                  metrics={metrics}
+                  calibrated={aiStatus?.calibrated ?? false}
+                  onChange={saveThreshold}
+                />
+              </SettingBlock>
+              <CustomInstructions
+                value={settings.aiCustomPrompt}
+                onSave={(aiCustomPrompt) => update({ aiCustomPrompt })}
+              />
+            </SettingGroup>
+          </section>
+
+          <section
+            id="settings-section-data"
+            data-settings-section="data"
+            className="settings-page-section flex flex-col gap-4"
+          >
+            <SettingsSectionHeading
+              title="Data & storage"
+              description="Review where OpenRize stores local information and how long automatic activity is retained."
+            />
+            <SettingGroup title="Local data">
+              <SettingBlock
+                title="Storage location"
+                description="Where your trackers, activity history, and preferences live"
+              >
+                {storage === null ? (
+                  <p className="text-[12px] text-fg-muted">Locating…</p>
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    <PathLine label="Data folder" path={storage.dataDir} />
+                    <div className="flex flex-col gap-1.5">
+                      <FileLine label="Database" path={storage.databaseFile} />
+                      <FileLine label="Preferences" path={storage.configFile} />
+                    </div>
                     <button
                       type="button"
-                      key={link.section}
-                      onClick={() => selectSection(link.section)}
-                      className="settings-shortcut-card group rounded-xl border border-settings-card-border bg-settings-card p-4 text-left transition-colors hover:border-accent/50 hover:bg-surface"
+                      onClick={openStorage}
+                      className="self-start rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] text-fg-muted hover:bg-surface-strong"
                     >
-                      <span className="flex items-center justify-between gap-3">
-                        <span className="font-medium text-fg-strong">
-                          {link.title}
-                        </span>
-                        <span
-                          aria-hidden="true"
-                          className="text-fg-muted transition-transform group-hover:translate-x-0.5"
-                        >
-                          →
-                        </span>
-                      </span>
-                      <span className="mt-1 block text-[12px] leading-relaxed text-fg-muted">
-                        {link.description}
-                      </span>
+                      Open folder in Finder
                     </button>
-                  ))}
-                </div>
-              </section>
-            </section>
-          )}
-
-          {activeSection === "appearance" && (
-            <section className="flex flex-col gap-4">
-              <SettingsSectionHeading
-                title="Appearance"
-                description="Set the reading theme and accent used across OpenRize."
-              />
-              <SettingGroup title="Theme & accent">
-                <SettingRow
-                  title="Theme"
-                  description="Dark, light, or follow macOS"
-                >
-                  <SegmentedControl
-                    name="theme"
-                    value={settings.theme}
-                    options={THEME_OPTIONS}
-                    onChange={(theme) => update({ theme })}
-                  />
-                </SettingRow>
-                <SettingBlock
-                  title="Size mode"
-                  description="Scale text and icons throughout OpenRize"
-                >
-                  <SegmentedControl
-                    name="size-mode"
-                    value={settings.sizeMode}
-                    options={SIZE_OPTIONS}
-                    largeTarget
-                    onChange={(sizeMode) => update({ sizeMode })}
-                  />
-                </SettingBlock>
-                <SettingRow
-                  title="Accent colour"
-                  description="Highlights, active states, and running timers"
-                >
-                  <SegmentedControl
-                    name="accent"
-                    value={settings.accent}
-                    options={ACCENT_OPTIONS}
-                    onChange={(accent) => update({ accent })}
-                  />
-                </SettingRow>
-              </SettingGroup>
-            </section>
-          )}
-
-          {activeSection === "general" && (
-            <section className="flex flex-col gap-4">
-              <SettingsSectionHeading
-                title="General"
-                description="Control how OpenRize starts and behaves when its window closes."
-              />
-              <SettingGroup title="App behavior">
-                <LaunchAtLoginRow onError={setLoginError} />
-                <SettingRow
-                  title="Menu bar icon"
-                  description="Keep a tray icon with quick controls"
-                >
-                  <Toggle
-                    checked={settings.trayEnabled}
-                    label="Menu bar icon"
-                    onChange={(trayEnabled) => update({ trayEnabled })}
-                  />
-                </SettingRow>
-                <SettingRow
-                  title="When I close the window"
-                  description={
-                    trayOff
-                      ? "Menu bar icon is off, so closing always quits"
-                      : "What the close button does while OpenRize keeps tracking"
-                  }
-                >
-                  <SegmentedControl
-                    name="close-behavior"
-                    value={settings.closeBehavior}
-                    options={CLOSE_OPTIONS}
-                    onChange={(closeBehavior) => update({ closeBehavior })}
-                  />
-                </SettingRow>
-              </SettingGroup>
-            </section>
-          )}
-
-          {activeSection === "tracking" && (
-            <section className="flex flex-col gap-4">
-              <SettingsSectionHeading
-                title="Tracking & work"
-                description="Choose when activity is captured and set the target used in work reports."
-              />
-              <TrackingHoursSetting settings={settings} update={update} />
-              <SettingGroup title="Work hours">
-                <SettingRow
-                  title="Expected hours"
-                  description="Your weekly work target. Calendar and My Timesheet use one fifth as the daily target."
-                >
-                  <Select
-                    label="Expected hours per week"
-                    value={settings.weeklyTargetHours}
-                    options={targetOptions(settings.weeklyTargetHours)}
-                    onChange={(weeklyTargetHours) =>
-                      update({ weeklyTargetHours })
-                    }
-                  />
-                </SettingRow>
-                <SettingRow
-                  title="Count toward Work Hours"
-                  description="Choose which categories count as work rather than personal time"
-                  status="not-implemented"
-                />
-              </SettingGroup>
-            </section>
-          )}
-
-          {activeSection === "suggestions" && (
-            <section className="flex flex-col gap-4">
-              <SettingsSectionHeading
-                title="Suggestions"
-                description="Set everyday categorization and confident auto-accept behavior."
-              />
-              <SettingGroup title="Categories & AI">
-                <SettingRow
-                  title="Suggestion engine"
-                  description={engineSummary(aiStatus)}
-                >
-                  <span className="shrink-0 font-mono text-[11px] text-fg-muted">
-                    {aiStatus === null
-                      ? ""
-                      : aiStatus.calibrated
-                        ? `${aiStatus.outcomes} reviewed`
-                        : `learning · ${aiStatus.outcomes}/50 reviewed`}
-                  </span>
-                </SettingRow>
-                <SettingRow
-                  title="What to suggest"
-                  description="Suggest a category for each entry, or a project too"
-                >
-                  <SegmentedControl
-                    name="ai-suggest"
-                    value={settings.aiSuggest}
-                    options={SUGGEST_OPTIONS}
-                    onChange={(aiSuggest) => update({ aiSuggest })}
-                  />
-                </SettingRow>
-                <SettingRow
-                  title="Auto-accept confident suggestions"
-                  description={
-                    aiStatus?.calibrated === false
-                      ? "Starts after 50 reviewed suggestions; until then only rule matches auto-approve"
-                      : "Approve entries whose every suggestion clears the threshold"
-                  }
-                >
-                  <Toggle
-                    checked={settings.autoAccept}
-                    label="Auto-accept confident suggestions"
-                    onChange={(autoAccept) => update({ autoAccept })}
-                  />
-                </SettingRow>
-                <SettingBlock
-                  title="Auto-accept threshold"
-                  description="Minimum calibrated confidence for an entry to skip review"
-                >
-                  <ThresholdSlider
-                    value={settings.autoAcceptPercent}
-                    disabled={!settings.autoAccept}
-                    metrics={metrics}
-                    calibrated={aiStatus?.calibrated ?? false}
-                    onChange={saveThreshold}
-                  />
-                </SettingBlock>
-                <CustomInstructions
-                  value={settings.aiCustomPrompt}
-                  onSave={(aiCustomPrompt) => update({ aiCustomPrompt })}
-                />
-              </SettingGroup>
-            </section>
-          )}
-
-          {activeSection === "data" && (
-            <section className="flex flex-col gap-4">
-              <SettingsSectionHeading
-                title="Data & storage"
-                description="Review where OpenRize stores local information and how long automatic activity is retained."
-              />
-              <SettingGroup title="Local data">
-                <SettingBlock
-                  title="Storage location"
-                  description="Where your trackers, activity history, and preferences live"
-                >
-                  {storage === null ? (
-                    <p className="text-[12px] text-fg-muted">Locating…</p>
-                  ) : (
-                    <div className="flex flex-col gap-3">
-                      <PathLine label="Data folder" path={storage.dataDir} />
-                      <div className="flex flex-col gap-1.5">
-                        <FileLine
-                          label="Database"
-                          path={storage.databaseFile}
-                        />
-                        <FileLine
-                          label="Preferences"
-                          path={storage.configFile}
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={openStorage}
-                        className="self-start rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] text-fg-muted hover:bg-surface-strong"
-                      >
-                        Open folder in Finder
-                      </button>
-                    </div>
-                  )}
-                </SettingBlock>
-                <SettingRow
-                  title="Keep activity until"
-                  description="Delete automatic activity history older than this. Manual trackers are never touched."
-                >
-                  <Select
-                    label="Keep activity until"
-                    value={settings.retentionDays}
-                    options={RETENTION_OPTIONS}
-                    onChange={(retentionDays) => update({ retentionDays })}
-                  />
-                </SettingRow>
-              </SettingGroup>
-            </section>
-          )}
-
-          {activeSection === "notifications" && (
-            <section className="flex flex-col gap-4">
-              <SettingsSectionHeading
-                title="Notifications"
-                description="Notification preferences will appear here when reminders are available."
-              />
-              <SettingGroup title="Reminders">
-                <SettingRow
-                  title="Long-run reminders"
-                  description="Ping me when a tracker has been running unusually long"
-                  status="not-implemented"
-                />
-              </SettingGroup>
-            </section>
-          )}
-
-          {activeSection === "advanced" && (
-            <section className="flex flex-col gap-4">
-              <SettingsSectionHeading
-                title="Advanced settings"
-                description="AI effectiveness, personal-model maintenance, and Battery & Energy. Everyday tracking and suggestion controls remain in their own sections."
-              />
-              <SettingGroup title="AI effectiveness">
-                <div className="flex items-center justify-between gap-4 border-b border-line px-4 py-3">
-                  <div className="min-w-0">
-                    <div className="text-[13px] font-medium text-fg">
-                      How suggestions are doing
-                    </div>
-                    <div className="text-[12px] leading-relaxed text-fg-muted">
-                      Measured on your own reviews, on this Mac
-                    </div>
                   </div>
-                  <SegmentedControl
-                    name="ai-metrics-range"
-                    value={metricDays}
-                    options={METRIC_RANGES}
-                    onChange={setMetricDays}
-                  />
-                </div>
-                <div className="border-b border-line px-4 py-3">
-                  {metrics === null ? (
-                    <p className="text-[12px] text-fg-muted">Loading…</p>
-                  ) : (
-                    <AiEffectiveness metrics={metrics} status={aiStatus} />
-                  )}
-                </div>
-                <SettingBlock
-                  title="Personal model"
-                  description="Classifiers trained on your approved entries"
-                >
-                  {metrics === null ? (
-                    <p className="text-[12px] text-fg-muted">Loading…</p>
-                  ) : (
-                    <PersonalModels
-                      metrics={metrics}
-                      status={aiStatus}
-                      onRetrain={retrain}
-                    />
-                  )}
-                </SettingBlock>
-                <SettingRow
-                  title="Reset learned data"
-                  description="Forget personal models, calibration, and the similar-entry index. Entries, categories, projects, and rules stay."
-                >
-                  <button
-                    type="button"
-                    onClick={() => setConfirmReset(true)}
-                    className="shrink-0 rounded-lg border border-danger/40 bg-danger-soft px-3 py-1.5 text-[12px] font-medium text-danger hover:bg-danger/20"
-                  >
-                    Reset…
-                  </button>
-                </SettingRow>
-              </SettingGroup>
+                )}
+              </SettingBlock>
+              <SettingRow
+                title="Keep activity until"
+                description="Delete automatic activity history older than this. Manual trackers are never touched."
+              >
+                <Select
+                  label="Keep activity until"
+                  value={settings.retentionDays}
+                  options={RETENTION_OPTIONS}
+                  onChange={(retentionDays) => update({ retentionDays })}
+                />
+              </SettingRow>
+            </SettingGroup>
+          </section>
 
-              <SettingGroup title="Battery & Energy">
-                <BatteryEnergyMonitor
-                  summary={energySummary}
-                  loading={energyLoading}
-                  selectedDays={energyDays}
-                  onRangeChange={setEnergyDays}
-                  onReset={resetEnergyHistory}
+          <section
+            id="settings-section-notifications"
+            data-settings-section="notifications"
+            className="settings-page-section flex flex-col gap-4"
+          >
+            <SettingsSectionHeading
+              title="Notifications"
+              description="Notification preferences will appear here when reminders are available."
+            />
+            <SettingGroup title="Reminders">
+              <SettingRow
+                title="Long-run reminders"
+                description="Ping me when a tracker has been running unusually long"
+                status="not-implemented"
+              />
+            </SettingGroup>
+          </section>
+
+          <section
+            id="settings-section-advanced"
+            data-settings-section="advanced"
+            className="settings-page-section flex flex-col gap-4"
+          >
+            <SettingsSectionHeading
+              title="Advanced settings"
+              description="AI effectiveness, personal-model maintenance, and Battery & Energy. Everyday tracking and suggestion controls remain in their own sections."
+            />
+            <SettingGroup title="AI effectiveness">
+              <div className="flex items-center justify-between gap-4 border-b border-line px-4 py-3">
+                <div className="min-w-0">
+                  <div className="text-[13px] font-medium text-fg">
+                    How suggestions are doing
+                  </div>
+                  <div className="text-[12px] leading-relaxed text-fg-muted">
+                    Measured on your own reviews, on this Mac
+                  </div>
+                </div>
+                <SegmentedControl
+                  name="ai-metrics-range"
+                  value={metricDays}
+                  options={METRIC_RANGES}
+                  onChange={setMetricDays}
                 />
-              </SettingGroup>
-              {confirmReset && (
-                <ConfirmDialog
-                  title="Reset learned data?"
-                  body="OpenRize forgets its personal models, calibration, and the index of similar entries. Your entries, categories, projects, and rules are kept. Suggestions start over from Apple's on-device model and rules, and confidence is capped at 90% again until you review 50 more."
-                  confirmLabel="Reset learned data"
-                  onConfirm={resetLearned}
-                  onCancel={() => setConfirmReset(false)}
-                />
-              )}
-            </section>
-          )}
+              </div>
+              <div className="border-b border-line px-4 py-3">
+                {metrics === null ? (
+                  <p className="text-[12px] text-fg-muted">Loading…</p>
+                ) : (
+                  <AiEffectiveness metrics={metrics} status={aiStatus} />
+                )}
+              </div>
+              <SettingBlock
+                title="Personal model"
+                description="Classifiers trained on your approved entries"
+              >
+                {metrics === null ? (
+                  <p className="text-[12px] text-fg-muted">Loading…</p>
+                ) : (
+                  <PersonalModels
+                    metrics={metrics}
+                    status={aiStatus}
+                    onRetrain={retrain}
+                  />
+                )}
+              </SettingBlock>
+              <SettingRow
+                title="Reset learned data"
+                description="Forget personal models, calibration, and the similar-entry index. Entries, categories, projects, and rules stay."
+              >
+                <button
+                  type="button"
+                  onClick={() => setConfirmReset(true)}
+                  className="shrink-0 rounded-lg border border-danger/40 bg-danger-soft px-3 py-1.5 text-[12px] font-medium text-danger hover:bg-danger/20"
+                >
+                  Reset…
+                </button>
+              </SettingRow>
+            </SettingGroup>
+
+            <SettingGroup title="Battery & Energy">
+              <BatteryEnergyMonitor
+                summary={energySummary}
+                loading={energyLoading}
+                selectedDays={energyDays}
+                onRangeChange={setEnergyDays}
+                onReset={resetEnergyHistory}
+              />
+            </SettingGroup>
+            {confirmReset && (
+              <ConfirmDialog
+                title="Reset learned data?"
+                body="OpenRize forgets its personal models, calibration, and the index of similar entries. Your entries, categories, projects, and rules are kept. Suggestions start over from Apple's on-device model and rules, and confidence is capped at 90% again until you review 50 more."
+                confirmLabel="Reset learned data"
+                onConfirm={resetLearned}
+                onCancel={() => setConfirmReset(false)}
+              />
+            )}
+          </section>
         </div>
       </div>
     </main>

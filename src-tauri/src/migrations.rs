@@ -689,6 +689,176 @@ mod tests {
         assert_eq!(schema_snapshot(&fresh), schema_snapshot(&legacy));
     }
 
+    /// The invoice tables and time-protection trigger exactly as main's v2 and
+    /// v3 steps leave them (the state of a shipped install at user_version 4).
+    const SHIPPED_V4_INVOICES: &str = "
+        CREATE TABLE invoices (
+          id TEXT PRIMARY KEY, client_id TEXT NOT NULL, client_name TEXT NOT NULL,
+          client_email TEXT, client_address TEXT, currency TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('draft', 'sent', 'paid')),
+          created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+        CREATE TABLE invoice_lines (
+          entry_id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL REFERENCES invoices(id),
+          project_name TEXT NOT NULL, description TEXT NOT NULL, started_at INTEGER NOT NULL,
+          ended_at INTEGER NOT NULL, rate REAL NOT NULL, amount_cents INTEGER NOT NULL);
+        CREATE INDEX idx_invoice_lines_invoice ON invoice_lines(invoice_id);
+        CREATE TRIGGER protect_invoiced_time BEFORE UPDATE OF started_at, ended_at, description, project_id, status, billable, deleted_at ON time_entries
+        WHEN OLD.invoice_id IS NOT NULL AND (
+          NEW.started_at IS NOT OLD.started_at OR NEW.ended_at IS NOT OLD.ended_at OR
+          NEW.description IS NOT OLD.description OR
+          (NEW.project_id IS NOT OLD.project_id AND NOT (
+            NEW.project_id IS NULL AND EXISTS (
+              SELECT 1 FROM projects WHERE id = OLD.project_id AND deleted_at IS NOT NULL
+            )
+          )) OR
+          NEW.status IS NOT OLD.status OR NEW.billable IS NOT OLD.billable OR NEW.deleted_at IS NOT OLD.deleted_at
+        ) BEGIN SELECT RAISE(ABORT, 'Invoiced time cannot be edited; delete its draft invoice first'); END;";
+
+    /// A database as main ships it at user_version 4: the full pre-invoice
+    /// schema, the old invoice tables, and tracked data of every kind,
+    /// including time reserved by a USD draft and by a sent invoice.
+    fn shipped_v4_database() -> Connection {
+        let mut conn = Connection::open_in_memory().unwrap();
+        legacy_v1_through_v7::run(&mut conn).unwrap();
+        conn.execute_batch(SHIPPED_V4_INVOICES).unwrap();
+        conn.execute_batch(
+            "INSERT INTO clients (id, name, created_at, updated_at) VALUES ('c', 'Acme', 1, 1);
+             INSERT INTO projects (id, client_id, name, color, created_at, updated_at)
+               VALUES ('p', 'c', 'Swap', '#fff', 1, 1);
+             INSERT INTO segments (app, title, kind, started_at) VALUES ('Code', 'main.rs', 'activity', 5);
+             INSERT INTO time_entries (id, started_at, ended_at, description, project_id, status, billable, invoice_id, created_at, updated_at)
+               VALUES ('e-draft', 0, 1000000, 'Draft work', 'p', 'approved', 1, 'draft-usd', 1, 1);
+             INSERT INTO time_entries (id, started_at, ended_at, description, project_id, status, billable, invoice_id, created_at, updated_at)
+               VALUES ('e-sent', 0, 3600000, 'Sent work', 'p', 'approved', 1, 'sent', 1, 1);
+             INSERT INTO time_entries (id, started_at, ended_at, description, project_id, status, billable, created_at, updated_at)
+               VALUES ('e-free', 0, 60000, 'Untouched', 'p', 'pending', 0, 1, 1);
+             INSERT INTO invoices VALUES ('draft-usd', 'c', 'Acme', 'a@x.test', '1 Main', 'USD', 'draft', 86400000, 86400000);
+             INSERT INTO invoices VALUES ('draft-eur', 'c', 'Acme', NULL, NULL, 'EUR', 'draft', 86400000, 86400000);
+             INSERT INTO invoices VALUES ('sent', 'c', 'Acme', NULL, NULL, 'USD', 'sent', 86400000, 86400000);
+             INSERT INTO invoices VALUES ('paid', 'c', 'Acme', NULL, NULL, 'USD', 'paid', 86400000, 86400000);
+             INSERT INTO invoice_lines VALUES ('e-draft', 'draft-usd', 'Swap', 'Draft work', 0, 1000000, 100.0, 2778);
+             INSERT INTO invoice_lines VALUES ('e-sent', 'sent', 'Swap', 'Sent work', 0, 3600000, 100.5, 10050);
+             PRAGMA user_version = 4;",
+        )
+        .unwrap();
+        conn
+    }
+
+    /// Everything the upgrade must leave exactly as it found it, and what the
+    /// invoice steps must do: only the USD draft survives, still holding its
+    /// time; the deleted invoices release theirs.
+    fn assert_upgraded_in_place(conn: &Connection) {
+        let mut fresh = Connection::open_in_memory().unwrap();
+        run_migrations(&mut fresh).unwrap();
+        assert_eq!(schema_snapshot(&fresh), schema_snapshot(conn));
+
+        let v: i32 = conn
+            .query_row("PRAGMA user_version;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 6);
+
+        let ids: Vec<String> = conn
+            .prepare("SELECT id FROM invoices ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(ids, ["draft-usd"]);
+        let entries: Vec<(String, Option<String>, String, String)> = conn
+            .prepare("SELECT id, invoice_id, description, status FROM time_entries ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            entries,
+            [
+                (
+                    "e-draft".into(),
+                    Some("draft-usd".into()),
+                    "Draft work".into(),
+                    "approved".into()
+                ),
+                ("e-free".into(), None, "Untouched".into(), "pending".into()),
+                ("e-sent".into(), None, "Sent work".into(), "approved".into()),
+            ]
+        );
+        let other: (i64, i64, i64, i64) = conn
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM segments), (SELECT COUNT(*) FROM clients),
+                        (SELECT COUNT(*) FROM projects), (SELECT COUNT(*) FROM categories)",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(other, (1, 1, 1, 12));
+        // The draft's line survived, and invoiced time is still protected.
+        let lines: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM invoice_lines WHERE entry_id = 'e-draft'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(lines, 1);
+        assert!(conn
+            .execute(
+                "UPDATE time_entries SET description = 'x' WHERE id = 'e-draft'",
+                []
+            )
+            .is_err());
+    }
+
+    /// A shipped install at user_version 4 upgrades in place to the schema a
+    /// new install gets, without touching anything it tracked.
+    #[test]
+    fn a_shipped_v4_database_upgrades_in_place_to_the_current_schema() {
+        let mut conn = shipped_v4_database();
+        run_migrations(&mut conn).unwrap();
+        assert_upgraded_in_place(&conn);
+    }
+
+    /// The same for a database that already ran the v5 step (which kept legacy
+    /// rows and has no From columns): v6 deletes the legacy rows, adds the
+    /// columns, and backfills drafts from the current settings.
+    #[test]
+    fn a_v5_database_upgrades_in_place_to_the_current_schema() {
+        let mut conn = shipped_v4_database();
+        conn.execute_batch(INVOICE_DOCUMENTS_V5).unwrap();
+        conn.execute_batch(
+            "UPDATE invoice_profile SET name = 'Offline Studios', address = '1 Main St.',
+                                        email = 'hi@offline.test' WHERE id = 1;
+             PRAGMA user_version = 5;",
+        )
+        .unwrap();
+        let legacy_before: i64 = conn
+            .query_row("SELECT COUNT(*) FROM invoices WHERE legacy = 1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(legacy_before, 3);
+
+        run_migrations(&mut conn).unwrap();
+        assert_upgraded_in_place(&conn);
+        let from: (String, String, Option<String>) = conn
+            .query_row(
+                "SELECT from_name, from_address, from_email FROM invoices WHERE id = 'draft-usd'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            from,
+            (
+                "Offline Studios".into(),
+                "1 Main St.".into(),
+                Some("hi@offline.test".into())
+            )
+        );
+    }
+
     /// The v2 invoice tables as shipped, with one row of every kind.
     #[test]
     fn v5_upgrades_usd_drafts_and_v6_deletes_the_rest() {

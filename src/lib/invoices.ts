@@ -4,6 +4,7 @@ import type {
   InvoiceLine,
   InvoiceLineInput,
   InvoiceLineKind,
+  InvoiceProfile,
   InvoiceSummary,
 } from "./types";
 
@@ -118,6 +119,30 @@ export const STATUS_LABEL: Record<DisplayStatus, string> = {
   void: "Void",
 };
 
+/** The From fields of a draft, as Invoice settings would fill them. */
+export type FromFields = Pick<
+  DraftForm,
+  "fromName" | "fromAddress" | "fromEmail" | "fromPhone"
+>;
+
+export function fromProfile(profile: InvoiceProfile): FromFields {
+  return {
+    fromName: profile.name,
+    fromAddress: profile.address,
+    fromEmail: profile.email ?? "",
+    fromPhone: profile.phone ?? "",
+  };
+}
+
+export function sameFrom(a: FromFields, b: FromFields): boolean {
+  return (
+    a.fromName === b.fromName &&
+    a.fromAddress === b.fromAddress &&
+    a.fromEmail === b.fromEmail &&
+    a.fromPhone === b.fromPhone
+  );
+}
+
 /** One editable row of the draft; text fields hold what the user typed. */
 export interface DraftLine {
   /** Stable React key; never sent. */
@@ -147,6 +172,10 @@ export interface DraftForm {
   billToName: string;
   billToAddress: string;
   billToEmail: string;
+  fromName: string;
+  fromAddress: string;
+  fromEmail: string;
+  fromPhone: string;
   issueDate: string;
   termsDays: number;
   subject: string;
@@ -214,6 +243,10 @@ export function toDraftInput(form: DraftForm): InvoiceDraftInput | null {
     billToName: form.billToName,
     billToAddress: blank(form.billToAddress),
     billToEmail: blank(form.billToEmail),
+    fromName: form.fromName,
+    fromAddress: form.fromAddress,
+    fromEmail: blank(form.fromEmail),
+    fromPhone: blank(form.fromPhone),
     issueDate: form.issueDate,
     termsDays: form.termsDays,
     subject: blank(form.subject),

@@ -23,10 +23,12 @@ import {
   type DraftLine,
   formatDate,
   formatUsd,
+  fromProfile,
   lineToForm,
   newLineKey,
   quantityInput,
   rateInput,
+  sameFrom,
   TERMS_OPTIONS,
   toDraftInput,
 } from "../../lib/invoices";
@@ -139,6 +141,10 @@ export function InvoiceEditor({
             billToName: invoice.clientName,
             billToAddress: invoice.billToAddress ?? "",
             billToEmail: invoice.billToEmail ?? "",
+            fromName: invoice.fromName,
+            fromAddress: invoice.fromAddress,
+            fromEmail: invoice.fromEmail ?? "",
+            fromPhone: invoice.fromPhone ?? "",
             issueDate: invoice.issueDate ?? localDateString(new Date()),
             termsDays: invoice.termsDays ?? loadedProfile.defaultTermsDays,
             subject: invoice.subject ?? "",
@@ -158,6 +164,7 @@ export function InvoiceEditor({
           billToName: client?.name ?? "",
           billToAddress: client?.address ?? "",
           billToEmail: client?.email ?? "",
+          ...fromProfile(loadedProfile),
           issueDate: localDateString(new Date()),
           termsDays: loadedProfile.defaultTermsDays,
           subject: "",
@@ -318,14 +325,27 @@ export function InvoiceEditor({
     });
 
   const requestFinalize = (): void => {
-    if (!profile?.name.trim() || !profile.address.trim()) {
+    if (!form?.fromName.trim() || !form.fromAddress.trim()) {
       setError(
-        "Add your business name and address in Invoice settings before finalizing.",
+        "Add your business name and address in the From section before finalizing.",
       );
-      setEditingProfile(true);
       return;
     }
     setConfirm("finalize");
+  };
+
+  // A brand-new draft that still shows the old settings picks up the edited
+  // ones; a stored draft keeps the From it was saved with.
+  const profileSaved = (next: InvoiceProfile): void => {
+    setForm((previous) =>
+      previous &&
+      previous.id === undefined &&
+      profile &&
+      sameFrom(previous, fromProfile(profile))
+        ? { ...previous, ...fromProfile(next) }
+        : previous,
+    );
+    setProfile(next);
   };
 
   if (form === null) {
@@ -435,27 +455,70 @@ export function InvoiceEditor({
 
         <EditorSection
           title="From"
-          summary={profile?.name || "Add your business details"}
+          defaultOpen={!form.fromName.trim() || !form.fromAddress.trim()}
+          summary={form.fromName || "Add your business details"}
         >
-          {profile?.name.trim() && profile.address.trim() ? (
-            <div className="space-y-0.5 text-fg">
-              <p className="font-semibold">{profile.name}</p>
-              <p className="whitespace-pre-line text-fg-soft">
-                {profile.address}
-              </p>
-            </div>
-          ) : (
-            <p className="text-fg-soft">
-              Your business name and address are required to finalize.
-            </p>
-          )}
-          <button
-            type="button"
-            className={BUTTON_SECONDARY}
-            onClick={() => setEditingProfile(true)}
-          >
-            Edit invoice settings
-          </button>
+          <Field label="Name" htmlFor="from-name">
+            <input
+              id="from-name"
+              className={FIELD}
+              value={form.fromName}
+              maxLength={120}
+              onChange={(event) => update({ fromName: event.target.value })}
+            />
+          </Field>
+          <Field label="Address" htmlFor="from-address">
+            <textarea
+              id="from-address"
+              className={TEXTAREA_FIELD}
+              rows={3}
+              value={form.fromAddress}
+              maxLength={500}
+              onChange={(event) => update({ fromAddress: event.target.value })}
+            />
+          </Field>
+          <Field label="Email" htmlFor="from-email">
+            <input
+              id="from-email"
+              type="email"
+              className={FIELD}
+              value={form.fromEmail}
+              maxLength={120}
+              onChange={(event) => update({ fromEmail: event.target.value })}
+            />
+          </Field>
+          <Field label="Phone" htmlFor="from-phone">
+            <input
+              id="from-phone"
+              type="tel"
+              className={FIELD}
+              value={form.fromPhone}
+              maxLength={120}
+              onChange={(event) => update({ fromPhone: event.target.value })}
+            />
+          </Field>
+          <p className="text-[11.5px] text-fg-faint">
+            Filled in from Invoice settings. Changes here apply to this invoice
+            only.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {profile && !sameFrom(form, fromProfile(profile)) && (
+              <button
+                type="button"
+                className={BUTTON_SECONDARY}
+                onClick={() => update(fromProfile(profile))}
+              >
+                Reset to settings
+              </button>
+            )}
+            <button
+              type="button"
+              className={BUTTON_SECONDARY}
+              onClick={() => setEditingProfile(true)}
+            >
+              Edit invoice settings
+            </button>
+          </div>
         </EditorSection>
 
         <EditorSection
@@ -610,7 +673,7 @@ export function InvoiceEditor({
         {draftId && (
           <button
             type="button"
-            className="text-[12px] text-danger underline"
+            className="rounded-md border border-danger/40 px-3 py-1 font-medium text-[12px] text-danger hover:bg-danger-soft disabled:opacity-40"
             disabled={busy}
             onClick={() => setConfirm("delete")}
           >
@@ -663,7 +726,7 @@ export function InvoiceEditor({
       {editingProfile && (
         <ProfileSheet
           onClose={() => setEditingProfile(false)}
-          onSaved={setProfile}
+          onSaved={profileSaved}
         />
       )}
       {confirm === "discard" && (

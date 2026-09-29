@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use money::{due_date, format_date, hours_hundredths, line_amount_cents, parse_date, terms_label};
 use pdf::{PaperInvoice, PaperLine};
-use profile::{Issuer, IssuerSnapshot, MAX_TERMS_DAYS};
+use profile::{IssuerSnapshot, MAX_TERMS_DAYS};
 
 const MAX_LINES: usize = 500;
 const MAX_DESCRIPTION: usize = 2000;
@@ -56,8 +56,6 @@ pub struct InvoiceSummary {
     pub client_name: String,
     /// `draft`, `open`, `paid` or `void`.
     pub status: String,
-    /// Recorded before real invoices: read-only, no number or PDF.
-    pub legacy: bool,
     pub currency: String,
     pub issue_date: Option<String>,
     pub due_date: Option<String>,
@@ -74,6 +72,12 @@ pub struct Invoice {
     pub summary: InvoiceSummary,
     pub bill_to_email: Option<String>,
     pub bill_to_address: Option<String>,
+    /// The From block: this invoice's own copy, defaulted from Invoice settings
+    /// when the draft is created and frozen at finalize.
+    pub from_name: String,
+    pub from_address: String,
+    pub from_email: Option<String>,
+    pub from_phone: Option<String>,
     pub terms_days: Option<i64>,
     pub subject: Option<String>,
     pub notes: Option<String>,
@@ -103,6 +107,10 @@ pub struct DraftInput {
     pub bill_to_name: String,
     pub bill_to_address: Option<String>,
     pub bill_to_email: Option<String>,
+    pub from_name: String,
+    pub from_address: String,
+    pub from_email: Option<String>,
+    pub from_phone: Option<String>,
     pub issue_date: String,
     pub terms_days: i64,
     pub subject: Option<String>,
@@ -128,7 +136,7 @@ pub struct BillableEntry {
     pub on_this_invoice: bool,
 }
 
-const SUMMARY_COLUMNS: &str = "id, number, client_id, client_name, status, legacy, currency,
+const SUMMARY_COLUMNS: &str = "id, number, client_id, client_name, status, currency,
     issue_date, due_date, total_cents, created_at, issued_at, paid_at";
 
 fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<InvoiceSummary> {
@@ -138,14 +146,13 @@ fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<InvoiceSummary>
         client_id: row.get(2)?,
         client_name: row.get(3)?,
         status: row.get(4)?,
-        legacy: row.get(5)?,
-        currency: row.get(6)?,
-        issue_date: row.get(7)?,
-        due_date: row.get(8)?,
-        total_cents: row.get(9)?,
-        created_at: row.get::<_, i64>(10)? as u64,
-        issued_at: row.get::<_, Option<i64>>(11)?.map(|v| v as u64),
-        paid_at: row.get::<_, Option<i64>>(12)?.map(|v| v as u64),
+        currency: row.get(5)?,
+        issue_date: row.get(6)?,
+        due_date: row.get(7)?,
+        total_cents: row.get(8)?,
+        created_at: row.get::<_, i64>(9)? as u64,
+        issued_at: row.get::<_, Option<i64>>(10)?.map(|v| v as u64),
+        paid_at: row.get::<_, Option<i64>>(11)?.map(|v| v as u64),
     })
 }
 
@@ -160,24 +167,29 @@ pub fn list(conn: &Connection) -> Result<Vec<InvoiceSummary>, String> {
 }
 
 pub fn get(conn: &Connection, id: &str) -> Result<Invoice, String> {
-    let (summary, email, address, terms, subject, notes, payment) = conn
+    let mut invoice = conn
         .query_row(
             &format!(
                 "SELECT {SUMMARY_COLUMNS}, client_email, client_address, terms_days, subject, notes,
-                        payment_instructions
+                        payment_instructions, from_name, from_address, from_email, from_phone
                  FROM invoices WHERE id = ?1"
             ),
             [id],
             |row| {
-                Ok((
-                    summary_from_row(row)?,
-                    row.get(13)?,
-                    row.get(14)?,
-                    row.get(15)?,
-                    row.get(16)?,
-                    row.get(17)?,
-                    row.get(18)?,
-                ))
+                Ok(Invoice {
+                    summary: summary_from_row(row)?,
+                    bill_to_email: row.get(12)?,
+                    bill_to_address: row.get(13)?,
+                    terms_days: row.get(14)?,
+                    subject: row.get(15)?,
+                    notes: row.get(16)?,
+                    payment_instructions: row.get(17)?,
+                    from_name: row.get(18)?,
+                    from_address: row.get(19)?,
+                    from_email: row.get(20)?,
+                    from_phone: row.get(21)?,
+                    lines: Vec::new(),
+                })
             },
         )
         .map_err(|_| "Invoice not found".to_string())?;
@@ -188,7 +200,7 @@ pub fn get(conn: &Connection, id: &str) -> Result<Invoice, String> {
              FROM invoice_lines WHERE invoice_id = ?1 ORDER BY position",
         )
         .map_err(err)?;
-    let lines = stmt
+    invoice.lines = stmt
         .query_map([id], |row| {
             Ok(InvoiceLine {
                 id: row.get(0)?,
@@ -207,16 +219,7 @@ pub fn get(conn: &Connection, id: &str) -> Result<Invoice, String> {
         .map_err(err)?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(err)?;
-    Ok(Invoice {
-        summary,
-        bill_to_email: email,
-        bill_to_address: address,
-        terms_days: terms,
-        subject,
-        notes,
-        payment_instructions: payment,
-        lines,
-    })
+    Ok(invoice)
 }
 
 /// Approved, billable, uninvoiced time for a client in `[start_ms, end_ms)`,
@@ -326,6 +329,16 @@ fn resolve(conn: &Connection, input: &DraftInput) -> Result<Invoice, String> {
         return Err("The bill-to address can have at most 8 lines".into());
     }
     let bill_to_email = text(&input.bill_to_email, 120, "The bill-to email")?;
+    let from_name = input.from_name.trim().to_owned();
+    if from_name.chars().count() > 120 {
+        return Err("The From name is too long".into());
+    }
+    let from_address = input.from_address.trim().to_owned();
+    if from_address.chars().count() > MAX_ADDRESS || from_address.lines().count() > 8 {
+        return Err("The From address can have at most 500 characters and 8 lines".into());
+    }
+    let from_email = text(&input.from_email, 120, "The From email")?;
+    let from_phone = text(&input.from_phone, 120, "The From phone")?;
     parse_date(&input.issue_date)?;
     if !(0..=MAX_TERMS_DAYS).contains(&input.terms_days) {
         return Err("Payment terms must be between 0 and 365 days".into());
@@ -367,7 +380,6 @@ fn resolve(conn: &Connection, input: &DraftInput) -> Result<Invoice, String> {
             client_id: input.client_id.clone(),
             client_name: bill_to_name,
             status: "draft".into(),
-            legacy: false,
             currency: "USD".into(),
             issue_date: Some(input.issue_date.clone()),
             due_date: Some(due),
@@ -378,6 +390,10 @@ fn resolve(conn: &Connection, input: &DraftInput) -> Result<Invoice, String> {
         },
         bill_to_email,
         bill_to_address,
+        from_name,
+        from_address,
+        from_email,
+        from_phone,
         terms_days: Some(input.terms_days),
         subject,
         notes,
@@ -515,7 +531,7 @@ pub fn save_draft(conn: &mut Connection, input: &DraftInput, now: u64) -> Result
     if let Some(id) = &input.id {
         let editable: bool = tx
             .query_row(
-                "SELECT status = 'draft' AND legacy = 0 FROM invoices WHERE id = ?1",
+                "SELECT status = 'draft' FROM invoices WHERE id = ?1",
                 [id],
                 |row| row.get(0),
             )
@@ -540,12 +556,16 @@ pub fn save_draft(conn: &mut Connection, input: &DraftInput, now: u64) -> Result
     let summary = &resolved.summary;
     tx.execute(
         "INSERT INTO invoices (id, client_id, client_name, client_email, client_address, currency,
-                               status, legacy, issue_date, due_date, terms_days, subject, notes,
-                               payment_instructions, total_cents, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'USD', 'draft', 0, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13)
+                               status, issue_date, due_date, terms_days, subject, notes,
+                               payment_instructions, total_cents, created_at, updated_at,
+                               from_name, from_address, from_email, from_phone)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'USD', 'draft', ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13,
+                 ?14, ?15, ?16, ?17)
          ON CONFLICT(id) DO UPDATE SET
            client_id = excluded.client_id, client_name = excluded.client_name,
            client_email = excluded.client_email, client_address = excluded.client_address,
+           from_name = excluded.from_name, from_address = excluded.from_address,
+           from_email = excluded.from_email, from_phone = excluded.from_phone,
            issue_date = excluded.issue_date, due_date = excluded.due_date,
            terms_days = excluded.terms_days, subject = excluded.subject, notes = excluded.notes,
            payment_instructions = excluded.payment_instructions,
@@ -564,6 +584,10 @@ pub fn save_draft(conn: &mut Connection, input: &DraftInput, now: u64) -> Result
             resolved.payment_instructions,
             summary.total_cents,
             now as i64,
+            resolved.from_name,
+            resolved.from_address,
+            resolved.from_email,
+            resolved.from_phone,
         ],
     )
     .map_err(err)?;
@@ -608,9 +632,12 @@ pub fn save_draft(conn: &mut Connection, input: &DraftInput, now: u64) -> Result
     get(conn, &id)
 }
 
+/// The invoice as it prints. Its From block is the invoice's own; only the
+/// logo comes from the shared profile. A draft with no From yet prints
+/// placeholders so the preview still renders.
 fn paper(
     invoice: &Invoice,
-    issuer: &Issuer,
+    logo: Option<Vec<u8>>,
     number: Option<String>,
 ) -> Result<PaperInvoice, String> {
     let issue = parse_date(
@@ -639,16 +666,24 @@ fn paper(
     if let Some(email) = &invoice.bill_to_email {
         bill_to_lines.push(email.clone());
     }
-    let mut issuer_lines: Vec<String> = issuer
-        .snapshot
-        .address
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .map(str::to_owned)
-        .collect();
-    issuer_lines.extend(issuer.snapshot.email.clone());
-    issuer_lines.extend(issuer.snapshot.phone.clone());
+    let issuer_name = if invoice.from_name.is_empty() {
+        "Your business name".to_owned()
+    } else {
+        invoice.from_name.clone()
+    };
+    let mut issuer_lines: Vec<String> = if invoice.from_address.is_empty() {
+        vec!["Add your address in the From section".to_owned()]
+    } else {
+        invoice
+            .from_address
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_owned)
+            .collect()
+    };
+    issuer_lines.extend(invoice.from_email.clone());
+    issuer_lines.extend(invoice.from_phone.clone());
     let lines = invoice
         .lines
         .iter()
@@ -674,9 +709,9 @@ fn paper(
         due_date: format_date(due),
         terms,
         subject: invoice.subject.clone(),
-        issuer_name: issuer.snapshot.name.clone(),
+        issuer_name,
         issuer_lines,
-        logo: issuer.logo.clone(),
+        logo,
         bill_to_name: invoice.summary.client_name.clone(),
         bill_to_lines,
         lines,
@@ -686,22 +721,10 @@ fn paper(
     })
 }
 
-fn placeholder_issuer(conn: &Connection) -> Result<Issuer, String> {
-    Ok(profile::issuer(conn)?.unwrap_or_else(|| Issuer {
-        snapshot: IssuerSnapshot {
-            name: "Your business name".into(),
-            address: "Add your address in Invoice settings".into(),
-            email: None,
-            phone: None,
-        },
-        logo: None,
-    }))
-}
-
 /// The DRAFT-watermarked PDF for an unsaved or saved draft.
 pub fn render_draft(conn: &Connection, input: &DraftInput) -> Result<Vec<u8>, String> {
     let invoice = resolve(conn, input)?;
-    pdf::render(&paper(&invoice, &placeholder_issuer(conn)?, None)?)
+    pdf::render(&paper(&invoice, profile::logo_bytes(conn)?, None)?)
 }
 
 /// Freezes a draft: allocates the next number for its issue year, renders the
@@ -709,7 +732,7 @@ pub fn render_draft(conn: &Connection, input: &DraftInput) -> Result<Vec<u8>, St
 pub fn finalize(conn: &mut Connection, id: &str, now: u64) -> Result<Invoice, String> {
     let tx = conn.transaction().map_err(err)?;
     let invoice = get(&tx, id)?;
-    if invoice.summary.status != "draft" || invoice.summary.legacy {
+    if invoice.summary.status != "draft" {
         return Err("Only drafts can be finalized".into());
     }
     if invoice.lines.is_empty() {
@@ -718,8 +741,11 @@ pub fn finalize(conn: &mut Connection, id: &str, now: u64) -> Result<Invoice, St
     if invoice.summary.total_cents <= 0 {
         return Err("The invoice total must be greater than $0.00".into());
     }
-    let issuer = profile::issuer(&tx)?
-        .ok_or("Add your business name and address in Invoice settings before finalizing")?;
+    if invoice.from_name.is_empty() || invoice.from_address.is_empty() {
+        return Err(
+            "Add your business name and address in the From section before finalizing".into(),
+        );
+    }
     let issue = parse_date(
         invoice
             .summary
@@ -728,8 +754,18 @@ pub fn finalize(conn: &mut Connection, id: &str, now: u64) -> Result<Invoice, St
             .ok_or("Set an issue date")?,
     )?;
     let number = allocate_number(&tx, issue.year())?;
-    let bytes = pdf::render(&paper(&invoice, &issuer, Some(number.clone()))?)?;
-    let snapshot = serde_json::to_string(&issuer.snapshot).map_err(err)?;
+    let bytes = pdf::render(&paper(
+        &invoice,
+        profile::logo_bytes(&tx)?,
+        Some(number.clone()),
+    )?)?;
+    let snapshot = serde_json::to_string(&IssuerSnapshot {
+        name: invoice.from_name.clone(),
+        address: invoice.from_address.clone(),
+        email: invoice.from_email.clone(),
+        phone: invoice.from_phone.clone(),
+    })
+    .map_err(err)?;
     tx.execute(
         "UPDATE invoices SET status = 'open', number = ?1, issuer_json = ?2, pdf = ?3,
                 issued_at = ?4, updated_at = ?4
@@ -772,7 +808,7 @@ pub fn stored_pdf(conn: &Connection, id: &str) -> Result<Vec<u8>, String> {
         row.get::<_, Option<Vec<u8>>>(0)
     })
     .map_err(|_| "Invoice not found".to_string())?
-    .ok_or_else(|| "This invoice has no PDF (it was recorded before invoice documents)".into())
+    .ok_or_else(|| "This invoice has not been finalized, so it has no PDF".into())
 }
 
 /// Suggested file name, e.g. `INV-2026-0001-Acme-Corp.pdf` or `Draft-Acme-Corp.pdf`.

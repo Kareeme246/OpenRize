@@ -50,18 +50,13 @@ pub struct ProfileInput {
     pub next_number: Option<i64>,
 }
 
-/// What Finalize snapshots of the issuer.
+/// What Finalize records of the From block an invoice was issued under.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IssuerSnapshot {
     pub name: String,
     pub address: String,
     pub email: Option<String>,
     pub phone: Option<String>,
-}
-
-pub struct Issuer {
-    pub snapshot: IssuerSnapshot,
-    pub logo: Option<Vec<u8>>,
 }
 
 fn err(error: impl std::fmt::Display) -> String {
@@ -192,33 +187,6 @@ fn set_next_number(conn: &Connection, year: i32, next: i64) -> Result<(), String
     )
     .map_err(err)?;
     Ok(())
-}
-
-/// The profile as a renderer needs it; `None` while it is too incomplete to
-/// put on an invoice.
-pub fn issuer(conn: &Connection) -> Result<Option<Issuer>, String> {
-    let row = conn
-        .query_row(
-            "SELECT name, address, email, phone, logo FROM invoice_profile WHERE id = 1",
-            [],
-            |row| {
-                Ok((
-                    IssuerSnapshot {
-                        name: row.get(0)?,
-                        address: row.get(1)?,
-                        email: row.get(2)?,
-                        phone: row.get(3)?,
-                    },
-                    row.get::<_, Option<Vec<u8>>>(4)?,
-                ))
-            },
-        )
-        .map_err(err)?;
-    let (snapshot, logo) = row;
-    if snapshot.name.is_empty() || snapshot.address.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(Issuer { snapshot, logo }))
 }
 
 pub fn logo_bytes(conn: &Connection) -> Result<Option<Vec<u8>>, String> {

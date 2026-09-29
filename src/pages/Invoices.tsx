@@ -48,9 +48,7 @@ export function Invoices({ route, navigate, replace }: InvoicesProps) {
   const summary = route.invoiceId
     ? invoices.find((invoice) => invoice.id === route.invoiceId)
     : undefined;
-  const editing =
-    route.compose !== undefined ||
-    (summary?.status === "draft" && !summary.legacy);
+  const editing = route.compose !== undefined || summary?.status === "draft";
 
   let body = null;
   if (editing) {
@@ -109,6 +107,14 @@ export function Invoices({ route, navigate, replace }: InvoicesProps) {
           invoices={invoices}
           loading={loading}
           onOpen={(id) => navigate({ name: "invoices", invoiceId: id })}
+          onDeleteDraft={async (id) => {
+            try {
+              await api.deleteDraftInvoice(id);
+              await refresh();
+            } catch (cause) {
+              setError(api.describeError(cause));
+            }
+          }}
           onCreate={() => navigate({ name: "invoices", compose: {} })}
           onSettings={() => setSettings(true)}
         />

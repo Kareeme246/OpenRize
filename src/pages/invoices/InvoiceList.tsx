@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { type MouseEvent, useMemo, useRef, useState } from "react";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import {
   BUTTON_PRIMARY,
   BUTTON_SECONDARY,
@@ -21,17 +22,16 @@ interface InvoiceListProps {
   invoices: InvoiceSummary[];
   loading: boolean;
   onOpen: (id: string) => void;
+  /** Deletes a draft and releases its time; the list refreshes afterwards. */
+  onDeleteDraft: (id: string) => Promise<void>;
   onCreate: () => void;
   onSettings: () => void;
 }
 
-/** Sums the totals of invoices in `status`, USD only (legacy non-USD excluded). */
+/** Sums the totals of invoices in `status`. */
 function sum(list: InvoiceSummary[], wanted: DisplayStatus): number {
   return list
-    .filter(
-      (invoice) =>
-        invoice.currency === "USD" && displayStatus(invoice) === wanted,
-    )
+    .filter((invoice) => displayStatus(invoice) === wanted)
     .reduce((total, invoice) => total + invoice.totalCents, 0);
 }
 
@@ -39,11 +39,27 @@ export function InvoiceList({
   invoices,
   loading,
   onOpen,
+  onDeleteDraft,
   onCreate,
   onSettings,
 }: InvoiceListProps) {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
+  const [deleting, setDeleting] = useState<InvoiceSummary | null>(null);
+  const pressed = useRef<{ x: number; y: number } | null>(null);
+
+  // A drag that ends on the row (selecting text, say) is not a click on it.
+  const remember = (event: MouseEvent): void => {
+    pressed.current = { x: event.clientX, y: event.clientY };
+  };
+  const dragged = (event: MouseEvent): boolean => {
+    const start = pressed.current;
+    pressed.current = null;
+    return (
+      start !== null &&
+      Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4
+    );
+  };
 
   const shown = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -140,19 +156,25 @@ export function InvoiceList({
                 <th scope="col" className="px-4 py-2 font-medium">
                   Status
                 </th>
+                <th scope="col" className="px-4 py-2">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>
               {shown.map((invoice) => (
+                // The whole row opens the invoice. Keyboard users get the same
+                // through the button in the first cell; its click bubbles here.
                 <tr
                   key={invoice.id}
-                  className="border-line/60 border-b last:border-b-0 hover:bg-surface"
+                  className="cursor-pointer select-none border-line/60 border-b last:border-b-0 hover:bg-surface"
+                  onMouseDown={remember}
+                  onClick={(event) => !dragged(event) && onOpen(invoice.id)}
                 >
                   <td className="px-4 py-2.5">
                     <button
                       type="button"
                       className="font-semibold text-fg-strong hover:underline"
-                      onClick={() => onOpen(invoice.id)}
                     >
                       {invoice.number ?? "Draft"}
                     </button>
@@ -172,15 +194,24 @@ export function InvoiceList({
                     {formatDate(invoice.dueDate)}
                   </td>
                   <td className="px-4 py-2.5 text-right font-medium text-fg tabular-nums">
-                    {invoice.currency === "USD"
-                      ? formatUsd(invoice.totalCents)
-                      : `${(invoice.totalCents / 100).toFixed(2)} ${invoice.currency}`}
+                    {formatUsd(invoice.totalCents)}
                   </td>
                   <td className="px-4 py-2.5">
-                    <StatusPill
-                      status={displayStatus(invoice)}
-                      legacy={invoice.legacy}
-                    />
+                    <StatusPill status={displayStatus(invoice)} />
+                  </td>
+                  <td className="px-4 py-2.5 text-right">
+                    {invoice.status === "draft" && (
+                      <button
+                        type="button"
+                        className="rounded px-1.5 py-0.5 text-danger hover:bg-danger-soft"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setDeleting(invoice);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -188,6 +219,19 @@ export function InvoiceList({
           </table>
         )}
       </div>
+      {deleting && (
+        <ConfirmDialog
+          title="Delete this draft?"
+          body="The draft is removed and its tracked time is released so it can be invoiced again."
+          confirmLabel="Delete draft"
+          onConfirm={() => {
+            const target = deleting;
+            setDeleting(null);
+            void onDeleteDraft(target.id);
+          }}
+          onCancel={() => setDeleting(null)}
+        />
+      )}
     </div>
   );
 }

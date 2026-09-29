@@ -8,28 +8,12 @@ const TONE: Record<DisplayStatus, string> = {
   void: "border-line bg-surface text-fg-faint line-through",
 };
 
-export function StatusPill({
-  status,
-  legacy = false,
-}: {
-  status: DisplayStatus;
-  legacy?: boolean;
-}) {
+export function StatusPill({ status }: { status: DisplayStatus }) {
   return (
-    <span className="inline-flex items-center gap-1.5">
-      <span
-        className={`rounded-full border px-2 py-0.5 font-medium text-[10.5px] ${TONE[status]}`}
-      >
-        {STATUS_LABEL[status]}
-      </span>
-      {legacy && (
-        <span
-          className="rounded-full border border-line px-2 py-0.5 text-[10px] text-fg-faint"
-          title="Recorded before invoice documents: no number or PDF"
-        >
-          Legacy
-        </span>
-      )}
+    <span
+      className={`inline-block rounded-full border px-2 py-0.5 font-medium text-[10.5px] ${TONE[status]}`}
+    >
+      {STATUS_LABEL[status]}
     </span>
   );
 }

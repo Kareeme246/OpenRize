@@ -12,7 +12,6 @@ import * as api from "../../lib/api";
 import {
   displayStatus,
   formatDate,
-  formatQuantity,
   formatUsd,
   termsLabel,
 } from "../../lib/invoices";
@@ -28,8 +27,7 @@ interface InvoiceViewProps {
 
 /**
  * A finalized invoice: the archived PDF exactly as issued, its facts, and the
- * only things that can still happen to it (export, mark paid, void). Invoices
- * recorded before invoice documents show their lines read-only instead.
+ * only things that can still happen to it (export, mark paid, void).
  */
 export function InvoiceView({
   invoiceId,
@@ -49,7 +47,7 @@ export function InvoiceView({
     try {
       const loaded = await api.getInvoice(invoiceId);
       setInvoice(loaded);
-      setPdf(loaded.legacy ? null : await api.getInvoicePdf(invoiceId));
+      setPdf(await api.getInvoicePdf(invoiceId));
       setError(null);
     } catch (cause) {
       setError(api.describeError(cause));
@@ -100,11 +98,6 @@ export function InvoiceView({
   }
 
   const shown = displayStatus(invoice);
-  const isUsd = invoice.currency === "USD";
-  const money = (cents: number): string =>
-    isUsd
-      ? formatUsd(cents)
-      : `${(cents / 100).toFixed(2)} ${invoice.currency}`;
 
   const facts: [string, string][] = [
     ["Bill to", invoice.clientName],
@@ -145,7 +138,7 @@ export function InvoiceView({
         <h2 className="font-semibold text-[13px] text-fg-strong">
           {invoice.number ?? "Invoice"}
         </h2>
-        <StatusPill status={shown} legacy={invoice.legacy} />
+        <StatusPill status={shown} />
       </div>
       <div className="grid min-h-0 flex-1 grid-cols-[300px_1fr] max-[900px]:grid-cols-1">
         <aside className="min-h-0 space-y-4 overflow-y-auto border-line border-r p-4 text-[12px]">
@@ -175,7 +168,7 @@ export function InvoiceView({
           <div>
             <p className="text-fg-soft">Amount due</p>
             <p className="font-semibold text-[24px] text-fg-strong tabular-nums">
-              {money(invoice.totalCents)}
+              {formatUsd(invoice.totalCents)}
             </p>
           </div>
           <dl className="space-y-2">
@@ -187,16 +180,14 @@ export function InvoiceView({
             ))}
           </dl>
           <div className="flex flex-wrap gap-2">
-            {!invoice.legacy && (
-              <button
-                type="button"
-                className={BUTTON_PRIMARY}
-                disabled={busy}
-                onClick={() => void exportPdf()}
-              >
-                Export PDF
-              </button>
-            )}
+            <button
+              type="button"
+              className={BUTTON_PRIMARY}
+              disabled={busy}
+              onClick={() => void exportPdf()}
+            >
+              Export PDF
+            </button>
             {invoice.status === "open" && (
               <button
                 type="button"
@@ -238,15 +229,11 @@ export function InvoiceView({
           </p>
         </aside>
         <div className="min-h-0">
-          {invoice.legacy ? (
-            <LegacyLines invoice={invoice} money={money} />
-          ) : (
-            <PdfViewer
-              bytes={pdf}
-              label={`Invoice ${invoice.number ?? ""}`}
-              placeholder="Loading invoice..."
-            />
-          )}
+          <PdfViewer
+            bytes={pdf}
+            label={`Invoice ${invoice.number ?? ""}`}
+            placeholder="Loading invoice..."
+          />
         </div>
       </div>
       {confirmVoid && (
@@ -261,62 +248,6 @@ export function InvoiceView({
           onCancel={() => setConfirmVoid(false)}
         />
       )}
-    </div>
-  );
-}
-
-/** Invoices from before invoice documents: their recorded lines, unchanged. */
-function LegacyLines({
-  invoice,
-  money,
-}: {
-  invoice: Invoice;
-  money: (cents: number) => string;
-}) {
-  return (
-    <div className="h-full overflow-auto p-5">
-      <p className="mb-4 rounded-lg border border-line bg-panel px-3 py-2 text-[11.5px] text-fg-soft">
-        This invoice was recorded before OpenRize produced invoice documents, so
-        it has no number or PDF. Its lines are shown as they were saved.
-      </p>
-      <table className="w-full text-left text-[12px] tabular-nums">
-        <thead>
-          <tr className="border-line border-b text-fg-soft">
-            <th scope="col" className="py-2 font-medium">
-              Project / work
-            </th>
-            <th scope="col" className="py-2 text-right font-medium">
-              Hours
-            </th>
-            <th scope="col" className="py-2 text-right font-medium">
-              Amount
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {invoice.lines.map((line) => (
-            <tr key={line.id} className="border-line/60 border-b">
-              <td className="py-2 pr-2">
-                <span className="font-medium">{line.projectName}</span>
-                <br />
-                <span className="text-fg-soft">{line.description}</span>
-              </td>
-              <td className="py-2 text-right">
-                {formatQuantity(line.quantityHundredths)}
-              </td>
-              <td className="py-2 text-right">{money(line.amountCents)}</td>
-            </tr>
-          ))}
-        </tbody>
-        <tfoot>
-          <tr className="font-semibold text-fg-strong">
-            <th scope="row" colSpan={2} className="pt-3 text-right">
-              Total
-            </th>
-            <td className="pt-3 text-right">{money(invoice.totalCents)}</td>
-          </tr>
-        </tfoot>
-      </table>
     </div>
   );
 }

@@ -138,8 +138,6 @@ export interface InvoiceSummary {
   /** The name printed under Bill To. */
   clientName: string;
   status: InvoiceStatus;
-  /** Recorded before invoice documents: read-only, no number or PDF. */
-  legacy: boolean;
   currency: string;
   /** `YYYY-MM-DD`. */
   issueDate?: string | null;
@@ -153,6 +151,11 @@ export interface InvoiceSummary {
 export interface Invoice extends InvoiceSummary {
   billToEmail?: string | null;
   billToAddress?: string | null;
+  /** This invoice's own From block (see InvoiceDraftInput). */
+  fromName: string;
+  fromAddress: string;
+  fromEmail?: string | null;
+  fromPhone?: string | null;
   termsDays?: number | null;
   subject?: string | null;
   notes?: string | null;
@@ -176,6 +179,14 @@ export interface InvoiceDraftInput {
   billToName: string;
   billToAddress?: string;
   billToEmail?: string;
+  /**
+   * The From block: defaulted from Invoice settings when the draft is created,
+   * then this invoice's own. Name and address are required to finalize.
+   */
+  fromName: string;
+  fromAddress: string;
+  fromEmail?: string;
+  fromPhone?: string;
   issueDate: string;
   termsDays: number;
   subject?: string;

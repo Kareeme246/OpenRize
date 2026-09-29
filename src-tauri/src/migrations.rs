@@ -334,6 +334,13 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
     }
 
+    if current_version < 6 {
+        let tx = conn.transaction()?;
+        tx.execute_batch(INVOICE_FROM_V6)?;
+        tx.execute("PRAGMA user_version = 6;", [])?;
+        tx.commit()?;
+    }
+
     Ok(())
 }
 
@@ -341,11 +348,10 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
 /// status CHECK and the one-row-per-entry primary key cannot be altered in
 /// place) and adds the issuer profile and per-year number sequences.
 ///
-/// Existing invoices are preserved, not reinterpreted. A USD draft becomes an
-/// editable draft (issue date from its creation day, Net 30); everything else
-/// is marked `legacy`: read-only history with no number or PDF. `sent` maps to
-/// `open`. Stored `amount_cents` are kept for legacy rows; rates become cents
-/// and hours become hundredths for display only.
+/// A USD draft becomes an editable draft (issue date from its creation day,
+/// Net 30); everything else is marked `legacy` here and deleted by v6, which
+/// also covers databases that already ran this migration. `sent` maps to
+/// `open`. Rates become cents and hours become hundredths.
 const INVOICE_DOCUMENTS_V5: &str = "
 ALTER TABLE invoices RENAME TO invoices_v4;
 
@@ -455,6 +461,40 @@ DROP TABLE invoices_v4;
 ALTER TABLE invoice_lines_v5 RENAME TO invoice_lines;
 CREATE INDEX idx_invoice_lines_invoice ON invoice_lines(invoice_id, position);
 CREATE INDEX idx_invoices_status ON invoices(status);
+";
+
+/// Drops the `legacy` concept and gives every invoice its own From block.
+///
+/// v5 preserved pre-document invoices as read-only `legacy` rows; they are not
+/// supported, so they (and their lines) are deleted here, on fresh installs and
+/// on databases already upgraded through v5 alike. Time they reserved is
+/// released so no `invoice_id` dangles. The From columns are backfilled from
+/// each finalized invoice's issuer snapshot, and drafts start from the current
+/// Invoice settings.
+const INVOICE_FROM_V6: &str = "
+UPDATE time_entries SET invoice_id = NULL
+WHERE invoice_id IN (SELECT id FROM invoices WHERE legacy = 1);
+DELETE FROM invoice_lines WHERE invoice_id IN (SELECT id FROM invoices WHERE legacy = 1);
+DELETE FROM invoices WHERE legacy = 1;
+ALTER TABLE invoices DROP COLUMN legacy;
+
+ALTER TABLE invoices ADD COLUMN from_name    TEXT NOT NULL DEFAULT '';
+ALTER TABLE invoices ADD COLUMN from_address TEXT NOT NULL DEFAULT '';
+ALTER TABLE invoices ADD COLUMN from_email   TEXT;
+ALTER TABLE invoices ADD COLUMN from_phone   TEXT;
+
+UPDATE invoices SET
+  from_name    = COALESCE(json_extract(issuer_json, '$.name'), ''),
+  from_address = COALESCE(json_extract(issuer_json, '$.address'), ''),
+  from_email   = json_extract(issuer_json, '$.email'),
+  from_phone   = json_extract(issuer_json, '$.phone')
+WHERE issuer_json IS NOT NULL;
+UPDATE invoices SET
+  from_name    = (SELECT name FROM invoice_profile WHERE id = 1),
+  from_address = (SELECT address FROM invoice_profile WHERE id = 1),
+  from_email   = (SELECT email FROM invoice_profile WHERE id = 1),
+  from_phone   = (SELECT phone FROM invoice_profile WHERE id = 1)
+WHERE issuer_json IS NULL;
 ";
 
 fn seed_default_categories(tx: &rusqlite::Transaction<'_>) -> Result<()> {
@@ -616,7 +656,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 5);
+        assert_eq!(v, 6);
 
         let cat_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM categories;", [], |r| r.get(0))
@@ -651,10 +691,11 @@ mod tests {
 
     /// The v2 invoice tables as shipped, with one row of every kind.
     #[test]
-    fn v5_keeps_legacy_invoices_and_upgrades_usd_drafts() {
+    fn v5_upgrades_usd_drafts_and_v6_deletes_the_rest() {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
-            "CREATE TABLE invoices (
+            "CREATE TABLE time_entries (id TEXT PRIMARY KEY, invoice_id TEXT);
+             CREATE TABLE invoices (
                id TEXT PRIMARY KEY, client_id TEXT NOT NULL, client_name TEXT NOT NULL,
                client_email TEXT, client_address TEXT, currency TEXT NOT NULL,
                status TEXT NOT NULL CHECK (status IN ('draft', 'sent', 'paid')),
@@ -669,46 +710,72 @@ mod tests {
              INSERT INTO invoices VALUES ('paid', 'c', 'Acme', NULL, NULL, 'USD', 'paid', 86400000, 86400000);
              INSERT INTO invoice_lines VALUES ('e1', 'draft-usd', 'P', 'Work', 0, 1000000, 100.0, 2778);
              INSERT INTO invoice_lines VALUES ('e2', 'sent', 'P', 'Work', 0, 3600000, 100.5, 10050);
+             INSERT INTO time_entries VALUES ('e1', 'draft-usd');
+             INSERT INTO time_entries VALUES ('e2', 'sent');
              PRAGMA user_version = 4;",
         )
         .unwrap();
         run_migrations(&mut conn).unwrap();
 
-        let row = |id: &str| -> (String, i64, Option<String>, i64) {
-            conn.query_row(
-                "SELECT status, legacy, number, total_cents FROM invoices WHERE id = ?1",
-                [id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-            )
+        // Only the USD draft survives; it stays editable and its amount now
+        // satisfies quantity x rate: 0.28 h (16m40s) x $100.00 = $28.00
+        // rather than the old exact $27.78.
+        let ids: Vec<String> = conn
+            .prepare("SELECT id FROM invoices ORDER BY id")
             .unwrap()
-        };
-        // A USD draft stays editable; its amount now satisfies quantity x rate:
-        // 0.28 h (16m40s) x $100.00 = $28.00 rather than the old exact $27.78.
-        assert_eq!(row("draft-usd"), ("draft".into(), 0, None, 2800));
-        let (issue, due, terms): (String, String, i64) = conn
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(ids, ["draft-usd"]);
+        let (status, number, total, issue, due, terms): (
+            String,
+            Option<String>,
+            i64,
+            String,
+            String,
+            i64,
+        ) = conn
             .query_row(
-                "SELECT issue_date, due_date, terms_days FROM invoices WHERE id = 'draft-usd'",
+                "SELECT status, number, total_cents, issue_date, due_date, terms_days
+                 FROM invoices WHERE id = 'draft-usd'",
                 [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                    ))
+                },
             )
             .unwrap();
+        assert_eq!((status.as_str(), number, total), ("draft", None, 2800));
         assert_eq!(terms, 30);
         assert!(issue < due);
-        // Everything else is preserved untouched as read-only history.
-        assert_eq!(row("draft-eur"), ("draft".into(), 1, None, 0));
-        assert_eq!(row("sent"), ("open".into(), 1, None, 10050));
-        assert_eq!(row("paid"), ("paid".into(), 1, None, 0));
         let (qty, rate, amount, kind): (i64, i64, i64, String) = conn
             .query_row(
-                "SELECT quantity_hundredths, rate_cents, amount_cents, kind FROM invoice_lines WHERE entry_id = 'e2'",
+                "SELECT quantity_hundredths, rate_cents, amount_cents, kind FROM invoice_lines WHERE entry_id = 'e1'",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .unwrap();
         assert_eq!(
             (qty, rate, amount, kind.as_str()),
-            (100, 10_050, 10_050, "time")
+            (28, 10_000, 2_800, "time")
         );
+        let reserved = |entry: &str| -> Option<String> {
+            conn.query_row(
+                "SELECT invoice_id FROM time_entries WHERE id = ?1",
+                [entry],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(reserved("e1").as_deref(), Some("draft-usd"));
+        assert_eq!(reserved("e2"), None);
         let profile_rows: i64 = conn
             .query_row("SELECT COUNT(*) FROM invoice_profile", [], |r| r.get(0))
             .unwrap();
@@ -716,7 +783,121 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 5);
+        assert_eq!(v, 6);
+    }
+
+    /// A database the v5 migration already ran on (with `legacy` rows kept) loses
+    /// them on the next launch; drafts and finalized invoices keep their From.
+    #[test]
+    fn v6_deletes_legacy_invoices_from_an_already_upgraded_database() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE time_entries (id TEXT PRIMARY KEY, invoice_id TEXT);
+             CREATE TABLE invoices (
+               id TEXT PRIMARY KEY, client_id TEXT NOT NULL, client_name TEXT NOT NULL,
+               client_email TEXT, client_address TEXT, currency TEXT NOT NULL,
+               status TEXT NOT NULL CHECK (status IN ('draft', 'sent', 'paid')),
+               created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+             CREATE TABLE invoice_lines (
+               entry_id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL REFERENCES invoices(id),
+               project_name TEXT NOT NULL, description TEXT NOT NULL, started_at INTEGER NOT NULL,
+               ended_at INTEGER NOT NULL, rate REAL NOT NULL, amount_cents INTEGER NOT NULL);",
+        )
+        .unwrap();
+        conn.execute_batch(INVOICE_DOCUMENTS_V5).unwrap();
+        conn.execute_batch(
+            "UPDATE invoice_profile SET name = 'Offline Studios', address = '1 Main St.',
+                                        email = 'hi@offline.test' WHERE id = 1;
+             INSERT INTO invoices (id, client_id, client_name, currency, status, legacy, created_at, updated_at)
+               VALUES ('old-sent', 'c', 'Acme', 'USD', 'open', 1, 1, 1);
+             INSERT INTO invoices (id, client_id, client_name, currency, status, legacy, created_at, updated_at)
+               VALUES ('old-eur', 'c', 'Acme', 'EUR', 'draft', 1, 1, 1);
+             INSERT INTO invoices (id, client_id, client_name, currency, status, legacy, issue_date, due_date,
+                                   terms_days, created_at, updated_at)
+               VALUES ('draft', 'c', 'Acme', 'USD', 'draft', 0, '2026-09-29', '2026-10-29', 30, 1, 1);
+             INSERT INTO invoices (id, client_id, client_name, currency, status, legacy, number, issuer_json,
+                                   issue_date, due_date, terms_days, created_at, updated_at)
+               VALUES ('issued', 'c', 'Acme', 'USD', 'open', 0, 'INV-2026-0001',
+                       '{\"name\":\"Old Name\",\"address\":\"9 Elm St.\",\"email\":null,\"phone\":\"555\"}',
+                       '2026-09-01', '2026-10-01', 30, 1, 1);
+             INSERT INTO invoice_lines (id, invoice_id, position, kind, entry_id, description, quantity_hundredths, rate_cents, amount_cents)
+               VALUES ('l1', 'old-sent', 0, 'time', 'e-old', 'Work', 100, 10000, 10000);
+             INSERT INTO invoice_lines (id, invoice_id, position, kind, entry_id, description, quantity_hundredths, rate_cents, amount_cents)
+               VALUES ('l2', 'draft', 0, 'time', 'e-draft', 'Work', 100, 10000, 10000);
+             INSERT INTO time_entries VALUES ('e-old', 'old-sent');
+             INSERT INTO time_entries VALUES ('e-draft', 'draft');
+             PRAGMA user_version = 5;",
+        )
+        .unwrap();
+        run_migrations(&mut conn).unwrap();
+
+        let ids: Vec<String> = conn
+            .prepare("SELECT id FROM invoices ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(ids, ["draft", "issued"]);
+        let lines: Vec<String> = conn
+            .prepare("SELECT id FROM invoice_lines ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(lines, ["l2"]);
+        let reserved = |entry: &str| -> Option<String> {
+            conn.query_row(
+                "SELECT invoice_id FROM time_entries WHERE id = ?1",
+                [entry],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(reserved("e-old"), None);
+        assert_eq!(reserved("e-draft").as_deref(), Some("draft"));
+        let has_legacy_column: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('invoices') WHERE name = 'legacy'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_legacy_column, 0);
+
+        let from = |id: &str| -> (String, String, Option<String>, Option<String>) {
+            conn.query_row(
+                "SELECT from_name, from_address, from_email, from_phone FROM invoices WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap()
+        };
+        // A draft starts from the current settings; a finalized invoice keeps
+        // the issuer it was issued under.
+        assert_eq!(
+            from("draft"),
+            (
+                "Offline Studios".into(),
+                "1 Main St.".into(),
+                Some("hi@offline.test".into()),
+                None
+            )
+        );
+        assert_eq!(
+            from("issued"),
+            (
+                "Old Name".into(),
+                "9 Elm St.".into(),
+                None,
+                Some("555".into())
+            )
+        );
+        let v: i32 = conn
+            .query_row("PRAGMA user_version;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 6);
     }
 
     #[test]

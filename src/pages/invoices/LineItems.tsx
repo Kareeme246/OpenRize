@@ -174,14 +174,16 @@ function LineRow({
           ✕
         </button>
       </div>
-      <div className="mt-1.5 flex items-center justify-end gap-1.5 text-fg-soft tabular-nums">
+      {/* The inputs share whatever width the card has (the editor column can be
+          narrow); only the amount and the operators keep a fixed size. */}
+      <div className="mt-1.5 flex items-center gap-1.5 text-fg-soft tabular-nums">
         {tracked ? (
           <span className="shrink-0 text-fg">
             {formatQuantity(line.trackedHundredths ?? 0)} h
           </span>
         ) : (
           <>
-            <div className="w-16 shrink-0">
+            <div className="min-w-0 flex-[3]">
               <input
                 aria-label={`${label} quantity`}
                 inputMode="decimal"
@@ -190,7 +192,7 @@ function LineRow({
                 onChange={(event) => onChange({ quantity: event.target.value })}
               />
             </div>
-            <div className="w-14 shrink-0">
+            <div className="min-w-0 flex-[4]">
               <input
                 aria-label={`${label} unit`}
                 className={FIELD}
@@ -202,8 +204,10 @@ function LineRow({
             </div>
           </>
         )}
-        <span aria-hidden="true">×</span>
-        <div className="relative w-24 shrink-0">
+        <span aria-hidden="true" className="shrink-0">
+          ×
+        </span>
+        <div className="relative min-w-0 flex-[5]">
           <span
             aria-hidden="true"
             className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-fg-faint"
@@ -219,8 +223,10 @@ function LineRow({
             onChange={(event) => onChange({ rate: event.target.value })}
           />
         </div>
-        <span aria-hidden="true">=</span>
-        <span className="w-24 shrink-0 text-right font-semibold text-fg-strong">
+        <span aria-hidden="true" className="shrink-0">
+          =
+        </span>
+        <span className="min-w-[4.5rem] shrink-0 text-right font-semibold text-fg-strong">
           {amount === undefined ? "-" : formatUsd(amount)}
         </span>
       </div>

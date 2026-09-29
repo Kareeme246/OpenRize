@@ -50,15 +50,6 @@ fn entry(
     .unwrap();
 }
 
-fn complete_profile(conn: &Connection) {
-    conn.execute(
-        "UPDATE invoice_profile SET name = 'Offline Studios', address = '1 Main St.\nPortland, OR 97201',
-                email = 'hi@offline.test' WHERE id = 1",
-        [],
-    )
-    .unwrap();
-}
-
 fn time(entry: &str) -> LineInput {
     LineInput {
         kind: "time".into(),
@@ -88,6 +79,10 @@ fn draft(id: Option<&str>, lines: Vec<LineInput>) -> DraftInput {
         bill_to_name: "Acme Corp".into(),
         bill_to_address: Some("123 Main St.".into()),
         bill_to_email: None,
+        from_name: "Offline Studios".into(),
+        from_address: "1 Main St.\nPortland, OR 97201".into(),
+        from_email: Some("hi@offline.test".into()),
+        from_phone: None,
         issue_date: "2026-09-29".into(),
         terms_days: 30,
         subject: Some("Software".into()),
@@ -227,6 +222,9 @@ fn validation_rejects_bad_drafts() {
     assert!(bad(&|d| d.lines[0].kind = "tax".into()));
     assert!(bad(&|d| d.lines[0].unit = Some("x".repeat(17))));
     assert!(bad(&|d| d.subject = Some("x".repeat(201))));
+    assert!(bad(&|d| d.from_name = "x".repeat(121)));
+    assert!(bad(&|d| d.from_address = "x\n".repeat(9)));
+    assert!(bad(&|d| d.from_email = Some("x".repeat(121))));
     // Time from another client's project, unapproved or unbillable time.
     entry(
         &conn,
@@ -249,7 +247,6 @@ fn validation_rejects_bad_drafts() {
     // Editing a finalized invoice is refused.
     conn.execute("UPDATE clients SET default_rate = 100 WHERE id = 'c'", [])
         .unwrap();
-    complete_profile(&conn);
     let saved = save_draft(&mut conn, &draft(None, vec![retainer(1000)]), 1).unwrap();
     finalize(&mut conn, &saved.summary.id, 2).unwrap();
     assert!(save_draft(
@@ -263,7 +260,6 @@ fn validation_rejects_bad_drafts() {
 #[test]
 fn finalize_numbers_invoices_by_year_and_archives_the_pdf() {
     let mut conn = db();
-    complete_profile(&conn);
     let first = save_draft(&mut conn, &draft(None, vec![time("e1")]), 1).unwrap();
     let done = finalize(&mut conn, &first.summary.id, 10).unwrap();
     assert_eq!(done.summary.number.as_deref(), Some("INV-2026-0001"));
@@ -305,15 +301,16 @@ fn finalize_numbers_invoices_by_year_and_archives_the_pdf() {
 #[test]
 fn finalize_failure_consumes_no_number_and_leaves_the_draft_intact() {
     let mut conn = db();
-    let saved = save_draft(&mut conn, &draft(None, vec![time("e1")]), 1).unwrap();
+    let mut blank_from = draft(None, vec![time("e1")]);
+    blank_from.from_name = String::new();
+    let saved = save_draft(&mut conn, &blank_from, 1).unwrap();
     let error = finalize(&mut conn, &saved.summary.id, 2).unwrap_err();
-    assert!(error.contains("Invoice settings"), "{error}");
+    assert!(error.contains("From section"), "{error}");
     assert_eq!(
         get(&conn, &saved.summary.id).unwrap().summary.status,
         "draft"
     );
     assert_eq!(profile::next_number_for(&conn, 2026).unwrap(), 1);
-    complete_profile(&conn);
     let zero = save_draft(
         &mut conn,
         &draft(Some(&saved.summary.id), vec![retainer(0)]),
@@ -341,7 +338,6 @@ fn finalize_failure_consumes_no_number_and_leaves_the_draft_intact() {
 #[test]
 fn paid_and_void_transitions_release_time_only_on_void() {
     let mut conn = db();
-    complete_profile(&conn);
     let saved = save_draft(&mut conn, &draft(None, vec![time("e1")]), 1).unwrap();
     let id = saved.summary.id.clone();
     assert!(set_paid(&conn, &id, true, 2).is_err()); // still a draft
@@ -368,10 +364,89 @@ fn paid_and_void_transitions_release_time_only_on_void() {
     );
 }
 
+fn set_profile(conn: &mut Connection, name: &str, address: &str) {
+    profile::update(
+        conn,
+        profile::ProfileInput {
+            name: name.into(),
+            address: address.into(),
+            email: None,
+            phone: None,
+            payment_instructions: None,
+            default_notes: None,
+            default_terms_days: 30,
+            next_number: None,
+        },
+        1,
+    )
+    .unwrap();
+}
+
+#[test]
+fn the_from_block_belongs_to_each_invoice_not_to_the_shared_settings() {
+    let mut conn = db();
+    set_profile(&mut conn, "Settings Name", "Settings Street");
+
+    // An invoice prints its own From, not the settings'.
+    let mut custom = draft(None, vec![retainer(1000)]);
+    custom.from_name = "Custom Studio".into();
+    custom.from_address = "9 Elm St.\nSalem, OR".into();
+    custom.from_phone = Some("555-0100".into());
+    let paper_for = |conn: &Connection, invoice: &Invoice, number: Option<String>| {
+        paper(invoice, profile::logo_bytes(conn).unwrap(), number).unwrap()
+    };
+    let printed = paper_for(&conn, &resolve(&conn, &custom).unwrap(), None);
+    assert_eq!(printed.issuer_name, "Custom Studio");
+    assert_eq!(
+        printed.issuer_lines,
+        ["9 Elm St.", "Salem, OR", "hi@offline.test", "555-0100"]
+    );
+    assert!(render_draft(&conn, &custom).unwrap().starts_with(b"%PDF-"));
+
+    // Saving stores it; a later change to the settings leaves it alone.
+    let saved = save_draft(&mut conn, &custom, 1).unwrap();
+    set_profile(&mut conn, "Changed Name", "Changed Street");
+    let reloaded = get(&conn, &saved.summary.id).unwrap();
+    assert_eq!(reloaded.from_name, "Custom Studio");
+    assert_eq!(reloaded.from_address, "9 Elm St.\nSalem, OR");
+    assert_eq!(reloaded.from_email.as_deref(), Some("hi@offline.test"));
+    assert_eq!(reloaded.from_phone.as_deref(), Some("555-0100"));
+
+    // Editing the draft's From updates it.
+    let mut edited = custom.clone();
+    edited.id = Some(saved.summary.id.clone());
+    edited.from_name = "Edited Studio".into();
+    let resaved = save_draft(&mut conn, &edited, 2).unwrap();
+    assert_eq!(resaved.from_name, "Edited Studio");
+
+    // Finalizing snapshots it, and it survives further settings changes.
+    let done = finalize(&mut conn, &saved.summary.id, 3).unwrap();
+    assert_eq!(done.from_name, "Edited Studio");
+    let snapshot: String = conn
+        .query_row(
+            "SELECT issuer_json FROM invoices WHERE id = ?1",
+            [&saved.summary.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(snapshot.contains("Edited Studio") && snapshot.contains("9 Elm St."));
+    set_profile(&mut conn, "Later Name", "Later Street");
+    let frozen = get(&conn, &saved.summary.id).unwrap();
+    assert_eq!(frozen.from_name, "Edited Studio");
+    assert_eq!(frozen.from_address, "9 Elm St.\nSalem, OR");
+
+    // A draft with nothing in From still previews, with placeholders.
+    let mut blank = draft(None, vec![retainer(1000)]);
+    blank.from_name = String::new();
+    blank.from_address = String::new();
+    let printed = paper_for(&conn, &resolve(&conn, &blank).unwrap(), None);
+    assert_eq!(printed.issuer_name, "Your business name");
+    assert!(render_draft(&conn, &blank).is_ok());
+}
+
 #[test]
 fn next_number_only_moves_forward_past_issued_numbers() {
     let mut conn = db();
-    complete_profile(&conn);
     let year = profile::current_year();
     let input = |next| profile::ProfileInput {
         name: "Offline Studios".into(),

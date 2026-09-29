@@ -41,6 +41,9 @@ export interface Client {
   address?: string;
   defaultRate?: number;
   currency?: string;
+  notes?: string;
+  /** Set while archived: kept and still linked to its projects, but out of the active list and the client pickers. */
+  archivedAt?: number;
   createdAt: number;
   updatedAt: number;
   deletedAt?: number;
@@ -52,14 +55,19 @@ export interface NewClient {
   address?: string;
   defaultRate?: number;
   currency?: string;
+  notes?: string;
 }
 
+/** A patch: omitted fields stay; `null` clears an optional one. */
 export interface UpdateClient {
   name?: string;
-  email?: string;
-  address?: string;
-  defaultRate?: number;
-  currency?: string;
+  email?: string | null;
+  address?: string | null;
+  defaultRate?: number | null;
+  currency?: string | null;
+  notes?: string | null;
+  /** Archives or restores. */
+  archived?: boolean;
 }
 
 export interface Project {
@@ -519,7 +527,8 @@ export type EntriesView = "table" | "charts" | "log";
 export type EntriesGroup = "project" | "client" | "category" | "app" | "status";
 export type EntriesStack = "day" | "week" | "month";
 export type EntriesRange = "day" | "week" | "month" | "30d" | "year";
-export type ProjectsTab = "active" | "completed" | "archived" | "clients";
+export type ProjectsTab = "active" | "completed" | "archived";
+export type ClientsTab = "active" | "archived";
 export type ProjectsRange = "week" | "month" | "30d" | "all";
 
 /** Time Entries' filter bar. Values are ids, or `none` for "no …". */
@@ -591,6 +600,12 @@ export type Route =
       name: "projects";
       tab?: ProjectsTab;
       projectId?: string;
+      range?: ProjectsRange;
+    }
+  | {
+      name: "clients";
+      tab?: ClientsTab;
+      clientId?: string;
       range?: ProjectsRange;
     }
   | {

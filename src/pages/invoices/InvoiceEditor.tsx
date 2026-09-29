@@ -16,6 +16,7 @@ import type { Catalog } from "../../hooks/useCatalog";
 import { useInvoicePreview } from "../../hooks/useInvoicePreview";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import * as api from "../../lib/api";
+import { assignableClients } from "../../lib/clients";
 import { addDays, localDateString, startOfDay } from "../../lib/dates";
 import {
   addDaysTo,
@@ -407,15 +408,15 @@ export function InvoiceEditor({
               value={form.clientId}
               onChange={selectClient}
               placeholder="Select a client"
-              options={catalog.clients
-                .filter((item) => !item.deletedAt)
-                .map((item) => ({ value: item.id, label: item.name }))}
+              options={assignableClients(catalog.clients, form.clientId).map(
+                (item) => ({ value: item.id, label: item.name }),
+              )}
               variant="field"
             />
           </Field>
-          {catalog.clients.filter((item) => !item.deletedAt).length === 0 && (
+          {assignableClients(catalog.clients, form.clientId).length === 0 && (
             <p className="text-[11.5px] text-fg-faint">
-              Add a client on the Projects page first.
+              Add a client on the Clients page first.
             </p>
           )}
         </EditorSection>

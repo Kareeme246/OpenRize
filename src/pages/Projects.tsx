@@ -22,16 +22,15 @@ import { type Catalog, useCatalog } from "../hooks/useCatalog";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
-import { addDays, startOfDay, startOfMonth, startOfWeek } from "../lib/dates";
+import { assignableClients, clientLabel } from "../lib/clients";
+import { addDays, startOfMonth } from "../lib/dates";
 import {
   formatDuration,
-  formatMoney,
   formatRelative,
   formatShortDate,
   plural,
 } from "../lib/format";
 import type {
-  Client,
   Project,
   ProjectStats,
   ProjectSuggestion,
@@ -42,6 +41,7 @@ import type {
 import { BUDGET_WARN, budgetUsage } from "./projects/budget";
 import { ProjectDetail } from "./projects/ProjectDetail";
 import { type ProjectDraft, ProjectSheet } from "./projects/ProjectSheet";
+import { RANGE_OPTIONS, rangeBounds } from "./projects/range";
 
 type ProjectsRoute = Extract<Route, { name: "projects" }>;
 
@@ -51,25 +51,8 @@ interface ProjectsProps {
   replace: (route: Route) => void;
 }
 
-const RANGE_OPTIONS: { value: ProjectsRange; label: string }[] = [
-  { value: "week", label: "This week" },
-  { value: "month", label: "This month" },
-  { value: "30d", label: "Last 30 days" },
-  { value: "all", label: "All time" },
-];
-
 /** Discovery looks at the last two weeks of titles (design board C§3b). */
 const DISCOVERY_DAYS = 14;
-
-function rangeBounds(range: ProjectsRange): { start: number; end: number } {
-  const now = new Date();
-  const end = addDays(startOfDay(now), 1).getTime();
-  if (range === "week") return { start: startOfWeek(now).getTime(), end };
-  if (range === "month") return { start: startOfMonth(now).getTime(), end };
-  if (range === "30d")
-    return { start: addDays(startOfDay(now), -29).getTime(), end };
-  return { start: 0, end };
-}
 
 /** Editing state for the sheet: a project, or a draft for a new one. */
 type Editing = { project: Project } | { draft: ProjectDraft } | null;
@@ -275,11 +258,6 @@ export function Projects({ route, navigate, replace }: ProjectsProps) {
                 label: "Archived",
                 count: counts.archived,
               },
-              {
-                value: "clients" as const,
-                label: "Clients",
-                count: catalog.clients.length,
-              },
             ]}
             value={tab}
             onChange={(next) => setRoute({ tab: next })}
@@ -294,90 +272,81 @@ export function Projects({ route, navigate, replace }: ProjectsProps) {
             </div>
           )}
 
-          {tab === "clients" ? (
-            <ClientsTable
-              catalog={catalog}
-              onChanged={() => void catalog.reload()}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              aria-label="Search projects"
+              placeholder="⌕ Search projects"
+              className="h-7 w-56 rounded-md border border-line bg-panel px-2.5 text-[12px] text-fg outline-hidden placeholder:text-fg-faint focus:border-accent"
             />
-          ) : (
-            <>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <input
-                  type="search"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  aria-label="Search projects"
-                  placeholder="⌕ Search projects"
-                  className="h-7 w-56 rounded-md border border-line bg-panel px-2.5 text-[12px] text-fg outline-hidden placeholder:text-fg-faint focus:border-accent"
-                />
-                <FilterSelect
-                  label="Client"
-                  value={clientFilter}
-                  options={[
-                    { value: "none", label: "No client" },
-                    ...catalog.clients.map((client) => ({
-                      value: client.id,
-                      label: client.name,
-                    })),
-                  ]}
-                  onChange={setClientFilter}
-                />
-                <Picker
-                  ariaLabel="Time range"
-                  value={range}
-                  onChange={(val) => setRoute({ range: val as ProjectsRange })}
-                  options={RANGE_OPTIONS}
-                  variant="compact"
-                />
-              </div>
+            <FilterSelect
+              label="Client"
+              value={clientFilter}
+              options={[
+                { value: "none", label: "No client" },
+                ...catalog.clients.map((client) => ({
+                  value: client.id,
+                  label: clientLabel(client),
+                })),
+              ]}
+              onChange={setClientFilter}
+            />
+            <Picker
+              ariaLabel="Time range"
+              value={range}
+              onChange={(val) => setRoute({ range: val as ProjectsRange })}
+              options={RANGE_OPTIONS}
+              variant="compact"
+            />
+          </div>
 
-              {tab === "active" &&
-                suggestions.map((suggestion) => (
-                  <SuggestionStrip
-                    key={suggestion.key}
-                    suggestion={suggestion}
-                    onCreate={() =>
-                      setEditing({
-                        draft: {
-                          name: suggestion.name,
-                          aiHints: suggestion.evidence.join(", "),
-                        },
-                      })
-                    }
-                    onDismiss={() => void dismiss(suggestion.key)}
-                  />
-                ))}
-
-              <ProjectsTable
-                projects={shown}
-                stats={stats}
-                catalog={catalog}
-                now={now}
-                loaded={loaded}
-                empty={
-                  catalog.projects.length === 0
-                    ? "first"
-                    : search || clientFilter
-                      ? "filtered"
-                      : "tab"
-                }
-                tab={tab}
-                rangeLabel={
-                  RANGE_OPTIONS.find((option) => option.value === range)
-                    ?.label ?? ""
-                }
-                onOpen={(project) =>
-                  navigate({
-                    name: "projects",
-                    tab,
-                    range,
-                    projectId: project.id,
+          {tab === "active" &&
+            suggestions.map((suggestion) => (
+              <SuggestionStrip
+                key={suggestion.key}
+                suggestion={suggestion}
+                onCreate={() =>
+                  setEditing({
+                    draft: {
+                      name: suggestion.name,
+                      aiHints: suggestion.evidence.join(", "),
+                    },
                   })
                 }
-                onCreate={() => setEditing({ draft: {} })}
+                onDismiss={() => void dismiss(suggestion.key)}
               />
-            </>
-          )}
+            ))}
+
+          <ProjectsTable
+            projects={shown}
+            stats={stats}
+            catalog={catalog}
+            now={now}
+            loaded={loaded}
+            empty={
+              catalog.projects.length === 0
+                ? "first"
+                : search || clientFilter
+                  ? "filtered"
+                  : "tab"
+            }
+            tab={tab}
+            rangeLabel={
+              RANGE_OPTIONS.find((option) => option.value === range)?.label ??
+              ""
+            }
+            onOpen={(project) =>
+              navigate({
+                name: "projects",
+                tab,
+                range,
+                projectId: project.id,
+              })
+            }
+            onCreate={() => setEditing({ draft: {} })}
+          />
         </main>
       )}
 
@@ -385,7 +354,10 @@ export function Projects({ route, navigate, replace }: ProjectsProps) {
         <ProjectSheet
           project={"project" in editing ? editing.project : undefined}
           draft={"draft" in editing ? editing.draft : undefined}
-          clients={catalog.clients}
+          clients={assignableClients(
+            catalog.clients,
+            "project" in editing ? editing.project.clientId : undefined,
+          )}
           usedColors={catalog.projects.map((project) => project.color)}
           onClose={() => setEditing(null)}
           onSaved={() => void reloadAll()}
@@ -569,236 +541,6 @@ function ProjectsTable({
           );
         })
       )}
-    </div>
-  );
-}
-
-// --- Clients tab ----------------------------------------------------------------------
-
-interface ClientDraft {
-  name: string;
-  email: string;
-  rate: string;
-  currency: string;
-}
-
-const EMPTY_CLIENT: ClientDraft = {
-  name: "",
-  email: "",
-  rate: "",
-  currency: "",
-};
-
-function draftOf(client: Client): ClientDraft {
-  return {
-    name: client.name,
-    email: client.email ?? "",
-    rate:
-      client.defaultRate !== undefined && client.defaultRate !== null
-        ? String(client.defaultRate)
-        : "",
-    currency: client.currency ?? "",
-  };
-}
-
-const CELL_INPUT =
-  "h-7 w-full min-w-0 rounded-md border border-line bg-surface px-2 text-[12px] text-fg outline-hidden focus:border-accent";
-
-/** Name, projects, default rate, and email, created and edited in place. */
-function ClientsTable({
-  catalog,
-  onChanged,
-}: {
-  catalog: Catalog;
-  onChanged: () => void;
-}) {
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<ClientDraft>(EMPTY_CLIENT);
-  const [creating, setCreating] = useState<ClientDraft>(EMPTY_CLIENT);
-  const [error, setError] = useState<string | null>(null);
-  const template = "minmax(0,1.4fr) 90px 120px 80px minmax(0,1.4fr) 120px";
-
-  const fields = (value: ClientDraft) => ({
-    name: value.name.trim(),
-    email: value.email.trim() || undefined,
-    defaultRate: value.rate === "" ? undefined : Number(value.rate),
-    currency: value.currency.trim().toUpperCase() || undefined,
-  });
-
-  const save = async (id: string): Promise<void> => {
-    if (!draft.name.trim()) return;
-    try {
-      await api.updateClient(id, fields(draft));
-      setEditingId(null);
-      setError(null);
-      onChanged();
-    } catch (cause) {
-      setError(describeError(cause));
-    }
-  };
-
-  const create = async (): Promise<void> => {
-    if (!creating.name.trim()) return;
-    try {
-      await api.createClient(fields(creating));
-      setCreating(EMPTY_CLIENT);
-      setError(null);
-      onChanged();
-    } catch (cause) {
-      setError(describeError(cause));
-    }
-  };
-
-  const inputs = (
-    value: ClientDraft,
-    set: (next: ClientDraft) => void,
-    label: string,
-  ) => (
-    <>
-      <input
-        aria-label={`${label} name`}
-        value={value.name}
-        onChange={(event) => set({ ...value, name: event.target.value })}
-        placeholder="Client name"
-        className={CELL_INPUT}
-      />
-      <span />
-      <input
-        aria-label={`${label} default rate`}
-        type="number"
-        min="0"
-        step="any"
-        value={value.rate}
-        onChange={(event) => set({ ...value, rate: event.target.value })}
-        placeholder="Rate /h"
-        className={CELL_INPUT}
-      />
-      <input
-        aria-label={`${label} currency`}
-        value={value.currency}
-        maxLength={3}
-        onChange={(event) => set({ ...value, currency: event.target.value })}
-        placeholder="USD"
-        className={`${CELL_INPUT} uppercase`}
-      />
-      <input
-        aria-label={`${label} email`}
-        type="email"
-        value={value.email}
-        onChange={(event) => set({ ...value, email: event.target.value })}
-        placeholder="billing@example.com"
-        className={CELL_INPUT}
-      />
-    </>
-  );
-
-  return (
-    <div className="mt-3 space-y-3">
-      {error && <InlineError message={error} />}
-      <div className="overflow-hidden rounded-xl border border-line bg-panel">
-        <div
-          className="grid items-center gap-3 border-line border-b bg-surface px-4 py-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider"
-          style={{ gridTemplateColumns: template }}
-        >
-          <span>Client</span>
-          <span className="text-right">Projects</span>
-          <span className="text-right">Default rate</span>
-          <span>Currency</span>
-          <span>Email</span>
-          <span />
-        </div>
-        {catalog.clients.length === 0 && (
-          <EmptyState
-            title="No clients yet"
-            hint="Clients group projects for invoicing. Add one below."
-          />
-        )}
-        {catalog.clients.map((client) => {
-          const projectCount = catalog.projects.filter(
-            (project) => project.clientId === client.id,
-          ).length;
-          const isEditing = editingId === client.id;
-          return (
-            <form
-              key={client.id}
-              onSubmit={(event) => {
-                event.preventDefault();
-                void save(client.id);
-              }}
-              className="grid items-center gap-3 border-line-soft border-b px-4 py-2 text-[12.5px] last:border-b-0"
-              style={{ gridTemplateColumns: template }}
-            >
-              {isEditing ? (
-                inputs(draft, setDraft, client.name)
-              ) : (
-                <>
-                  <span className="truncate font-medium text-fg-strong">
-                    {client.name}
-                  </span>
-                  <span className="text-right font-mono text-fg-muted tabular-nums">
-                    {projectCount}
-                  </span>
-                  <span className="text-right font-mono text-fg-muted tabular-nums">
-                    {client.defaultRate
-                      ? `${formatMoney(client.defaultRate, client.currency || "USD")}/h`
-                      : "–"}
-                  </span>
-                  <span className="text-fg-soft">{client.currency || "–"}</span>
-                  <span className="truncate text-fg-soft">
-                    {client.email || "–"}
-                  </span>
-                </>
-              )}
-              <span className="flex justify-end gap-1.5">
-                {isEditing ? (
-                  <>
-                    <button type="submit" className={BUTTON_PRIMARY}>
-                      Save
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEditingId(null)}
-                      className="text-[12px] text-fg-soft hover:text-fg"
-                    >
-                      Cancel
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingId(client.id);
-                      setDraft(draftOf(client));
-                    }}
-                    className={BUTTON_SECONDARY}
-                  >
-                    Edit
-                  </button>
-                )}
-              </span>
-            </form>
-          );
-        })}
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void create();
-          }}
-          className="grid items-center gap-3 border-line border-t bg-inset-soft px-4 py-2"
-          style={{ gridTemplateColumns: template }}
-        >
-          {inputs(creating, setCreating, "New client")}
-          <span className="flex justify-end">
-            <button
-              type="submit"
-              disabled={!creating.name.trim()}
-              className={BUTTON_PRIMARY}
-            >
-              + Add client
-            </button>
-          </span>
-        </form>
-      </div>
     </div>
   );
 }

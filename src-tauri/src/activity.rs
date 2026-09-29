@@ -1039,31 +1039,18 @@ impl ActivityStore {
 
     // --- P1: Clients CRUD -----------------------------------------------
 
+    /// Every client that is not deleted, archived ones included: projects
+    /// still resolve their client's name, and the views split active from
+    /// archived themselves.
     pub fn list_clients(&self) -> Result<Vec<Client>, String> {
         let mut stmt = self
             .conn
-            .prepare(
-                "SELECT id, name, email, address, default_rate, currency, created_at, updated_at, deleted_at
-                 FROM clients
-                 WHERE deleted_at IS NULL
-                 ORDER BY name ASC;",
-            )
+            .prepare(&format!(
+                "SELECT {CLIENT_COLUMNS} FROM clients WHERE deleted_at IS NULL ORDER BY name ASC;"
+            ))
             .map_err(|e| e.to_string())?;
-
         let rows = stmt
-            .query_map([], |row| {
-                Ok(Client {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    email: row.get(2)?,
-                    address: row.get(3)?,
-                    default_rate: row.get(4)?,
-                    currency: row.get(5)?,
-                    created_at: row.get::<_, i64>(6)? as u64,
-                    updated_at: row.get::<_, i64>(7)? as u64,
-                    deleted_at: row.get::<_, Option<i64>>(8)?.map(|v| v as u64),
-                })
-            })
+            .query_map([], client_from_row)
             .map_err(|e| e.to_string())?;
 
         let mut list = Vec::new();
@@ -1074,20 +1061,26 @@ impl ActivityStore {
     }
 
     pub fn create_client(&mut self, client: NewClient, now: u64) -> Result<Client, String> {
+        let name = client.name.trim().to_string();
+        if name.is_empty() {
+            return Err("A client needs a name".to_string());
+        }
         let id = uuid::Uuid::now_v7().to_string();
         self.conn.execute(
-            "INSERT INTO clients (id, name, email, address, default_rate, currency, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7);",
-            params![id, client.name, client.email, client.address, client.default_rate, client.currency, now as i64],
+            "INSERT INTO clients (id, name, email, address, default_rate, currency, notes, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8);",
+            params![id, name, client.email, client.address, client.default_rate, client.currency, client.notes, now as i64],
         ).map_err(|e| e.to_string())?;
 
         Ok(Client {
             id,
-            name: client.name,
+            name,
             email: client.email,
             address: client.address,
             default_rate: client.default_rate,
             currency: client.currency,
+            notes: client.notes,
+            archived_at: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -1102,31 +1095,48 @@ impl ActivityStore {
     ) -> Result<Client, String> {
         let mut client = self.get_client(id)?;
         if let Some(name) = patch.name {
+            let name = name.trim().to_string();
+            if name.is_empty() {
+                return Err("A client needs a name".to_string());
+            }
             client.name = name;
         }
         if let Some(email) = patch.email {
-            client.email = Some(email);
+            client.email = email;
         }
         if let Some(addr) = patch.address {
-            client.address = Some(addr);
+            client.address = addr;
         }
         if let Some(rate) = patch.default_rate {
-            client.default_rate = Some(rate);
+            client.default_rate = rate;
         }
         if let Some(curr) = patch.currency {
-            client.currency = Some(curr);
+            client.currency = curr;
+        }
+        if let Some(notes) = patch.notes {
+            client.notes = notes;
+        }
+        if let Some(archived) = patch.archived {
+            // Archiving twice keeps the first date.
+            client.archived_at = match (archived, client.archived_at) {
+                (true, Some(at)) => Some(at),
+                (true, None) => Some(now),
+                (false, _) => None,
+            };
         }
         client.updated_at = now;
 
         self.conn.execute(
-            "UPDATE clients SET name = ?1, email = ?2, address = ?3, default_rate = ?4, currency = ?5, updated_at = ?6
-             WHERE id = ?7;",
+            "UPDATE clients SET name = ?1, email = ?2, address = ?3, default_rate = ?4, currency = ?5, notes = ?6, archived_at = ?7, updated_at = ?8
+             WHERE id = ?9;",
             params![
                 client.name,
                 client.email,
                 client.address,
                 client.default_rate,
                 client.currency,
+                client.notes,
+                client.archived_at.map(|v| v as i64),
                 now as i64,
                 id,
             ],
@@ -1135,35 +1145,47 @@ impl ActivityStore {
         Ok(client)
     }
 
+    /// Soft-deletes a client and detaches its projects, which keep their
+    /// status, time, and rules but lose the client link (so none is left
+    /// pointing at a client that no longer lists). A client with invoices
+    /// cannot be deleted: those documents bill it, so it can only be archived.
     pub fn delete_client(&mut self, id: &str, now: u64) -> Result<(), String> {
-        self.conn
-            .execute(
-                "UPDATE clients SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2;",
-                params![now as i64, id],
+        let client = self.get_client(id)?;
+        let tx = self.conn.transaction().map_err(|e| e.to_string())?;
+        let invoiced: bool = tx
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM invoices WHERE client_id = ?1);",
+                params![id],
+                |row| row.get(0),
             )
             .map_err(|e| e.to_string())?;
-        Ok(())
+        if invoiced {
+            return Err(format!(
+                "{} has invoices, so it can't be deleted. Archive it instead.",
+                client.name
+            ));
+        }
+        tx.execute(
+            "UPDATE projects SET client_id = NULL, updated_at = ?1 WHERE client_id = ?2;",
+            params![now as i64, id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE clients SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2;",
+            params![now as i64, id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())
     }
 
     fn get_client(&self, id: &str) -> Result<Client, String> {
-        self.conn.query_row(
-            "SELECT id, name, email, address, default_rate, currency, created_at, updated_at, deleted_at
-             FROM clients WHERE id = ?1;",
-            params![id],
-            |row| {
-                Ok(Client {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    email: row.get(2)?,
-                    address: row.get(3)?,
-                    default_rate: row.get(4)?,
-                    currency: row.get(5)?,
-                    created_at: row.get::<_, i64>(6)? as u64,
-                    updated_at: row.get::<_, i64>(7)? as u64,
-                    deleted_at: row.get::<_, Option<i64>>(8)?.map(|v| v as u64),
-                })
-            },
-        ).map_err(|e| e.to_string())
+        self.conn
+            .query_row(
+                &format!("SELECT {CLIENT_COLUMNS} FROM clients WHERE id = ?1;"),
+                params![id],
+                client_from_row,
+            )
+            .map_err(|e| e.to_string())
     }
 
     // --- P1: Time Entries -----------------------------------------------
@@ -2014,6 +2036,26 @@ pub(crate) fn segment_from_row(row: &Row<'_>) -> rusqlite::Result<ActivitySegmen
     })
 }
 
+/// The `clients` columns `client_from_row` reads, in its order.
+const CLIENT_COLUMNS: &str =
+    "id, name, email, address, default_rate, currency, notes, archived_at, created_at, updated_at, deleted_at";
+
+fn client_from_row(row: &Row<'_>) -> rusqlite::Result<Client> {
+    Ok(Client {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        email: row.get(2)?,
+        address: row.get(3)?,
+        default_rate: row.get(4)?,
+        currency: row.get(5)?,
+        notes: row.get(6)?,
+        archived_at: row.get::<_, Option<i64>>(7)?.map(|v| v as u64),
+        created_at: row.get::<_, i64>(8)? as u64,
+        updated_at: row.get::<_, i64>(9)? as u64,
+        deleted_at: row.get::<_, Option<i64>>(10)?.map(|v| v as u64),
+    })
+}
+
 fn compute_totals(conn: &Connection, since_ms: u64, now: u64) -> Result<Totals, String> {
     let mut statement = conn
         .prepare(
@@ -2651,6 +2693,7 @@ mod tests {
                     address: None,
                     default_rate: Some(120.0),
                     currency: Some("USD".to_string()),
+                    notes: None,
                 },
                 1_000,
             )
@@ -2680,6 +2723,166 @@ mod tests {
 
         let projects = store.list_projects().unwrap();
         assert_eq!(projects.len(), 1);
+    }
+
+    fn new_client(name: &str) -> NewClient {
+        NewClient {
+            name: name.to_string(),
+            email: Some("billing@acme.test".to_string()),
+            address: Some("1 Main St.".to_string()),
+            default_rate: Some(120.0),
+            currency: Some("EUR".to_string()),
+            notes: Some("Net 15".to_string()),
+        }
+    }
+
+    fn new_project_for(client_id: Option<&str>, name: &str) -> NewProject {
+        NewProject {
+            client_id: client_id.map(str::to_string),
+            name: name.to_string(),
+            color: "#75a4e5".to_string(),
+            description: None,
+            ai_hints: None,
+            status: None,
+            due_date: None,
+            budget_kind: None,
+            budget_value: None,
+            budget_period: None,
+            billable_default: None,
+            hourly_rate: None,
+        }
+    }
+
+    #[test]
+    fn a_client_patch_edits_clears_and_leaves_fields_alone() {
+        let mut store = store();
+        let client = store.create_client(new_client("Acme"), 1).unwrap();
+        assert_eq!(client.notes.as_deref(), Some("Net 15"));
+
+        let renamed = store
+            .update_client(
+                &client.id,
+                serde_json::from_str(r#"{"name": " Acme Inc ", "email": null, "defaultRate": 90}"#)
+                    .unwrap(),
+                2,
+            )
+            .unwrap();
+        assert_eq!(renamed.name, "Acme Inc");
+        assert_eq!(renamed.email, None);
+        assert_eq!(renamed.default_rate, Some(90.0));
+        // Untouched fields stay.
+        assert_eq!(renamed.address.as_deref(), Some("1 Main St."));
+        assert_eq!(renamed.currency.as_deref(), Some("EUR"));
+        assert_eq!(renamed.notes.as_deref(), Some("Net 15"));
+        assert_eq!(store.list_clients().unwrap(), vec![renamed]);
+
+        assert!(store
+            .update_client(
+                &client.id,
+                serde_json::from_str(r#"{"name": "  "}"#).unwrap(),
+                3
+            )
+            .is_err());
+        assert!(store.create_client(new_client(" "), 4).is_err());
+    }
+
+    #[test]
+    fn archiving_a_client_keeps_it_and_its_projects_and_can_be_undone() {
+        let mut store = store();
+        let client = store.create_client(new_client("Acme"), 1).unwrap();
+        let project = store
+            .create_project(new_project_for(Some(&client.id), "Acme Web"), 2)
+            .unwrap();
+
+        let archive: UpdateClient = serde_json::from_str(r#"{"archived": true}"#).unwrap();
+        let archived = store.update_client(&client.id, archive, 10).unwrap();
+        assert_eq!(archived.archived_at, Some(10));
+        // Archiving again keeps the first date.
+        let again: UpdateClient = serde_json::from_str(r#"{"archived": true}"#).unwrap();
+        let again = store.update_client(&client.id, again, 20).unwrap();
+        assert_eq!(again.archived_at, Some(10));
+
+        // Still listed (so its projects resolve its name) and still linked.
+        let listed = store.list_clients().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].archived_at, Some(10));
+        let projects = store.list_projects().unwrap();
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].id, project.id);
+        assert_eq!(projects[0].client_id.as_deref(), Some(client.id.as_str()));
+        assert_eq!(projects[0].status, "active");
+
+        let restore: UpdateClient = serde_json::from_str(r#"{"archived": false}"#).unwrap();
+        let restored = store.update_client(&client.id, restore, 30).unwrap();
+        assert_eq!(restored.archived_at, None);
+    }
+
+    #[test]
+    fn deleting_a_client_detaches_its_projects_and_keeps_them_and_their_time() {
+        let mut store = store();
+        let client = store.create_client(new_client("Acme"), 1).unwrap();
+        let other = store.create_client(new_client("Other"), 1).unwrap();
+        let project = store
+            .create_project(new_project_for(Some(&client.id), "Acme Web"), 2)
+            .unwrap();
+        let kept = store
+            .create_project(new_project_for(Some(&other.id), "Other Web"), 2)
+            .unwrap();
+        store
+            .conn()
+            .execute(
+                "INSERT INTO time_entries (id, started_at, ended_at, description, project_id, status, source, billable, created_at, updated_at)
+                 VALUES ('e', 0, 3600000, 'x', ?1, 'approved', 'auto', 1, 0, 0);",
+                [&project.id],
+            )
+            .unwrap();
+
+        store.delete_client(&client.id, 50).unwrap();
+
+        let clients = store.list_clients().unwrap();
+        assert_eq!(clients.len(), 1);
+        assert_eq!(clients[0].id, other.id);
+        let projects = store.list_projects().unwrap();
+        assert_eq!(projects.len(), 2, "no project is deleted or hidden");
+        let detached = projects.iter().find(|p| p.id == project.id).unwrap();
+        assert_eq!(detached.client_id, None);
+        assert_eq!(detached.status, "active");
+        let untouched = projects.iter().find(|p| p.id == kept.id).unwrap();
+        assert_eq!(untouched.client_id.as_deref(), Some(other.id.as_str()));
+        let entry_project: Option<String> = store
+            .conn()
+            .query_row(
+                "SELECT project_id FROM time_entries WHERE id = 'e'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(entry_project.as_deref(), Some(project.id.as_str()));
+    }
+
+    #[test]
+    fn a_client_with_invoices_cannot_be_deleted() {
+        let mut store = store();
+        let client = store.create_client(new_client("Acme"), 1).unwrap();
+        let project = store
+            .create_project(new_project_for(Some(&client.id), "Acme Web"), 2)
+            .unwrap();
+        store
+            .conn()
+            .execute(
+                "INSERT INTO invoices (id, client_id, client_name, currency, status, created_at, updated_at)
+                 VALUES ('inv', ?1, 'Acme', 'USD', 'draft', 0, 0);",
+                [&client.id],
+            )
+            .unwrap();
+
+        let refused = store.delete_client(&client.id, 50).unwrap_err();
+        assert!(refused.contains("Archive it instead"), "{refused}");
+        // Nothing changed: still listed, project still attached.
+        assert_eq!(store.list_clients().unwrap().len(), 1);
+        let projects = store.list_projects().unwrap();
+        assert_eq!(projects[0].id, project.id);
+        assert_eq!(projects[0].client_id.as_deref(), Some(client.id.as_str()));
     }
 
     const MIN: u64 = 60_000;

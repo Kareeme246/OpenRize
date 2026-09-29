@@ -11,6 +11,7 @@ import { currentCalendarDay, localDateString } from "./lib/dates";
 import type { ActivitySnapshot, ActivityTick, Route } from "./lib/types";
 import { Apps } from "./pages/Apps";
 import { Calendar } from "./pages/Calendar";
+import { Clients } from "./pages/Clients";
 import { Invoices } from "./pages/Invoices";
 import { MyTimesheet } from "./pages/MyTimesheet";
 import { Projects } from "./pages/Projects";
@@ -246,6 +247,10 @@ export default function App() {
             navigate={navigate}
             replace={replace}
           />
+        );
+      case "clients":
+        return (
+          <Clients route={currentRoute} navigate={navigate} replace={replace} />
         );
       case "invoices":
         return (

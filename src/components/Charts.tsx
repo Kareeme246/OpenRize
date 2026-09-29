@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 import { formatDuration, formatHours } from "../lib/format";
 
 /**
@@ -16,6 +16,7 @@ export interface Slice {
 }
 
 const GAP_PX = 2;
+const OTHER_KEY = "__other";
 
 /** A donut with a legend beside it: share of time by group. */
 export function Donut({
@@ -26,6 +27,7 @@ export function Donut({
   maxLegend = 6,
   stacked = false,
   showLegend = true,
+  foldLone = false,
 }: {
   slices: Slice[];
   size?: number;
@@ -36,6 +38,8 @@ export function Donut({
   /** Ring above the legend, for narrow cards side by side. */
   stacked?: boolean;
   showLegend?: boolean;
+  /** Fold a lone leftover group into "Other" too, so the cap is exact. */
+  foldLone?: boolean;
 }) {
   const [hovered, setHovered] = useState<string | null>(null);
   const total = slices.reduce((sum, slice) => sum + slice.ms, 0);
@@ -43,12 +47,13 @@ export function Donut({
     .filter((s) => s.ms > 0)
     .sort((a, b) => b.ms - a.ms);
   // Folding a single group into "Other" would only hide its name.
-  const keep = sorted.length > maxLegend + 1 ? maxLegend : sorted.length;
+  const keep =
+    sorted.length > maxLegend + (foldLone ? 0 : 1) ? maxLegend : sorted.length;
   const shown = sorted.slice(0, keep);
   const rest = sorted.slice(keep);
   if (rest.length > 0) {
     shown.push({
-      key: "__other",
+      key: OTHER_KEY,
       label: `Other (${rest.length})`,
       color: "var(--fg-ghost)",
       ms: rest.reduce((sum, slice) => sum + slice.ms, 0),
@@ -144,31 +149,141 @@ export function Donut({
           {shown.length === 0 && (
             <div className="text-fg-faint">{emptyLabel}</div>
           )}
-          {shown.map((slice) => (
-            // biome-ignore lint/a11y/noStaticElementInteractions: hover highlights the matching ring slice; the row is plain text.
-            <div
-              key={slice.key}
-              onMouseEnter={() => setHovered(slice.key)}
-              onMouseLeave={() => setHovered(null)}
-              className={`flex items-center gap-2 rounded px-1 ${
-                hovered === slice.key ? "bg-surface" : ""
-              }`}
-            >
-              <span
-                className="size-2 shrink-0 rounded-full"
-                style={{ backgroundColor: slice.color }}
+          {shown.map((slice) =>
+            slice.key === OTHER_KEY ? (
+              <OtherRow
+                key={slice.key}
+                slice={slice}
+                parts={rest}
+                highlighted={hovered === slice.key}
+                onHover={(on) => setHovered(on ? slice.key : null)}
               />
-              <span className="min-w-0 flex-1 truncate text-fg-muted">
-                {slice.label}
-              </span>
-              <span className="shrink-0 font-mono text-fg-soft tabular-nums">
-                {formatDuration(slice.ms)}
-              </span>
-            </div>
-          ))}
+            ) : (
+              // biome-ignore lint/a11y/noStaticElementInteractions: hover highlights the matching ring slice; the row is plain text.
+              <div
+                key={slice.key}
+                onMouseEnter={() => setHovered(slice.key)}
+                onMouseLeave={() => setHovered(null)}
+                className={`flex items-center gap-2 rounded px-1 ${
+                  hovered === slice.key ? "bg-surface" : ""
+                }`}
+              >
+                <span
+                  className="size-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: slice.color }}
+                />
+                <span className="min-w-0 flex-1 truncate text-fg-muted">
+                  {slice.label}
+                </span>
+                <span className="shrink-0 font-mono text-fg-soft tabular-nums">
+                  {formatDuration(slice.ms)}
+                </span>
+              </div>
+            ),
+          )}
         </figcaption>
       )}
     </figure>
+  );
+}
+
+/**
+ * The "Other" legend row. Its button reveals the folded groups as a small
+ * bar plus a ranked list on hover or focus, and click/tap pins it open, so
+ * keyboard and touch users get the same breakdown.
+ */
+function OtherRow({
+  slice,
+  parts,
+  highlighted,
+  onHover,
+}: {
+  slice: Slice;
+  parts: Slice[];
+  highlighted: boolean;
+  onHover: (on: boolean) => void;
+}) {
+  const [hover, setHover] = useState(false);
+  const [focus, setFocus] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const panelId = useId();
+  const open = hover || focus || pinned;
+  const setHovering = (on: boolean) => {
+    setHover(on);
+    onHover(on);
+  };
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: the wrapper only tracks hover; the button inside is the keyboard control.
+    <div
+      className="relative"
+      onMouseEnter={() => setHovering(true)}
+      onMouseLeave={() => setHovering(false)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setFocus(false);
+          setPinned(false);
+        }
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          setPinned(false);
+          setFocus(false);
+          setHover(false);
+        }
+      }}
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onFocus={() => setFocus(true)}
+        onClick={() => setPinned((value) => !value)}
+        className={`flex w-full items-center gap-2 rounded px-1 text-left ${
+          highlighted || open ? "bg-surface" : ""
+        }`}
+      >
+        <span
+          className="size-2 shrink-0 rounded-full"
+          style={{ backgroundColor: slice.color }}
+        />
+        <span className="min-w-0 flex-1 truncate text-fg-muted">
+          {slice.label}
+        </span>
+        <span className="shrink-0 font-mono text-fg-soft tabular-nums">
+          {formatDuration(slice.ms)}
+        </span>
+        <span aria-hidden="true" className="shrink-0 text-[9px] text-fg-faint">
+          ▾
+        </span>
+      </button>
+      {open && (
+        <div
+          id={panelId}
+          className="absolute right-0 left-0 z-20 mt-1 space-y-1.5 rounded-md border border-line bg-panel p-2.5 shadow-lg"
+        >
+          <StackedBar slices={parts} height={8} />
+          <div className="space-y-1">
+            {parts.map((part) => (
+              <div key={part.key} className="flex items-center gap-2">
+                <span
+                  className="size-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: part.color }}
+                />
+                <span className="min-w-0 flex-1 truncate text-fg-muted">
+                  {part.label}
+                </span>
+                <span className="shrink-0 font-mono text-fg-soft tabular-nums">
+                  {formatDuration(part.ms)}
+                </span>
+                <span className="w-8 shrink-0 text-right font-mono text-[10.5px] text-fg-faint tabular-nums">
+                  {Math.round((part.ms / slice.ms) * 100)}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

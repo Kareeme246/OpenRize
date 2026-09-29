@@ -10,6 +10,10 @@
  * runtime by that same function from the palette in src/lib/settings.ts.
  */
 :root {
+  /* Normal is the existing 16px baseline. Rem utilities scale with the root. */
+  --ui-scale: 1;
+  font-size: calc(16px * var(--ui-scale));
+
   --bg-canvas: #1d201f;
   --bg-rail: #191c1b;
   --bg-bar: #161817;
@@ -74,6 +78,41 @@
   --tier-personal: #cc7f43;
   --tier-model: #a07ad6;
 }
+
+:root[data-size-mode="compact"] {
+  --ui-scale: 0.9;
+}
+
+:root[data-size-mode="relaxed"] {
+  --ui-scale: 1.1;
+}
+
+/* Tailwind's arbitrary pixel typography does not follow the root rem size.
+   Keep its original pixel values at Normal and scale them with the same factor
+   as the rem-based type and icon utilities everywhere, including Pulse. */
+.text-\[9px\] { font-size: calc(9px * var(--ui-scale)); }
+.text-\[9\.5px\] { font-size: calc(9.5px * var(--ui-scale)); }
+.text-\[10px\] { font-size: calc(10px * var(--ui-scale)); }
+.text-\[10\.5px\] { font-size: calc(10.5px * var(--ui-scale)); }
+.text-\[11px\] { font-size: calc(11px * var(--ui-scale)); }
+.text-\[11\.5px\] { font-size: calc(11.5px * var(--ui-scale)); }
+.text-\[12px\] { font-size: calc(12px * var(--ui-scale)); }
+.text-\[12\.5px\] { font-size: calc(12.5px * var(--ui-scale)); }
+.text-\[13px\] { font-size: calc(13px * var(--ui-scale)); }
+.text-\[13\.5px\] { font-size: calc(13.5px * var(--ui-scale)); }
+.text-\[14px\] { font-size: calc(14px * var(--ui-scale)); }
+.text-\[15px\] { font-size: calc(15px * var(--ui-scale)); }
+.text-\[17px\] { font-size: calc(17px * var(--ui-scale)); }
+.text-\[18px\] { font-size: calc(18px * var(--ui-scale)); }
+.text-\[20px\] { font-size: calc(20px * var(--ui-scale)); }
+.text-\[22px\] { font-size: calc(22px * var(--ui-scale)); }
+.text-\[26px\] { font-size: calc(26px * var(--ui-scale)); }
+.text-\[28px\] { font-size: calc(28px * var(--ui-scale)); }
+
+/* Pixel-sized glyphs are the only icons outside rem-based size utilities. */
+.size-\[7px\] { width: calc(7px * var(--ui-scale)); height: calc(7px * var(--ui-scale)); }
+.size-\[18px\] { width: calc(18px * var(--ui-scale)); height: calc(18px * var(--ui-scale)); }
+.w-\[4px\] { width: calc(4px * var(--ui-scale)); }
 
 :root[data-theme="light"] {
   --bg-canvas: #f2f1ed;

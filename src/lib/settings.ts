@@ -9,6 +9,7 @@
 
 export type Theme = "system" | "light" | "dark";
 export type Accent = "green" | "blue" | "purple" | "orange";
+export type SizeMode = "compact" | "normal" | "relaxed";
 export type CloseBehavior = "quit" | "hide";
 /** What the AI suggests for each entry (Rize's "Suggestion level"). */
 export type AiSuggest = "category" | "categoryProject";
@@ -126,6 +127,7 @@ export function nextTrackingStart(
 export interface Settings {
   theme: Theme;
   accent: Accent;
+  sizeMode: SizeMode;
   closeBehavior: CloseBehavior;
   trayEnabled: boolean;
   /** Activity history older than this many days. 0 = keep forever. */
@@ -144,6 +146,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   theme: "system",
   accent: "green",
+  sizeMode: "normal",
   closeBehavior: "hide",
   trayEnabled: true,
   retentionDays: 0,
@@ -269,6 +272,7 @@ export function applyAppearance(settings: Settings): void {
   // Tells the browser to render native widgets (scrollbars, form controls)
   // for the active scheme.
   root.style.colorScheme = theme;
+  root.dataset.sizeMode = settings.sizeMode;
 
   const accent = ACCENTS[settings.accent];
   root.style.setProperty("--accent", accent.base);

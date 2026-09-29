@@ -2636,7 +2636,7 @@ dependencies = [
 
 [[package]]
 name = "openrize"
-version = "0.4.11"
+version = "0.4.12"
 dependencies = [
  "block2",
  "chrono",

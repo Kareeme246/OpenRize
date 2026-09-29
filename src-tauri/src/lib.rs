@@ -79,6 +79,7 @@ impl AppState {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
@@ -200,9 +201,22 @@ pub fn run() {
             commands::delete_client,
             // Local invoice lifecycle.
             commands::list_invoices,
-            commands::create_invoice,
-            commands::set_invoice_status,
+            commands::get_invoice,
+            commands::list_billable_entries,
+            commands::quote_invoice,
+            commands::render_invoice_preview,
+            commands::get_invoice_pdf,
+            commands::save_invoice_draft,
+            commands::finalize_invoice,
+            commands::set_invoice_paid,
+            commands::void_invoice,
             commands::delete_draft_invoice,
+            commands::export_invoice_pdf,
+            commands::get_invoice_profile,
+            commands::update_invoice_profile,
+            commands::get_invoice_logo,
+            commands::set_invoice_logo,
+            commands::clear_invoice_logo,
             commands::list_time_entries,
             commands::get_entry_detail,
             commands::update_time_entry,

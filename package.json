@@ -1,7 +1,7 @@
 {
   "name": "openrize",
   "private": true,
-  "version": "0.4.19",
+  "version": "0.4.20",
   "description": "Automatic, private, local-first time tracking for your Mac",
   "license": "AGPL-3.0",
   "packageManager": "pnpm@12.5.1",
@@ -23,6 +23,7 @@
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
+    "pdfjs-dist": "^6.3.289",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

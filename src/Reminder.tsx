@@ -1,5 +1,6 @@
 import {
   type ReactNode,
+  type RefObject,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -45,30 +46,41 @@ function ReminderPanel() {
   }, [state.phase]);
 
   const card = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const reported = useRef("");
-  // Report the card's size after every state change, even an unchanged one:
-  // the window waits for a measurement before it shows.
+  // Report the card and any overhanging menu's bounds after every state
+  // change: the window waits for a measurement before it shows.
   // biome-ignore lint/correctness/useExhaustiveDependencies: state, menu and hover are what change the layout
   useLayoutEffect(() => {
     const element = card.current;
     // Nothing is drawn while idle, so there is nothing to size a window to.
     if (!element || state.phase === "idle") return;
-    const report = (): void => {
+    const measure = (): {
+      height: number;
+      signature: string;
+      width: number;
+    } => {
       const box = element.getBoundingClientRect();
-      const width = Math.ceil(box.width);
-      const height = Math.ceil(box.height);
-      reported.current = `${width}x${height}`;
+      const menuBox = menuRef.current?.getBoundingClientRect();
+      const left = Math.min(box.left, menuBox?.left ?? box.left);
+      const right = Math.max(box.right, menuBox?.right ?? box.right);
+      const top = Math.min(box.top, menuBox?.top ?? box.top);
+      const bottom = Math.max(box.bottom, menuBox?.bottom ?? box.bottom);
+      const width = Math.ceil(right - left);
+      const height = Math.ceil(bottom - top);
+      return { height, signature: `${left},${top},${width}x${height}`, width };
+    };
+    const report = (): void => {
+      const { height, signature, width } = measure();
+      reported.current = signature;
       void api.resizeReminderPanel(width, height);
     };
     report();
     const observer = new ResizeObserver(() => {
-      const box = element.getBoundingClientRect();
-      if (
-        `${Math.ceil(box.width)}x${Math.ceil(box.height)}` !== reported.current
-      )
-        report();
+      if (measure().signature !== reported.current) report();
     });
     observer.observe(element);
+    if (menuRef.current) observer.observe(menuRef.current);
     return () => observer.disconnect();
   }, [state, menu, hovered]);
 
@@ -97,12 +109,13 @@ function ReminderPanel() {
     <div className="fixed top-0 right-0">
       <div
         ref={card}
-        className="w-max select-none overflow-hidden rounded-[14px] border border-line-strong bg-panel text-[12px] text-fg"
+        className="w-max select-none rounded-[14px] border border-line-strong bg-panel text-[12px] text-fg"
       >
         <PanelBody
           state={state}
           now={now}
           menu={menu}
+          menuRef={menuRef}
           onMenu={setMenu}
           expanded={hovered}
         />
@@ -115,19 +128,26 @@ function PanelBody({
   state,
   now,
   menu,
+  menuRef,
   onMenu,
   expanded,
 }: {
   state: BreakState;
   now: number;
   menu: "snooze" | "more" | null;
+  menuRef: RefObject<HTMLDivElement | null>;
   onMenu: (menu: "snooze" | "more" | null) => void;
   expanded: boolean;
 }) {
   switch (state.phase) {
     case "due":
       return state.reminder ? (
-        <ReminderCard reminder={state.reminder} menu={menu} onMenu={onMenu} />
+        <ReminderCard
+          reminder={state.reminder}
+          menu={menu}
+          menuRef={menuRef}
+          onMenu={onMenu}
+        />
       ) : null;
     case "nudge":
       return state.reminder ? <NudgeCapsule reminder={state.reminder} /> : null;
@@ -153,10 +173,12 @@ function act(action: Promise<unknown>): void {
 function ReminderCard({
   reminder,
   menu,
+  menuRef,
   onMenu,
 }: {
   reminder: ReminderView;
   menu: "snooze" | "more" | null;
+  menuRef: RefObject<HTMLDivElement | null>;
   onMenu: (menu: "snooze" | "more" | null) => void;
 }) {
   const scheduled = reminder.source === "scheduled";
@@ -165,7 +187,7 @@ function ReminderCard({
     : `Time for a ${formatPlanned(reminder.plannedMs)} break`;
   const startLabel = scheduled
     ? `Start ${reminder.label.toLowerCase()}`
-    : "Start break";
+    : "Start";
   return (
     <div className="w-[360px] px-4 py-3.5">
       <div className="flex items-start gap-2.5">
@@ -190,7 +212,7 @@ function ReminderCard({
         <button
           type="button"
           onClick={() => act(api.startBreak())}
-          className="rounded-lg bg-accent px-3 py-1.5 font-semibold text-[12px] text-accent-fg transition-opacity hover:opacity-90"
+          className="shrink-0 whitespace-nowrap rounded-lg bg-accent px-3 py-1.5 font-semibold text-[12px] text-accent-fg transition-opacity hover:opacity-90"
         >
           {startLabel}
         </button>
@@ -199,65 +221,77 @@ function ReminderCard({
             <button
               type="button"
               onClick={() => act(api.snoozeBreak(15))}
-              className="rounded-lg border border-line bg-surface px-3 py-1.5 font-medium text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
+              className="shrink-0 whitespace-nowrap rounded-lg border border-line bg-surface px-3 py-1.5 font-medium text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
             >
               In 15 min
             </button>
           ) : (
-            <SnoozeButton
-              minutes={reminder.snoozeMinutes}
-              open={menu === "snooze"}
-              onToggle={() => onMenu(menu === "snooze" ? null : "snooze")}
-            />
+            <div className="relative">
+              <SnoozeButton
+                minutes={reminder.snoozeMinutes}
+                open={menu === "snooze"}
+                onToggle={() => onMenu(menu === "snooze" ? null : "snooze")}
+              />
+              {menu === "snooze" && (
+                <Menu align="left" menuRef={menuRef}>
+                  {SNOOZE_CHOICES.map((minutes) => (
+                    <MenuItem
+                      key={minutes}
+                      onClick={() => act(api.snoozeBreak(minutes))}
+                    >
+                      Snooze {minutes} min
+                    </MenuItem>
+                  ))}
+                </Menu>
+              )}
+            </div>
           ))}
         <button
           type="button"
           onClick={() => act(api.skipBreak())}
-          className="rounded-lg px-2.5 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+          className="shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
         >
           {scheduled ? "Skip today" : "Skip"}
         </button>
-        <button
-          type="button"
-          aria-label="More options"
-          aria-expanded={menu === "more"}
-          onClick={() => onMenu(menu === "more" ? null : "more")}
-          className="ml-auto grid size-7 place-items-center rounded-lg text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
-        >
-          <svg viewBox="0 0 24 24" className="size-4 fill-current" aria-hidden>
-            <circle cx="5" cy="12" r="1.7" />
-            <circle cx="12" cy="12" r="1.7" />
-            <circle cx="19" cy="12" r="1.7" />
-          </svg>
-        </button>
-      </div>
-      {menu === "snooze" && (
-        <Menu align="left">
-          {SNOOZE_CHOICES.map((minutes) => (
-            <MenuItem
-              key={minutes}
-              onClick={() => act(api.snoozeBreak(minutes))}
-            >
-              Snooze {minutes} min
-            </MenuItem>
-          ))}
-        </Menu>
-      )}
-      {menu === "more" && (
-        <Menu align="right">
-          <MenuItem
-            onClick={() => act(api.pauseBreakReminders(Date.now() + HOUR_MS))}
+        <div className="relative ml-auto">
+          <button
+            type="button"
+            aria-label="More options"
+            aria-expanded={menu === "more"}
+            onClick={() => onMenu(menu === "more" ? null : "more")}
+            className="grid size-7 place-items-center rounded-lg text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
           >
-            Pause reminders for 1 hour
-          </MenuItem>
-          <MenuItem onClick={() => act(api.pauseBreakReminders(tomorrow()))}>
-            Pause reminders until tomorrow
-          </MenuItem>
-          <MenuItem onClick={() => act(api.openBreakSettings())}>
-            Reminder settings…
-          </MenuItem>
-        </Menu>
-      )}
+            <svg
+              viewBox="0 0 24 24"
+              className="size-4 fill-current"
+              aria-hidden
+            >
+              <circle cx="5" cy="12" r="1.7" />
+              <circle cx="12" cy="12" r="1.7" />
+              <circle cx="19" cy="12" r="1.7" />
+            </svg>
+          </button>
+          {menu === "more" && (
+            <Menu align="right" menuRef={menuRef}>
+              <MenuItem
+                onClick={() =>
+                  act(api.pauseBreakReminders(Date.now() + HOUR_MS))
+                }
+              >
+                Pause reminders for 1 hour
+              </MenuItem>
+              <MenuItem
+                onClick={() => act(api.pauseBreakReminders(tomorrow()))}
+              >
+                Pause reminders until tomorrow
+              </MenuItem>
+              <MenuItem onClick={() => act(api.openBreakSettings())}>
+                Reminder settings…
+              </MenuItem>
+            </Menu>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -288,9 +322,9 @@ function SnoozeButton({
       <button
         type="button"
         onClick={() => act(api.snoozeBreak(minutes))}
-        className="px-3 py-1.5 font-medium text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
+        className="shrink-0 whitespace-nowrap px-3 py-1.5 font-medium text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
       >
-        Snooze {minutes}m
+        Snooze {minutes} min
       </button>
       <button
         type="button"
@@ -318,16 +352,19 @@ function SnoozeButton({
 
 function Menu({
   align,
+  menuRef,
   children,
 }: {
   align: "left" | "right";
+  menuRef: RefObject<HTMLDivElement | null>;
   children: ReactNode;
 }) {
   return (
     <div
-      className={`mt-2 flex flex-col rounded-lg border border-line bg-surface p-1 ${
-        align === "right" ? "ml-auto" : "mr-auto"
-      } w-fit min-w-[150px]`}
+      ref={menuRef}
+      className={`absolute top-full z-50 mt-1 flex w-fit min-w-[150px] flex-col rounded-lg border border-line bg-panel p-1 ${
+        align === "right" ? "right-0" : "left-0"
+      }`}
     >
       {children}
     </div>
@@ -345,7 +382,7 @@ function MenuItem({
     <button
       type="button"
       onClick={onClick}
-      className="rounded-md px-2.5 py-1.5 text-left text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
+      className="whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
     >
       {children}
     </button>

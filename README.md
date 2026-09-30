@@ -164,6 +164,18 @@ the last snapshot Rust sent it; Rust pushes events when something changes.
 
 Stack: [Tauri 2](https://tauri.app) · Rust · SQLite · Swift · [React 19](https://react.dev) · TypeScript · [Tailwind CSS 4](https://tailwindcss.com) · [Vite](https://vite.dev)
 
+## CLI installation
+
+Standalone CLI releases start at **v0.8.1** and support **Apple Silicon macOS**:
+
+```sh
+curl -fsSL https://github.com/Kareeme246/OpenRize/releases/latest/download/install.sh | bash
+```
+
+Installs into `~/.local/bin`; add that directory to PATH if needed. The installer verifies
+SHA-256, the code signature, and notarization before installing. It does not replace existing
+files or edit shell profiles.
+
 ## Building from source
 
 Packaged builds are available from the [Releases](https://github.com/Kareeme246/OpenRize/releases)

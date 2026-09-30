@@ -124,6 +124,76 @@ export function nextTrackingStart(
   return null;
 }
 
+export interface Weekdays {
+  mon: boolean;
+  tue: boolean;
+  wed: boolean;
+  thu: boolean;
+  fri: boolean;
+  sat: boolean;
+  sun: boolean;
+}
+
+/** A fixed-time recurring break such as "Lunch 12:30, 45 min, weekdays". */
+export interface ScheduledBreak {
+  id: string;
+  label: string;
+  /** `HH:MM`, local time. */
+  at: string;
+  minutes: number;
+  days: Weekdays;
+  enabled: boolean;
+}
+
+/** Interval reminders have no days: tracking hours decide when they fire. */
+export interface BreakSettings {
+  enabled: boolean;
+  workMinutes: number;
+  breakMinutes: number;
+  /** What the reminder's snooze button snoozes for; 5, 10 or 15. */
+  snoozeMinutes: number;
+  /** An extra line on the reminder. Empty shows nothing. */
+  message: string;
+  /** Pause running stopwatches for a break and resume them after. */
+  pauseStopwatches: boolean;
+  chime: boolean;
+  schedules: ScheduledBreak[];
+}
+
+export const WEEKDAY_KEYS = [
+  "mon",
+  "tue",
+  "wed",
+  "thu",
+  "fri",
+  "sat",
+  "sun",
+] as const;
+
+export const WEEKDAYS_MON_FRI: Weekdays = {
+  mon: true,
+  tue: true,
+  wed: true,
+  thu: true,
+  fri: true,
+  sat: false,
+  sun: false,
+};
+
+export const MAX_BREAK_MESSAGE_CHARS = 120;
+export const MAX_SCHEDULED_BREAKS = 12;
+
+export const DEFAULT_BREAK_SETTINGS: BreakSettings = {
+  enabled: true,
+  workMinutes: 50,
+  breakMinutes: 5,
+  snoozeMinutes: 5,
+  message: "",
+  pauseStopwatches: false,
+  chime: false,
+  schedules: [],
+};
+
 export interface Settings {
   theme: Theme;
   accent: Accent;
@@ -141,6 +211,7 @@ export interface Settings {
   /** Expected work hours per week; a day's target is a fifth of it. */
   weeklyTargetHours: number;
   trackingHours: TrackingHours;
+  breaks: BreakSettings;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -156,6 +227,7 @@ export const DEFAULT_SETTINGS: Settings = {
   aiCustomPrompt: "",
   weeklyTargetHours: 40,
   trackingHours: DEFAULT_TRACKING_HOURS,
+  breaks: DEFAULT_BREAK_SETTINGS,
 };
 
 /** A working day's share of the weekly target, in milliseconds. */

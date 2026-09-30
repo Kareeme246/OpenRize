@@ -1,5 +1,11 @@
 import { useLayoutEffect, useRef } from "react";
 import {
+  type BreakEntry,
+  breakEnd,
+  breakLabel,
+  takenBreaks,
+} from "../../lib/breaks";
+import {
   addDays,
   currentCalendarDay,
   isSameDay,
@@ -13,7 +19,7 @@ import {
 } from "../../lib/entries";
 import { formatDuration } from "../../lib/format";
 import type { Category, Project, TimeEntry } from "../../lib/types";
-import { NowLine, useMinuteClock } from "./DayView";
+import { BreakBand, NowLine, useMinuteClock } from "./DayView";
 import { EntryBlock } from "./EntryBlock";
 import { gutterLabel, hourOffset, place, timelineFor } from "./timeline";
 
@@ -22,6 +28,8 @@ const HOUR_HEIGHT_PX = 56;
 interface WeekViewProps {
   weekStart: Date;
   entries: TimeEntry[];
+  breaks: BreakEntry[];
+  scheduleLabels: Map<string, string>;
   loading: boolean;
   selectedId?: string;
   categoryById: Map<string, Category>;
@@ -38,6 +46,8 @@ interface WeekViewProps {
 export function WeekView({
   weekStart,
   entries,
+  breaks,
+  scheduleLabels,
   loading,
   selectedId,
   categoryById,
@@ -206,6 +216,33 @@ export function WeekView({
                     }}
                   />
                 ))}
+                {takenBreaks(breaks)
+                  .filter(
+                    (entry) =>
+                      (entry.startedAt ?? 0) >= column.start &&
+                      (entry.startedAt ?? 0) < addDays(column.day, 1).getTime(),
+                  )
+                  .map((entry) => {
+                    const { top, height } = place(
+                      timeline,
+                      entry.startedAt ?? column.start,
+                      breakEnd(entry, now),
+                      column.start,
+                      "wall",
+                      3,
+                    );
+                    return (
+                      <BreakBand
+                        key={entry.id}
+                        entry={entry}
+                        top={top}
+                        height={height}
+                        label={breakLabel(entry, scheduleLabels)}
+                        now={now}
+                        narrow
+                      />
+                    );
+                  })}
                 {column.entries.map((entry) => {
                   const end = entryEnd(entry, now);
                   const { top, height } = place(

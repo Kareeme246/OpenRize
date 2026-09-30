@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Slice, StackedBar } from "./components/Charts";
+import { useBreaks } from "./hooks/useBreaks";
 import { useCatalog } from "./hooks/useCatalog";
 import { SettingsProvider, useSettings } from "./hooks/useSettings";
 import { useTauriEvent } from "./hooks/useTauriEvent";
@@ -11,6 +12,7 @@ import {
 } from "./lib/activity";
 import * as api from "./lib/api";
 import { describeError } from "./lib/api";
+import { type BreakState, formatCountdown, formatUntil } from "./lib/breaks";
 import { addDays, currentCalendarDay } from "./lib/dates";
 import {
   countsAsWork,
@@ -54,6 +56,7 @@ function PulsePanel() {
   const { categoryById, projectById } = catalog;
   const timers = useTimers();
   const { now } = timers;
+  const breaks = useBreaks();
 
   // Only the live fields are read; a full snapshot is a tick plus segments.
   const [live, setLive] = useState<ActivityTick | null>(null);
@@ -174,6 +177,9 @@ function PulsePanel() {
           targetMs={dailyTargetMs(settings)}
           now={now}
         />
+      </section>
+      <section className="border-line border-t px-3.5 py-2.5">
+        <BreakRow state={breaks.state} now={now} />
       </section>
       {timers.timers.length > 0 && (
         <section className="border-line border-t px-3.5 pt-2.5 pb-2">
@@ -472,6 +478,71 @@ function TodaySummary({
         </p>
       )}
     </>
+  );
+}
+
+/** The next break, a door to taking one now, and the pause-reminders switch. */
+function BreakRow({ state, now }: { state: BreakState; now: number }) {
+  const current = state.current;
+  const onBreak = current !== null && current.endedAt === null;
+  if (onBreak) {
+    const remaining = current.startedAt + current.plannedMs - now;
+    return (
+      <div className="flex items-center gap-2">
+        <span className="size-2 shrink-0 animate-pulse rounded-full bg-break" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium text-fg-muted">
+            {remaining > 0
+              ? `On ${current.label.toLowerCase()} · ${formatCountdown(remaining)} left`
+              : `${current.label} is over`}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => void api.endBreak()}
+          className="rounded-lg bg-accent px-2.5 py-1.5 font-semibold text-[11.5px] text-accent-fg transition-opacity hover:opacity-90"
+        >
+          End break
+        </button>
+      </div>
+    );
+  }
+
+  const paused = state.pausedUntil !== null;
+  const next = state.next;
+  const summary = paused
+    ? `Reminders paused until ${formatTime(state.pausedUntil ?? now)}`
+    : next
+      ? `${next.source === "scheduled" ? next.label : "Next break"} ${formatUntil(next.at - now)}`
+      : "Break reminders are off";
+  return (
+    <div className="flex items-center gap-2">
+      <div className="min-w-0 flex-1">
+        <div className="font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
+          Break
+        </div>
+        <div className="truncate text-fg-muted">{summary}</div>
+      </div>
+      <button
+        type="button"
+        onClick={() =>
+          void api.pauseBreakReminders(paused ? null : Date.now() + 3_600_000)
+        }
+        title={
+          paused ? "Turn reminders back on" : "Pause reminders for an hour"
+        }
+        className="rounded-lg px-2 py-1.5 font-medium text-[11px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+      >
+        {paused ? "Resume" : "Pause 1h"}
+      </button>
+      <button
+        type="button"
+        onClick={() => void api.startBreak()}
+        className="rounded-lg border border-line bg-surface px-2.5 py-1.5 font-semibold text-[11.5px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
+      >
+        Take a break now
+      </button>
+    </div>
   );
 }
 

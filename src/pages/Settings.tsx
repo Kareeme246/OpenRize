@@ -1,11 +1,5 @@
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AiEffectiveness,
   PersonalModels,
@@ -13,13 +7,11 @@ import {
 } from "../components/AiLearning";
 import { BatteryEnergyMonitor } from "../components/BatteryEnergyMonitor";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { Picker } from "../components/Picker";
 import {
   SegmentedControl,
   type SegmentedOption,
   Toggle,
 } from "../components/SegmentedControl";
-import { type Status, StatusBadge } from "../components/StatusBadge";
 import { useAiMetrics } from "../hooks/useAiMetrics";
 import { llmUnavailableReason, useAiStatus } from "../hooks/useAiStatus";
 import { useEnergy } from "../hooks/useEnergy";
@@ -42,6 +34,13 @@ import {
   type TrackingHours,
 } from "../lib/settings";
 import type { AiStatus, ReleaseNotes, Route, UpdateStatus } from "../lib/types";
+import { BreakSettingsGroups } from "./settings/BreakSettings";
+import {
+  Select,
+  SettingBlock,
+  SettingGroup,
+  SettingRow,
+} from "./settings/SettingParts";
 
 const THEME_OPTIONS: SegmentedOption<Theme>[] = [
   { value: "system", label: "System" },
@@ -148,71 +147,6 @@ const RETENTION_OPTIONS = [
   { value: 7, label: "7 days" },
   { value: 30, label: "30 days" },
 ] satisfies { value: number; label: string }[];
-
-/** Title + description with an inline control on the right. */
-function SettingRow({
-  title,
-  description,
-  status,
-  children,
-}: {
-  title: string;
-  description: string;
-  status?: Status;
-  children?: ReactNode;
-}) {
-  return (
-    <div className="setting-row flex items-center justify-between gap-4 border-b border-line px-4 py-3 last:border-b-0">
-      <div className="min-w-0">
-        <div className="text-[13px] font-medium text-fg">{title}</div>
-        <div className="text-[12px] leading-relaxed text-fg-muted">
-          {description}
-        </div>
-      </div>
-      {children ?? (status !== undefined && <StatusBadge status={status} />)}
-    </div>
-  );
-}
-
-/** Title + description with a full-width control underneath. */
-function SettingBlock({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="setting-block border-b border-line px-4 py-3 last:border-b-0">
-      <div className="text-[13px] font-medium text-fg">{title}</div>
-      <div className="text-[12px] leading-relaxed text-fg-muted">
-        {description}
-      </div>
-      <div className="mt-3">{children}</div>
-    </div>
-  );
-}
-
-function SettingGroup({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="flex flex-col gap-2">
-      <h2 className="px-1 font-mono text-[11px] font-semibold uppercase tracking-wider text-fg-muted">
-        {title}
-      </h2>
-      <div className="settings-group-card rounded-xl border border-settings-card-border bg-settings-card">
-        {children}
-      </div>
-    </section>
-  );
-}
 
 function SettingsSectionHeading({
   title,
@@ -335,29 +269,6 @@ function FileLine({ label, path }: { label: string; path: string }) {
         {path}
       </span>
     </div>
-  );
-}
-
-/** A themed dropdown, styled to match the segmented controls beside it. */
-function Select({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  options: { value: number; label: string }[];
-  onChange: (value: number) => void;
-}) {
-  return (
-    <Picker<number>
-      ariaLabel={label}
-      value={value}
-      options={options}
-      onChange={onChange}
-      variant="compact"
-    />
   );
 }
 
@@ -835,6 +746,10 @@ export function Settings({
   }, []);
 
   useEffect(() => {
+    if (route.section === "notifications") {
+      selectSection("notifications");
+      return;
+    }
     if (route.section !== "updates" && revealUpdates === 0) return;
     selectSection("overview");
   }, [route.section, revealUpdates, selectSection]);
@@ -1187,9 +1102,10 @@ export function Settings({
           >
             <SettingsSectionHeading
               title="Notifications"
-              description="Notification preferences will appear here when reminders are available."
+              description="Break reminders appear in the top-right corner of your screen, whichever app is in front."
             />
-            <SettingGroup title="Reminders">
+            <BreakSettingsGroups />
+            <SettingGroup title="Stopwatch reminders">
               <SettingRow
                 title="Long-run reminders"
                 description="Ping me when a tracker has been running unusually long"

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { BreakEntry, BreakState } from "./breaks";
 import type { LoginItemState, Settings, StoragePaths } from "./settings";
 import type { Timer } from "./timers";
 import type {
@@ -54,6 +55,10 @@ export const ENERGY_CHANGED = "energy-changed";
 export const OPEN_REVIEW = "open-review";
 /** Payload: `UpdateStatus`. */
 export const UPDATE_STATUS = "update-status";
+/** Main window only: the reminder asked for Settings > Notifications. */
+export const OPEN_BREAK_SETTINGS = "open-break-settings";
+/** Payload: `BreakState`. */
+export const BREAK_STATE_CHANGED = "break-state-changed";
 
 /** Tauri rejects with a string; React errors are Error objects. Handle both. */
 export function describeError(error: unknown): string {
@@ -101,6 +106,75 @@ export async function hidePulsePanel(): Promise<void> {
 /** Closes the panel and brings the main window forward. */
 export async function openMainWindow(review: boolean): Promise<void> {
   await invoke("open_main_window", { review });
+}
+
+// --- Break reminders ---
+
+export async function breakState(): Promise<BreakState> {
+  return await invoke<BreakState>("break_state");
+}
+
+/** Starts the pending reminder's break, or a manual one when none is pending. */
+export async function startBreak(): Promise<BreakState> {
+  return await invoke<BreakState>("start_break");
+}
+
+export async function endBreak(): Promise<BreakState> {
+  return await invoke<BreakState>("end_break");
+}
+
+export async function snoozeBreak(minutes: number): Promise<BreakState> {
+  return await invoke<BreakState>("snooze_break", { minutes });
+}
+
+export async function skipBreak(): Promise<BreakState> {
+  return await invoke<BreakState>("skip_break");
+}
+
+/** Re-expands a reminder that collapsed to the corner capsule. */
+export async function expandBreakReminder(): Promise<BreakState> {
+  return await invoke<BreakState>("expand_break_reminder");
+}
+
+/** Adds five minutes to the running break. */
+export async function extendBreak(): Promise<BreakState> {
+  return await invoke<BreakState>("extend_break");
+}
+
+/** Silences reminders until `until` (epoch ms); null turns them back on. */
+export async function pauseBreakReminders(
+  until: number | null,
+): Promise<BreakState> {
+  return await invoke<BreakState>("pause_break_reminders", { until });
+}
+
+export async function listBreaks(
+  sinceMs: number,
+  untilMs: number,
+): Promise<BreakEntry[]> {
+  return await invoke<BreakEntry[]>("list_breaks", { sinceMs, untilMs });
+}
+
+/** Sizes the top-right reminder panel to its card. */
+export async function resizeReminderPanel(
+  width: number,
+  height: number,
+): Promise<void> {
+  await invoke("resize_reminder_panel", { width, height });
+}
+
+/** Brings the main window forward on Settings > Notifications. */
+export async function openBreakSettings(): Promise<void> {
+  await invoke("open_break_settings");
+}
+
+/** Dev builds only: raises a sample reminder. */
+export async function devSampleBreakReminder(): Promise<BreakState> {
+  return await invoke<BreakState>("dev_sample_break_reminder");
+}
+
+export async function previewBreakChime(): Promise<void> {
+  await invoke("preview_break_chime");
 }
 
 // --- Activity & Capture ---

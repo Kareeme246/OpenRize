@@ -348,8 +348,38 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
     }
 
+    if current_version < 8 {
+        let tx = conn.transaction()?;
+        tx.execute_batch(BREAKS_V8)?;
+        tx.execute("PRAGMA user_version = 8;", [])?;
+        tx.commit()?;
+    }
+
     Ok(())
 }
+
+/// Break reminders: one row per break decision (taken, skipped, missed, or
+/// credited from idle time). The break itself stays a `break` segment; this
+/// table records the choice around it and links to its segment. Purely
+/// additive, so existing installs upgrade in place untouched.
+const BREAKS_V8: &str = "
+CREATE TABLE breaks (
+  id          TEXT PRIMARY KEY,
+  source      TEXT NOT NULL,
+  schedule_id TEXT,
+  due_at      INTEGER,
+  planned_ms  INTEGER NOT NULL,
+  status      TEXT NOT NULL,
+  snoozes     INTEGER NOT NULL DEFAULT 0,
+  started_at  INTEGER,
+  ended_at    INTEGER,
+  segment_id  INTEGER REFERENCES segments(id) ON DELETE SET NULL,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+CREATE INDEX breaks_started_at ON breaks (started_at);
+CREATE INDEX breaks_due_at ON breaks (due_at);
+";
 
 /// The Clients page: a client can be archived (kept, hidden from the active
 /// list and from the pickers that assign one) and carries free-form notes.
@@ -671,7 +701,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 7);
+        assert_eq!(v, 8);
 
         let cat_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM categories;", [], |r| r.get(0))
@@ -770,7 +800,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 7);
+        assert_eq!(v, 8);
 
         let ids: Vec<String> = conn
             .prepare("SELECT id FROM invoices ORDER BY id")
@@ -969,7 +999,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 7);
+        assert_eq!(v, 8);
     }
 
     /// A database the v5 migration already ran on (with `legacy` rows kept) loses
@@ -1084,7 +1114,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 7);
+        assert_eq!(v, 8);
     }
 
     /// A database as v6 shipped it: the fresh schema without the client
@@ -1094,7 +1124,8 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         run_migrations(&mut conn).unwrap();
         conn.execute_batch(
-            "ALTER TABLE clients DROP COLUMN archived_at;
+            "DROP TABLE breaks;
+             ALTER TABLE clients DROP COLUMN archived_at;
              ALTER TABLE clients DROP COLUMN notes;
              INSERT INTO clients (id, name, email, address, default_rate, currency, created_at, updated_at)
                VALUES ('c1', 'Acme', 'a@x.test', '1 Main St.', 125.5, 'EUR', 10, 20);
@@ -1124,7 +1155,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 7);
+        assert_eq!(v, 8);
 
         type Row = (
             String,
@@ -1186,6 +1217,77 @@ mod tests {
             )
             .unwrap();
         assert_eq!(linked, ("c1".into(), "p1".into(), 3_600_000));
+    }
+
+    /// A database as v7 shipped it: the fresh schema without the `breaks`
+    /// table, holding clients, projects, tracked time and an invoice.
+    #[test]
+    fn a_v7_database_upgrades_in_place_keeping_clients_projects_time_and_invoices() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        conn.execute_batch(
+            "DROP TABLE breaks;
+             INSERT INTO clients (id, name, created_at, updated_at, archived_at, notes)
+               VALUES ('c1', 'Acme', 10, 20, 30, 'Net 15');
+             INSERT INTO projects (id, client_id, name, color, created_at, updated_at)
+               VALUES ('p1', 'c1', 'Swap', '#fff', 1, 1);
+             INSERT INTO segments (app, title, kind, label, started_at, ended_at)
+               VALUES ('Code', 'main.rs', 'activity', NULL, 100, 900);
+             INSERT INTO segments (app, title, kind, label, started_at, ended_at)
+               VALUES ('Idle', 'No activity', 'break', 'Idle', 900, 1500);
+             INSERT INTO time_entries (id, started_at, ended_at, description, project_id, status, billable, invoice_id, created_at, updated_at)
+               VALUES ('e1', 0, 3600000, 'Work', 'p1', 'approved', 1, 'inv1', 1, 1);
+             INSERT INTO invoices (id, client_id, client_name, currency, status, from_name, from_address, total_cents, created_at, updated_at)
+               VALUES ('inv1', 'c1', 'Acme', 'USD', 'draft', 'Me', '1 Main', 10000, 5, 5);
+             INSERT INTO invoice_lines (id, invoice_id, position, kind, entry_id, description, quantity_hundredths, rate_cents, amount_cents)
+               VALUES ('l1', 'inv1', 0, 'time', 'e1', 'Work', 100, 10000, 10000);
+             PRAGMA user_version = 7;",
+        )
+        .unwrap();
+        assert!(conn.prepare("SELECT id FROM breaks").is_err());
+
+        run_migrations(&mut conn).unwrap();
+
+        let v: i32 = conn
+            .query_row("PRAGMA user_version;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 8);
+        let mut fresh = Connection::open_in_memory().unwrap();
+        run_migrations(&mut fresh).unwrap();
+        assert_eq!(schema_snapshot(&fresh), schema_snapshot(&conn));
+
+        // The new table starts empty and accepts a decision linked to a segment.
+        let breaks: i64 = conn
+            .query_row("SELECT COUNT(*) FROM breaks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(breaks, 0);
+        conn.execute(
+            "INSERT INTO breaks (id, source, planned_ms, status, segment_id, created_at, updated_at)
+             VALUES ('b1', 'idle', 300000, 'taken', 2, 1, 1)",
+            [],
+        )
+        .unwrap();
+
+        let kept: (i64, i64, i64, i64, i64, i64) = conn
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM clients WHERE notes = 'Net 15' AND archived_at = 30),
+                        (SELECT COUNT(*) FROM projects WHERE client_id = 'c1'),
+                        (SELECT COUNT(*) FROM segments),
+                        (SELECT COUNT(*) FROM time_entries WHERE invoice_id = 'inv1' AND ended_at - started_at = 3600000),
+                        (SELECT total_cents FROM invoices WHERE id = 'inv1'),
+                        (SELECT COUNT(*) FROM invoice_lines WHERE entry_id = 'e1')",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+            )
+            .unwrap();
+        assert_eq!(kept, (1, 1, 2, 1, 10_000, 1));
+        // Invoiced time is still protected after the upgrade.
+        assert!(conn
+            .execute(
+                "UPDATE time_entries SET description = 'x' WHERE id = 'e1'",
+                []
+            )
+            .is_err());
     }
 
     #[test]

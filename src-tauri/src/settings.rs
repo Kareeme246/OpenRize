@@ -246,6 +246,172 @@ impl TrackingHours {
     }
 }
 
+pub const DEFAULT_WORK_MINUTES: u16 = 50;
+pub const DEFAULT_BREAK_MINUTES: u16 = 5;
+pub const DEFAULT_SNOOZE_MINUTES: u16 = 5;
+/// The snooze lengths the reminder's chevron offers; the default is one of them.
+pub const SNOOZE_CHOICES: [u16; 3] = [5, 10, 15];
+pub const MAX_BREAK_MESSAGE_CHARS: usize = 120;
+pub const MAX_SCHEDULED_BREAKS: usize = 12;
+const MAX_SCHEDULE_LABEL_CHARS: usize = 40;
+
+/// Days a scheduled break repeats on. Interval reminders have no days of
+/// their own: tracking hours alone decide when they fire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Weekdays {
+    pub mon: bool,
+    pub tue: bool,
+    pub wed: bool,
+    pub thu: bool,
+    pub fri: bool,
+    pub sat: bool,
+    pub sun: bool,
+}
+
+impl Default for Weekdays {
+    fn default() -> Self {
+        Self {
+            mon: true,
+            tue: true,
+            wed: true,
+            thu: true,
+            fri: true,
+            sat: false,
+            sun: false,
+        }
+    }
+}
+
+impl Weekdays {
+    /// Whether the schedule repeats on `weekday`.
+    pub fn includes(&self, weekday: chrono::Weekday) -> bool {
+        use chrono::Weekday::{Fri, Mon, Sat, Sun, Thu, Tue, Wed};
+        match weekday {
+            Mon => self.mon,
+            Tue => self.tue,
+            Wed => self.wed,
+            Thu => self.thu,
+            Fri => self.fri,
+            Sat => self.sat,
+            Sun => self.sun,
+        }
+    }
+}
+
+/// A fixed-time, recurring break such as "Lunch 12:30, 45 min, weekdays".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ScheduledBreak {
+    pub id: String,
+    pub label: String,
+    /// `HH:MM`, local time.
+    pub at: String,
+    pub minutes: u16,
+    pub days: Weekdays,
+    pub enabled: bool,
+}
+
+impl Default for ScheduledBreak {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            label: "Break".to_string(),
+            at: "12:30".to_string(),
+            minutes: 30,
+            days: Weekdays::default(),
+            enabled: true,
+        }
+    }
+}
+
+impl ScheduledBreak {
+    /// Minutes after local midnight the break is due.
+    pub fn at_minutes(&self) -> u32 {
+        parse_time_minutes(&self.at).unwrap_or(0)
+    }
+
+    fn normalized(mut self) -> Self {
+        if self.id.trim().is_empty() {
+            self.id = uuid::Uuid::now_v7().to_string();
+        }
+        let label: String = self
+            .label
+            .trim()
+            .chars()
+            .take(MAX_SCHEDULE_LABEL_CHARS)
+            .collect();
+        self.label = if label.is_empty() {
+            "Break".to_string()
+        } else {
+            label
+        };
+        self.at = normalize_time_str(&self.at, "12:30");
+        self.minutes = self.minutes.clamp(1, 180);
+        self
+    }
+}
+
+/// Break reminders (Settings > Notifications). Interval reminders fire after
+/// `work_minutes` of continuous work; scheduled breaks fire at fixed times.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BreakSettings {
+    pub enabled: bool,
+    pub work_minutes: u16,
+    pub break_minutes: u16,
+    /// The reminder's snooze button snoozes for this long; its chevron offers
+    /// every length in `SNOOZE_CHOICES`.
+    pub snooze_minutes: u16,
+    /// An optional extra line on the reminder. Empty shows nothing.
+    pub message: String,
+    /// Pause running stopwatches for a break and resume them after it.
+    pub pause_stopwatches: bool,
+    pub chime: bool,
+    pub schedules: Vec<ScheduledBreak>,
+}
+
+impl Default for BreakSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            work_minutes: DEFAULT_WORK_MINUTES,
+            break_minutes: DEFAULT_BREAK_MINUTES,
+            snooze_minutes: DEFAULT_SNOOZE_MINUTES,
+            message: String::new(),
+            pause_stopwatches: false,
+            chime: false,
+            schedules: Vec::new(),
+        }
+    }
+}
+
+impl BreakSettings {
+    fn normalized(mut self) -> Self {
+        self.work_minutes = self.work_minutes.clamp(15, 180);
+        self.break_minutes = self.break_minutes.clamp(1, 60);
+        if !SNOOZE_CHOICES.contains(&self.snooze_minutes) {
+            self.snooze_minutes = DEFAULT_SNOOZE_MINUTES;
+        }
+        let message: String = self
+            .message
+            .trim()
+            .chars()
+            .take(MAX_BREAK_MESSAGE_CHARS)
+            .collect();
+        // Cutting at the limit can leave a trailing space; normalizing must
+        // be idempotent or the value changes on every reload.
+        self.message = message.trim_end().to_string();
+        self.schedules.truncate(MAX_SCHEDULED_BREAKS);
+        self.schedules = self
+            .schedules
+            .into_iter()
+            .map(ScheduledBreak::normalized)
+            .collect();
+        self
+    }
+}
+
 /// Every field is `#[serde(default)]`, so a settings file written by an older
 /// build loads with new fields defaulted instead of failing to parse.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -269,6 +435,7 @@ pub struct Settings {
     /// Expected work hours per week. A day's target is a fifth of it.
     pub weekly_target_hours: u16,
     pub tracking_hours: TrackingHours,
+    pub breaks: BreakSettings,
 }
 
 impl Default for Settings {
@@ -286,6 +453,7 @@ impl Default for Settings {
             ai_custom_prompt: String::new(),
             weekly_target_hours: DEFAULT_WEEKLY_TARGET_HOURS,
             tracking_hours: TrackingHours::default(),
+            breaks: BreakSettings::default(),
         }
     }
 }
@@ -307,6 +475,7 @@ impl Settings {
                 .collect();
         }
         self.tracking_hours = self.tracking_hours.normalized();
+        self.breaks = self.breaks.normalized();
         self
     }
 }
@@ -432,6 +601,7 @@ mod tests {
                         saturday: DaySchedule::default(),
                         sunday: DaySchedule::default(),
                     },
+                    breaks: BreakSettings::default(),
                 })
                 .unwrap();
         }
@@ -502,6 +672,57 @@ mod tests {
             })
             .unwrap();
         assert_eq!(huge.weekly_target_hours, MAX_WEEKLY_TARGET_HOURS);
+    }
+
+    #[test]
+    fn break_reminders_default_to_fifty_minutes_of_work_then_five_off_the_clock() {
+        let defaults = Settings::default().breaks;
+        assert!(defaults.enabled);
+        assert_eq!(defaults.work_minutes, 50);
+        assert_eq!(defaults.break_minutes, 5);
+        assert_eq!(defaults.snooze_minutes, 5);
+        assert_eq!(defaults.message, "");
+        // Pausing stopwatches for a break is opt-in.
+        assert!(!defaults.pause_stopwatches);
+        assert!(defaults.schedules.is_empty());
+        // An older settings file loads with the defaults filled in.
+        let loaded: Settings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(loaded.breaks, defaults);
+    }
+
+    #[test]
+    fn break_settings_are_clamped_and_schedules_get_ids() {
+        let dir = temp_dir("breaks");
+        let mut store = SettingsStore::load(&dir).unwrap();
+        let saved = store
+            .set(Settings {
+                breaks: BreakSettings {
+                    work_minutes: 1,
+                    break_minutes: 500,
+                    snooze_minutes: 7,
+                    message: "  x".repeat(100),
+                    schedules: vec![ScheduledBreak {
+                        label: "   ".to_string(),
+                        at: "25:99".to_string(),
+                        minutes: 0,
+                        ..ScheduledBreak::default()
+                    }],
+                    ..BreakSettings::default()
+                },
+                ..Settings::default()
+            })
+            .unwrap();
+        assert_eq!(saved.breaks.work_minutes, 15);
+        assert_eq!(saved.breaks.break_minutes, 60);
+        assert_eq!(saved.breaks.snooze_minutes, DEFAULT_SNOOZE_MINUTES);
+        assert!(saved.breaks.message.chars().count() <= MAX_BREAK_MESSAGE_CHARS);
+        let schedule = &saved.breaks.schedules[0];
+        assert!(!schedule.id.is_empty());
+        assert_eq!(schedule.label, "Break");
+        assert_eq!(schedule.at, "12:30");
+        assert_eq!(schedule.minutes, 1);
+        let reloaded = SettingsStore::load(&dir).unwrap().snapshot();
+        assert_eq!(reloaded.breaks, saved.breaks);
     }
 
     #[test]

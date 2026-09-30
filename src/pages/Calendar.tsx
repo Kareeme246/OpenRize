@@ -16,6 +16,7 @@ import { useTauriEvent } from "../hooks/useTauriEvent";
 import { timeByApp } from "../lib/activity";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
+import { type BreakEntry, totalBreaks } from "../lib/breaks";
 import {
   addDays,
   calendarDay,
@@ -109,6 +110,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [segments, setSegments] = useState<ActivitySegment[]>([]);
   const [cells, setCells] = useState<RollupCell[]>([]);
+  const [breakEntries, setBreakEntries] = useState<BreakEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
@@ -130,14 +132,20 @@ export function Calendar({ route, navigate }: CalendarProps) {
           calendarDayEdges(grid.start, grid.end),
           "category",
         );
-        if (shownKey.current === key) setCells(next);
+        const breakList = await api.listBreaks(startMs, endMs);
+        if (shownKey.current === key) {
+          setCells(next);
+          setBreakEntries(breakList);
+        }
       } else {
-        const [list, snapshot] = await Promise.all([
+        const [list, snapshot, breakList] = await Promise.all([
           api.listTimeEntries(startMs, endMs - 1),
           scale === "day" ? api.fetchActivitySnapshot(startMs) : null,
+          api.listBreaks(startMs, endMs),
         ]);
         if (shownKey.current === key) {
           setEntries(list);
+          setBreakEntries(breakList);
           if (snapshot) {
             setSegments(
               snapshot.segments.filter(
@@ -163,11 +171,13 @@ export function Calendar({ route, navigate }: CalendarProps) {
     const key = `${scale}:${startMs}`;
     setLoading(true);
     try {
-      const [list, snapshot] = await Promise.all([
+      const [list, snapshot, breakList] = await Promise.all([
         api.rebuildTimeEntries(startMs, endMs - 1),
         scale === "day" ? api.fetchActivitySnapshot(startMs) : null,
+        api.listBreaks(startMs, endMs),
       ]);
       if (shownKey.current !== key) return;
+      setBreakEntries(breakList);
       if (scale === "month") {
         await refresh();
       } else {
@@ -194,6 +204,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
 
   useTauriEvent(api.ENTRIES_CHANGED, () => void refresh());
   useTauriEvent(api.ACTIVITY_CHANGED, () => void refresh());
+  useTauriEvent(api.BREAK_STATE_CHANGED, () => void refresh());
   useTauriEvent(api.SUGGESTION_READY, () => void refresh());
 
   useEffect(() => {
@@ -410,6 +421,20 @@ export function Calendar({ route, navigate }: CalendarProps) {
       : undefined;
 
   const targetMs = targetMsFor(settings, scale, daysInRange);
+  const scheduleLabels = useMemo(
+    () =>
+      new Map(
+        settings.breaks.schedules.map((schedule) => [
+          schedule.id,
+          schedule.label,
+        ]),
+      ),
+    [settings.breaks.schedules],
+  );
+  const breakTotals = useMemo(
+    () => totalBreaks(breakEntries, now),
+    [breakEntries, now],
+  );
   const title =
     scale === "day"
       ? date.toLocaleDateString(undefined, {
@@ -464,6 +489,8 @@ export function Calendar({ route, navigate }: CalendarProps) {
               dayStart={startMs}
               entries={visible}
               segments={segments}
+              breaks={breakEntries}
+              scheduleLabels={scheduleLabels}
               loading={loading}
               selectedId={review.selectedId}
               categoryById={categoryById}
@@ -501,6 +528,8 @@ export function Calendar({ route, navigate }: CalendarProps) {
             <WeekView
               weekStart={range.start}
               entries={visible}
+              breaks={breakEntries}
+              scheduleLabels={scheduleLabels}
               loading={loading}
               selectedId={review.selectedId}
               categoryById={categoryById}
@@ -572,6 +601,10 @@ export function Calendar({ route, navigate }: CalendarProps) {
               toReview={summary.toReview}
               processing={processingCount}
               categories={summary.categories}
+              breaks={breakEntries}
+              breakTotals={breakTotals}
+              scheduleLabels={scheduleLabels}
+              now={now}
               topApps={
                 scale === "day"
                   ? timeByApp(segments, now).map(({ app, ms }) => ({ app, ms }))

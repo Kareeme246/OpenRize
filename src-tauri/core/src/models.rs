@@ -1,5 +1,23 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivitySegment {
+    pub id: i64,
+    pub app: String,
+    pub title: String,
+    pub kind: String,
+    pub label: Option<String>,
+    pub started_at: u64,
+    pub ended_at: Option<u64>,
+    pub reviewed: bool,
+    pub app_id: Option<String>,
+    pub bundle_id: Option<String>,
+    pub url: Option<String>,
+    pub domain: Option<String>,
+    pub entry_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Category {
@@ -283,7 +301,7 @@ pub struct TitleItem {
 #[serde(rename_all = "camelCase")]
 pub struct EntryDetail {
     pub entry: TimeEntry,
-    pub segments: Vec<crate::activity::ActivitySegment>,
+    pub segments: Vec<ActivitySegment>,
     pub apps: Vec<AppContribution>,
     pub titles: Vec<TitleItem>,
     pub events: Vec<EntryEvent>,

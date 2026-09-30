@@ -26,6 +26,8 @@ set_json_version() {
 set_json_version package.json
 set_json_version src-tauri/tauri.conf.json
 
-perl -0pi -e 's/(^version\s*=\s*")[^"]*(")/${1}'"$VERSION"'${2}/m' src-tauri/Cargo.toml
+for manifest in src-tauri/Cargo.toml src-tauri/cli/Cargo.toml src-tauri/core/Cargo.toml; do
+  perl -0pi -e 's/(^version\s*=\s*")[^"]*(")/${1}'"$VERSION"'${2}/m' "$manifest"
+done
 
-echo "bumped package.json, src-tauri/tauri.conf.json, and src-tauri/Cargo.toml to $VERSION"
+echo "bumped package.json, Tauri config, and Rust package versions to $VERSION"

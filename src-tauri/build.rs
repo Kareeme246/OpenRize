@@ -10,8 +10,49 @@ fn main() {
     // app binary and fails if one is missing.
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
         build_ml_sidecar();
+        build_cli_sidecar();
     }
     tauri_build::build()
+}
+
+/// Builds the independent CLI package, not the Tauri application. A separate
+/// target directory avoids a nested Cargo lock on the app build. The executable
+/// also contains its headless service, so no GUI/Swift runtime is needed when
+/// installing just this sidecar.
+fn build_cli_sidecar() {
+    println!("cargo:rerun-if-changed=cli/Cargo.toml");
+    println!("cargo:rerun-if-changed=cli/src");
+    println!("cargo:rerun-if-changed=core/Cargo.toml");
+    println!("cargo:rerun-if-changed=core/src");
+    let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let target = env::var("TARGET").expect("TARGET");
+    let output = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR")).join("cli-target");
+    let status = Command::new(env::var_os("CARGO").expect("CARGO"))
+        .args([
+            "build",
+            "--locked",
+            "--release",
+            "--package",
+            "openrize-cli",
+            "--target",
+        ])
+        .arg(&target)
+        .arg("--manifest-path")
+        .arg(manifest.join("cli/Cargo.toml"))
+        .arg("--target-dir")
+        .arg(&output)
+        .env_remove("RUSTC_WORKSPACE_WRAPPER")
+        .status()
+        .expect("could not build the CLI sidecar");
+    assert!(status.success(), "CLI sidecar build failed: {status}");
+    let built = output.join(&target).join("release/openrize");
+    let staged = manifest
+        .join("binaries")
+        .join(format!("openrize-cli-{target}"));
+    if !matches!((fs::read(&built), fs::read(&staged)), (Ok(a), Ok(b)) if a == b) {
+        fs::create_dir_all(staged.parent().expect("binaries dir")).expect("binaries dir");
+        fs::copy(built, staged).expect("could not stage the CLI sidecar");
+    }
 }
 
 /// Builds `swift/` (the `openrize-ml` executable) and stages it as

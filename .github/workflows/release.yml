@@ -25,7 +25,8 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           package_version=$(node -p "require('./package.json').version")
-          tauri_version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          tauri_version=$(node -p \
+            "require('./src-tauri/tauri.conf.json').version")
           cargo_version=$(awk '
             /^\[package\]$/ { package=1; next }
             /^\[/ { package=0 }
@@ -36,6 +37,13 @@ jobs:
               exit
             }
           ' src-tauri/Cargo.toml)
+          for manifest in src-tauri/cli/Cargo.toml src-tauri/core/Cargo.toml; do
+            version=$(awk -F '"' '/^version = / { print $2; exit }' "$manifest")
+            if [[ "$version" != "$package_version" ]]; then
+              printf '%s version does not match the release\n' "$manifest" >&2
+              exit 1
+            fi
+          done
           if [[ "$package_version" != "$tauri_version" ||
                 "$package_version" != "$cargo_version" ||
                 "$TAG" != "v$package_version" ]]; then
@@ -103,6 +111,27 @@ jobs:
           spctl --assess --type execute --verbose=2 "$app"
           xcrun stapler validate "$app"
 
+      # The signed sidecar is also independently downloadable. It includes the
+      # headless read service and needs neither the app nor the Swift sidecar.
+      - name: Package and notarize the standalone CLI
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/openrize-cli"
+          app=src-tauri/target/release/bundle/macos/openrize.app
+          cli="$RUNNER_TEMP/openrize-cli/openrize"
+          cp "$app/Contents/MacOS/openrize-cli" "$cli"
+          cp LICENSE "$RUNNER_TEMP/openrize-cli/LICENSE"
+          codesign --verify --strict --verbose=2 "$cli"
+          ditto -c -k --keepParent "$RUNNER_TEMP/openrize-cli" \
+            openrize-cli-darwin-aarch64.zip
+          xcrun notarytool submit openrize-cli-darwin-aarch64.zip \
+            --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" \
+            --issuer "$APPLE_API_ISSUER" --wait --output-format json \
+            > "$RUNNER_TEMP/cli-notary.json"
+          jq -e '.status == "Accepted"' "$RUNNER_TEMP/cli-notary.json"
+
       - name: Zip the .app bundle for upload
         run: |
           cd src-tauri/target/release/bundle/macos
@@ -117,11 +146,12 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: |
           bundle=src-tauri/target/release/bundle/macos
+          url="https://github.com/$REPOSITORY/releases/download/$TAG"
           jq -n \
             --arg version "${TAG#v}" \
             --rawfile notes release-notes.md \
             --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg url "https://github.com/$REPOSITORY/releases/download/$TAG/openrize.app.tar.gz" \
+            --arg url "$url/openrize.app.tar.gz" \
             --rawfile signature "$bundle/openrize.app.tar.gz.sig" \
             '{
               version: $version,
@@ -143,5 +173,6 @@ jobs:
             src-tauri/target/release/bundle/macos/openrize.app.zip
             src-tauri/target/release/bundle/macos/openrize.app.tar.gz
             latest.json
+            openrize-cli-darwin-aarch64.zip
           body: |
             ${{ steps.git-cliff.outputs.content }}

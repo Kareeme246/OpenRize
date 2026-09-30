@@ -9,7 +9,7 @@ mod entry_builder;
 mod invoices;
 mod login_item;
 mod migrations;
-mod models;
+use openrize_core::models;
 mod projects;
 mod pulse;
 mod reports;
@@ -324,4 +324,41 @@ fn spawn_retention_sweeper(app: tauri::AppHandle) {
             eprintln!("retention sweep failed: {error}");
         }
     });
+}
+
+#[cfg(test)]
+mod cli_read_tests {
+    #[test]
+    fn shared_reads_match_the_real_migrated_app_schema() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::migrations::run_migrations(&mut conn).unwrap();
+        conn.execute(
+            "INSERT INTO time_entries (id, started_at, ended_at, description, created_at, updated_at)
+             VALUES ('cli-test', 1000, 2000, 'private', 1000, 1000)", [],
+        ).unwrap();
+        let totals = openrize_core::readonly::status(&conn).unwrap();
+        assert_eq!(totals.entries, 1);
+        assert_eq!(totals.pending, 1);
+        assert_eq!(totals.tracked_ms, 1000);
+        let entries = openrize_core::readonly::entries(&conn, 1000, 1000, None, 50, false).unwrap();
+        assert_eq!(entries.count, 1);
+        assert!(entries.entries[0].detail.is_none());
+        // The GUI report adapter enriches the same shared row with AI/app data.
+        let filter = crate::reports::EntryFilter {
+            start_ms: 1000,
+            end_ms: 1001,
+            ..Default::default()
+        };
+        assert_eq!(
+            crate::reports::query_entries(&conn, &filter, 50).unwrap()[0].id,
+            entries.entries[0].id
+        );
+    }
+
+    #[test]
+    fn independent_client_identity_matches_the_release_bundle() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(config["identifier"], openrize_core::APP_IDENTIFIER);
+    }
 }

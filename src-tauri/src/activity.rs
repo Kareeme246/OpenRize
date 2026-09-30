@@ -12,7 +12,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use rusqlite::{params, Connection, Row};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::capture::WindowSample;
@@ -46,23 +46,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// The window the background worker keeps rebuilt (see ai/worker.rs).
 pub const REBUILD_WINDOW_MS: u64 = ONE_DAY_MS;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ActivitySegment {
-    pub id: i64,
-    pub app: String,
-    pub title: String,
-    pub kind: String,
-    pub label: Option<String>,
-    pub started_at: u64,
-    pub ended_at: Option<u64>,
-    pub reviewed: bool,
-    pub app_id: Option<String>,
-    pub bundle_id: Option<String>,
-    pub url: Option<String>,
-    pub domain: Option<String>,
-    pub entry_id: Option<String>,
-}
+pub use crate::models::ActivitySegment;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2218,27 +2202,7 @@ impl ActivityStore {
 
 /// Maps the `time_entries` column list used throughout this module (the 14
 /// P1 columns plus `description_origin`).
-pub(crate) fn time_entry_from_row(row: &Row<'_>) -> rusqlite::Result<TimeEntry> {
-    Ok(TimeEntry {
-        id: row.get(0)?,
-        started_at: row.get::<_, i64>(1)? as u64,
-        ended_at: row.get::<_, i64>(2)? as u64,
-        description: row.get(3)?,
-        category_id: row.get(4)?,
-        project_id: row.get(5)?,
-        status: row.get(6)?,
-        approved_by: row.get(7)?,
-        source: row.get(8)?,
-        billable: row.get::<_, i64>(9)? != 0,
-        invoice_id: row.get(10)?,
-        created_at: row.get::<_, i64>(11)? as u64,
-        updated_at: row.get::<_, i64>(12)? as u64,
-        deleted_at: row.get::<_, Option<i64>>(13)?.map(|v| v as u64),
-        description_origin: row.get(14)?,
-        ai: None,
-        dominant_app: None,
-    })
-}
+pub(crate) use openrize_core::time_entry_from_row;
 
 pub(crate) fn segment_from_row(row: &Row<'_>) -> rusqlite::Result<ActivitySegment> {
     Ok(ActivitySegment {

@@ -49,31 +49,6 @@ notarizes with an App Store Connect API key. It needs these repository secrets
 | `TAURI_SIGNING_PRIVATE_KEY` | full contents of the updater's minisign private key |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | password chosen when generating that key |
 
-To produce them:
-
-1. **Certificate** (Account Holder only): in Keychain Access, choose
-   Certificate Assistant > Request a Certificate From a Certificate Authority,
-   save to disk. At developer.apple.com > Certificates, create a
-   **Developer ID Application** certificate from that request, download it and
-   double-click to install. `Apple Development` certificates cannot be used for
-   distribution outside the App Store.
-2. In Keychain Access > My Certificates, right-click the Developer ID
-   certificate (with its private key) > Export as `.p12` with a password, then
-   `base64 -i cert.p12 | pbcopy` for `APPLE_CERTIFICATE`.
-   `security find-identity -v -p codesigning` prints the exact
-   `APPLE_SIGNING_IDENTITY` string.
-3. **API key**: at App Store Connect > Users and Access > Integrations >
-   Team Keys, create a key with the **Developer** role. Note the key ID and
-   issuer ID and download the `.p8` (it can only be downloaded once).
-
-4. **Updater key**: `pnpm tauri signer generate -w ~/.tauri/openrize.key`.
-   Paste the private key file's contents into `TAURI_SIGNING_PRIVATE_KEY` and
-   the `.pub` file's contents into `plugins.updater.pubkey` in
-   `src-tauri/tauri.conf.json`. Installed copies only accept updates signed by
-   the key whose public half they shipped with, so back the private key up:
-   losing it means every user has to download the next release by hand.
-   Local `pnpm tauri build` runs need the same variables, since
-   `createUpdaterArtifacts` is on.
 
 The app's hardened-runtime entitlements live in `src-tauri/Entitlements.plist`
 and privacy prompt strings in `src-tauri/Info.plist`; any new API that macOS

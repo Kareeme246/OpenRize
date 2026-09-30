@@ -16,7 +16,7 @@ import { useTauriEvent } from "../hooks/useTauriEvent";
 import { timeByApp } from "../lib/activity";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
-import { type BreakEntry, totalBreaks } from "../lib/breaks";
+import type { BreakEntry } from "../lib/breaks";
 import {
   addDays,
   calendarDay,
@@ -421,20 +421,6 @@ export function Calendar({ route, navigate }: CalendarProps) {
       : undefined;
 
   const targetMs = targetMsFor(settings, scale, daysInRange);
-  const scheduleLabels = useMemo(
-    () =>
-      new Map(
-        settings.breaks.schedules.map((schedule) => [
-          schedule.id,
-          schedule.label,
-        ]),
-      ),
-    [settings.breaks.schedules],
-  );
-  const breakTotals = useMemo(
-    () => totalBreaks(breakEntries, now),
-    [breakEntries, now],
-  );
   const title =
     scale === "day"
       ? date.toLocaleDateString(undefined, {
@@ -490,7 +476,6 @@ export function Calendar({ route, navigate }: CalendarProps) {
               entries={visible}
               segments={segments}
               breaks={breakEntries}
-              scheduleLabels={scheduleLabels}
               loading={loading}
               selectedId={review.selectedId}
               categoryById={categoryById}
@@ -529,7 +514,6 @@ export function Calendar({ route, navigate }: CalendarProps) {
               weekStart={range.start}
               entries={visible}
               breaks={breakEntries}
-              scheduleLabels={scheduleLabels}
               loading={loading}
               selectedId={review.selectedId}
               categoryById={categoryById}
@@ -598,13 +582,8 @@ export function Calendar({ route, navigate }: CalendarProps) {
               targetMs={targetMs}
               targetLabel={formatTargetHours(targetMs)}
               entries={summary.count}
-              toReview={summary.toReview}
               processing={processingCount}
               categories={summary.categories}
-              breaks={breakEntries}
-              breakTotals={breakTotals}
-              scheduleLabels={scheduleLabels}
-              now={now}
               topApps={
                 scale === "day"
                   ? timeByApp(segments, now).map(({ app, ms }) => ({ app, ms }))

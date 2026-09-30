@@ -1,10 +1,5 @@
 import { useLayoutEffect, useRef } from "react";
-import {
-  type BreakEntry,
-  breakEnd,
-  breakLabel,
-  takenBreaks,
-} from "../../lib/breaks";
+import { type BreakEntry, breakEnd, takenBreaks } from "../../lib/breaks";
 import {
   addDays,
   currentCalendarDay,
@@ -29,7 +24,6 @@ interface WeekViewProps {
   weekStart: Date;
   entries: TimeEntry[];
   breaks: BreakEntry[];
-  scheduleLabels: Map<string, string>;
   loading: boolean;
   selectedId?: string;
   categoryById: Map<string, Category>;
@@ -47,7 +41,6 @@ export function WeekView({
   weekStart,
   entries,
   breaks,
-  scheduleLabels,
   loading,
   selectedId,
   categoryById,
@@ -237,9 +230,7 @@ export function WeekView({
                         entry={entry}
                         top={top}
                         height={height}
-                        label={breakLabel(entry, scheduleLabels)}
                         now={now}
-                        narrow
                       />
                     );
                   })}

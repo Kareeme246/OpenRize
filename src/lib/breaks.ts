@@ -115,33 +115,6 @@ export function formatUntil(ms: number): string {
   return `in ${Math.floor(minutes / 60)}h${rest === 0 ? "" : ` ${rest}m`}`;
 }
 
-/** The label of a recorded break: its schedule's name, else its source. */
-export function breakLabel(
-  entry: BreakEntry,
-  scheduleLabels: Map<string, string>,
-): string {
-  if (entry.source === "scheduled") {
-    return (
-      (entry.scheduleId && scheduleLabels.get(entry.scheduleId)) || "Scheduled"
-    );
-  }
-  return entry.source === "idle" ? "Away" : "Break";
-}
-
-/** How a recorded break reads in a list: what triggered it. */
-export function sourceLabel(source: BreakSource): string {
-  switch (source) {
-    case "interval":
-      return "Reminder";
-    case "scheduled":
-      return "Scheduled";
-    case "manual":
-      return "Manual";
-    case "idle":
-      return "Away";
-  }
-}
-
 /** Breaks that were actually taken, as they draw on the Calendar. */
 export function takenBreaks(entries: BreakEntry[]): BreakEntry[] {
   return entries.filter(
@@ -152,32 +125,4 @@ export function takenBreaks(entries: BreakEntry[]): BreakEntry[] {
 /** When a taken break ended; a running one ends now. */
 export function breakEnd(entry: BreakEntry, now: number): number {
   return entry.endedAt ?? Math.max(entry.startedAt ?? now, now);
-}
-
-export interface BreakTotals {
-  taken: number;
-  takenMs: number;
-  skipped: number;
-  missed: number;
-  snoozed: number;
-}
-
-export function totalBreaks(entries: BreakEntry[], now: number): BreakTotals {
-  const totals: BreakTotals = {
-    taken: 0,
-    takenMs: 0,
-    skipped: 0,
-    missed: 0,
-    snoozed: 0,
-  };
-  for (const entry of entries) {
-    if (entry.snoozes > 0) totals.snoozed += entry.snoozes;
-    if (entry.status === "skipped") totals.skipped += 1;
-    else if (entry.status === "missed") totals.missed += 1;
-    else if (entry.startedAt !== null) {
-      totals.taken += 1;
-      totals.takenMs += Math.max(0, breakEnd(entry, now) - entry.startedAt);
-    }
-  }
-  return totals;
 }

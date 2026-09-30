@@ -362,7 +362,7 @@ function Menu({
   return (
     <div
       ref={menuRef}
-      className={`absolute top-full z-50 flex w-fit min-w-[150px] flex-col rounded-lg border border-line bg-panel p-1 ${
+      className={`absolute top-full z-50 mt-1 flex w-fit min-w-[150px] flex-col rounded-lg border border-line bg-panel p-1 ${
         align === "right" ? "right-0" : "left-0"
       }`}
     >

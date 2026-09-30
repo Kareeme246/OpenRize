@@ -785,7 +785,7 @@ function gridColumns(columns: Columns): string {
     columns.category ? "minmax(0,150px)" : "",
     "56px",
     columns.billable ? "28px" : "",
-    "108px",
+    "max-content",
   ]
     .filter(Boolean)
     .join(" ");
@@ -1195,11 +1195,11 @@ function TimesheetRow({
           {entry.billable ? "$" : "–"}
         </button>
       )}
-      <span className="flex items-center justify-end gap-1">
+      <span className="flex items-center justify-end gap-1 whitespace-nowrap">
         {isApproved ? (
           <>
             <span
-              className="text-[11px] text-accent"
+              className="shrink-0 whitespace-nowrap text-[11px] text-accent"
               title={`Approved by ${entry.approvedBy ?? "you"}`}
             >
               {entry.approvedBy === "auto" || entry.approvedBy === "rule"

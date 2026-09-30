@@ -1,5 +1,5 @@
-//! Installer behavior with local release fixtures. Apple signature/notarization
-//! commands are mocked here; actual signing remains the release workflow's gate.
+//! Installer behavior with local release fixtures. Apple's notarization check is
+//! mocked for the success paths; the release workflow runs it on the signed CLI.
 #![cfg(target_os = "macos")]
 
 use std::fs;
@@ -79,11 +79,7 @@ cp "$TEST_ASSETS/${url##*/}" "$output""#,
         );
         fixture.mock(
             "codesign",
-            "printf 'signature\\n' >> \"$TEST_ROOT/checks\"; exit \"${TEST_FAIL_SIGNATURE:-0}\"",
-        );
-        fixture.mock(
-            "spctl",
-            "printf 'notarization\\n' >> \"$TEST_ROOT/checks\"; exit \"${TEST_FAIL_NOTARY:-0}\"",
+            "printf '%s\\n' \"$*\" >> \"$TEST_ROOT/checks\"; exit \"${TEST_FAIL_SIGNATURE:-0}\"",
         );
         fixture.mock(
             "cargo",
@@ -168,10 +164,12 @@ fn piped_installer_uses_default_path_without_rust_or_gui() {
         fs::read_to_string(fixture.binary().with_file_name("openrize.LICENSE")).unwrap(),
         "fixture license\n"
     );
-    assert_eq!(
-        fs::read_to_string(fixture.root.join("checks")).unwrap(),
-        "signature\nnotarization\n"
-    );
+    let checks = fs::read_to_string(fixture.root.join("checks")).unwrap();
+    assert_eq!(checks.lines().count(), 1);
+    assert!(checks.starts_with(
+        "--verify --strict --check-notarization -R=notarized and anchor apple generic \
+         and certificate leaf[subject.OU] = \"Z899WY5Y94\" "
+    ));
     assert!(!fixture.home.join(".zshrc").exists());
     assert_eq!(fs::read_dir(fixture.root.join("tmp")).unwrap().count(), 0);
     let repeat = fixture.run(fixture.command());
@@ -219,12 +217,7 @@ fn concurrent_installations_never_clobber_each_other() {
 
 #[test]
 fn checksum_download_and_apple_verification_fail_closed() {
-    for failure in [
-        "checksum",
-        "TEST_FAIL_DOWNLOAD",
-        "TEST_FAIL_SIGNATURE",
-        "TEST_FAIL_NOTARY",
-    ] {
+    for failure in ["checksum", "TEST_FAIL_DOWNLOAD", "TEST_FAIL_SIGNATURE"] {
         let fixture = Fixture::new();
         let mut command = fixture.command();
         if failure == "checksum" {
@@ -244,6 +237,17 @@ fn checksum_download_and_apple_verification_fail_closed() {
             assert!(!fixture.root.join("checks").exists());
         }
     }
+}
+
+#[test]
+fn locally_signed_cli_is_rejected_by_real_codesign() {
+    let fixture = Fixture::new();
+    fs::remove_file(fixture.mocks.join("codesign")).unwrap();
+    let output = fixture.run(fixture.command());
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("not notarized"));
+    assert!(!fixture.binary().exists());
+    assert_eq!(fs::read_dir(fixture.root.join("tmp")).unwrap().count(), 0);
 }
 
 #[test]
@@ -277,12 +281,12 @@ fn pinned_version_custom_destination_and_invalid_inputs() {
     command
         .arg("--dir")
         .arg(&destination)
-        .args(["--version", "0.8.1"]);
+        .args(["--version", "0.8.4"]);
     assert_success(&fixture.run(command));
     assert!(destination.join("openrize").is_file());
     assert!(fs::read_to_string(fixture.root.join("downloads"))
         .unwrap()
-        .contains("/download/v0.8.1/"));
+        .contains("/download/v0.8.4/"));
     for args in [
         vec!["--unknown"],
         vec!["--version", "../main"],

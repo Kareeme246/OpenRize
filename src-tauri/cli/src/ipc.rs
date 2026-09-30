@@ -86,26 +86,33 @@ impl Endpoint {
             Err(_) => {
                 let executable = std::env::current_exe().map_err(|e| e.to_string())?;
                 let data_dir = self.database.parent().ok_or("missing data directory")?;
-                let mut child = Command::new(executable)
-                    .arg("--data-dir")
-                    .arg(data_dir)
-                    .arg("--runtime-dir")
-                    .arg(&self.directory)
-                    .arg("__serve")
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .map_err(|e| format!("could not start read service: {e}"))?;
+                let spawn = || {
+                    Command::new(&executable)
+                        .arg("--data-dir")
+                        .arg(data_dir)
+                        .arg("--runtime-dir")
+                        .arg(&self.directory)
+                        .arg("__serve")
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .spawn()
+                        .map_err(|e| format!("could not start read service: {e}"))
+                };
+                let mut child = spawn()?;
                 let deadline = Instant::now() + TIMEOUT;
                 let connected: Result<UnixStream, String> = loop {
                     if let Ok(stream) = self.connect() {
                         break Ok(stream);
                     }
-                    if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
-                        if !status.success() {
+                    // A clean exit means another instance held the service
+                    // lock, possibly while shutting down; start again once free.
+                    match child.try_wait().map_err(|e| e.to_string())? {
+                        Some(status) if !status.success() => {
                             break Err("read service could not start".into());
                         }
+                        Some(_) => child = spawn()?,
+                        None => {}
                     }
                     if Instant::now() >= deadline {
                         break Err("read service startup timed out".into());
@@ -162,32 +169,13 @@ impl Endpoint {
         fs::set_permissions(&self.socket, fs::Permissions::from_mode(0o600))
             .map_err(|e| e.to_string())?;
         listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-        let _cleanup = SocketCleanup(&self.socket);
+        let cleanup = SocketCleanup(&self.socket);
         let mut last_request = Instant::now();
         while last_request.elapsed() < IDLE {
             match listener.accept() {
-                Ok((mut stream, _)) => {
+                Ok((stream, _)) => {
                     last_request = Instant::now();
-                    // Accepted socket mode varies across Unix platforms. A
-                    // disconnected probe may also make timeout setup return
-                    // EINVAL on macOS; a bad client must not stop the service.
-                    if stream
-                        .set_nonblocking(false)
-                        .and_then(|()| stream.set_read_timeout(Some(TIMEOUT)))
-                        .and_then(|()| stream.set_write_timeout(Some(TIMEOUT)))
-                        .is_err()
-                    {
-                        continue;
-                    }
-                    let response =
-                        match protocol::read_frame::<Request>(&mut stream, protocol::MAX_REQUEST) {
-                            Ok(request) => self.dispatch(request),
-                            Err(_) => Response::error(
-                                "INVALID_REQUEST",
-                                "invalid or oversized IPC request",
-                            ),
-                        };
-                    let _ = protocol::write_frame(&mut stream, &response, protocol::MAX_RESPONSE);
+                    self.respond(stream);
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(50))
@@ -195,7 +183,32 @@ impl Endpoint {
                 Err(e) => return Err(e.to_string()),
             }
         }
+        // Unlink first so no new client can connect, then answer every client
+        // that already connected before the listener closes.
+        drop(cleanup);
+        while let Ok((stream, _)) = listener.accept() {
+            self.respond(stream);
+        }
         Ok(())
+    }
+
+    fn respond(&self, mut stream: UnixStream) {
+        // Accepted socket mode varies across Unix platforms. A disconnected
+        // probe may also make timeout setup return EINVAL on macOS; a bad
+        // client must not stop the service.
+        if stream
+            .set_nonblocking(false)
+            .and_then(|()| stream.set_read_timeout(Some(TIMEOUT)))
+            .and_then(|()| stream.set_write_timeout(Some(TIMEOUT)))
+            .is_err()
+        {
+            return;
+        }
+        let response = match protocol::read_frame::<Request>(&mut stream, protocol::MAX_REQUEST) {
+            Ok(request) => self.dispatch(request),
+            Err(_) => Response::error("INVALID_REQUEST", "invalid or oversized IPC request"),
+        };
+        let _ = protocol::write_frame(&mut stream, &response, protocol::MAX_RESPONSE);
     }
 
     fn dispatch(&self, request: Request) -> Response {

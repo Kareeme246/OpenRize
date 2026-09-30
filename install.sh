@@ -13,7 +13,7 @@ usage() {
     'Install the standalone OpenRize CLI (Apple Silicon macOS).' \
     'Usage: bash install.sh [--dir DIRECTORY] [--version X.Y.Z]' \
     'Default: latest release, ~/.local/bin; existing files are never replaced.' \
-    'Downloads are checked against SHA-256, codesign, and macOS notarization.'
+    'Downloads are checked against SHA-256 and a notarized OpenRize Developer ID signature.'
 }
 
 install_dir=''
@@ -41,7 +41,7 @@ fi
 [[ "$install_dir" == /* ]] || install_dir="$PWD/$install_dir"
 [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || \
   fail 'Prebuilt releases currently support Apple Silicon macOS only.'
-for tool in curl unzip shasum codesign spctl; do
+for tool in curl unzip shasum codesign; do
   command -v "$tool" >/dev/null 2>&1 || fail "Required command is missing: $tool"
 done
 
@@ -57,7 +57,7 @@ trap 'exit 143' TERM
 # until the archive hash, executable signature, and notarization are checked.
 curl_args=(--fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 10 --max-time 120)
 curl "${curl_args[@]}" "$base/$asset" --output "$work/$asset" || \
-  fail 'Could not download the CLI. Standalone releases start at v0.8.1.'
+  fail 'Could not download the CLI. Standalone releases start at v0.8.4.'
 curl "${curl_args[@]}" "$base/$asset.sha256" --output "$work/checksum" || \
   fail 'Could not download the release checksum; nothing was installed.'
 read -r expected filename < "$work/checksum" || fail 'Invalid release checksum.'
@@ -70,8 +70,11 @@ unzip -p "$work/$asset" openrize-cli/openrize > "$work/openrize" || fail 'Invali
 unzip -p "$work/$asset" openrize-cli/LICENSE > "$work/LICENSE" || fail 'Missing license in CLI archive.'
 [[ -s "$work/openrize" && -s "$work/LICENSE" ]] || fail 'Empty CLI archive.'
 chmod 755 "$work/openrize"
-codesign --verify --strict "$work/openrize" || fail 'CLI signature verification failed; nothing was installed.'
-spctl --assess --type execute "$work/openrize" || fail 'macOS did not accept the notarized CLI; nothing was installed.'
+# Gatekeeper's spctl rejects every bare command-line tool, so require Apple's
+# notarization and the OpenRize Developer ID team directly.
+requirement='notarized and anchor apple generic and certificate leaf[subject.OU] = "Z899WY5Y94"'
+codesign --verify --strict --check-notarization -R="$requirement" "$work/openrize" || \
+  fail 'CLI is not notarized and signed by OpenRize; nothing was installed.'
 
 destination="$install_dir/openrize"
 license="$install_dir/openrize.LICENSE"

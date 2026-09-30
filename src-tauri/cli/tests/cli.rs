@@ -33,7 +33,8 @@ impl Fixture {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
-        let runtime = root.join("i");
+        // Deep checkouts would overflow sockaddr_un's path limit under target/.
+        let runtime = std::env::temp_dir().join("openrize-cli-tests");
         fs::create_dir_all(&data).unwrap();
         fs::create_dir_all(&runtime).unwrap();
         fs::set_permissions(&runtime, fs::Permissions::from_mode(0o700)).unwrap();
@@ -317,6 +318,25 @@ fn protocol_limits_version_and_unknown_operations() {
 }
 
 #[test]
+fn client_starts_a_new_service_while_the_previous_one_shuts_down() {
+    let mut fixture = Fixture::new();
+    fixture.database();
+    fixture.start();
+    // An idle service unlinks its socket before releasing the service lock.
+    fs::remove_file(fixture.socket()).unwrap();
+    let mut previous = fixture.service.take().unwrap();
+    let exiting = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(500));
+        previous.kill().unwrap();
+        previous.wait().unwrap();
+    });
+    let started = Instant::now();
+    assert_eq!(fixture.json(&["status"], 0)["ok"], true);
+    assert!(started.elapsed() < Duration::from_secs(4));
+    exiting.join().unwrap();
+}
+
+#[test]
 fn on_demand_service_without_gui_and_concurrent_startup() {
     let fixture = Fixture::new();
     // No pre-existing service, GUI, or database. Two real CLI invocations race
@@ -370,7 +390,9 @@ fn unsafe_runtime_directory_is_rejected() {
     let fixture = Fixture::new();
     // Keep the runtime path below sockaddr_un's limit so this specifically
     // exercises permissions, not the separate long-path guard.
-    let unsafe_dir = fixture.runtime.with_file_name("u");
+    let unsafe_dir = fixture
+        .runtime
+        .with_file_name(format!("openrize-cli-unsafe-{}", std::process::id()));
     fs::create_dir(&unsafe_dir).unwrap();
     fs::set_permissions(&unsafe_dir, fs::Permissions::from_mode(0o755)).unwrap();
     let output = fixture

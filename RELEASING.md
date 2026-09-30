@@ -15,17 +15,21 @@ To cut a release:
    ```
    `CHANGELOG.md` is generated from git history; do not edit it by hand.
 2. Tag and push the version already recorded in `package.json`,
-   `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`:
+   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`,
+   `src-tauri/cli/Cargo.toml`, and `src-tauri/core/Cargo.toml`
+   (`./scripts/bump-version.sh` updates them all):
    ```sh
    git tag vX.Y.Z
    git push origin main vX.Y.Z
    ```
-   The release workflow rejects a tag unless all three versions match. It uses
-   the same `cliff.toml` to generate GitHub Release notes and builds a signed,
-   notarized macOS `.dmg`/`.app` with `pnpm tauri build`.
+   The release workflow rejects a tag unless all five versions match. It uses
+   the same `cliff.toml` to generate GitHub Release notes, builds a signed,
+   notarized macOS `.dmg`/`.app` with `pnpm tauri build`, and notarizes the
+   standalone CLI.
 3. Watch the `Release` workflow. When it finishes, it publishes the GitHub
    Release with the `.dmg` and zipped `.app` attached, plus the in-app
-   updater's `openrize.app.tar.gz` and `latest.json`.
+   updater's `openrize.app.tar.gz` and `latest.json`, and the standalone CLI's
+   `openrize-cli-darwin-aarch64.zip`, its `.sha256`, and `install.sh`.
 
 Publishing a release ships it to every installed copy: the app checks
 `releases/latest/download/latest.json` hourly (see `src-tauri/src/updater.rs`)
@@ -48,6 +52,10 @@ notarizes with an App Store Connect API key. It needs these repository secrets
 | `APPLE_API_PRIVATE_KEY` | full contents of the `AuthKey_<KEYID>.p8` file |
 | `TAURI_SIGNING_PRIVATE_KEY` | full contents of the updater's minisign private key |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | password chosen when generating that key |
+
+`install.sh` only accepts a CLI notarized and signed by team `Z899WY5Y94`, and
+the release workflow runs that same check before publishing. If the signing
+identity's team ever changes, update the requirement in `install.sh`.
 
 
 The app's hardened-runtime entitlements live in `src-tauri/Entitlements.plist`

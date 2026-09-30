@@ -72,10 +72,12 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24
-          package-manager-cache: false
+          cache: pnpm
 
-      # Signed release artifacts must be compiled from the locked sources,
-      # never restored from lower-trust dependency or compiler-output caches.
+      # v2.9.2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: src-tauri
 
       - run: pnpm install --frozen-lockfile
 
@@ -131,6 +133,10 @@ jobs:
             --issuer "$APPLE_API_ISSUER" --wait --output-format json \
             > "$RUNNER_TEMP/cli-notary.json"
           jq -e '.status == "Accepted"' "$RUNNER_TEMP/cli-notary.json"
+          requirement=$(sed -n "s/^requirement='\(.*\)'$/\1/p" install.sh)
+          [[ -n "$requirement" ]]
+          codesign --verify --strict --check-notarization --verbose=2 \
+            -R="$requirement" "$cli"
           shasum -a 256 openrize-cli-darwin-aarch64.zip \
             > openrize-cli-darwin-aarch64.zip.sha256
 

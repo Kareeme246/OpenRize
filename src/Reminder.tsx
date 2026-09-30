@@ -187,7 +187,7 @@ function ReminderCard({
     : `Time for a ${formatPlanned(reminder.plannedMs)} break`;
   const startLabel = scheduled
     ? `Start ${reminder.label.toLowerCase()}`
-    : "Start break";
+    : "Start";
   return (
     <div className="w-[360px] px-4 py-3.5">
       <div className="flex items-start gap-2.5">
@@ -212,7 +212,7 @@ function ReminderCard({
         <button
           type="button"
           onClick={() => act(api.startBreak())}
-          className="rounded-lg bg-accent px-3 py-1.5 font-semibold text-[12px] text-accent-fg transition-opacity hover:opacity-90"
+          className="shrink-0 whitespace-nowrap rounded-lg bg-accent px-3 py-1.5 font-semibold text-[12px] text-accent-fg transition-opacity hover:opacity-90"
         >
           {startLabel}
         </button>
@@ -221,7 +221,7 @@ function ReminderCard({
             <button
               type="button"
               onClick={() => act(api.snoozeBreak(15))}
-              className="rounded-lg border border-line bg-surface px-3 py-1.5 font-medium text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
+              className="shrink-0 whitespace-nowrap rounded-lg border border-line bg-surface px-3 py-1.5 font-medium text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
             >
               In 15 min
             </button>
@@ -249,7 +249,7 @@ function ReminderCard({
         <button
           type="button"
           onClick={() => act(api.skipBreak())}
-          className="rounded-lg px-2.5 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+          className="shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
         >
           {scheduled ? "Skip today" : "Skip"}
         </button>
@@ -322,9 +322,9 @@ function SnoozeButton({
       <button
         type="button"
         onClick={() => act(api.snoozeBreak(minutes))}
-        className="px-3 py-1.5 font-medium text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
+        className="shrink-0 whitespace-nowrap px-3 py-1.5 font-medium text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
       >
-        Snooze {minutes}m
+        Snooze {minutes} min
       </button>
       <button
         type="button"
@@ -362,7 +362,7 @@ function Menu({
   return (
     <div
       ref={menuRef}
-      className={`absolute top-full z-50 mt-2 flex w-fit min-w-[150px] flex-col rounded-lg border border-line bg-surface p-1 ${
+      className={`absolute top-full z-50 flex w-fit min-w-[150px] flex-col rounded-lg border border-line bg-panel p-1 ${
         align === "right" ? "right-0" : "left-0"
       }`}
     >
@@ -382,7 +382,7 @@ function MenuItem({
     <button
       type="button"
       onClick={onClick}
-      className="rounded-md px-2.5 py-1.5 text-left text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
+      className="whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
     >
       {children}
     </button>

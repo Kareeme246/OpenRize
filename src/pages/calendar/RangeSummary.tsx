@@ -1,6 +1,13 @@
 import { BarRow, Donut, type Slice } from "../../components/Charts";
 import { Progress, StatCard } from "../../components/Page";
-import { formatDuration, plural } from "../../lib/format";
+import {
+  type BreakEntry,
+  type BreakTotals,
+  breakEnd,
+  breakLabel,
+  sourceLabel,
+} from "../../lib/breaks";
+import { formatDuration, formatTime, plural } from "../../lib/format";
 
 interface RangeSummaryProps {
   title: string;
@@ -13,6 +20,10 @@ interface RangeSummaryProps {
   processing: number;
   categories: Slice[];
   topApps?: { app: string; ms: number }[];
+  breaks?: BreakEntry[];
+  breakTotals?: BreakTotals;
+  scheduleLabels?: Map<string, string>;
+  now?: number;
 }
 
 /**
@@ -29,6 +40,10 @@ export function RangeSummary({
   processing,
   categories,
   topApps,
+  breaks = [],
+  breakTotals,
+  scheduleLabels = new Map(),
+  now = Date.now(),
 }: RangeSummaryProps) {
   const progress = targetMs > 0 ? workMs / targetMs : 0;
   // Under a minute reads as "0m", which only adds noise to a ranked list.
@@ -73,6 +88,15 @@ export function RangeSummary({
         foldLone
       />
 
+      {breakTotals && breaks.length > 0 && (
+        <BreaksCard
+          breaks={breaks}
+          totals={breakTotals}
+          scheduleLabels={scheduleLabels}
+          now={now}
+        />
+      )}
+
       {apps.length > 0 && (
         <div className="space-y-2">
           <div className="font-semibold text-[12px] text-fg-faint uppercase tracking-wider">
@@ -89,6 +113,93 @@ export function RangeSummary({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+const MAX_BREAK_ROWS = 6;
+
+/** What follows a row's name: how it started, and why it did not happen. */
+function detail(
+  entry: BreakEntry,
+  scheduleLabels: Map<string, string>,
+  taken: boolean,
+): string {
+  const parts: string[] = [];
+  const source = sourceLabel(entry.source);
+  if (source !== breakLabel(entry, scheduleLabels)) parts.push(source);
+  if (!taken) parts.push(entry.status);
+  return parts.length > 0 ? ` · ${parts.join(" · ")}` : "";
+}
+
+/** Break history for the range: what was taken, skipped, or put off. */
+function BreaksCard({
+  breaks,
+  totals,
+  scheduleLabels,
+  now,
+}: {
+  breaks: BreakEntry[];
+  totals: BreakTotals;
+  scheduleLabels: Map<string, string>;
+  now: number;
+}) {
+  const rows = [...breaks].reverse().slice(0, MAX_BREAK_ROWS);
+  const notes = [
+    totals.skipped > 0 ? `${totals.skipped} skipped` : null,
+    totals.missed > 0 ? `${totals.missed} missed` : null,
+    totals.snoozed > 0
+      ? `${plural(totals.snoozed, "snooze", "snoozes")}`
+      : null,
+  ].filter((note) => note !== null);
+  return (
+    <div className="space-y-2">
+      <div className="font-semibold text-[12px] text-fg-faint uppercase tracking-wider">
+        Breaks
+      </div>
+      <div className="rounded-lg border border-line bg-surface p-3">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="font-semibold text-[14px] text-fg-strong tabular-nums">
+            {totals.taken > 0
+              ? `${totals.taken} taken · ${formatDuration(totals.takenMs)}`
+              : "None taken"}
+          </span>
+        </div>
+        {notes.length > 0 && (
+          <div className="mt-0.5 text-[12px] text-fg-soft">
+            {notes.join(" · ")}
+          </div>
+        )}
+      </div>
+      <ul className="space-y-1">
+        {rows.map((entry) => {
+          const taken = entry.status === "taken" && entry.startedAt !== null;
+          const at = entry.startedAt ?? entry.dueAt ?? 0;
+          return (
+            <li
+              key={entry.id}
+              className="flex items-center gap-2 text-[12px] text-fg-muted"
+            >
+              <span
+                className={`size-2 shrink-0 rounded-full ${
+                  taken ? "bg-break" : "bg-fg-ghost"
+                }`}
+              />
+              <span className="min-w-0 flex-1 truncate">
+                {breakLabel(entry, scheduleLabels)}
+                <span className="text-fg-faint">
+                  {detail(entry, scheduleLabels, taken)}
+                </span>
+              </span>
+              <span className="shrink-0 text-fg-faint tabular-nums">
+                {formatTime(at)}
+                {taken &&
+                  ` · ${formatDuration(Math.max(0, breakEnd(entry, now) - at))}`}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

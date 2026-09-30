@@ -36,7 +36,7 @@ pub const KIND_ACTIVITY: &str = "activity";
 pub const KIND_FOCUS: &str = "focus";
 pub const KIND_BREAK: &str = "break";
 
-const IDLE_LABEL: &str = "Idle";
+pub(crate) const IDLE_LABEL: &str = "Idle";
 
 /// How long a statement waits on another connection's write lock. The AI
 /// worker reads on its own connection, so contention is brief but real.
@@ -133,11 +133,29 @@ impl Current {
 pub struct LiveState {
     current: Option<Current>,
     capture_enabled: bool,
-    idle_threshold_ms: u64,
-    last_idle_ms: u64,
+    pub(crate) idle_threshold_ms: u64,
+    pub(crate) last_idle_ms: u64,
     watch_since_ms: Option<u64>,
     in_tracking_hours: bool,
-    tracking_active: bool,
+    pub(crate) tracking_active: bool,
+}
+
+/// What the break engine needs to know about the open segment.
+#[derive(Debug, Clone)]
+pub(crate) struct SegmentInfo {
+    pub id: i64,
+    pub kind: String,
+    pub label: Option<String>,
+}
+
+impl LiveState {
+    pub(crate) fn segment_info(&self) -> Option<SegmentInfo> {
+        self.current.as_ref().map(|current| SegmentInfo {
+            id: current.id,
+            kind: current.kind.clone(),
+            label: current.label.clone(),
+        })
+    }
 }
 
 struct Totals {
@@ -224,7 +242,7 @@ impl ActivityStore {
         &mut self.conn
     }
 
-    fn read_setting(&self, key: &str) -> Option<String> {
+    pub(crate) fn read_setting(&self, key: &str) -> Option<String> {
         self.conn
             .query_row(
                 "SELECT value FROM settings WHERE key = ?1",
@@ -234,7 +252,7 @@ impl ActivityStore {
             .ok()
     }
 
-    fn write_setting(&self, key: &str, value: &str) -> Result<(), String> {
+    pub(crate) fn write_setting(&self, key: &str, value: &str) -> Result<(), String> {
         self.conn
             .execute(
                 "INSERT INTO settings (key, value) VALUES (?1, ?2)
@@ -528,6 +546,12 @@ impl ActivityStore {
         let removed = transaction
             .execute(
                 "DELETE FROM segments WHERE ended_at IS NOT NULL AND ended_at < ?1",
+                params![cutoff as i64],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "DELETE FROM breaks WHERE created_at < ?1",
                 params![cutoff as i64],
             )
             .map_err(|error| error.to_string())?;
@@ -2297,6 +2321,7 @@ pub fn spawn_sampler(app: AppHandle) {
             let now = now_epoch_ms();
             let away = crate::capture::user_is_away();
             let sample = crate::capture::read_active_window();
+            let keeps_display_awake = sample.as_ref().is_some_and(|s| s.keeps_display_awake);
             let idle_ms = read_idle_ms();
 
             let state = app.state::<crate::AppState>();
@@ -2339,6 +2364,8 @@ pub fn spawn_sampler(app: AppHandle) {
                 }
                 Err(error) => eprintln!("activity sample failed: {error}"),
             }
+
+            crate::breaks::after_tick(&app, keeps_display_awake, away);
         }
     });
 }

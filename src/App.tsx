@@ -2,6 +2,7 @@ import { type ReactElement, useCallback, useEffect, useState } from "react";
 import { NotImplementedProvider } from "./components/NotImplemented";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
+import { useBreaks } from "./hooks/useBreaks";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { SettingsProvider } from "./hooks/useSettings";
 import { useTauriEvent } from "./hooks/useTauriEvent";
@@ -65,6 +66,7 @@ export default function App() {
   const narrowWindow = useMediaQuery(AUTO_COLLAPSE_QUERY);
   const sidebarCollapsed = sidebarChoice ?? narrowWindow;
   const updates = useUpdates();
+  const breaks = useBreaks();
 
   const toggleSidebar = useCallback((): void => {
     const next = !sidebarCollapsed;
@@ -189,6 +191,11 @@ export default function App() {
     setCalendarMount((count) => count + 1);
   });
 
+  // The break reminder's "Reminder settings…".
+  useTauriEvent(api.OPEN_BREAK_SETTINGS, () => {
+    navigate({ name: "settings", section: "notifications" });
+  });
+
   const handleToggleCapture = async () => {
     try {
       const next = !trackingActive;
@@ -299,6 +306,17 @@ export default function App() {
               captureEnabled={captureEnabled}
               trackingActive={trackingActive}
               onToggleCapture={handleToggleCapture}
+              onBreak={
+                breaks.state.current && breaks.state.current.endedAt === null
+                  ? {
+                      label: breaks.state.current.label,
+                      remainingMs:
+                        breaks.state.current.startedAt +
+                        breaks.state.current.plannedMs -
+                        breaks.now,
+                    }
+                  : undefined
+              }
               updateVersion={updates?.available?.version}
               onOpenUpdate={() => {
                 navigate({ name: "settings", section: "updates" });

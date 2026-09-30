@@ -1,4 +1,5 @@
 import { createContext, type ReactNode, useContext } from "react";
+import { formatCountdown } from "../lib/breaks";
 import type { Route } from "../lib/types";
 
 interface SidebarProps {
@@ -9,6 +10,8 @@ interface SidebarProps {
   captureEnabled?: boolean;
   trackingActive?: boolean;
   onToggleCapture?: () => void;
+  /** A break in progress: the status strip shows its countdown. */
+  onBreak?: { label: string; remainingMs: number };
   /** The newer version ready to install, when there is one. */
   updateVersion?: string;
   onOpenUpdate?: () => void;
@@ -95,18 +98,23 @@ export function Sidebar({
   captureEnabled = true,
   trackingActive = captureEnabled,
   onToggleCapture,
+  onBreak,
   updateVersion,
   onOpenUpdate,
   collapsed = false,
 }: SidebarProps) {
   const currentName = currentRoute.name;
-  const statusText = trackingActive
-    ? currentApp
-      ? `Tracking · ${currentApp}`
-      : "Tracking active"
-    : !captureEnabled
-      ? "Tracking paused"
-      : "Outside tracking hours";
+  const statusText = onBreak
+    ? onBreak.remainingMs > 0
+      ? `On ${onBreak.label.toLowerCase()} · ${formatCountdown(onBreak.remainingMs)}`
+      : `${onBreak.label} is over`
+    : trackingActive
+      ? currentApp
+        ? `Tracking · ${currentApp}`
+        : "Tracking active"
+      : !captureEnabled
+        ? "Tracking paused"
+        : "Outside tracking hours";
 
   return (
     <CollapsedContext.Provider value={collapsed}>
@@ -263,7 +271,11 @@ export function Sidebar({
           >
             <span
               className={`size-2 shrink-0 rounded-full ${
-                trackingActive ? "bg-accent animate-pulse" : "bg-fg-soft"
+                onBreak
+                  ? "bg-break animate-pulse"
+                  : trackingActive
+                    ? "bg-accent animate-pulse"
+                    : "bg-fg-soft"
               }`}
             />
             {!collapsed && (

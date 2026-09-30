@@ -8,6 +8,7 @@ use tauri_plugin_dialog::DialogExt;
 use crate::activity::{self, ActivitySnapshot};
 use crate::ai::metrics::AiMetrics;
 use crate::ai::{self, AiRuntime, AiStatus};
+use crate::breaks;
 use crate::invoices::{self, profile, BillableEntry, DraftInput, Invoice, InvoiceSummary};
 use crate::login_item::{self, LoginItemState};
 use crate::models::{
@@ -1033,4 +1034,91 @@ pub async fn check_for_updates(app: AppHandle) -> Result<UpdateStatus, String> {
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
     updater::install(&app).await
+}
+
+// --- Break reminders ----------------------------------------------------
+
+#[tauri::command]
+pub fn break_state(app: AppHandle) -> Result<breaks::engine::BreakState, String> {
+    breaks::current_state(&app)
+}
+
+/// Starts the pending reminder's break, or a manual one when none is pending.
+#[tauri::command]
+pub fn start_break(app: AppHandle) -> Result<breaks::engine::BreakState, String> {
+    breaks::command(&app, breaks::engine::Command::StartBreak)
+}
+
+#[tauri::command]
+pub fn end_break(app: AppHandle) -> Result<breaks::engine::BreakState, String> {
+    breaks::command(&app, breaks::engine::Command::EndBreak)
+}
+
+#[tauri::command]
+pub fn snooze_break(app: AppHandle, minutes: u16) -> Result<breaks::engine::BreakState, String> {
+    if !crate::settings::SNOOZE_CHOICES.contains(&minutes) {
+        return Err(format!("cannot snooze for {minutes} minutes"));
+    }
+    breaks::command(&app, breaks::engine::Command::Snooze(minutes))
+}
+
+#[tauri::command]
+pub fn skip_break(app: AppHandle) -> Result<breaks::engine::BreakState, String> {
+    breaks::command(&app, breaks::engine::Command::Skip)
+}
+
+#[tauri::command]
+pub fn expand_break_reminder(app: AppHandle) -> Result<breaks::engine::BreakState, String> {
+    breaks::command(&app, breaks::engine::Command::Expand)
+}
+
+#[tauri::command]
+pub fn extend_break(app: AppHandle) -> Result<breaks::engine::BreakState, String> {
+    breaks::command(
+        &app,
+        breaks::engine::Command::Extend(breaks::EXTEND_MINUTES),
+    )
+}
+
+/// Silences reminders until `until` (epoch ms); `None` turns them back on.
+#[tauri::command]
+pub fn pause_break_reminders(
+    app: AppHandle,
+    until: Option<u64>,
+) -> Result<breaks::engine::BreakState, String> {
+    breaks::pause_reminders(&app, until)
+}
+
+#[tauri::command]
+pub fn list_breaks(
+    app: AppHandle,
+    since_ms: u64,
+    until_ms: u64,
+) -> Result<Vec<breaks::store::BreakEntry>, String> {
+    breaks::list_breaks(&app, since_ms, until_ms)
+}
+
+#[tauri::command]
+pub fn resize_reminder_panel(app: AppHandle, width: f64, height: f64) {
+    breaks::surface::resize(&app, width, height);
+}
+
+/// The reminder's "Reminder settings…": brings the main window forward on
+/// Settings > Notifications.
+#[tauri::command]
+pub fn open_break_settings(app: AppHandle) {
+    tray::show_main_window(&app);
+    let _ = app.emit_to("main", crate::EVENT_OPEN_BREAK_SETTINGS, ());
+}
+
+/// Dev builds only: raises a sample reminder (Settings > Notifications).
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn dev_sample_break_reminder(app: AppHandle) -> Result<breaks::engine::BreakState, String> {
+    breaks::dev_sample(&app)
+}
+
+#[tauri::command]
+pub fn preview_break_chime() {
+    breaks::chime();
 }

@@ -82,6 +82,11 @@ impl AppState {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Registered first so a second launch exits before it opens the
+        // database; the running copy comes forward instead.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tray::show_main_window(app);
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())

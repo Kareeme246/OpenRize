@@ -5,12 +5,26 @@ All notable changes are documented here. Entries are generated from commit histo
 ## [unreleased]
 
 ### Features
+- **timesheets:** Rebuild Analyze > Timesheets as Rise's Day and Week matrix (#61)
+- **invoices:** Generate real invoice PDFs with live preview and auto-populated time (#60)
+- **clients:** Add a Clients page with archive, delete, and project assignment (#63)
+- **breaks:** Add break reminders with a top-right panel, scheduled breaks, and break history (#64)
+
+### Bug Fixes
+- **calendar:** Wrap entry text when the block has vertical room instead of truncating (#62)
+- **tracking:** Run a single app instance so an orphaned segment cannot extend a session forever (#65)
+## [0.4.19] - 2026-09-29
+
+### Features
 - **calendar:** Remove AI review prompt from the day summary (#56)
 - **calendar:** Accent-colored entries, no left bars, labels under the time row (#57)
 - **ui:** Restrict review yellow-orange color to review call to action (#59)
 
 ### Bug Fixes
 - **apps:** Fix timeline clipping, restore palette, and default to timeline tab (#58)
+
+### Documentation
+- Update changelog for v0.4.19
 ## [0.4.15] - 2026-09-29
 
 ### Features

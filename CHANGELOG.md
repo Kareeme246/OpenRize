@@ -4,6 +4,15 @@ All notable changes are documented here. Entries are generated from commit histo
 
 ## [unreleased]
 
+### Bug Fixes
+- **timesheet:** Prevent approved actions overlapping duration (#66)
+- **breaks:** Anchor reminder menus and isolate dev identity (#68)
+- **calendar:** Show breaks as gray entries and drop the day summary placeholder (#69)
+
+### Maintenance
+- Update release doc
+## [0.8.0] - 2026-09-30
+
 ### Features
 - **timesheets:** Rebuild Analyze > Timesheets as Rise's Day and Week matrix (#61)
 - **invoices:** Generate real invoice PDFs with live preview and auto-populated time (#60)
@@ -13,6 +22,9 @@ All notable changes are documented here. Entries are generated from commit histo
 ### Bug Fixes
 - **calendar:** Wrap entry text when the block has vertical room instead of truncating (#62)
 - **tracking:** Run a single app instance so an orphaned segment cannot extend a session forever (#65)
+
+### Documentation
+- Update changelog for v0.8.0
 ## [0.4.19] - 2026-09-29
 
 ### Features

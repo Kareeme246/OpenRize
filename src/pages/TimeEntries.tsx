@@ -392,6 +392,7 @@ export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
           onToday={() =>
             navigate({ ...route, date: localDateString(new Date()) })
           }
+          isToday={Date.now() >= query.startMs && Date.now() < query.endMs}
         />
         <Picker
           ariaLabel="Date range"

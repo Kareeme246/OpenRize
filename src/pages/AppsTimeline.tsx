@@ -12,7 +12,7 @@ import { Picker } from "../components/Picker";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import { timeByApp } from "../lib/activity";
 import * as api from "../lib/api";
-import { addDays, startOfDay } from "../lib/dates";
+import { addDays, isSameDay, startOfDay } from "../lib/dates";
 import { formatDuration, formatTime } from "../lib/format";
 import { assignColors } from "../lib/palette";
 import type {
@@ -177,6 +177,7 @@ export function AppsTimeline({ apps, categories, projects, onUpdate }: Props) {
               setDay((previous) => addDays(previous, direction))
             }
             onToday={() => setDay(startOfDay(new Date()))}
+            isToday={isSameDay(day, new Date())}
           />
         </div>
         {error && (

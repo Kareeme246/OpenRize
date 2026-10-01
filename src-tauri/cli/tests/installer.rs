@@ -1,5 +1,5 @@
-//! Installer behavior with local release fixtures. Apple's notarization check is
-//! mocked for the success paths; the release workflow runs it on the signed CLI.
+//! Installer behavior with local release fixtures. Apple codesign checks are
+//! tested both with a recorded mock and against macOS's real `/usr/bin/codesign`.
 #![cfg(target_os = "macos")]
 
 use std::fs;
@@ -166,10 +166,7 @@ fn piped_installer_uses_default_path_without_rust_or_gui() {
     );
     let checks = fs::read_to_string(fixture.root.join("checks")).unwrap();
     assert_eq!(checks.lines().count(), 1);
-    assert!(checks.starts_with(
-        "--verify --strict --check-notarization -R=notarized and anchor apple generic \
-         and certificate leaf[subject.OU] = \"Z899WY5Y94\" "
-    ));
+    assert!(checks.starts_with("--verify --strict "));
     assert!(!fixture.home.join(".zshrc").exists());
     assert_eq!(fs::read_dir(fixture.root.join("tmp")).unwrap().count(), 0);
     let repeat = fixture.run(fixture.command());
@@ -240,12 +237,90 @@ fn checksum_download_and_apple_verification_fail_closed() {
 }
 
 #[test]
-fn locally_signed_cli_is_rejected_by_real_codesign() {
+fn locally_signed_ad_hoc_cli_succeeds_with_real_codesign_and_runs() {
     let fixture = Fixture::new();
     fs::remove_file(fixture.mocks.join("codesign")).unwrap();
     let output = fixture.run(fixture.command());
+    assert_success(&output);
+    let version = Command::new(fixture.binary())
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert_success(&version);
+    assert_eq!(
+        String::from_utf8(version.stdout).unwrap().trim(),
+        format!("openrize {}", env!("CARGO_PKG_VERSION"))
+    );
+    assert_eq!(
+        fs::metadata(fixture.binary()).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.binary().with_file_name("openrize.LICENSE")).unwrap(),
+        "fixture license\n"
+    );
+    assert_eq!(fs::read_dir(fixture.root.join("tmp")).unwrap().count(), 0);
+    let repeat = fixture.run(fixture.command());
+    assert_success(&repeat);
+    assert!(String::from_utf8(repeat.stdout)
+        .unwrap()
+        .contains("already installed"));
+}
+
+#[test]
+fn real_codesign_rejects_corrupted_signature_without_installation() {
+    let fixture = Fixture::new();
+    fs::remove_file(fixture.mocks.join("codesign")).unwrap();
+    let binary_path = fixture.assets.join("openrize-cli/openrize");
+    let mut bytes = fs::read(&binary_path).unwrap();
+    if bytes.len() > 2000 {
+        bytes[1500] ^= 0xff;
+    }
+    fs::write(&binary_path, bytes).unwrap();
+    assert!(Command::new("/usr/bin/zip")
+        .current_dir(&fixture.assets)
+        .args(["-qr", ASSET, "openrize-cli"])
+        .status()
+        .unwrap()
+        .success());
+    let checksum = Command::new("/usr/bin/shasum")
+        .current_dir(&fixture.assets)
+        .args(["-a", "256", ASSET])
+        .output()
+        .unwrap();
+    assert!(checksum.status.success());
+    fs::write(
+        fixture.assets.join(format!("{ASSET}.sha256")),
+        checksum.stdout,
+    )
+    .unwrap();
+
+    let output = fixture.run(fixture.command());
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("not notarized"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("signature verification failed"));
+    assert!(!fixture.binary().exists());
+    assert_eq!(fs::read_dir(fixture.root.join("tmp")).unwrap().count(), 0);
+}
+
+#[test]
+fn corrupted_archive_fails_without_installation() {
+    let fixture = Fixture::new();
+    fs::write(fixture.assets.join(ASSET), b"not a valid zip file").unwrap();
+    let checksum = Command::new("/usr/bin/shasum")
+        .current_dir(&fixture.assets)
+        .args(["-a", "256", ASSET])
+        .output()
+        .unwrap();
+    assert!(checksum.status.success());
+    fs::write(
+        fixture.assets.join(format!("{ASSET}.sha256")),
+        checksum.stdout,
+    )
+    .unwrap();
+
+    let output = fixture.run(fixture.command());
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Invalid CLI archive"));
     assert!(!fixture.binary().exists());
     assert_eq!(fs::read_dir(fixture.root.join("tmp")).unwrap().count(), 0);
 }

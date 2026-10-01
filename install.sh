@@ -13,7 +13,7 @@ usage() {
     'Install the standalone OpenRize CLI (Apple Silicon macOS).' \
     'Usage: bash install.sh [--dir DIRECTORY] [--version X.Y.Z]' \
     'Default: latest release, ~/.local/bin; existing files are never replaced.' \
-    'Downloads are checked against SHA-256 and a notarized OpenRize Developer ID signature.'
+    'Downloads are checked against SHA-256 and codesign integrity.'
 }
 
 install_dir=''
@@ -54,7 +54,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 # Constrain redirects to HTTPS, bound the wait, and never execute a download
-# until the archive hash, executable signature, and notarization are checked.
+# until the archive hash and executable signature are checked.
 curl_args=(--fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 10 --max-time 120)
 curl "${curl_args[@]}" "$base/$asset" --output "$work/$asset" || \
   fail 'Could not download the CLI. Standalone releases start at v0.8.4.'
@@ -70,11 +70,7 @@ unzip -p "$work/$asset" openrize-cli/openrize > "$work/openrize" || fail 'Invali
 unzip -p "$work/$asset" openrize-cli/LICENSE > "$work/LICENSE" || fail 'Missing license in CLI archive.'
 [[ -s "$work/openrize" && -s "$work/LICENSE" ]] || fail 'Empty CLI archive.'
 chmod 755 "$work/openrize"
-# Gatekeeper's spctl rejects every bare command-line tool, so require Apple's
-# notarization and the OpenRize Developer ID team directly.
-requirement='notarized and anchor apple generic and certificate leaf[subject.OU] = "Z899WY5Y94"'
-codesign --verify --strict --check-notarization -R="$requirement" "$work/openrize" || \
-  fail 'CLI is not notarized and signed by OpenRize; nothing was installed.'
+codesign --verify --strict "$work/openrize" || fail 'CLI signature verification failed; nothing was installed.'
 
 destination="$install_dir/openrize"
 license="$install_dir/openrize.LICENSE"

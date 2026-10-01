@@ -4,10 +4,20 @@ All notable changes are documented here. Entries are generated from commit histo
 
 ## [unreleased]
 
+### Features
+- **ui:** Rounded/sharper shape, custom tooltips, dark default, tab baselines (#72)
+
+### Bug Fixes
+- **calendar:** Draw only official breaks (#71)
+## [0.8.3] - 2026-09-30
+
 ### Bug Fixes
 - **timesheet:** Prevent approved actions overlapping duration (#66)
 - **breaks:** Anchor reminder menus and isolate dev identity (#68)
 - **calendar:** Show breaks as gray entries and drop the day summary placeholder (#69)
+
+### Documentation
+- Update changelog for v0.8.3 (#70)
 
 ### Maintenance
 - Update release doc

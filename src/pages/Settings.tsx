@@ -94,6 +94,7 @@ type SettingsSection =
   | "suggestions"
   | "data"
   | "notifications"
+  | "ai"
   | "advanced";
 
 const SETTINGS_SECTIONS: readonly SettingsSection[] = [
@@ -104,6 +105,7 @@ const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   "suggestions",
   "data",
   "notifications",
+  "ai",
   "advanced",
 ];
 
@@ -123,7 +125,6 @@ const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
   { id: "suggestions", label: "Suggestions" },
   { id: "data", label: "Data & storage" },
   { id: "notifications", label: "Notifications" },
-  { id: "advanced", label: "Advanced settings" },
 ];
 
 /** One line on which tiers are running and why. */
@@ -245,6 +246,80 @@ function LaunchAtLoginRow({
           onChange={change}
         />
       </div>
+    </SettingRow>
+  );
+}
+
+const APPLE_INTELLIGENCE_SETTINGS =
+  "x-apple.systempreferences:com.apple.Siri-Settings.extension";
+
+function AppleIntelligenceRow({
+  status,
+  onError,
+}: {
+  status: AiStatus | null;
+  onError: (message: string | null) => void;
+}) {
+  const isAvailable = status?.llm === "available";
+  const isOff = status?.llm === "appleIntelligenceNotEnabled";
+  const isModelDownloading = status?.llm === "modelNotReady";
+  const isUnsupported =
+    status?.llm === "unsupportedOS" || status?.llm === "deviceNotEligible";
+
+  const handleOpenSettings = (): void => {
+    onError(null);
+    if (status?.llm === "unsupportedOS") {
+      onError("Apple Intelligence requires macOS 15.1 or later.");
+      return;
+    }
+    if (status?.llm === "deviceNotEligible") {
+      onError("This Mac does not support Apple Intelligence.");
+      return;
+    }
+    openUrl(APPLE_INTELLIGENCE_SETTINGS).catch((cause: unknown) => {
+      onError(describeError(cause));
+    });
+  };
+
+  const showButton =
+    isAvailable ||
+    isOff ||
+    isModelDownloading ||
+    (!isUnsupported && status !== null);
+
+  return (
+    <SettingRow
+      title="Apple Intelligence"
+      description={
+        isAvailable
+          ? "Apple's on-device foundation model powers intelligent category and project suggestions"
+          : isOff
+            ? "Apple Intelligence is turned off in macOS System Settings"
+            : isModelDownloading
+              ? "Apple Intelligence model is still downloading in macOS"
+              : isUnsupported
+                ? status !== null
+                  ? (llmUnavailableReason(status) ??
+                    "Not supported on this Mac")
+                  : "Not supported on this Mac"
+                : "Manage Apple Intelligence and Siri preferences in macOS System Settings"
+      }
+    >
+      {showButton ? (
+        <button
+          type="button"
+          onClick={handleOpenSettings}
+          className="shrink-0 rounded-md border border-line px-2.5 py-1 text-[11.5px] font-medium text-fg-muted transition-colors hover:bg-surface hover:text-fg cursor-pointer"
+        >
+          Open Apple Intelligence Settings
+        </button>
+      ) : (
+        <span className="shrink-0 font-mono text-[11px] text-fg-muted">
+          {status !== null
+            ? (llmUnavailableReason(status) ?? "Unavailable")
+            : "Checking…"}
+        </span>
+      )}
     </SettingRow>
   );
 }
@@ -750,9 +825,28 @@ export function Settings({
     });
   }, []);
 
+  const [advancedExpanded, setAdvancedExpanded] = useState<boolean>(
+    () => route.section === "ai" || route.section === "advanced",
+  );
+
+  useEffect(() => {
+    if (activeSection === "ai" || activeSection === "advanced") {
+      setAdvancedExpanded(true);
+    }
+  }, [activeSection]);
+
   useEffect(() => {
     if (route.section === "notifications") {
       selectSection("notifications");
+      return;
+    }
+    if (route.section === "ai") {
+      selectSection("ai");
+      return;
+    }
+    const section = parseSettingsSection(route.section ?? null);
+    if (section && section !== "overview") {
+      selectSection(section);
       return;
     }
     if (route.section !== "updates" && revealUpdates === 0) return;
@@ -791,6 +885,16 @@ export function Settings({
     return () => observer.disconnect();
   }, []);
 
+  const toggleAdvanced = (): void => {
+    setAdvancedExpanded((prev) => {
+      const next = !prev;
+      if (next && activeSection !== "ai" && activeSection !== "advanced") {
+        selectSection("ai");
+      }
+      return next;
+    });
+  };
+
   const trayOff = !settings.trayEnabled;
   const sectionError =
     activeSection === "general"
@@ -798,10 +902,12 @@ export function Settings({
       : activeSection === "data"
         ? openError
         : activeSection === "suggestions"
-          ? metricsError
-          : activeSection === "advanced"
-            ? (aiError ?? metricsError ?? energyError)
-            : null;
+          ? null
+          : activeSection === "ai"
+            ? (aiError ?? metricsError)
+            : activeSection === "advanced"
+              ? energyError
+              : null;
   const problem = error ?? sectionError;
 
   return (
@@ -851,6 +957,58 @@ export function Settings({
               {item.label}
             </button>
           ))}
+          <div className="settings-nav-group flex flex-col gap-1">
+            <button
+              type="button"
+              aria-expanded={advancedExpanded}
+              onClick={toggleAdvanced}
+              className={`settings-nav-item flex items-center justify-between cursor-pointer ${
+                (activeSection === "ai" || activeSection === "advanced") &&
+                !advancedExpanded
+                  ? "settings-nav-item-active"
+                  : ""
+              }`}
+            >
+              <span>Advanced settings</span>
+              <svg
+                viewBox="0 0 24 24"
+                className={`size-3 shrink-0 fill-none stroke-current stroke-2 transition-transform duration-150 ${
+                  advancedExpanded ? "rotate-90" : ""
+                }`}
+                aria-hidden="true"
+              >
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </button>
+            {advancedExpanded && (
+              <div className="settings-nav-subitems">
+                <button
+                  type="button"
+                  aria-current={activeSection === "ai" ? "location" : undefined}
+                  onClick={() => selectSection("ai")}
+                  className={`settings-nav-item !text-[11.5px] !py-1.5 cursor-pointer ${
+                    activeSection === "ai" ? "settings-nav-item-active" : ""
+                  }`}
+                >
+                  AI
+                </button>
+                <button
+                  type="button"
+                  aria-current={
+                    activeSection === "advanced" ? "location" : undefined
+                  }
+                  onClick={() => selectSection("advanced")}
+                  className={`settings-nav-item !text-[11.5px] !py-1.5 cursor-pointer ${
+                    activeSection === "advanced"
+                      ? "settings-nav-item-active"
+                      : ""
+                  }`}
+                >
+                  Battery & Energy
+                </button>
+              </div>
+            )}
+          </div>
         </nav>
 
         <div
@@ -1131,14 +1289,30 @@ export function Settings({
           </section>
 
           <section
-            id="settings-section-advanced"
-            data-settings-section="advanced"
+            id="settings-section-ai"
+            data-settings-section="ai"
             className="settings-page-section flex flex-col gap-4"
           >
             <SettingsSectionHeading
-              title="Advanced settings"
-              description="AI effectiveness, personal-model maintenance, and Battery & Energy. Everyday tracking and suggestion controls remain in their own sections."
+              title="AI & Machine Learning"
+              description="On-device models, Apple Intelligence integration, personal model maintenance, and prediction effectiveness."
             />
+            <SettingGroup title="On-device intelligence">
+              <SettingRow
+                title="Suggestion engine"
+                description={engineSummary(aiStatus)}
+              >
+                <span className="shrink-0 font-mono text-[11px] text-fg-muted">
+                  {aiStatus === null
+                    ? ""
+                    : aiStatus.calibrated
+                      ? `${aiStatus.outcomes} reviewed`
+                      : `learning · ${aiStatus.outcomes}/50 reviewed`}
+                </span>
+              </SettingRow>
+              <AppleIntelligenceRow status={aiStatus} onError={setAiError} />
+            </SettingGroup>
+
             <SettingGroup title="AI effectiveness">
               <div className="flex items-center justify-between gap-4 border-b border-line px-4 py-3">
                 <div className="min-w-0">
@@ -1190,7 +1364,17 @@ export function Settings({
                 </button>
               </SettingRow>
             </SettingGroup>
+          </section>
 
+          <section
+            id="settings-section-advanced"
+            data-settings-section="advanced"
+            className="settings-page-section flex flex-col gap-4"
+          >
+            <SettingsSectionHeading
+              title="Advanced settings"
+              description="System performance diagnostics and Battery & Energy monitoring."
+            />
             <SettingGroup title="Battery & Energy">
               <BatteryEnergyMonitor
                 summary={energySummary}
@@ -1200,16 +1384,16 @@ export function Settings({
                 onReset={resetEnergyHistory}
               />
             </SettingGroup>
-            {confirmReset && (
-              <ConfirmDialog
-                title="Reset learned data?"
-                body="OpenRize forgets its personal models, calibration, and the index of similar entries. Your entries, categories, projects, and rules are kept. Suggestions start over from Apple's on-device model and rules, and confidence is capped at 90% again until you review 50 more."
-                confirmLabel="Reset learned data"
-                onConfirm={resetLearned}
-                onCancel={() => setConfirmReset(false)}
-              />
-            )}
           </section>
+          {confirmReset && (
+            <ConfirmDialog
+              title="Reset learned data?"
+              body="OpenRize forgets its personal models, calibration, and the index of similar entries. Your entries, categories, projects, and rules are kept. Suggestions start over from Apple's on-device model and rules, and confidence is capped at 90% again until you review 50 more."
+              confirmLabel="Reset learned data"
+              onConfirm={resetLearned}
+              onCancel={() => setConfirmReset(false)}
+            />
+          )}
         </div>
       </div>
     </main>

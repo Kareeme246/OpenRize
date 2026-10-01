@@ -386,6 +386,21 @@ html.reminder-window body {
   outline-offset: 2px;
 }
 
+.settings-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.settings-nav-subitems {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  border-left: 1px solid var(--line);
+  margin-left: 0.625rem;
+  padding-left: 0.625rem;
+}
+
 .settings-section-heading h2 {
   position: relative;
   display: table;
@@ -427,9 +442,33 @@ html.reminder-window body {
     padding: 0.5rem 0.75rem;
   }
 
-  .settings-nav > .settings-nav-item {
+  .settings-nav > .settings-nav-item,
+  .settings-nav-group > .settings-nav-item {
     width: auto;
     min-width: 7rem;
+    flex: 0 0 auto;
+    justify-content: center;
+    white-space: nowrap;
+  }
+
+  .settings-nav-group {
+    flex-direction: row;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .settings-nav-subitems {
+    flex-direction: row;
+    border-left: 0;
+    margin-left: 0;
+    padding-left: 0;
+    gap: 0.5rem;
+  }
+
+  .settings-nav-subitems > .settings-nav-item {
+    width: auto;
+    min-width: 5rem;
     flex: 0 0 auto;
     justify-content: center;
     white-space: nowrap;
@@ -508,20 +547,12 @@ html.reminder-window body {
 :root[data-shape="sharper"] .shape-bleed,
 :root[data-shape="sharper"] .shape-bleed-table,
 :root[data-shape="sharper"] .shape-strip {
-  margin-inline: calc(var(--gutter) * -1);
   border-radius: 0;
-  border-inline-width: 0;
   box-shadow: none;
 }
 
 :root[data-shape="sharper"] .shape-bleed {
-  padding-inline: var(--gutter);
   border-style: solid;
-}
-
-:root[data-shape="sharper"] .shape-top {
-  margin-top: -1rem;
-  border-top-width: 0;
 }
 
 /* Fused bands share one divider rather than stacking two borders. */
@@ -565,16 +596,8 @@ html.reminder-window body {
   gap: 0;
   padding-inline: 0;
   background-color: var(--bg-panel);
-  border-block: 1px solid var(--line);
-}
-
-/* The outer cells pad out to the page gutter so content lines up with it. */
-:root[data-shape="sharper"] .shape-strip > .shape-cell:first-child {
-  padding-left: var(--gutter);
-}
-
-:root[data-shape="sharper"] .shape-strip > .shape-cell:last-child {
-  padding-right: var(--gutter);
+  border: 1px solid var(--line);
+  overflow: hidden;
 }
 
 :root[data-shape="sharper"] .shape-cell {

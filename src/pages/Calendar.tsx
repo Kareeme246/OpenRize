@@ -453,6 +453,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
           onToday={() =>
             go({ date: localDateString(currentCalendarDay(new Date())) })
           }
+          isToday={now >= startMs && now < endMs}
         />
         <ScaleControl
           name="calendar-scale"

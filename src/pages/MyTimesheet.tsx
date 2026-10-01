@@ -435,6 +435,7 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
             go({ date: localDateString(stepDate(scale, date, direction)) })
           }
           onToday={() => go({ date: localDateString(new Date()) })}
+          isToday={Date.now() >= startMs && Date.now() < endMs}
         />
         <ScaleControl
           name="timesheet-scale"

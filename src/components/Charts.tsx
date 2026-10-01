@@ -76,10 +76,11 @@ export function Donut({
     <figure
       className={`flex min-w-0 gap-4 ${stacked ? "flex-col" : "items-center"}`}
     >
+      {/* biome-ignore lint/a11y/useSemanticElements: SVG cannot be a fieldset */}
       <svg
         viewBox={`0 0 ${size} ${size}`}
         style={{ width: `${size / 16}rem`, height: `${size / 16}rem` }}
-        role="img"
+        role="group"
         aria-label={`${title}: ${shown
           .map((s) => `${s.label} ${formatDuration(s.ms)}`)
           .join(", ")}`}
@@ -97,25 +98,30 @@ export function Donut({
           shown.map((slice) => {
             const length = (slice.ms / total) * circumference;
             const dash = Math.max(0, length - gap);
+            const tooltipContent = `${slice.label}: ${formatDuration(slice.ms)} (${Math.round((slice.ms / total) * 100)}%)`;
             const element = (
-              // biome-ignore lint/a11y/noStaticElementInteractions: hover only mirrors the legend, which carries the same values as text.
-              <circle
-                key={slice.key}
-                cx={size / 2}
-                cy={size / 2}
-                r={radius}
-                fill="none"
-                stroke={slice.color}
-                strokeWidth={hovered === slice.key ? stroke + 3 : stroke}
-                strokeDasharray={`${dash} ${circumference - dash}`}
-                strokeDashoffset={-offset}
-                transform={`rotate(-90 ${size / 2} ${size / 2})`}
-                onMouseEnter={() => setHovered(slice.key)}
-                onMouseLeave={() => setHovered(null)}
-                className="transition-[stroke-width]"
-              >
-                <title>{`${slice.label}: ${formatDuration(slice.ms)} (${Math.round((slice.ms / total) * 100)}%)`}</title>
-              </circle>
+              <Tooltip key={slice.key} content={tooltipContent}>
+                {/* biome-ignore lint/a11y/useSemanticElements: SVG circle cannot be an HTML button */}
+                <circle
+                  cx={size / 2}
+                  cy={size / 2}
+                  r={radius}
+                  fill="none"
+                  stroke={slice.color}
+                  strokeWidth={hovered === slice.key ? stroke + 3 : stroke}
+                  strokeDasharray={`${dash} ${circumference - dash}`}
+                  strokeDashoffset={-offset}
+                  transform={`rotate(-90 ${size / 2} ${size / 2})`}
+                  onMouseEnter={() => setHovered(slice.key)}
+                  onMouseLeave={() => setHovered(null)}
+                  onFocus={() => setHovered(slice.key)}
+                  onBlur={() => setHovered(null)}
+                  tabIndex={0}
+                  role="button"
+                  aria-label={tooltipContent}
+                  className="cursor-pointer outline-none transition-[stroke-width] focus-visible:stroke-[17px]"
+                />
+              </Tooltip>
             );
             offset += length;
             return element;

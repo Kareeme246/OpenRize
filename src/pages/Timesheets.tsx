@@ -178,6 +178,10 @@ export function Timesheets({
             go({ date: localDateString(stepDate(scale, date, direction)) })
           }
           onToday={() => go({ date: localDateString(new Date()) })}
+          isToday={
+            Date.now() >= range.start.getTime() &&
+            Date.now() < range.end.getTime()
+          }
         />
         <SegmentedControl
           name="timesheets-scale"

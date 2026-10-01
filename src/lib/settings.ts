@@ -330,7 +330,9 @@ export interface StoragePaths {
 /**
  * Where the saved theme and shape are mirrored for index.html's pre-paint
  * script, so a Light, System, or Sharper user does not see the defaults flash
- * before settings load.
+ * before settings load. Rust seeds a missing copy before the page runs
+ * (`appearance_init_script` in src-tauri/src/settings.rs), so keep the key
+ * names in sync with it.
  */
 const THEME_HINT_KEY = "openrize.theme";
 const SHAPE_HINT_KEY = "openrize.shape";

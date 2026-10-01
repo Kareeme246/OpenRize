@@ -24,6 +24,7 @@ use crate::models::{
 use crate::timers::now_epoch_ms;
 
 pub const SAMPLE_SECS: u64 = 1;
+pub const APP_SWITCH_GRACE_MS: u64 = 20_000;
 const HEARTBEAT_MS: u64 = 30_000;
 pub const DEFAULT_IDLE_THRESHOLD_MS: u64 = 5 * 60 * 1000;
 pub(crate) const DB_FILE: &str = "activity.db";
@@ -130,6 +131,21 @@ impl Current {
     }
 }
 
+#[derive(Debug, Clone)]
+struct PendingSwitch {
+    sample: WindowSample,
+    started_at: u64,
+    started_instant: Option<std::time::Instant>,
+}
+
+fn is_same_app(cur_app: &str, cur_bundle_id: Option<&str>, sample: &WindowSample) -> bool {
+    if let (Some(cur_bid), Some(sample_bid)) = (cur_bundle_id, sample.bundle_id.as_deref()) {
+        cur_bid == sample_bid && cur_app == sample.app
+    } else {
+        cur_app == sample.app
+    }
+}
+
 pub struct LiveState {
     current: Option<Current>,
     capture_enabled: bool,
@@ -168,6 +184,7 @@ struct Totals {
 pub struct ActivityStore {
     conn: Connection,
     current: Option<Current>,
+    pending_switch: Option<PendingSwitch>,
     capture_enabled: bool,
     idle_threshold_ms: u64,
     last_idle_ms: u64,
@@ -205,6 +222,7 @@ impl ActivityStore {
         let mut store = Self {
             conn,
             current: None,
+            pending_switch: None,
             capture_enabled: true,
             idle_threshold_ms: DEFAULT_IDLE_THRESHOLD_MS,
             last_idle_ms: 0,
@@ -287,6 +305,20 @@ impl ActivityStore {
         self.tracking_hours.is_inside_window(now)
     }
 
+    pub fn is_sample_excluded(&self, sample: &WindowSample) -> bool {
+        let domain = sample.domain.as_deref();
+        let bundle_id = sample.bundle_id.as_deref();
+        let app = sample.app.as_str();
+        let identifier = domain.or(bundle_id).unwrap_or(app);
+
+        let excluded: Result<i64, _> = self.conn.query_row(
+            "SELECT excluded FROM apps WHERE deleted_at IS NULL AND (identifier = ?1 OR identifier = ?2 OR identifier = ?3 OR display_name = ?3) AND excluded != 0 LIMIT 1;",
+            params![identifier, bundle_id.unwrap_or(identifier), app],
+            |row| row.get(0),
+        );
+        excluded.map(|v| v != 0).unwrap_or(false)
+    }
+
     pub fn tick(
         &mut self,
         sample: Option<WindowSample>,
@@ -311,6 +343,7 @@ impl ActivityStore {
         self.last_idle_ms = idle_ms;
 
         if !self.capture_enabled {
+            self.pending_switch = None;
             self.manual_tracking = false;
             return self.close_current(now);
         }
@@ -325,11 +358,26 @@ impl ActivityStore {
         // Outside tracking hours with no active work session and no manual override:
         // suppress new capture. Close any idle break that was open.
         if !in_window && !self.manual_tracking && !is_active_work {
+            self.pending_switch = None;
             if self.current.is_some() {
                 self.close_current(now)?;
                 return Ok(true);
             }
             return Ok(false);
+        }
+
+        // Privacy and exclusion: an excluded app must take effect immediately.
+        // It must never be attributed to the previous app, delayed by a grace period,
+        // or stored as billable activity.
+        if let Some(ref sample) = sample {
+            if self.is_sample_excluded(sample) {
+                self.pending_switch = None;
+                if is_active_work {
+                    self.close_current(now)?;
+                    return Ok(true);
+                }
+                return Ok(false);
+            }
         }
 
         let current = self.current.as_ref().map(|cur| {
@@ -345,6 +393,7 @@ impl ActivityStore {
 
         match current {
             None => {
+                self.pending_switch = None;
                 if !in_window && !self.manual_tracking {
                     return Ok(false);
                 }
@@ -376,6 +425,7 @@ impl ActivityStore {
             }
             Some((app, title, kind, label, bundle_id, url)) => {
                 if idle {
+                    self.pending_switch = None;
                     if kind != KIND_ACTIVITY {
                         return Ok(false);
                     }
@@ -404,6 +454,7 @@ impl ActivityStore {
                 }
 
                 if kind == KIND_BREAK && label.as_deref() == Some(IDLE_LABEL) {
+                    self.pending_switch = None;
                     self.close_current(now)?;
                     if !in_window && !self.manual_tracking {
                         return Ok(true);
@@ -424,29 +475,93 @@ impl ActivityStore {
                 }
 
                 if kind != KIND_ACTIVITY {
+                    self.pending_switch = None;
                     return Ok(false);
                 }
 
                 match sample {
-                    Some(sample)
-                        if sample.app != app
-                            || sample.title != title
-                            || sample.url != url
-                            || sample.bundle_id != bundle_id =>
-                    {
-                        self.close_current(now)?;
-                        self.open(
-                            &sample.app,
-                            &sample.title,
-                            KIND_ACTIVITY,
-                            None,
-                            now,
-                            sample.bundle_id.as_deref(),
-                            sample.url.as_deref(),
-                            sample.domain.as_deref(),
-                        )
+                    Some(sample) => {
+                        let same_app = is_same_app(&app, bundle_id.as_deref(), &sample);
+                        if same_app {
+                            // User is in the current app (or returned to it from a brief detour).
+                            self.pending_switch = None;
+
+                            if sample.title != title
+                                || sample.url != url
+                                || sample.bundle_id != bundle_id
+                            {
+                                self.close_current(now)?;
+                                self.open(
+                                    &sample.app,
+                                    &sample.title,
+                                    KIND_ACTIVITY,
+                                    None,
+                                    now,
+                                    sample.bundle_id.as_deref(),
+                                    sample.url.as_deref(),
+                                    sample.domain.as_deref(),
+                                )
+                            } else {
+                                Ok(false)
+                            }
+                        } else {
+                            // User is in a different app.
+                            match self.pending_switch.take() {
+                                None => {
+                                    self.pending_switch = Some(PendingSwitch {
+                                        sample,
+                                        started_at: now,
+                                        started_instant: Some(std::time::Instant::now()),
+                                    });
+                                    Ok(false)
+                                }
+                                Some(pending) => {
+                                    let same_pending = is_same_app(
+                                        &pending.sample.app,
+                                        pending.sample.bundle_id.as_deref(),
+                                        &sample,
+                                    );
+                                    if same_pending {
+                                        let elapsed_clock = now.saturating_sub(pending.started_at);
+                                        let elapsed_instant = pending
+                                            .started_instant
+                                            .map_or(0, |i| i.elapsed().as_millis() as u64);
+                                        let elapsed = elapsed_clock.max(elapsed_instant);
+
+                                        if elapsed >= APP_SWITCH_GRACE_MS {
+                                            self.close_current(pending.started_at)?;
+                                            self.open(
+                                                &sample.app,
+                                                &sample.title,
+                                                KIND_ACTIVITY,
+                                                None,
+                                                pending.started_at,
+                                                sample.bundle_id.as_deref(),
+                                                sample.url.as_deref(),
+                                                sample.domain.as_deref(),
+                                            )
+                                        } else {
+                                            self.pending_switch = Some(PendingSwitch {
+                                                sample,
+                                                started_at: pending.started_at,
+                                                started_instant: pending.started_instant,
+                                            });
+                                            Ok(false)
+                                        }
+                                    } else {
+                                        // A -> B -> C burst: previous detour aborted without fragmenting
+                                        self.pending_switch = Some(PendingSwitch {
+                                            sample,
+                                            started_at: now,
+                                            started_instant: Some(std::time::Instant::now()),
+                                        });
+                                        Ok(false)
+                                    }
+                                }
+                            }
+                        }
                     }
-                    _ => Ok(false),
+                    None => Ok(false),
                 }
             }
         }
@@ -461,6 +576,7 @@ impl ActivityStore {
         if kind != KIND_FOCUS && kind != KIND_BREAK {
             return Err(format!("cannot start a session of kind {kind}"));
         }
+        self.pending_switch = None;
         self.manual_tracking = true;
         self.close_current(now)?;
         let display = label.map(str::trim).filter(|text| !text.is_empty());
@@ -470,6 +586,7 @@ impl ActivityStore {
     }
 
     pub fn stop_session(&mut self, now: u64) -> Result<bool, String> {
+        self.pending_switch = None;
         self.manual_tracking = false;
         self.close_current(now)
     }
@@ -478,6 +595,7 @@ impl ActivityStore {
     /// segment now, not at the last input, and treat the time as idle until
     /// the user is back.
     pub fn tick_away(&mut self, now: u64) -> Result<bool, String> {
+        self.pending_switch = None;
         let closed = if self
             .current
             .as_ref()
@@ -492,11 +610,13 @@ impl ActivityStore {
     }
 
     pub fn close_active_segment(&mut self, now: u64) -> Result<bool, String> {
+        self.pending_switch = None;
         self.manual_tracking = false;
         self.close_current(now)
     }
 
     pub fn set_capture_enabled(&mut self, enabled: bool, now: u64) -> Result<(), String> {
+        self.pending_switch = None;
         if enabled {
             self.capture_enabled = true;
             self.write_setting("capture_enabled", "true")?;
@@ -1992,6 +2112,28 @@ impl ActivityStore {
                     params![exc as i64, now as i64, id],
                 )
                 .map_err(|e| e.to_string())?;
+
+            if exc {
+                if let Some(ref pending) = self.pending_switch {
+                    if self.is_sample_excluded(&pending.sample) {
+                        self.pending_switch = None;
+                    }
+                }
+                if let Some(ref cur) = self.current {
+                    let cur_sample = WindowSample {
+                        app: cur.app.clone(),
+                        title: cur.title.clone(),
+                        bundle_id: cur.bundle_id.clone(),
+                        url: cur.url.clone(),
+                        domain: cur.domain.clone(),
+                        keeps_display_awake: false,
+                    };
+                    if self.is_sample_excluded(&cur_sample) {
+                        self.pending_switch = None;
+                        let _ = self.close_current(now);
+                    }
+                }
+            }
         }
 
         self.conn.query_row(
@@ -2397,15 +2539,25 @@ mod tests {
         let mut store = store();
         store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
         assert!(!store.tick(sample("Code", "main.rs"), 0, 4_000).unwrap());
-        assert!(store.tick(sample("Slack", "#general"), 0, 7_000).unwrap());
+        // Slack is first seen at 7_000; 20-second grace period starts, so tick returns false
+        assert!(!store.tick(sample("Slack", "#general"), 0, 7_000).unwrap());
 
-        let snapshot = store.snapshot(0, 7_000).unwrap();
+        // While within the grace period, Code remains the open segment
+        let intermediate = store.snapshot(0, 7_000).unwrap();
+        assert_eq!(intermediate.segments.len(), 1);
+        assert_eq!(intermediate.segments[0].app, "Code");
+        assert_eq!(intermediate.segments[0].ended_at, None);
+
+        // Sustained visit reaches 20 seconds (7_000 + 20_000 = 27_000)
+        assert!(store.tick(sample("Slack", "#general"), 0, 27_000).unwrap());
+
+        let snapshot = store.snapshot(0, 27_000).unwrap();
         assert_eq!(snapshot.segments.len(), 2);
         assert_eq!(snapshot.segments[0].app, "Code");
         assert_eq!(snapshot.segments[0].ended_at, Some(7_000));
         assert_eq!(snapshot.segments[1].app, "Slack");
         assert_eq!(snapshot.segments[1].ended_at, None);
-        assert_eq!(snapshot.tracked_ms, 6_000);
+        assert_eq!(snapshot.tracked_ms, 26_000);
     }
 
     #[test]
@@ -2413,15 +2565,17 @@ mod tests {
         let mut store = store();
         store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
         store.tick(sample("Slack", "#general"), 0, 5_000).unwrap();
+        // Sustain Slack past the 20s grace threshold (5_000 + 20_000 = 25_000)
+        store.tick(sample("Slack", "#general"), 0, 25_000).unwrap();
         let entries = store
-            .rebuild_time_entries_in_range(0, 5_000, 5_000)
+            .rebuild_time_entries_in_range(0, 25_000, 25_000)
             .unwrap();
         // The session covering the Code segment starts first.
         let code_entry = entries.first().unwrap();
 
-        store.delete_time_entry(&code_entry.id, 6_000).unwrap();
+        store.delete_time_entry(&code_entry.id, 26_000).unwrap();
 
-        let remaining = store.snapshot(0, 6_000).unwrap();
+        let remaining = store.snapshot(0, 26_000).unwrap();
         assert_eq!(remaining.segments.len(), 1);
         assert_eq!(remaining.segments[0].app, "Slack");
         let linked: i64 = store
@@ -3449,8 +3603,11 @@ mod tests {
         store
             .tick(sample("Slack", "#general"), 0, outside_ms)
             .unwrap();
+        store
+            .tick(sample("Slack", "#general"), 0, outside_ms + 20_000)
+            .unwrap();
 
-        let live = store.live_state(outside_ms);
+        let live = store.live_state(outside_ms + 20_000);
         assert!(!live.in_tracking_hours);
         assert!(live.tracking_active);
         assert_eq!(live.current.as_ref().unwrap().app, "Slack");
@@ -3530,5 +3687,317 @@ mod tests {
             .tick(sample("Code", "main.rs"), 0, now + 20_000)
             .unwrap();
         assert!(store.snapshot(0, now + 20_000).unwrap().current.is_none());
+    }
+
+    #[test]
+    fn test_nineteen_second_detour_does_not_create_switch_fragment() {
+        let mut store = store();
+        store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
+        // Switch to Slack at 10_000
+        assert!(!store.tick(sample("Slack", "#general"), 0, 10_000).unwrap());
+        // Still in Slack at 29_000 (19s in Slack < 20s grace period)
+        assert!(!store.tick(sample("Slack", "#general"), 0, 29_000).unwrap());
+
+        let snap_during = store.snapshot(0, 29_000).unwrap();
+        assert_eq!(snap_during.segments.len(), 1);
+        assert_eq!(snap_during.segments[0].app, "Code");
+        assert_eq!(snap_during.segments[0].ended_at, None);
+
+        // Return to Code at 29_500: detour is discarded
+        assert!(!store.tick(sample("Code", "main.rs"), 0, 29_500).unwrap());
+        assert!(!store.tick(sample("Code", "main.rs"), 0, 40_000).unwrap());
+
+        let snapshot = store.snapshot(0, 40_000).unwrap();
+        assert_eq!(snapshot.segments.len(), 1);
+        assert_eq!(snapshot.segments[0].app, "Code");
+        assert_eq!(snapshot.segments[0].ended_at, None);
+        assert_eq!(snapshot.tracked_ms, 39_000);
+
+        let slack_segments: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM segments WHERE app = 'Slack';",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(slack_segments, 0, "Slack must not create a segment row");
+
+        let slack_apps: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM apps WHERE display_name = 'Slack';",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            slack_apps, 0,
+            "Detour app must not be registered in apps table"
+        );
+    }
+
+    #[test]
+    fn test_exact_twenty_second_boundary_switches_app() {
+        let mut store = store();
+        store.tick(sample("Code", "main.rs"), 0, 10_000).unwrap();
+        // Switch to Slack at 20_000
+        assert!(!store.tick(sample("Slack", "#general"), 0, 20_000).unwrap());
+
+        // At 39_999 (19_999 ms in Slack): still pending
+        assert!(!store.tick(sample("Slack", "#general"), 0, 39_999).unwrap());
+        assert_eq!(store.snapshot(0, 39_999).unwrap().segments.len(), 1);
+
+        // At exactly 40_000 (20_000 ms in Slack): threshold reached!
+        assert!(store.tick(sample("Slack", "#general"), 0, 40_000).unwrap());
+
+        let snapshot = store.snapshot(0, 40_000).unwrap();
+        assert_eq!(snapshot.segments.len(), 2);
+        assert_eq!(snapshot.segments[0].app, "Code");
+        assert_eq!(snapshot.segments[0].started_at, 10_000);
+        assert_eq!(snapshot.segments[0].ended_at, Some(20_000));
+        assert_eq!(snapshot.segments[1].app, "Slack");
+        assert_eq!(snapshot.segments[1].started_at, 20_000);
+        assert_eq!(snapshot.segments[1].ended_at, None);
+        // Continuous total work time without double counting or gaps
+        assert_eq!(snapshot.tracked_ms, 30_000);
+    }
+
+    #[test]
+    fn test_sustained_switch_retains_real_start_timestamp() {
+        let mut store = store();
+        store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
+        store.tick(sample("Slack", "#general"), 0, 10_000).unwrap();
+        // Sustained for 25s
+        assert!(store.tick(sample("Slack", "#general"), 0, 35_000).unwrap());
+        // Continues further in Slack
+        store.tick(sample("Slack", "#general"), 0, 60_000).unwrap();
+
+        let snapshot = store.snapshot(0, 60_000).unwrap();
+        assert_eq!(snapshot.segments.len(), 2);
+        assert_eq!(snapshot.segments[0].app, "Code");
+        assert_eq!(snapshot.segments[0].ended_at, Some(10_000));
+        assert_eq!(snapshot.segments[1].app, "Slack");
+        // Real start timestamp retained rather than starting at 30_000 or 35_000
+        assert_eq!(snapshot.segments[1].started_at, 10_000);
+        assert_eq!(snapshot.tracked_ms, 59_000);
+    }
+
+    #[test]
+    fn test_rapid_alternating_apps_detour_does_not_fragment() {
+        let mut store = store();
+        store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
+
+        // Rapid switches: Code -> Slack (5s) -> Chrome (7s) -> Terminal (8s) -> Slack (6s) -> Code
+        store.tick(sample("Slack", "#general"), 0, 10_000).unwrap();
+        store.tick(sample("Chrome", "Google"), 0, 15_000).unwrap();
+        store.tick(sample("Terminal", "zsh"), 0, 22_000).unwrap();
+        store.tick(sample("Slack", "#general"), 0, 30_000).unwrap();
+        store.tick(sample("Code", "main.rs"), 0, 36_000).unwrap();
+        store.tick(sample("Code", "main.rs"), 0, 50_000).unwrap();
+
+        let snapshot = store.snapshot(0, 50_000).unwrap();
+        assert_eq!(
+            snapshot.segments.len(),
+            1,
+            "Detours must not produce standalone fragments"
+        );
+        assert_eq!(snapshot.segments[0].app, "Code");
+        assert_eq!(snapshot.segments[0].ended_at, None);
+        assert_eq!(snapshot.tracked_ms, 49_000);
+    }
+
+    #[test]
+    fn test_burst_switches_a_b_c_commits_sustained_candidate() {
+        let mut store = store();
+        store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
+        // Switch to Slack at 10_000
+        store.tick(sample("Slack", "#general"), 0, 10_000).unwrap();
+        // Switch to Chrome at 15_000 (Slack was 5s < 20s, aborted)
+        store.tick(sample("Chrome", "Docs"), 0, 15_000).unwrap();
+        // Chrome reaches 20 seconds at 35_000
+        assert!(store.tick(sample("Chrome", "Docs"), 0, 35_000).unwrap());
+
+        let snapshot = store.snapshot(0, 35_000).unwrap();
+        assert_eq!(snapshot.segments.len(), 2);
+        assert_eq!(snapshot.segments[0].app, "Code");
+        assert_eq!(snapshot.segments[0].ended_at, Some(15_000));
+        assert_eq!(snapshot.segments[1].app, "Chrome");
+        assert_eq!(snapshot.segments[1].started_at, 15_000);
+        assert_eq!(snapshot.segments[1].ended_at, None);
+        assert_eq!(snapshot.tracked_ms, 34_000);
+
+        let slack_count: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM segments WHERE app = 'Slack';",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(slack_count, 0);
+    }
+
+    #[test]
+    fn test_first_event_opens_immediately_without_grace_delay() {
+        let mut store = store();
+        // First sample opens immediately
+        let changed = store.tick(sample("Code", "main.rs"), 0, 5_000).unwrap();
+        assert!(changed, "First event must open immediately");
+
+        let snapshot = store.snapshot(0, 5_000).unwrap();
+        assert_eq!(snapshot.segments.len(), 1);
+        assert_eq!(snapshot.segments[0].app, "Code");
+        assert_eq!(snapshot.segments[0].started_at, 5_000);
+        assert_eq!(snapshot.segments[0].ended_at, None);
+    }
+
+    #[test]
+    fn test_pending_switch_at_idle_terminates_grace_and_closes_cleanly() {
+        let mut store = store();
+        store.set_idle_threshold_ms(300_000).unwrap();
+        store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
+        // Switch to Slack at 10_000
+        store.tick(sample("Slack", "#general"), 0, 10_000).unwrap();
+        // Last input at 15_000 (5s in Slack)
+        // At 315_000, idle threshold (300s) crossed:
+        let changed = store
+            .tick(sample("Slack", "#general"), 300_000, 315_000)
+            .unwrap();
+        assert!(changed);
+
+        let snapshot = store.snapshot(0, 315_000).unwrap();
+        assert_eq!(snapshot.segments.len(), 2);
+        // Code closed at idle_since (15_000)
+        assert_eq!(snapshot.segments[0].app, "Code");
+        assert_eq!(snapshot.segments[0].ended_at, Some(15_000));
+        // Break opened at 15_000
+        assert_eq!(snapshot.segments[1].kind, KIND_BREAK);
+        assert_eq!(snapshot.segments[1].started_at, 15_000);
+
+        let slack_count: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM segments WHERE app = 'Slack';",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            slack_count, 0,
+            "Pending Slack must not create a segment on idle"
+        );
+    }
+
+    #[test]
+    fn test_pending_switch_at_stop_and_sleep_terminates_grace_period() {
+        let mut store = store();
+        store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
+        store.tick(sample("Slack", "#general"), 0, 10_000).unwrap();
+        // At 18_000 (8s in Slack), close active segment (e.g. system sleep or tracking stop)
+        store.close_active_segment(18_000).unwrap();
+
+        let snapshot = store.snapshot(0, 18_000).unwrap();
+        assert_eq!(snapshot.segments.len(), 1);
+        assert_eq!(snapshot.segments[0].app, "Code");
+        assert_eq!(snapshot.segments[0].ended_at, Some(18_000));
+        assert_eq!(snapshot.tracked_ms, 17_000);
+
+        let slack_count: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM segments WHERE app = 'Slack';",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(slack_count, 0);
+    }
+
+    #[test]
+    fn test_ignored_excluded_apps_take_effect_immediately_without_grace_delay() {
+        let mut store = store();
+        // Insert an excluded app into apps table
+        store
+            .conn
+            .execute(
+                "INSERT INTO apps (id, kind, identifier, display_name, excluded, first_seen, last_seen, created_at, updated_at)
+                 VALUES ('app-1', 'app', 'com.agilebits.onepassword7', '1Password', 1, 0, 0, 0, 0);",
+                [],
+            )
+            .unwrap();
+
+        let op_sample = Some(WindowSample {
+            app: "1Password".to_string(),
+            title: "Vault".to_string(),
+            bundle_id: Some("com.agilebits.onepassword7".to_string()),
+            url: None,
+            domain: None,
+            keeps_display_awake: false,
+        });
+
+        store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
+        // Switch to excluded app 1Password at 10_000
+        let changed = store.tick(op_sample.clone(), 0, 10_000).unwrap();
+        assert!(
+            changed,
+            "Switching to excluded app must close current work immediately"
+        );
+
+        let snap1 = store.snapshot(0, 10_000).unwrap();
+        assert_eq!(snap1.segments.len(), 1);
+        assert_eq!(snap1.segments[0].app, "Code");
+        assert_eq!(snap1.segments[0].ended_at, Some(10_000));
+        assert!(
+            snap1.current.is_none(),
+            "Excluded app must not open a segment"
+        );
+
+        // Stays in 1Password for 15 seconds (10_000 to 25_000)
+        assert!(!store.tick(op_sample.clone(), 0, 25_000).unwrap());
+        let snap2 = store.snapshot(0, 25_000).unwrap();
+        assert_eq!(snap2.segments.len(), 1);
+        assert_eq!(
+            snap2.tracked_ms, 9_000,
+            "1Password time must never be attributed to Code or tracked"
+        );
+
+        // Returns to Code at 25_000: opens immediately (first event attribution)
+        assert!(store.tick(sample("Code", "main.rs"), 0, 25_000).unwrap());
+        let snap3 = store.snapshot(0, 30_000).unwrap();
+        assert_eq!(snap3.segments.len(), 2);
+        assert_eq!(snap3.segments[1].app, "Code");
+        assert_eq!(snap3.segments[1].started_at, 25_000);
+        // Code ran 1_000..10_000 (9s) + 25_000..30_000 (5s) = 14s. 1Password was excluded for 15s.
+        assert_eq!(snap3.tracked_ms, 14_000);
+    }
+
+    #[test]
+    fn test_constant_total_work_time_preserved_across_detours_and_switches() {
+        let mut store = store();
+        // 0..10_000: Code
+        store.tick(sample("Code", "main.rs"), 0, 0).unwrap();
+        // 10_000..15_000: Slack detour (5s)
+        store.tick(sample("Slack", "#general"), 0, 10_000).unwrap();
+        // 15_000..30_000: Back to Code
+        store.tick(sample("Code", "main.rs"), 0, 15_000).unwrap();
+        // 30_000: Sustained switch to Chrome
+        store.tick(sample("Chrome", "GitHub"), 0, 30_000).unwrap();
+        // 50_000: Chrome sustained (20s)
+        store.tick(sample("Chrome", "GitHub"), 0, 50_000).unwrap();
+        // 60_000: Stop tracking
+        store.close_active_segment(60_000).unwrap();
+
+        let snapshot = store.snapshot(0, 60_000).unwrap();
+        // Total work time from 0 to 60_000 was 60_000 ms.
+        // Segments: Code [0..30_000] (30s) + Chrome [30_000..60_000] (30s) = 60s total.
+        assert_eq!(snapshot.segments.len(), 2);
+        assert_eq!(snapshot.segments[0].app, "Code");
+        assert_eq!(snapshot.segments[0].started_at, 0);
+        assert_eq!(snapshot.segments[0].ended_at, Some(30_000));
+        assert_eq!(snapshot.segments[1].app, "Chrome");
+        assert_eq!(snapshot.segments[1].started_at, 30_000);
+        assert_eq!(snapshot.segments[1].ended_at, Some(60_000));
+        assert_eq!(snapshot.tracked_ms, 60_000);
     }
 }

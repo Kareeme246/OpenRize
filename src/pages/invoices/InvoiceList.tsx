@@ -8,6 +8,7 @@ import {
   FilterSelect,
   SkeletonRows,
 } from "../../components/Page";
+import { Tooltip } from "../../components/Tooltip";
 import {
   type DisplayStatus,
   displayStatus,
@@ -107,7 +108,7 @@ export function InvoiceList({
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-line bg-panel">
+      <div className="shape-bleed-table overflow-hidden rounded-xl border border-line bg-panel">
         <dl className="grid grid-cols-3 divide-x divide-line border-line border-b">
           {cells.map((cell) => (
             <div key={cell.label} className="px-4 py-3">
@@ -201,18 +202,19 @@ export function InvoiceList({
                   </td>
                   <td className="px-4 py-2.5 text-right">
                     {invoice.status === "draft" && (
-                      <button
-                        type="button"
-                        title="Delete draft"
-                        aria-label={`Delete draft invoice for ${invoice.clientName}`}
-                        className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1 text-[12px] text-danger transition-colors hover:bg-danger/10"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setDeleting(invoice);
-                        }}
-                      >
-                        ✕
-                      </button>
+                      <Tooltip content="Delete draft">
+                        <button
+                          type="button"
+                          aria-label={`Delete draft invoice for ${invoice.clientName}`}
+                          className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1 text-[12px] text-danger transition-colors hover:bg-danger/10"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setDeleting(invoice);
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </Tooltip>
                     )}
                   </td>
                 </tr>

@@ -16,7 +16,7 @@ export function EditorSection({
   const [open, setOpen] = useState(defaultOpen);
   const bodyId = useId();
   return (
-    <section className="rounded-xl border border-line bg-panel">
+    <section className="shape-bleed-table rounded-xl border border-line bg-panel">
       <button
         type="button"
         aria-expanded={open}

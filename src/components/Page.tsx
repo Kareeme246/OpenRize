@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Picker, type PickerOption } from "./Picker";
 import { SegmentedControl, type SegmentedOption } from "./SegmentedControl";
+import { Tooltip } from "./Tooltip";
 
 /**
  * Shared view chrome (design board, D shared conventions): a header with a
@@ -48,15 +49,16 @@ export function DateStepper({
 }) {
   return (
     <div className="flex items-center gap-1">
-      <button
-        type="button"
-        onClick={() => onStep(-1)}
-        className={STEP_BUTTON}
-        title={`Previous ${unit}`}
-        aria-label={`Previous ${unit}`}
-      >
-        ‹
-      </button>
+      <Tooltip content={`Previous ${unit}`}>
+        <button
+          type="button"
+          onClick={() => onStep(-1)}
+          className={STEP_BUTTON}
+          aria-label={`Previous ${unit}`}
+        >
+          ‹
+        </button>
+      </Tooltip>
       <button
         type="button"
         onClick={onToday}
@@ -64,15 +66,16 @@ export function DateStepper({
       >
         Today
       </button>
-      <button
-        type="button"
-        onClick={() => onStep(1)}
-        className={STEP_BUTTON}
-        title={`Next ${unit}`}
-        aria-label={`Next ${unit}`}
-      >
-        ›
-      </button>
+      <Tooltip content={`Next ${unit}`}>
+        <button
+          type="button"
+          onClick={() => onStep(1)}
+          className={STEP_BUTTON}
+          aria-label={`Next ${unit}`}
+        >
+          ›
+        </button>
+      </Tooltip>
     </div>
   );
 }
@@ -108,14 +111,13 @@ export interface TabOption<T extends string> {
   value: T;
   label: string;
   count?: number;
-  /**
-   * A 24px-viewBox stroke glyph. With one, the tab shows only the icon (the
-   * label becomes its accessible name and tooltip) and sits at the far end.
-   */
-  icon?: ReactNode;
 }
 
-/** Underlined tabs, the review panel's style, with optional counts. */
+/**
+ * Underlined tabs, the review panel's style, with optional counts. The
+ * baseline is only as wide as the tabs themselves (`w-fit`), whatever the
+ * container, so it never runs on to the window's edge.
+ */
 export function Tabs<T extends string>({
   tabs,
   value,
@@ -131,7 +133,7 @@ export function Tabs<T extends string>({
     <div
       role="tablist"
       aria-label={label}
-      className="flex gap-4 border-line border-b font-medium text-[12.5px]"
+      className="flex w-fit max-w-full gap-4 border-line border-b font-medium text-[12.5px]"
     >
       {tabs.map((tab) => {
         const active = tab.value === value;
@@ -141,33 +143,14 @@ export function Tabs<T extends string>({
             type="button"
             role="tab"
             aria-selected={active}
-            aria-label={tab.icon ? tab.label : undefined}
-            title={tab.icon ? tab.label : undefined}
             onClick={() => onChange(tab.value)}
             className={`-mb-px flex items-center gap-1.5 border-b-2 pb-2 transition-colors ${
-              tab.icon ? "ml-auto px-0.5" : ""
-            } ${
               active
                 ? "border-accent font-semibold text-fg-strong"
                 : "border-transparent text-fg-soft hover:text-fg"
             }`}
           >
-            {tab.icon ? (
-              <svg
-                viewBox="0 0 24 24"
-                className="size-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.8}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                {tab.icon}
-              </svg>
-            ) : (
-              tab.label
-            )}
+            {tab.label}
             {tab.count !== undefined && (
               <span
                 className={`rounded-full px-1.5 font-mono text-[10.5px] tabular-nums ${
@@ -241,7 +224,7 @@ export function StatCard({
     </>
   );
   // Top-aligned so values line up across cards with and without a sub line.
-  const frame = `flex min-w-0 flex-col justify-start rounded-xl border bg-panel p-3 text-left ${
+  const frame = `shape-cell flex min-w-0 flex-col justify-start rounded-xl border bg-panel p-3 text-left ${
     active ? "border-accent/50 ring-1 ring-accent/30" : "border-line"
   }`;
   if (!onClick) return <div className={frame}>{body}</div>;

@@ -468,8 +468,8 @@ export function Calendar({ route, navigate }: CalendarProps) {
         </div>
       )}
 
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_320px] gap-4 overflow-hidden p-4">
-        <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-sm">
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_320px] gap-4 overflow-hidden p-4 sharper:gap-0 sharper:p-0">
+        <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-sm sharper:rounded-none sharper:border-0 sharper:shadow-none">
           {scale === "day" && (
             <DayView
               dayStart={startMs}
@@ -535,7 +535,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
           )}
         </div>
 
-        <aside className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-sm">
+        <aside className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-sm sharper:rounded-none sharper:border-0 sharper:border-l sharper:shadow-none">
           {review.detail ? (
             <EntryReviewSheet
               review={review}

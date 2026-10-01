@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import { Dot, EmptyState } from "../../components/Page";
+import { Tooltip } from "../../components/Tooltip";
 import type { Catalog } from "../../hooks/useCatalog";
 import { isSameDay } from "../../lib/dates";
 import { isInFlight } from "../../lib/entries";
@@ -98,17 +99,20 @@ function ReviewBadge({
 }) {
   if (cell.review === 0) return null;
   return (
-    <button
-      type="button"
-      onClick={onReview}
-      title={`${formatDuration(cell.reviewMs)} across ${cell.review} entries waiting on review`}
-      className="flex h-6 shrink-0 items-center gap-1 rounded-md border border-review/40 bg-review/10 pr-1 pl-1.5 font-semibold text-[11px] text-review transition-colors hover:bg-review/20"
+    <Tooltip
+      content={`${formatDuration(cell.reviewMs)} across ${cell.review} entries waiting on review`}
     >
-      +{decimalHours(cell.reviewMs)} Review
-      <span className="min-w-4 rounded-full bg-review px-1 text-center text-[10px] text-canvas tabular-nums leading-4">
-        {cell.review}
-      </span>
-    </button>
+      <button
+        type="button"
+        onClick={onReview}
+        className="flex h-6 shrink-0 items-center gap-1 rounded-md border border-review/40 bg-review/10 pr-1 pl-1.5 font-semibold text-[11px] text-review transition-colors hover:bg-review/20"
+      >
+        +{decimalHours(cell.reviewMs)} Review
+        <span className="min-w-4 rounded-full bg-review px-1 text-center text-[10px] text-canvas tabular-nums leading-4">
+          {cell.review}
+        </span>
+      </button>
+    </Tooltip>
   );
 }
 
@@ -378,23 +382,28 @@ export function SheetGrid({
               style={columnStyle(column)}
             >
               {cell.ms > 0 ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    scale === "week" ? onOpenDay(column.start) : toggle(rowKey)
-                  }
-                  aria-label={`${name.label}, ${new Date(column.start).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}: ${formatDuration(cell.ms)}`}
-                  title={`${formatDuration(cell.ms)}${
+                <Tooltip
+                  content={`${formatDuration(cell.ms)}${
                     cell.reviewMs > 0
                       ? ` · ${formatDuration(cell.reviewMs)} to review`
                       : ""
                   }`}
-                  className="relative flex h-12 w-full items-center justify-center rounded-md font-semibold text-[14px] text-fg-strong tabular-nums outline-none transition-[filter] hover:brightness-110 focus-visible:ring-2 focus-visible:ring-accent"
-                  style={FILLED}
                 >
-                  {label}
-                  <Delta ms={cell.reviewMs} />
-                </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      scale === "week"
+                        ? onOpenDay(column.start)
+                        : toggle(rowKey)
+                    }
+                    aria-label={`${name.label}, ${new Date(column.start).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}: ${formatDuration(cell.ms)}`}
+                    className="relative flex h-12 w-full items-center justify-center rounded-md font-semibold text-[14px] text-fg-strong tabular-nums outline-none transition-[filter] hover:brightness-110 focus-visible:ring-2 focus-visible:ring-accent"
+                    style={FILLED}
+                  >
+                    {label}
+                    <Delta ms={cell.reviewMs} />
+                  </button>
+                </Tooltip>
               ) : (
                 <div
                   className={`h-12 rounded-md ${column.weekend ? "" : "bg-surface"}`}
@@ -482,7 +491,7 @@ export function SheetGrid({
   };
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-line bg-panel">
+    <div className="shape-bleed-table overflow-x-auto rounded-xl border border-line bg-panel">
       <table
         className={`w-full table-fixed border-collapse ${scale === "week" ? "min-w-[860px]" : "min-w-[640px]"}`}
       >

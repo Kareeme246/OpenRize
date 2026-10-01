@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { EnergyImpactLevel, EnergySummary } from "../lib/types";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { SegmentedControl, type SegmentedOption } from "./SegmentedControl";
+import { Tooltip } from "./Tooltip";
 
 const IMPACT_STYLES: Record<
   EnergyImpactLevel,
@@ -47,9 +48,9 @@ function StatCard({
       <div className="mt-0.5 text-[17px] font-semibold tabular-nums text-fg-strong">
         {value}
       </div>
-      <div className="truncate text-[11px] text-fg-muted" title={detail}>
-        {detail}
-      </div>
+      <Tooltip content={detail}>
+        <div className="truncate text-[11px] text-fg-muted">{detail}</div>
+      </Tooltip>
     </div>
   );
 }
@@ -174,16 +175,22 @@ export function BatteryEnergyMonitor({
         {/* Energy Share Stacked Bar */}
         <div className="my-2">
           <div className="flex h-2 overflow-hidden rounded-[3px] bg-inset-soft">
-            <div
-              className="bg-accent transition-all duration-300"
-              style={{ width: `${aiPct}%` }}
-              title={`On-device AI classification: ${aiPct.toFixed(1)}%`}
-            />
-            <div
-              className="bg-line-strong transition-all duration-300"
-              style={{ width: `${ambientPct}%` }}
-              title={`Ambient tracking & UI: ${ambientPct.toFixed(1)}%`}
-            />
+            <Tooltip
+              content={`On-device AI classification: ${aiPct.toFixed(1)}%`}
+            >
+              <div
+                className="bg-accent transition-all duration-300"
+                style={{ width: `${aiPct}%` }}
+              />
+            </Tooltip>
+            <Tooltip
+              content={`Ambient tracking & UI: ${ambientPct.toFixed(1)}%`}
+            >
+              <div
+                className="bg-line-strong transition-all duration-300"
+                style={{ width: `${ambientPct}%` }}
+              />
+            </Tooltip>
           </div>
           <div className="settings-energy-legend mt-1.5 flex items-center justify-between text-[11.5px] text-fg-muted">
             <span className="flex items-center gap-1.5">

@@ -550,7 +550,9 @@ export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
               <InlineError message={error} onRetry={loadTotals} />
             </div>
           )}
-          <div className="grid shrink-0 grid-cols-4 gap-3">
+          <div
+            className={`shape-strip grid shrink-0 grid-cols-4 gap-3 ${error ? "" : "shape-top"}`}
+          >
             <StatCard
               label="Time"
               value={formatDuration(totalMs)}
@@ -632,7 +634,7 @@ export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
 
           <div className="mt-3 min-h-0 flex-1">
             {!loading && entryCount === 0 && !error ? (
-              <div className="rounded-xl border border-line bg-panel">
+              <div className="shape-bleed-table rounded-xl border border-line bg-panel">
                 <EmptyState
                   title={
                     filtered ? "No entries match" : "No entries in this range"
@@ -951,7 +953,7 @@ function PivotTable({
   if (error) return <InlineError message={error} onRetry={load} />;
   if (cells === null) {
     return (
-      <div className="rounded-xl border border-line bg-panel">
+      <div className="shape-bleed-table rounded-xl border border-line bg-panel">
         <SkeletonRows />
       </div>
     );
@@ -959,7 +961,7 @@ function PivotTable({
 
   const groupName = GROUP_OPTIONS.find((g) => g.value === groupBy)?.label;
   return (
-    <div className="overflow-x-auto rounded-xl border border-line bg-panel">
+    <div className="shape-bleed-table overflow-x-auto rounded-xl border border-line bg-panel">
       {/* Separate borders on the cells: WebKit drops collapsed borders under
           the sticky first column. */}
       <table className="w-full min-w-max border-separate border-spacing-0 text-[12px]">
@@ -1218,7 +1220,7 @@ function ChartsView({
   if (error) return <InlineError message={error} onRetry={load} />;
   if (data === null) {
     return (
-      <div className="rounded-xl border border-line bg-panel">
+      <div className="shape-bleed-table rounded-xl border border-line bg-panel">
         <SkeletonRows />
       </div>
     );
@@ -1249,8 +1251,8 @@ function ChartsView({
   }));
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-3">
+    <div className="shape-stack space-y-4">
+      <div className="shape-strip shape-narrow-rows grid grid-cols-1 items-start gap-3 lg:grid-cols-3">
         {(
           [
             ["By project", data.project, "project"],
@@ -1260,13 +1262,13 @@ function ChartsView({
         ).map(([title, cells, by]) => (
           <div
             key={title}
-            className="rounded-xl border border-line bg-panel p-4"
+            className="shape-cell rounded-xl border border-line bg-panel p-4"
           >
             <Donut title={title} slices={slices([...cells], by)} stacked />
           </div>
         ))}
       </div>
-      <div className="rounded-xl border border-line bg-panel p-4">
+      <div className="shape-bleed rounded-xl border border-line bg-panel p-4">
         <StackedColumns
           title={`Time per ${stackBy} by category`}
           columns={columns}
@@ -1406,7 +1408,7 @@ function LogView({
   );
 
   return (
-    <div className="flex h-full min-h-[320px] flex-col overflow-hidden rounded-xl border border-line bg-panel">
+    <div className="shape-bleed-table flex h-full min-h-[320px] flex-col overflow-hidden rounded-xl border border-line bg-panel">
       <div
         // Reserves the list's scrollbar gutter so the columns line up.
         className="grid shrink-0 items-center gap-3 overflow-y-hidden border-line border-b bg-surface px-3 py-2 font-semibold text-[10.5px] text-fg-faint tracking-wider [scrollbar-gutter:stable]"

@@ -17,6 +17,7 @@ import type {
   SuggestionField,
 } from "../lib/types";
 import { Picker } from "./Picker";
+import { Tooltip } from "./Tooltip";
 
 /** One pickable value for a field, ranked: suggestion, alternatives, rest. */
 interface PickOption {
@@ -317,14 +318,15 @@ export function EntryReviewPanel({
             </span>
           )}
         </span>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded p-1 text-fg-faint transition-colors hover:bg-surface hover:text-fg"
-          title="Close (Esc)"
-        >
-          ✕
-        </button>
+        <Tooltip content="Close (Esc)">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded p-1 text-fg-faint transition-colors hover:bg-surface hover:text-fg"
+          >
+            ✕
+          </button>
+        </Tooltip>
       </div>
 
       <div className="flex-1 space-y-3 overflow-y-auto p-4">
@@ -387,21 +389,22 @@ export function EntryReviewPanel({
               </div>
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="w-full cursor-pointer text-left font-medium text-[12.5px] text-fg-strong transition-colors hover:text-accent"
-              title="Edit description (E)"
-            >
-              {entry.description || (
-                <span className="text-fg-faint">Untitled session</span>
-              )}
-              {entry.descriptionOrigin === "ai" && (
-                <span className="ml-1.5 rounded-sm border border-line px-1 align-middle font-normal text-[9.5px] text-fg-faint">
-                  AI
-                </span>
-              )}
-            </button>
+            <Tooltip content="Edit description (E)">
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                className="w-full cursor-pointer text-left font-medium text-[12.5px] text-fg-strong transition-colors hover:text-accent"
+              >
+                {entry.description || (
+                  <span className="text-fg-faint">Untitled session</span>
+                )}
+                {entry.descriptionOrigin === "ai" && (
+                  <span className="ml-1.5 rounded-sm border border-line px-1 align-middle font-normal text-[9.5px] text-fg-faint">
+                    AI
+                  </span>
+                )}
+              </button>
+            </Tooltip>
           )}
         </div>
 
@@ -410,9 +413,11 @@ export function EntryReviewPanel({
             role="alert"
             className="flex items-center gap-2 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2 text-[11.5px]"
           >
-            <span className="min-w-0 flex-1 text-danger" title={job.lastError}>
-              Couldn't categorize this entry
-            </span>
+            <Tooltip content={job.lastError}>
+              <span className="min-w-0 flex-1 text-danger">
+                Couldn't categorize this entry
+              </span>
+            </Tooltip>
             <button
               type="button"
               onClick={onRetry}
@@ -440,19 +445,20 @@ export function EntryReviewPanel({
           <span className="font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
             Billable
           </span>
-          <button
-            type="button"
-            onClick={onToggleBillable}
-            aria-pressed={entry.billable}
-            title={entry.billable ? "Billable" : "Not billable"}
-            className={`ml-auto flex size-6 items-center justify-center rounded font-semibold text-[11px] transition-colors ${
-              entry.billable
-                ? "bg-accent/20 text-accent"
-                : "text-fg-ghost hover:bg-surface hover:text-fg-soft"
-            }`}
-          >
-            {entry.billable ? "$" : "–"}
-          </button>
+          <Tooltip content={entry.billable ? "Billable" : "Not billable"}>
+            <button
+              type="button"
+              onClick={onToggleBillable}
+              aria-pressed={entry.billable}
+              className={`ml-auto flex size-6 items-center justify-center rounded font-semibold text-[11px] transition-colors ${
+                entry.billable
+                  ? "bg-accent/20 text-accent"
+                  : "text-fg-ghost hover:bg-surface hover:text-fg-soft"
+              }`}
+            >
+              {entry.billable ? "$" : "–"}
+            </button>
+          </Tooltip>
         </div>
 
         {detail.ruleSuggestion && !approved && (
@@ -470,36 +476,44 @@ export function EntryReviewPanel({
         )}
 
         <div className="flex items-center gap-1.5 border-line border-t pt-3">
-          <button
-            type="button"
-            onClick={onAccept}
-            disabled={!entry.categoryId || approved}
-            title={
+          <Tooltip
+            content={
               approved
                 ? "Already approved"
                 : entry.categoryId
                   ? "Accept (⌘↵)"
                   : "Pick a category first (1–9)"
             }
-            className="whitespace-nowrap flex-1 rounded-md bg-accent px-3 py-1.5 font-semibold text-[12px] text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            wrapperClassName="flex min-w-0 flex-1"
           >
-            {approved ? "Approved ✓" : "Accept"}{" "}
-            {!approved && <span className="text-[10px] opacity-70">⌘↵</span>}
-          </button>
-          {approved ? (
             <button
               type="button"
-              onClick={onUnapprove}
-              disabled={invoiced}
-              title={
+              onClick={onAccept}
+              disabled={!entry.categoryId || approved}
+              className="whitespace-nowrap flex-1 rounded-md bg-accent px-3 py-1.5 font-semibold text-[12px] text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {approved ? "Approved ✓" : "Accept"}{" "}
+              {!approved && <span className="text-[10px] opacity-70">⌘↵</span>}
+            </button>
+          </Tooltip>
+          {approved ? (
+            <Tooltip
+              content={
                 invoiced
                   ? "Invoiced entries can't be unapproved"
                   : "Return to pending to edit"
               }
-              className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
+              wrapperClassName="inline-flex"
             >
-              Unapprove
-            </button>
+              <button
+                type="button"
+                onClick={onUnapprove}
+                disabled={invoiced}
+                className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Unapprove
+              </button>
+            </Tooltip>
           ) : (
             <button
               type="button"
@@ -509,22 +523,24 @@ export function EntryReviewPanel({
               Reject <span className="text-[10px] opacity-70">⌘⌫</span>
             </button>
           )}
-          <button
-            type="button"
-            onClick={onSplit}
-            className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
-            title="Split at the main app switch (S)"
-          >
-            Split
-          </button>
-          <button
-            type="button"
-            onClick={onDelete}
-            className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-danger transition-colors hover:bg-danger/10"
-            title="Delete entry"
-          >
-            ✕
-          </button>
+          <Tooltip content="Split at the main app switch (S)">
+            <button
+              type="button"
+              onClick={onSplit}
+              className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+            >
+              Split
+            </button>
+          </Tooltip>
+          <Tooltip content="Delete entry">
+            <button
+              type="button"
+              onClick={onDelete}
+              className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-danger transition-colors hover:bg-danger/10"
+            >
+              ✕
+            </button>
+          </Tooltip>
         </div>
         <p className="text-[10.5px] text-fg-faint">
           <Kbd>1–9</Kbd> pick · <Kbd>C</Kbd>
@@ -740,32 +756,35 @@ function FieldSection({
         active && !locked ? "border-accent/50 bg-accent/5" : "border-line"
       }`}
     >
-      <button
-        type="button"
-        onClick={onActivate}
-        className="flex w-full items-center gap-2 text-left"
-        title={
+      <Tooltip
+        content={
           isProjectEmpty
             ? "No projects yet"
             : `Choose ${label.toLowerCase()} (${shortcut})`
         }
       >
-        <span className="font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
-          {label}
-        </span>
-        <Kbd>{shortcut}</Kbd>
-        <span className="ml-auto flex items-center gap-2">
-          {processing && !suggestion ? (
-            <span className="animate-pulse text-[11px] text-fg-soft">
-              Categorizing…
-            </span>
-          ) : suggestion ? (
-            <ConfidenceSummary suggestion={suggestion} />
-          ) : model.rejected ? (
-            <span className="text-[11px] text-fg-faint">Rejected</span>
-          ) : null}
-        </span>
-      </button>
+        <button
+          type="button"
+          onClick={onActivate}
+          className="flex w-full items-center gap-2 text-left"
+        >
+          <span className="font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
+            {label}
+          </span>
+          <Kbd>{shortcut}</Kbd>
+          <span className="ml-auto flex items-center gap-2">
+            {processing && !suggestion ? (
+              <span className="animate-pulse text-[11px] text-fg-soft">
+                Categorizing…
+              </span>
+            ) : suggestion ? (
+              <ConfidenceSummary suggestion={suggestion} />
+            ) : model.rejected ? (
+              <span className="text-[11px] text-fg-faint">Rejected</span>
+            ) : null}
+          </span>
+        </button>
+      </Tooltip>
 
       <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         {current ? (

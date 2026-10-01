@@ -1,3 +1,5 @@
+import { Tooltip } from "./Tooltip";
+
 const SIZE = 96;
 const STROKE = 7;
 const RADIUS = (SIZE - STROKE) / 2;
@@ -29,65 +31,66 @@ export function HourRing({ elapsed, running, onToggle }: HourRingProps) {
   const minutes = Math.floor((elapsed % HOUR_MS) / 60_000);
 
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-label={running ? "Pause tracking" : "Start tracking"}
-      title={running ? "Pause" : "Start"}
-      className="grid size-24 shrink-0 place-items-center rounded-full outline-none transition-transform hover:scale-[1.03] active:scale-95 focus-visible:ring-2 focus-visible:ring-accent/50"
-    >
-      <svg
-        viewBox={`0 0 ${SIZE} ${SIZE}`}
-        className="size-24"
-        role="img"
-        aria-label={`${minutes} minutes into this tracker's current hour`}
+    <Tooltip content={running ? "Pause" : "Start"}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={running ? "Pause tracking" : "Start tracking"}
+        className="grid size-24 shrink-0 place-items-center rounded-full outline-none transition-transform hover:scale-[1.03] active:scale-95 focus-visible:ring-2 focus-visible:ring-accent/50"
       >
-        <circle
-          cx={CENTRE}
-          cy={CENTRE}
-          r={RADIUS}
-          fill="none"
-          strokeWidth={STROKE}
-          className="stroke-line"
-        />
-        <circle
-          cx={CENTRE}
-          cy={CENTRE}
-          r={RADIUS}
-          fill="none"
-          strokeWidth={STROKE}
-          strokeLinecap="round"
-          strokeDasharray={CIRCUMFERENCE}
-          strokeDashoffset={CIRCUMFERENCE * (1 - progress)}
-          transform={`rotate(-90 ${CENTRE} ${CENTRE})`}
-          className={running ? "stroke-accent" : "stroke-fg-faint"}
-        />
-        {running ? (
-          <>
-            <rect
-              x={CENTRE - 10}
-              y={CENTRE - 14}
-              width="6"
-              height="28"
-              rx="2"
-              className="fill-accent"
-            />
-            <rect
-              x={CENTRE + 4}
-              y={CENTRE - 14}
-              width="6"
-              height="28"
-              rx="2"
-              className="fill-accent"
-            />
-          </>
-        ) : (
-          <path
-            d={`M${CENTRE - 8},${CENTRE - 16} L${CENTRE - 8},${CENTRE + 16} L${CENTRE + 16},${CENTRE} Z`}
-            className="fill-fg-muted"
+        <svg
+          viewBox={`0 0 ${SIZE} ${SIZE}`}
+          className="size-24"
+          role="img"
+          aria-label={`${minutes} minutes into this tracker's current hour`}
+        >
+          <circle
+            cx={CENTRE}
+            cy={CENTRE}
+            r={RADIUS}
+            fill="none"
+            strokeWidth={STROKE}
+            className="stroke-line"
           />
-        )}
-      </svg>
-    </button>
+          <circle
+            cx={CENTRE}
+            cy={CENTRE}
+            r={RADIUS}
+            fill="none"
+            strokeWidth={STROKE}
+            strokeLinecap="round"
+            strokeDasharray={CIRCUMFERENCE}
+            strokeDashoffset={CIRCUMFERENCE * (1 - progress)}
+            transform={`rotate(-90 ${CENTRE} ${CENTRE})`}
+            className={running ? "stroke-accent" : "stroke-fg-faint"}
+          />
+          {running ? (
+            <>
+              <rect
+                x={CENTRE - 10}
+                y={CENTRE - 14}
+                width="6"
+                height="28"
+                rx="2"
+                className="fill-accent"
+              />
+              <rect
+                x={CENTRE + 4}
+                y={CENTRE - 14}
+                width="6"
+                height="28"
+                rx="2"
+                className="fill-accent"
+              />
+            </>
+          ) : (
+            <path
+              d={`M${CENTRE - 8},${CENTRE - 16} L${CENTRE - 8},${CENTRE + 16} L${CENTRE + 16},${CENTRE} Z`}
+              className="fill-fg-muted"
+            />
+          )}
+        </svg>
+      </button>
+    </Tooltip>
   );
 }

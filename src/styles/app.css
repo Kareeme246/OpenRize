@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* `sharper:` styles an element only in the Sharper shape (Settings > Appearance),
+   which the root's `data-shape` attribute carries. Rounded is the base. */
+@custom-variant sharper (:where(:root[data-shape="sharper"]) &);
+
 /*
  * Semantic tokens. Components never name a raw colour: they use utilities
  * generated from these names (`text-fg-muted`, `border-line`, `bg-surface`, ...)
@@ -432,6 +436,7 @@ html.reminder-window body {
   }
 
   .settings-content {
+    --gutter: 1rem;
     padding: 1rem;
   }
 
@@ -477,4 +482,127 @@ html.reminder-window body {
   .settings-nav-item {
     transition: none;
   }
+}
+
+/*
+ * Sharper shape. Rounded keeps the spaced, rounded cards; Sharper turns each
+ * panel into an edge-to-edge band split by plain dividers, with no gap between
+ * them. A page opts a panel in with one of these classes, and every rule below
+ * is unlayered so it wins over the panel's own utilities.
+ *
+ *   shape-bleed        a panel that spans the page gutters (the px-5 of <main>)
+ *   shape-bleed-table  the same, for a table or list whose rows pad themselves
+ *                      (their header fills should reach the edges)
+ *   shape-top          a band that opens the page, flush under the header line
+ *   shape-strip        a grid of shape-cell panels fused into one divided band
+ *   shape-cell         one cell of a strip
+ *   shape-narrow-rows  a strip whose cells stack below 64rem (-xl: 80rem): divide them by row
+ *   shape-stack        a column of panels: the gaps between them close up
+ *   shape-group        a wrapper of bands that follows a band: they fuse across it
+ *   shape-one-col      a grid of panels that stacks into one column of bands
+ */
+:root {
+  --gutter: 1.25rem;
+}
+
+:root[data-shape="sharper"] .shape-bleed,
+:root[data-shape="sharper"] .shape-bleed-table,
+:root[data-shape="sharper"] .shape-strip {
+  margin-inline: calc(var(--gutter) * -1);
+  border-radius: 0;
+  border-inline-width: 0;
+  box-shadow: none;
+}
+
+:root[data-shape="sharper"] .shape-bleed {
+  padding-inline: var(--gutter);
+  border-style: solid;
+}
+
+:root[data-shape="sharper"] .shape-top {
+  margin-top: -1rem;
+  border-top-width: 0;
+}
+
+/* Fused bands share one divider rather than stacking two borders. */
+:root[data-shape="sharper"]
+  :is(.shape-bleed, .shape-bleed-table, .shape-strip)
+  + :is(.shape-bleed, .shape-bleed-table, .shape-strip) {
+  margin-top: 0;
+  border-top-width: 0;
+}
+
+:root[data-shape="sharper"]
+  :is(.shape-bleed, .shape-bleed-table, .shape-strip)
+  + .shape-group {
+  margin-top: 0;
+}
+
+:root[data-shape="sharper"]
+  :is(.shape-bleed, .shape-bleed-table, .shape-strip)
+  + .shape-group
+  > :first-child {
+  margin-top: 0;
+  border-top-width: 0;
+}
+
+/* A grid of panels that sharper stacks into one column of bands. */
+:root[data-shape="sharper"] .shape-one-col {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+:root[data-shape="sharper"] .shape-stack {
+  gap: 0;
+  row-gap: 0;
+}
+
+:root[data-shape="sharper"] .shape-stack > * {
+  margin-block: 0;
+}
+
+:root[data-shape="sharper"] .shape-strip {
+  gap: 0;
+  padding-inline: 0;
+  background-color: var(--bg-panel);
+  border-block: 1px solid var(--line);
+}
+
+/* The outer cells pad out to the page gutter so content lines up with it. */
+:root[data-shape="sharper"] .shape-strip > .shape-cell:first-child {
+  padding-left: var(--gutter);
+}
+
+:root[data-shape="sharper"] .shape-strip > .shape-cell:last-child {
+  padding-right: var(--gutter);
+}
+
+:root[data-shape="sharper"] .shape-cell {
+  border-width: 0;
+  border-radius: 0;
+  background-color: transparent;
+  box-shadow: none;
+}
+
+:root[data-shape="sharper"] .shape-cell + .shape-cell {
+  border-left: 1px solid var(--line);
+}
+
+@media (max-width: 63.999rem) {
+  :root[data-shape="sharper"] .shape-narrow-rows > .shape-cell + .shape-cell {
+    border-left-width: 0;
+    border-top: 1px solid var(--line);
+  }
+}
+
+@media (max-width: 79.999rem) {
+  :root[data-shape="sharper"] .shape-narrow-rows-xl > .shape-cell + .shape-cell {
+    border-left-width: 0;
+    border-top: 1px solid var(--line);
+  }
+}
+
+/* A selected cell keeps its accent as a bar, since its ring is gone. */
+:root[data-shape="sharper"] .shape-cell[aria-pressed="true"] {
+  box-shadow: inset 0 -2px 0 var(--accent);
 }

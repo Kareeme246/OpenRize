@@ -157,8 +157,8 @@ export function AppsTimeline({ apps, categories, projects, onUpdate }: Props) {
   };
 
   return (
-    <div className="space-y-4 pb-5">
-      <section className="rounded-xl border border-line bg-surface p-4">
+    <div className="shape-stack space-y-4 pb-5">
+      <section className="shape-bleed rounded-xl border border-line bg-surface p-4">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold text-fg-strong">Timeline</h2>
@@ -293,8 +293,8 @@ export function AppsTimeline({ apps, categories, projects, onUpdate }: Props) {
         </p>
       </section>
 
-      <div className="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
-        <section className="rounded-xl border border-line bg-surface p-4">
+      <div className="shape-strip shape-narrow-rows grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
+        <section className="shape-cell rounded-xl border border-line bg-surface p-4">
           <h2 className="mb-5 text-sm font-semibold text-fg-strong">
             Total tracked time
           </h2>
@@ -308,7 +308,7 @@ export function AppsTimeline({ apps, categories, projects, onUpdate }: Props) {
             />
           </div>
         </section>
-        <section className="min-w-0 rounded-xl border border-line bg-surface p-4">
+        <section className="shape-cell min-w-0 rounded-xl border border-line bg-surface p-4">
           <h2 className="mb-3 text-sm font-semibold text-fg-strong">
             Apps & Websites
           </h2>

@@ -1,5 +1,6 @@
 import { type ReactNode, useId, useState } from "react";
 import { formatDuration, formatHours } from "../lib/format";
+import { Tooltip } from "./Tooltip";
 
 /**
  * Small SVG charts for totals by category, project, or app. Identity is
@@ -320,15 +321,18 @@ export function StackedBar({
       {slices
         .filter((slice) => slice.ms > 0)
         .map((slice) => (
-          <span
+          <Tooltip
             key={slice.key}
-            title={`${slice.label}: ${formatDuration(slice.ms)}`}
-            className="block h-full first:rounded-l-full last:rounded-r-full"
-            style={{
-              width: `${(slice.ms / total) * 100}%`,
-              backgroundColor: slice.color,
-            }}
-          />
+            content={`${slice.label}: ${formatDuration(slice.ms)}`}
+          >
+            <span
+              className="block h-full first:rounded-l-full last:rounded-r-full"
+              style={{
+                width: `${(slice.ms / total) * 100}%`,
+                backgroundColor: slice.color,
+              }}
+            />
+          </Tooltip>
         ))}
     </div>
   );

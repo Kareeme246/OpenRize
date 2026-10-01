@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { EmptyState } from "../../components/Page";
+import { Tooltip } from "../../components/Tooltip";
 import { type BreakEntry, breakEnd, takenBreaks } from "../../lib/breaks";
 import { recordingEntry } from "../../lib/entries";
 import { formatDuration, formatTime } from "../../lib/format";
@@ -242,26 +243,25 @@ export function DayView({
           <span className="w-[114px] shrink-0 truncate border-line border-l px-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
             Projects
           </span>
-          <span
-            className="flex w-[30px] shrink-0 items-center justify-center border-line border-l"
-            title="Productivity metrics"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              className="size-3.5 text-fg-faint"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.8}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-label="Productivity metrics"
-            >
-              <path d="M3 3v16a2 2 0 0 0 2 2h16" />
-              <path d="M18 17V9" />
-              <path d="M13 17V5" />
-              <path d="M8 17v-3" />
-            </svg>
-          </span>
+          <Tooltip content="Productivity metrics">
+            <span className="flex w-[30px] shrink-0 items-center justify-center border-line border-l">
+              <svg
+                viewBox="0 0 24 24"
+                className="size-3.5 text-fg-faint"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.8}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-label="Productivity metrics"
+              >
+                <path d="M3 3v16a2 2 0 0 0 2 2h16" />
+                <path d="M18 17V9" />
+                <path d="M13 17V5" />
+                <path d="M8 17v-3" />
+              </svg>
+            </span>
+          </Tooltip>
         </div>
       </div>
 
@@ -301,18 +301,21 @@ export function DayView({
                 ? entryById.get(segment.entryId)
                 : undefined;
               return (
-                <div
+                <Tooltip
                   key={segment.id}
-                  title={`${segment.app}: ${segment.title}`}
-                  className="absolute right-0 left-0 rounded-xs"
-                  style={{
-                    top: `${top}px`,
-                    height: `${segmentHeight}px`,
-                    backgroundColor: owner
-                      ? "var(--accent)"
-                      : "var(--fg-faint)",
-                  }}
-                />
+                  content={`${segment.app}: ${segment.title}`}
+                >
+                  <div
+                    className="absolute right-0 left-0 rounded-xs"
+                    style={{
+                      top: `${top}px`,
+                      height: `${segmentHeight}px`,
+                      backgroundColor: owner
+                        ? "var(--accent)"
+                        : "var(--fg-faint)",
+                    }}
+                  />
+                </Tooltip>
               );
             })}
           </div>
@@ -337,60 +340,61 @@ export function DayView({
 
             <div className="flex h-full items-stretch">
               <div className="relative min-w-0 flex-1">
-                <button
-                  ref={column}
-                  type="button"
-                  aria-label="Drag to add a session"
-                  title="Drag to add a session"
-                  className="absolute inset-0 w-full cursor-cell touch-none"
-                  onPointerDown={(event) => {
-                    if (event.button !== 0) return;
-                    press.current = {
-                      y: event.clientY,
-                      time: timeAt(event.clientY),
-                    };
-                    setDraft(null);
-                    event.currentTarget.setPointerCapture(event.pointerId);
-                  }}
-                  onPointerMove={(event) => {
-                    if (press.current === null) return;
-                    setDraft(
-                      dragRange(
+                <Tooltip content="Drag to add a session">
+                  <button
+                    ref={column}
+                    type="button"
+                    aria-label="Drag to add a session"
+                    className="absolute inset-0 w-full cursor-cell touch-none"
+                    onPointerDown={(event) => {
+                      if (event.button !== 0) return;
+                      press.current = {
+                        y: event.clientY,
+                        time: timeAt(event.clientY),
+                      };
+                      setDraft(null);
+                      event.currentTarget.setPointerCapture(event.pointerId);
+                    }}
+                    onPointerMove={(event) => {
+                      if (press.current === null) return;
+                      setDraft(
+                        dragRange(
+                          press.current.y,
+                          press.current.time,
+                          event.clientY,
+                          timeAt(event.clientY),
+                        ),
+                      );
+                    }}
+                    onPointerUp={(event) => {
+                      if (press.current === null) return;
+                      const range = dragRange(
                         press.current.y,
                         press.current.time,
                         event.clientY,
                         timeAt(event.clientY),
-                      ),
-                    );
-                  }}
-                  onPointerUp={(event) => {
-                    if (press.current === null) return;
-                    const range = dragRange(
-                      press.current.y,
-                      press.current.time,
-                      event.clientY,
-                      timeAt(event.clientY),
-                    );
-                    press.current = null;
-                    setDraft(null);
-                    if (range) {
-                      onCreate(range.start, range.end);
-                    }
-                  }}
-                  onPointerCancel={() => {
-                    press.current = null;
-                    setDraft(null);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      const start = startAt(
-                        Math.max(dayStart, Math.min(now, dayEnd - SNAP_MS)),
                       );
-                      onCreate(start, start + SNAP_MS);
-                    }
-                  }}
-                />
+                      press.current = null;
+                      setDraft(null);
+                      if (range) {
+                        onCreate(range.start, range.end);
+                      }
+                    }}
+                    onPointerCancel={() => {
+                      press.current = null;
+                      setDraft(null);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        const start = startAt(
+                          Math.max(dayStart, Math.min(now, dayEnd - SNAP_MS)),
+                        );
+                        onCreate(start, start + SNAP_MS);
+                      }
+                    }}
+                  />
+                </Tooltip>
                 {takenBreaks(breaks).map((entry) => {
                   const start = entry.startedAt ?? dayStart;
                   const { top, height: bandHeight } = place(
@@ -545,13 +549,14 @@ export function BreakBand({ entry, top, height, now }: BreakBandProps) {
   const start = entry.startedAt ?? now;
   const length = formatDuration(Math.max(0, breakEnd(entry, now) - start));
   return (
-    <div
-      className="pointer-events-none absolute right-4 left-0 z-0 overflow-hidden rounded-md border border-line-strong bg-surface-strong"
-      style={{ top: `${top}px`, height: `${height}px` }}
-      title={`${formatTime(start)} · ${length}`}
-      role="img"
-      aria-label={`Break, ${length}`}
-    />
+    <Tooltip content={`${formatTime(start)} · ${length}`}>
+      <div
+        className="pointer-events-none absolute right-4 left-0 z-0 overflow-hidden rounded-md border border-line-strong bg-surface-strong"
+        style={{ top: `${top}px`, height: `${height}px` }}
+        role="img"
+        aria-label={`Break, ${length}`}
+      />
+    </Tooltip>
   );
 }
 
@@ -583,28 +588,29 @@ function LaneBlock({
 }: LaneBlockProps) {
   const tone = color ?? "var(--fg-faint)";
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(entryId)}
-      title={label}
-      aria-label={label}
-      className={`calendar-entry absolute right-1 left-0.5 overflow-hidden rounded-md px-1.5 text-left text-[10.5px] font-medium leading-tight transition-all ${
-        selected ? "z-20 ring-2 ring-accent" : "z-10 hover:border-fg-soft/40"
-      }`}
-      style={{
-        top: `${top}px`,
-        height: `${height}px`,
-        backgroundColor: `color-mix(in srgb, ${tone} 15%, var(--bg-panel))`,
-        color: tone,
-      }}
-    >
-      <span
-        className="min-w-0"
-        style={clampStyle(Math.max(1, Math.floor(height / LANE_LINE)))}
+    <Tooltip content={label}>
+      <button
+        type="button"
+        onClick={() => onSelect(entryId)}
+        aria-label={label}
+        className={`calendar-entry absolute right-1 left-0.5 overflow-hidden rounded-md px-1.5 text-left text-[10.5px] font-medium leading-tight transition-all ${
+          selected ? "z-20 ring-2 ring-accent" : "z-10 hover:border-fg-soft/40"
+        }`}
+        style={{
+          top: `${top}px`,
+          height: `${height}px`,
+          backgroundColor: `color-mix(in srgb, ${tone} 15%, var(--bg-panel))`,
+          color: tone,
+        }}
       >
-        {label}
-      </span>
-    </button>
+        <span
+          className="min-w-0"
+          style={clampStyle(Math.max(1, Math.floor(height / LANE_LINE)))}
+        >
+          {label}
+        </span>
+      </button>
+    </Tooltip>
   );
 }
 
@@ -636,21 +642,22 @@ export function NowLine({ top, recording, compact = false }: NowLineProps) {
   }
   const elapsed = formatDuration(recording.now - recording.startedAt);
   return (
-    <div
-      className="pointer-events-none absolute right-0 left-0 z-30 flex -translate-y-1/2 items-center"
-      style={{ top: `${top}px` }}
-      title={`Recording since ${formatTime(recording.startedAt)}`}
-    >
-      <span className="recording-dot -ml-1 size-2 shrink-0 rounded-full bg-danger" />
-      <span className="h-0.5 flex-1 rounded-full bg-danger" />
-      {compact ? (
-        <span className="sr-only">Recording, {elapsed}</span>
-      ) : (
-        <span className="-ml-px flex shrink-0 items-center gap-1 rounded-full bg-danger py-0.5 pr-2 pl-1.5 font-semibold text-[10px] text-canvas leading-none tabular-nums shadow-sm">
-          <span className="recording-dot size-1.5 rounded-full bg-canvas" />
-          Recording · {elapsed}
-        </span>
-      )}
-    </div>
+    <Tooltip content={`Recording since ${formatTime(recording.startedAt)}`}>
+      <div
+        className="pointer-events-none absolute right-0 left-0 z-30 flex -translate-y-1/2 items-center"
+        style={{ top: `${top}px` }}
+      >
+        <span className="recording-dot -ml-1 size-2 shrink-0 rounded-full bg-danger" />
+        <span className="h-0.5 flex-1 rounded-full bg-danger" />
+        {compact ? (
+          <span className="sr-only">Recording, {elapsed}</span>
+        ) : (
+          <span className="-ml-px flex shrink-0 items-center gap-1 rounded-full bg-danger py-0.5 pr-2 pl-1.5 font-semibold text-[10px] text-canvas leading-none tabular-nums shadow-sm">
+            <span className="recording-dot size-1.5 rounded-full bg-canvas" />
+            Recording · {elapsed}
+          </span>
+        )}
+      </div>
+    </Tooltip>
   );
 }

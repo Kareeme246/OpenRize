@@ -70,7 +70,7 @@ export function DaySummary({ summary }: { summary: SheetSummary }) {
   return (
     <section
       aria-label="Day summary"
-      className="rounded-xl border border-line bg-panel py-4"
+      className="shape-bleed-table rounded-xl border border-line bg-panel py-4"
     >
       <div className="grid grid-cols-3">
         <Figure

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Tabs } from "../components/Page";
 import { Picker } from "../components/Picker";
+import { Tooltip } from "../components/Tooltip";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import * as api from "../lib/api";
 import type { AppRecord, Category, Project } from "../lib/types";
@@ -91,7 +92,7 @@ export function Apps() {
   const excludedCount = apps.filter((a) => a.excluded).length;
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto bg-base p-6">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto bg-base p-6 [--gutter:1.5rem]">
       {/* Header */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
@@ -236,7 +237,7 @@ export function Apps() {
           </div>
 
           {/* Table */}
-          <div className="flex-1 overflow-hidden rounded-xl border border-line bg-surface">
+          <div className="shape-bleed-table flex-1 overflow-hidden rounded-xl border border-line bg-surface">
             <div className="h-full overflow-x-auto">
               <table className="w-full border-collapse text-left text-xs">
                 <thead>
@@ -295,12 +296,11 @@ export function Apps() {
                           </div>
                         </td>
 
-                        <td
-                          className="px-3 py-2.5 text-fg-muted font-mono text-[11px] truncate max-w-[200px]"
-                          title={app.identifier}
-                        >
-                          {app.identifier}
-                        </td>
+                        <Tooltip content={app.identifier}>
+                          <td className="px-3 py-2.5 text-fg-muted font-mono text-[11px] truncate max-w-[200px]">
+                            {app.identifier}
+                          </td>
+                        </Tooltip>
 
                         <td className="px-3 py-2.5">
                           <Picker

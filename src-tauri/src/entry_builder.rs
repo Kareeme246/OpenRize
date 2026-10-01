@@ -24,6 +24,78 @@ impl Default for EntrySettings {
     }
 }
 
+/// Entry ids minted for time spent in an agent's pane start with this, so the
+/// classifier knows the project is already settled.
+pub const CARVE_ID_PREFIX: &str = "ag-";
+/// Time in an agent's pane shorter than this stays part of the session around
+/// it: it is a glance, not a stretch of work on the agent's project.
+pub const MIN_CARVE_MS: u64 = 2 * 60 * 1000;
+/// Stretches in the same pane closer together than this are one stretch.
+pub const CARVE_MERGE_GAP_MS: u64 = 60 * 1000;
+
+/// One row of the time the person had an agent's pane in front of them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FocusInput {
+    pub id: i64,
+    pub project_id: String,
+    pub agent: String,
+    pub started_at: u64,
+    pub ended_at: u64,
+}
+
+/// A stretch of a session that belongs to an agent's project: the person was
+/// in that agent's pane.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Carve {
+    /// The id its entry will carry, stable while the stretch grows.
+    pub id: String,
+    pub project_id: String,
+    pub label: String,
+    pub start: u64,
+    pub end: u64,
+}
+
+/// Joins focus rows into stretches: same project, gaps up to a minute closed,
+/// anything under two minutes dropped.
+pub fn carves_from_focus(rows: &[FocusInput]) -> Vec<Carve> {
+    let mut sorted: Vec<&FocusInput> = rows
+        .iter()
+        .filter(|row| row.ended_at > row.started_at)
+        .collect();
+    sorted.sort_by_key(|row| (row.started_at, row.id));
+    let mut carves: Vec<Carve> = Vec::new();
+    let mut anchors: Vec<i64> = Vec::new();
+    for row in sorted {
+        match carves.last_mut() {
+            Some(last)
+                if last.project_id == row.project_id
+                    && row.started_at <= last.end + CARVE_MERGE_GAP_MS =>
+            {
+                last.end = last.end.max(row.ended_at);
+            }
+            _ => {
+                carves.push(Carve {
+                    id: String::new(),
+                    project_id: row.project_id.clone(),
+                    label: format!("{} agent", row.agent),
+                    start: row.started_at,
+                    end: row.ended_at,
+                });
+                anchors.push(row.id);
+            }
+        }
+    }
+    carves
+        .into_iter()
+        .zip(anchors)
+        .filter(|(carve, _)| carve.end - carve.start >= MIN_CARVE_MS)
+        .map(|(mut carve, anchor)| {
+            carve.id = format!("{CARVE_ID_PREFIX}{anchor}");
+            carve
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SegmentInput {
@@ -84,11 +156,31 @@ pub struct BuiltTimeEntry {
 /// 5. Ids are stable across rebuilds: an entry keeps the id its segments were
 ///    linked to, so re-running the builder updates the open entry in place
 ///    instead of minting a duplicate.
+/// 6. Time spent in an agent's pane is carved out of its session as an entry
+///    of its own on that agent's project (`carves`). It is the only slicing
+///    the builder does: the pieces partition the session, a stretch under
+///    two minutes stays in the surrounding entry, and a leftover under two
+///    minutes next to a carve joins it.
+#[cfg(test)]
 pub fn build_entries(
     segments: &[SegmentInput],
     frozen_entries: &[BuiltTimeEntry],
     settings: &EntrySettings,
     now: u64,
+) -> Vec<BuiltTimeEntry> {
+    build_entries_with(segments, frozen_entries, settings, now, &[])
+}
+
+/// `build_entries`, with the time the person spent in agents' panes carved out
+/// of the sessions around it (rule 6): a session that contains such a stretch
+/// becomes several entries that together cover exactly the same time, so
+/// work totals are unchanged.
+pub fn build_entries_with(
+    segments: &[SegmentInput],
+    frozen_entries: &[BuiltTimeEntry],
+    settings: &EntrySettings,
+    now: u64,
+    carves: &[Carve],
 ) -> Vec<BuiltTimeEntry> {
     let frozen_ids: HashSet<&str> = frozen_entries.iter().map(|e| e.id.as_str()).collect();
     let mut work: Vec<&SegmentInput> = segments
@@ -115,6 +207,7 @@ pub fn build_entries(
                 settings,
                 now,
                 &mut claimed,
+                carves,
             );
             session.clear();
         }
@@ -130,11 +223,14 @@ pub fn build_entries(
         let live = session.iter().any(|seg| seg.ended_at.is_none())
             || now.saturating_sub(session_end) <= gap;
         if live {
-            let mut entry = create_entry_from_segments(&session, session_end, now, &mut claimed);
-            entry.status = "building".to_string();
-            // An ongoing session isn't named after its apps until it closes.
-            entry.description = UNTITLED_SESSION.to_string();
-            results.push(entry);
+            let pieces = split_session(&session, session_end, now, &mut claimed, carves, true);
+            for mut entry in pieces {
+                if entry.status == "building" {
+                    // An ongoing session isn't named after its apps until it closes.
+                    entry.description = UNTITLED_SESSION.to_string();
+                }
+                results.push(entry);
+            }
         } else {
             push_closed(
                 &mut results,
@@ -143,6 +239,7 @@ pub fn build_entries(
                 settings,
                 now,
                 &mut claimed,
+                carves,
             );
         }
     }
@@ -159,15 +256,174 @@ fn push_closed(
     settings: &EntrySettings,
     now: u64,
     claimed: &mut HashSet<String>,
+    carves: &[Carve],
 ) {
     if session_end.saturating_sub(session[0].started_at) >= settings.min_duration_ms {
-        results.push(create_entry_from_segments(
+        results.extend(split_session(
             session,
             session_end,
             now,
             claimed,
+            carves,
+            false,
         ));
     }
+}
+
+/// One piece of a session: a stretch with the project of the agent pane it
+/// was spent in, or the rest of the session.
+struct Piece<'a> {
+    start: u64,
+    end: u64,
+    carve: Option<&'a Carve>,
+}
+
+/// Cuts a session at the carved stretches. With none it is one piece.
+fn pieces_of<'a>(start: u64, end: u64, carves: &'a [Carve]) -> Vec<Piece<'a>> {
+    struct Cut<'a> {
+        start: u64,
+        end: u64,
+        carve: &'a Carve,
+    }
+    let mut cuts: Vec<Cut<'a>> = Vec::new();
+    let mut floor = start;
+    let mut sorted: Vec<&Carve> = carves.iter().collect();
+    sorted.sort_by_key(|carve| carve.start);
+    for carve in sorted {
+        let (from, to) = (carve.start.max(floor), carve.end.min(end));
+        if to > from && to - from >= MIN_CARVE_MS {
+            cuts.push(Cut {
+                start: from,
+                end: to,
+                carve,
+            });
+            floor = to;
+        }
+    }
+    // A leftover too short to stand alone joins the carve beside it.
+    for index in 0..cuts.len() {
+        let before = if index == 0 {
+            start
+        } else {
+            cuts[index - 1].end
+        };
+        if cuts[index].start - before < MIN_CARVE_MS {
+            if index == 0 {
+                cuts[index].start = start;
+            } else {
+                cuts[index - 1].end = cuts[index].start;
+            }
+        }
+    }
+    if let Some(last) = cuts.last_mut() {
+        if end - last.end < MIN_CARVE_MS {
+            last.end = end;
+        }
+    }
+    let mut pieces = Vec::new();
+    let mut cursor = start;
+    for cut in &cuts {
+        if cut.start > cursor {
+            pieces.push(Piece {
+                start: cursor,
+                end: cut.start,
+                carve: None,
+            });
+        }
+        pieces.push(Piece {
+            start: cut.start,
+            end: cut.end,
+            carve: Some(cut.carve),
+        });
+        cursor = cut.end;
+    }
+    if cursor < end {
+        pieces.push(Piece {
+            start: cursor,
+            end,
+            carve: None,
+        });
+    }
+    if pieces.is_empty() {
+        pieces.push(Piece {
+            start,
+            end,
+            carve: None,
+        });
+    }
+    pieces
+}
+
+/// A session as one entry, or as one per piece when agent panes carved it up.
+/// A live session is `building` only where it can still change: its last
+/// piece, and any carve that could still be joined by the next stretch.
+fn split_session(
+    session: &[&SegmentInput],
+    session_end: u64,
+    now: u64,
+    claimed: &mut HashSet<String>,
+    carves: &[Carve],
+    live: bool,
+) -> Vec<BuiltTimeEntry> {
+    let start = session[0].started_at;
+    let pieces = pieces_of(start, session_end, carves);
+    if pieces.len() == 1 && pieces[0].carve.is_none() {
+        let mut entry = create_entry_from_segments(session, session_end, now, claimed);
+        if live {
+            entry.status = "building".to_string();
+        }
+        return vec![entry];
+    }
+    let last = pieces.len() - 1;
+    pieces
+        .iter()
+        .enumerate()
+        .map(|(index, piece)| {
+            let inside: Vec<&SegmentInput> = session
+                .iter()
+                .copied()
+                .filter(|seg| {
+                    seg.started_at >= piece.start
+                        && (seg.started_at < piece.end
+                            || (index == last && seg.started_at <= piece.end))
+                })
+                .collect();
+            let id = match piece.carve {
+                Some(carve) => carve.id.clone(),
+                None => inside
+                    .iter()
+                    .filter_map(|s| s.entry_id.as_ref())
+                    .find(|id| !id.is_empty() && !claimed.contains(*id))
+                    .cloned()
+                    .unwrap_or_else(|| format!("rm-{}", piece.start)),
+            };
+            claimed.insert(id.clone());
+            let description = match (&piece.carve, inside.is_empty()) {
+                (_, false) => generate_description(&inside),
+                (Some(carve), true) => carve.label.clone(),
+                (None, true) => "Work".to_string(),
+            };
+            let still_open =
+                live && (index == last || now.saturating_sub(piece.end) <= CARVE_MERGE_GAP_MS);
+            BuiltTimeEntry {
+                id,
+                started_at: piece.start,
+                ended_at: piece.end,
+                description,
+                category_id: None,
+                project_id: piece.carve.map(|carve| carve.project_id.clone()),
+                status: if still_open { "building" } else { "pending" }.to_string(),
+                approved_by: None,
+                source: "auto".to_string(),
+                billable: false,
+                invoice_id: None,
+                created_at: now,
+                updated_at: now,
+                deleted_at: None,
+                segment_ids: inside.iter().map(|s| s.id).collect(),
+            }
+        })
+        .collect()
 }
 
 /// Whether a segment is already accounted for by a frozen entry: linked to
@@ -547,5 +803,118 @@ mod tests {
         );
 
         assert_eq!(entries, vec![deleted]);
+    }
+
+    fn focus(id: i64, project: &str, start: u64, end: u64) -> FocusInput {
+        FocusInput {
+            id,
+            project_id: project.to_string(),
+            agent: "claude".to_string(),
+            started_at: start,
+            ended_at: end,
+        }
+    }
+
+    /// A 60 minute session, one segment per minute.
+    fn hour_of_segments() -> Vec<SegmentInput> {
+        (0..60)
+            .map(|i| {
+                make_seg(
+                    i,
+                    "Code",
+                    "main.rs",
+                    "activity",
+                    i as u64 * MIN,
+                    (i as u64 + 1) * MIN,
+                )
+            })
+            .collect()
+    }
+
+    fn covered(entries: &[BuiltTimeEntry]) -> u64 {
+        entries.iter().map(|e| e.ended_at - e.started_at).sum()
+    }
+
+    #[test]
+    fn focus_rows_join_across_short_gaps_and_short_stretches_vanish() {
+        let carves = carves_from_focus(&[
+            focus(7, "a", 10 * MIN, 12 * MIN),
+            // 30 s later: the same stretch.
+            focus(8, "a", 12 * MIN + 30_000, 15 * MIN),
+            // A glance.
+            focus(9, "b", 30 * MIN, 30 * MIN + 90_000),
+        ]);
+
+        assert_eq!(carves.len(), 1);
+        assert_eq!(carves[0].id, "ag-7");
+        assert_eq!((carves[0].start, carves[0].end), (10 * MIN, 15 * MIN));
+        assert_eq!(carves[0].project_id, "a");
+    }
+
+    #[test]
+    fn a_carve_splits_a_session_without_changing_its_total() {
+        let segs = hour_of_segments();
+        let carves = carves_from_focus(&[focus(1, "proj", 20 * MIN, 35 * MIN)]);
+
+        let entries = build_entries_with(&segs, &[], &EntrySettings::default(), 90 * MIN, &carves);
+
+        assert_eq!(entries.len(), 3);
+        assert_eq!(covered(&entries), 60 * MIN);
+        assert_eq!(entries[1].id, "ag-1");
+        assert_eq!(entries[1].project_id.as_deref(), Some("proj"));
+        assert_eq!(
+            (entries[1].started_at, entries[1].ended_at),
+            (20 * MIN, 35 * MIN)
+        );
+        assert_eq!(entries[0].project_id, None);
+        assert_eq!(entries[2].ended_at, 60 * MIN);
+        assert!(entries.iter().all(|e| e.status == "pending"));
+        // Every segment lands in exactly one piece.
+        let mut ids: Vec<i64> = entries.iter().flat_map(|e| e.segment_ids.clone()).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, (0..60).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_leftover_under_two_minutes_joins_the_carve() {
+        let segs = hour_of_segments();
+        let carves = carves_from_focus(&[focus(1, "proj", 90_000, 59 * MIN + 30_000)]);
+
+        let entries = build_entries_with(&segs, &[], &EntrySettings::default(), 90 * MIN, &carves);
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, "ag-1");
+        assert_eq!((entries[0].started_at, entries[0].ended_at), (0, 60 * MIN));
+    }
+
+    #[test]
+    fn carve_ids_are_stable_while_the_stretch_grows() {
+        let segs = hour_of_segments();
+        let early = carves_from_focus(&[focus(4, "proj", 20 * MIN, 30 * MIN)]);
+        let later = carves_from_focus(&[
+            focus(4, "proj", 20 * MIN, 30 * MIN),
+            focus(5, "proj", 30 * MIN + 10_000, 40 * MIN),
+        ]);
+        let settings = EntrySettings::default();
+
+        let a = build_entries_with(&segs, &[], &settings, 90 * MIN, &early);
+        let b = build_entries_with(&segs, &[], &settings, 90 * MIN, &later);
+
+        assert!(a.iter().any(|e| e.id == "ag-4"));
+        let grown = b.iter().find(|e| e.id == "ag-4").unwrap();
+        assert_eq!(grown.ended_at, 40 * MIN);
+    }
+
+    #[test]
+    fn a_live_session_keeps_only_its_open_pieces_building() {
+        let segs = hour_of_segments();
+        let carves = carves_from_focus(&[focus(1, "proj", 10 * MIN, 20 * MIN)]);
+
+        let entries = build_entries_with(&segs, &[], &EntrySettings::default(), 61 * MIN, &carves);
+
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].status, "pending");
+        assert_eq!(entries[1].status, "pending");
+        assert_eq!(entries[2].status, "building");
     }
 }

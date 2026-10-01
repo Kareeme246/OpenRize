@@ -165,6 +165,15 @@ pub(crate) struct SegmentInfo {
 }
 
 impl LiveState {
+    /// The app in front while the person is at the keyboard in a tracked
+    /// session: an activity segment, and not idle past the threshold. `None`
+    /// when they are idle, away, on a break or not being tracked.
+    pub(crate) fn attention(&self) -> Option<(&str, Option<&str>)> {
+        let current = self.current.as_ref()?;
+        (current.kind == KIND_ACTIVITY && self.last_idle_ms < self.idle_threshold_ms)
+            .then_some((current.app.as_str(), current.bundle_id.as_deref()))
+    }
+
     pub(crate) fn segment_info(&self) -> Option<SegmentInfo> {
         self.current.as_ref().map(|current| SegmentInfo {
             id: current.id,
@@ -1340,7 +1349,7 @@ impl ActivityStore {
             .prepare(
                 "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at, description_origin
                  FROM time_entries
-                 WHERE deleted_at IS NULL AND ended_at >= ?1 AND started_at <= ?2
+                 WHERE deleted_at IS NULL AND source != 'agent' AND ended_at >= ?1 AND started_at <= ?2
                  ORDER BY started_at ASC;",
             )
             .map_err(|e| e.to_string())?;
@@ -1359,6 +1368,25 @@ impl ActivityStore {
             list.push(entry);
         }
         Ok(list)
+    }
+
+    /// Counted agent time in a range (`source = 'agent'`). Every other list
+    /// leaves these out, so no work total can include them by accident.
+    pub fn list_agent_entries(&self, start_ms: u64, end_ms: u64) -> Result<Vec<TimeEntry>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at, description_origin
+                 FROM time_entries
+                 WHERE deleted_at IS NULL AND source = 'agent' AND ended_at >= ?1 AND started_at <= ?2
+                 ORDER BY started_at ASC;",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![start_ms as i64, end_ms as i64], time_entry_from_row)
+            .map_err(|e| e.to_string())?;
+        rows.collect::<rusqlite::Result<_>>()
+            .map_err(|e| e.to_string())
     }
 
     /// The entries with these ids, in the order given (missing ids skipped).
@@ -1598,6 +1626,13 @@ impl ActivityStore {
                 "UPDATE time_entries SET status = 'approved', approved_by = ?1, updated_at = ?2 WHERE id = ?3;",
                 params![approved_by, now as i64, id],
             ).map_err(|e| e.to_string())?;
+
+            // Agent time has no suggestion to learn from and no content to
+            // embed: confirming it is just approving it.
+            if entry.source == crate::agents::ledger::SOURCE {
+                self.log_event(id, "accepted", approved_by, None, now);
+                continue;
+            }
 
             // Feedback loop: the suggestion's outcome (accepted or changed)
             // feeds calibration and rule suggestions, and the entry joins the
@@ -1902,7 +1937,10 @@ impl ActivityStore {
     /// view shows changed (an entry closed, appeared, or went away), as
     /// opposed to the open entry merely growing.
     pub fn rebuild_range(&mut self, start_ms: u64, end_ms: u64, now: u64) -> Result<bool, String> {
-        use crate::entry_builder::{build_entries, BuiltTimeEntry, EntrySettings, SegmentInput};
+        use crate::entry_builder::{
+            build_entries_with, carves_from_focus, BuiltTimeEntry, EntrySettings, FocusInput,
+            SegmentInput,
+        };
 
         let tx = self.conn.transaction().map_err(|e| e.to_string())?;
 
@@ -1940,7 +1978,7 @@ impl ActivityStore {
                 .prepare(
                     "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at, description_origin
                      FROM time_entries
-                     WHERE ended_at >= ?1 AND started_at <= ?2;",
+                     WHERE ended_at >= ?1 AND started_at <= ?2 AND source != 'agent';",
                 )
                 .map_err(|e| e.to_string())?;
             let rows = stmt
@@ -1974,7 +2012,24 @@ impl ActivityStore {
         let frozen_ids: std::collections::HashSet<&str> =
             frozen.iter().map(|e| e.id.as_str()).collect();
 
-        let built = build_entries(&segments, &frozen, &EntrySettings::default(), now);
+        // Time the person spent in agents' panes becomes entries of its own.
+        let carves = {
+            let focus =
+                crate::agents::store::focus_in(&tx, start_ms, end_ms.saturating_add(ONE_DAY_MS))?;
+            carves_from_focus(
+                &focus
+                    .into_iter()
+                    .map(|row| FocusInput {
+                        id: row.id,
+                        project_id: row.project_id,
+                        agent: row.agent,
+                        started_at: row.started_at,
+                        ended_at: row.ended_at,
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let built = build_entries_with(&segments, &frozen, &EntrySettings::default(), now, &carves);
         let linked: std::collections::HashMap<i64, Option<&str>> = segments
             .iter()
             .map(|s| (s.id, s.entry_id.as_deref()))
@@ -1987,7 +2042,7 @@ impl ActivityStore {
             let before = existing.iter().find(|e| e.id == entry.id);
             tx.execute(
                 "INSERT INTO time_entries (id, started_at, ended_at, description, category_id, project_id, status, source, billable, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, NULL, NULL, ?5, 'auto', 0, ?6, ?6)
+                 VALUES (?1, ?2, ?3, ?4, NULL, ?7, ?5, 'auto', 0, ?6, ?6)
                  ON CONFLICT(id) DO UPDATE SET
                    started_at = excluded.started_at,
                    ended_at = excluded.ended_at,
@@ -2002,6 +2057,7 @@ impl ActivityStore {
                     entry.description,
                     entry.status,
                     now as i64,
+                    entry.project_id,
                 ],
             )
             .map_err(|e| e.to_string())?;

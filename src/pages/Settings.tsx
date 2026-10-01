@@ -46,6 +46,7 @@ import {
 } from "../lib/settings";
 import type { AiStatus, ReleaseNotes, Route, UpdateStatus } from "../lib/types";
 import { BreakSettingsGroups } from "./settings/BreakSettings";
+import { ExtensionSettingsGroups } from "./settings/ExtensionSettings";
 import {
   Select,
   SettingBlock,
@@ -104,6 +105,7 @@ type SettingsSection =
   | "data"
   | "notifications"
   | "ai"
+  | "extensions"
   | "advanced";
 
 const SETTINGS_SECTIONS: readonly SettingsSection[] = [
@@ -115,6 +117,7 @@ const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   "data",
   "notifications",
   "ai",
+  "extensions",
   "advanced",
 ];
 
@@ -134,6 +137,7 @@ const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
   { id: "suggestions", label: "Suggestions" },
   { id: "data", label: "Data & storage" },
   { id: "notifications", label: "Notifications" },
+  { id: "extensions", label: "Extensions" },
 ];
 
 /** One line on which tiers are running and why. */
@@ -1377,6 +1381,18 @@ export function Settings({
                 </button>
               </SettingRow>
             </SettingGroup>
+          </section>
+
+          <section
+            id="settings-section-extensions"
+            data-settings-section="extensions"
+            className="settings-page-section flex flex-col gap-4"
+          >
+            <SettingsSectionHeading
+              title="Extensions"
+              description="Connect the terminal tools your coding agents run in. Tools found on this Mac are turned on automatically."
+            />
+            <ExtensionSettingsGroups />
           </section>
 
           <section

@@ -8,6 +8,7 @@
 //! The file is written atomically (temp + rename) and a corrupt file is moved
 //! aside rather than silently reset, matching `timers.rs`.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -447,6 +448,11 @@ pub struct Settings {
     pub weekly_target_hours: u16,
     pub tracking_hours: TrackingHours,
     pub breaks: BreakSettings,
+    /// Extensions (agent bridges) the person switched on or off by hand,
+    /// keyed by extension id. An id with no entry follows auto-detection: on
+    /// when the tool is installed. An explicit value, on or off, persists and
+    /// is never overridden by detection.
+    pub extensions: BTreeMap<String, bool>,
 }
 
 impl Default for Settings {
@@ -466,11 +472,21 @@ impl Default for Settings {
             weekly_target_hours: DEFAULT_WEEKLY_TARGET_HOURS,
             tracking_hours: TrackingHours::default(),
             breaks: BreakSettings::default(),
+            extensions: BTreeMap::new(),
         }
     }
 }
 
+/// Extension ids a settings file may carry; anything else is dropped.
+pub const EXTENSION_IDS: [&str; 2] = ["herdr", "tmux"];
+
 impl Settings {
+    /// Whether an extension runs: the person's explicit choice, else whether
+    /// its tool was detected.
+    pub fn extension_enabled(&self, id: &str, detected: bool) -> bool {
+        self.extensions.get(id).copied().unwrap_or(detected)
+    }
+
     /// The only place a value is allowed in. Keeps persistence and validation
     /// in one spot so a command can never write something unloadable.
     fn normalized(mut self) -> Self {
@@ -488,6 +504,8 @@ impl Settings {
         }
         self.tracking_hours = self.tracking_hours.normalized();
         self.breaks = self.breaks.normalized();
+        self.extensions
+            .retain(|id, _| EXTENSION_IDS.contains(&id.as_str()));
         self
     }
 }
@@ -635,6 +653,7 @@ mod tests {
                         sunday: DaySchedule::default(),
                     },
                     breaks: BreakSettings::default(),
+                    extensions: BTreeMap::new(),
                 })
                 .unwrap();
         }
@@ -654,6 +673,27 @@ mod tests {
         assert!(reloaded.tracking_hours.per_day);
         assert_eq!(reloaded.tracking_hours.monday.start, "09:00");
         assert!(!reloaded.tracking_hours.tuesday.enabled);
+    }
+
+    #[test]
+    fn an_extension_follows_detection_until_the_person_chooses() {
+        let dir = temp_dir("extensions");
+        let mut store = SettingsStore::load(&dir).unwrap();
+        let fresh = store.snapshot();
+        // No choice yet: detection decides, so a newly installed tool is on.
+        assert!(fresh.extension_enabled("herdr", true));
+        assert!(!fresh.extension_enabled("herdr", false));
+
+        let mut next = fresh;
+        next.extensions.insert("herdr".to_string(), false);
+        next.extensions.insert("not-an-extension".to_string(), true);
+        store.set(next).unwrap();
+
+        // An explicit off survives a restart and is not undone by detection.
+        let reloaded = SettingsStore::load(&dir).unwrap().snapshot();
+        assert!(!reloaded.extension_enabled("herdr", true));
+        assert!(reloaded.extension_enabled("tmux", true));
+        assert!(!reloaded.extensions.contains_key("not-an-extension"));
     }
 
     #[test]

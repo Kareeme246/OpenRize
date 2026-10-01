@@ -269,6 +269,7 @@ export function lineToForm(line: InvoiceLine): DraftLine {
                 year: "numeric",
               })
             : "",
+          line.agent ? "agents" : "",
         ]
           .filter(Boolean)
           .join(" · ")

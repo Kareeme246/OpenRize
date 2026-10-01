@@ -41,11 +41,13 @@ export function DateStepper({
   unit,
   onStep,
   onToday,
+  isToday = true,
 }: {
   /** "day", "week", or "month", for the button labels. */
   unit: string;
   onStep: (direction: 1 | -1) => void;
   onToday: () => void;
+  isToday?: boolean;
 }) {
   return (
     <div className="flex items-center gap-1">
@@ -59,13 +61,26 @@ export function DateStepper({
           ‹
         </button>
       </Tooltip>
-      <button
-        type="button"
-        onClick={onToday}
-        className="h-7 rounded-md border border-line bg-panel px-2.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface hover:text-fg"
-      >
-        Today
-      </button>
+      <Tooltip content={isToday ? "Today" : "Jump to today"}>
+        <button
+          type="button"
+          onClick={onToday}
+          aria-label={isToday ? "Today" : "Jump to today"}
+          className={`flex h-7 items-center gap-1.5 rounded-md border border-line bg-panel px-2.5 font-medium text-[12px] transition-colors hover:bg-surface hover:text-fg ${
+            isToday
+              ? "text-fg-soft"
+              : "border-line-strong font-semibold text-fg-strong"
+          }`}
+        >
+          {!isToday && (
+            <span
+              className="size-1.5 shrink-0 rounded-full bg-accent"
+              aria-hidden="true"
+            />
+          )}
+          Today
+        </button>
+      </Tooltip>
       <Tooltip content={`Next ${unit}`}>
         <button
           type="button"

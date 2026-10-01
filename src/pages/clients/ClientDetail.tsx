@@ -8,6 +8,7 @@ import {
   StatCard,
 } from "../../components/Page";
 import { Picker } from "../../components/Picker";
+import { Tooltip } from "../../components/Tooltip";
 import type { Catalog } from "../../hooks/useCatalog";
 import * as api from "../../lib/api";
 import { describeError } from "../../lib/api";
@@ -181,19 +182,23 @@ export function ClientDetail({
           >
             {archived ? "Restore" : "Archive"}
           </button>
-          <button
-            type="button"
-            onClick={() => setConfirmDelete(true)}
-            disabled={rollup.invoiceCount > 0}
-            title={
+          <Tooltip
+            content={
               rollup.invoiceCount > 0
                 ? "This client has invoices, so it can only be archived"
                 : "Delete client"
             }
-            className={`${BUTTON_SECONDARY} text-danger`}
+            wrapperClassName="inline-flex"
           >
-            Delete
-          </button>
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(true)}
+              disabled={rollup.invoiceCount > 0}
+              className={`${BUTTON_SECONDARY} text-danger`}
+            >
+              Delete
+            </button>
+          </Tooltip>
         </div>
       </div>
       {archived && (
@@ -209,7 +214,7 @@ export function ClientDetail({
         </div>
       )}
 
-      <div className="mt-4 grid grid-cols-4 gap-3">
+      <div className="shape-strip mt-4 grid grid-cols-4 gap-3">
         <StatCard
           label="Projects"
           value={String(rollup.projects.length)}
@@ -247,7 +252,7 @@ export function ClientDetail({
       </div>
 
       {rollup.unbilledEntries > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-accent/30 bg-accent-soft px-4 py-3 text-[12px]">
+        <div className="shape-bleed mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-accent/30 bg-accent-soft px-4 py-3 text-[12px]">
           <p className="min-w-0 flex-1 text-fg">
             <span className="font-semibold">
               {formatDuration(rollup.unbilledMs)} ready to invoice
@@ -269,8 +274,8 @@ export function ClientDetail({
         </div>
       )}
 
-      <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-        <section className="rounded-xl border border-line bg-panel">
+      <div className="shape-group shape-one-col mt-4 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <section className="shape-bleed-table rounded-xl border border-line bg-panel">
           <div className="flex items-center gap-3 border-line border-b px-4 py-2">
             <h3 className="min-w-0 flex-1 font-semibold text-[12.5px] text-fg-strong">
               Projects
@@ -345,18 +350,21 @@ export function ClientDetail({
                         ? formatDuration(projectStats.unbilledMs)
                         : "–"}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void run(() =>
-                          api.updateProject(project.id, { clientId: null }),
-                        )
-                      }
-                      title={`Remove ${project.name} from ${client.name}`}
-                      className="justify-self-end text-[11.5px] text-fg-soft hover:text-danger"
+                    <Tooltip
+                      content={`Remove ${project.name} from ${client.name}`}
                     >
-                      Detach
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void run(() =>
+                            api.updateProject(project.id, { clientId: null }),
+                          )
+                        }
+                        className="justify-self-end text-[11.5px] text-fg-soft hover:text-danger"
+                      >
+                        Detach
+                      </button>
+                    </Tooltip>
                   </div>
                 );
               })}
@@ -364,8 +372,8 @@ export function ClientDetail({
           )}
         </section>
 
-        <div className="space-y-3">
-          <section className="rounded-xl border border-line bg-panel p-4">
+        <div className="shape-group shape-stack space-y-3">
+          <section className="shape-bleed rounded-xl border border-line bg-panel p-4">
             <h3 className="font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
               Details
             </h3>
@@ -387,7 +395,7 @@ export function ClientDetail({
             </dl>
           </section>
 
-          <section className="rounded-xl border border-line bg-panel">
+          <section className="shape-bleed-table rounded-xl border border-line bg-panel">
             <h3 className="border-line border-b px-4 py-2.5 font-semibold text-[12.5px] text-fg-strong">
               Invoices
             </h3>

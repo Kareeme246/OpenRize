@@ -87,6 +87,13 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tray::show_main_window(app);
         }))
+        .plugin(
+            // Seeds the page's theme/shape hint before its first paint; see
+            // `settings::appearance_init_script`.
+            tauri::plugin::Builder::<tauri::Wry>::new("appearance")
+                .js_init_script(settings::appearance_init_script(&settings::config_dir()))
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())

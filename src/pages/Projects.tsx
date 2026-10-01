@@ -18,6 +18,7 @@ import {
   Tabs,
 } from "../components/Page";
 import { Picker } from "../components/Picker";
+import { Tooltip } from "../components/Tooltip";
 import { type Catalog, useCatalog } from "../hooks/useCatalog";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import * as api from "../lib/api";
@@ -191,14 +192,15 @@ export function Projects({ route, navigate, replace }: ProjectsProps) {
           className="hidden"
           onChange={(event) => void importCsv(event)}
         />
-        <button
-          type="button"
-          onClick={() => fileInput.current?.click()}
-          className={BUTTON_SECONDARY}
-          title="Columns: name, client, budget, due date"
-        >
-          Import CSV
-        </button>
+        <Tooltip content="Columns: name, client, budget, due date">
+          <button
+            type="button"
+            onClick={() => fileInput.current?.click()}
+            className={BUTTON_SECONDARY}
+          >
+            Import CSV
+          </button>
+        </Tooltip>
         <button
           type="button"
           onClick={() => setEditing({ draft: {} })}
@@ -429,7 +431,7 @@ function ProjectsTable({
   const template =
     "minmax(0,1.6fr) minmax(0,1fr) 110px 80px 90px minmax(150px,1fr) 16px";
   return (
-    <div className="mt-3 overflow-hidden rounded-xl border border-line bg-panel">
+    <div className="shape-bleed-table mt-3 overflow-hidden rounded-xl border border-line bg-panel">
       <div
         className="grid items-center gap-3 border-line border-b bg-surface px-4 py-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider"
         style={{ gridTemplateColumns: template }}
@@ -438,9 +440,9 @@ function ProjectsTable({
         <span>Client</span>
         <span>Last activity</span>
         <span>Due</span>
-        <span className="text-right" title={rangeLabel}>
-          Time
-        </span>
+        <Tooltip content={rangeLabel}>
+          <span className="text-right">Time</span>
+        </Tooltip>
         <span>Budget</span>
         <span />
       </div>

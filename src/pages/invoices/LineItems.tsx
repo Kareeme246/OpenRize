@@ -1,4 +1,5 @@
 import { BUTTON_SECONDARY, FIELD } from "../../components/Page";
+import { Tooltip } from "../../components/Tooltip";
 import {
   type DraftLine,
   formatQuantity,
@@ -84,15 +85,19 @@ export function LineItems({
       )}
 
       <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          className={BUTTON_SECONDARY}
-          disabled={disabled}
-          onClick={onAddTime}
-          title={disabled ? "Select a client first" : undefined}
+        <Tooltip
+          content={disabled ? "Select a client first" : undefined}
+          wrapperClassName="inline-flex"
         >
-          + Tracked time
-        </button>
+          <button
+            type="button"
+            className={BUTTON_SECONDARY}
+            disabled={disabled}
+            onClick={onAddTime}
+          >
+            + Tracked time
+          </button>
+        </Tooltip>
         <button
           type="button"
           className={BUTTON_SECONDARY}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Slice, StackedBar } from "./components/Charts";
+import { Tooltip } from "./components/Tooltip";
 import { useBreaks } from "./hooks/useBreaks";
 import { useCatalog } from "./hooks/useCatalog";
 import { SettingsProvider, useSettings } from "./hooks/useSettings";
@@ -260,20 +261,23 @@ function CaptureStatus({
           {view.text}
         </span>
         {view.action && (
-          <button
-            type="button"
-            onClick={toggle}
-            title={
+          <Tooltip
+            content={
               view.action === "pause" ? "Pause tracking" : "Resume tracking"
             }
-            className={`grid size-6 shrink-0 place-items-center rounded-md transition-colors hover:bg-surface-strong ${
-              view.action === "resume"
-                ? "text-accent"
-                : "text-fg-soft hover:text-fg"
-            }`}
           >
-            {view.action === "pause" ? <PauseIcon /> : <PlayIcon />}
-          </button>
+            <button
+              type="button"
+              onClick={toggle}
+              className={`grid size-6 shrink-0 place-items-center rounded-md transition-colors hover:bg-surface-strong ${
+                view.action === "resume"
+                  ? "text-accent"
+                  : "text-fg-soft hover:text-fg"
+              }`}
+            >
+              {view.action === "pause" ? <PauseIcon /> : <PlayIcon />}
+            </button>
+          </Tooltip>
         )}
       </div>
       {view.detail && (
@@ -523,18 +527,21 @@ function BreakRow({ state, now }: { state: BreakState; now: number }) {
         </div>
         <div className="truncate text-fg-muted">{summary}</div>
       </div>
-      <button
-        type="button"
-        onClick={() =>
-          void api.pauseBreakReminders(paused ? null : Date.now() + 3_600_000)
-        }
-        title={
+      <Tooltip
+        content={
           paused ? "Turn reminders back on" : "Pause reminders for an hour"
         }
-        className="rounded-lg px-2 py-1.5 font-medium text-[11px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
       >
-        {paused ? "Resume" : "Pause 1h"}
-      </button>
+        <button
+          type="button"
+          onClick={() =>
+            void api.pauseBreakReminders(paused ? null : Date.now() + 3_600_000)
+          }
+          className="rounded-lg px-2 py-1.5 font-medium text-[11px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+        >
+          {paused ? "Resume" : "Pause 1h"}
+        </button>
+      </Tooltip>
       <button
         type="button"
         onClick={() => void api.startBreak()}
@@ -592,20 +599,23 @@ function TimerRows({
             >
               {formatStopwatch(elapsedMs(timer, now))}
             </span>
-            <button
-              type="button"
-              onClick={() =>
-                isRunning ? onPause(timer.id) : onStart(timer.id)
-              }
-              title={
+            <Tooltip
+              content={
                 isRunning ? `Pause ${timer.label}` : `Resume ${timer.label}`
               }
-              className={`grid size-6 shrink-0 place-items-center rounded-md transition-colors hover:bg-surface-strong ${
-                isRunning ? "text-accent" : "text-fg-soft hover:text-fg"
-              }`}
             >
-              {isRunning ? <PauseIcon /> : <PlayIcon />}
-            </button>
+              <button
+                type="button"
+                onClick={() =>
+                  isRunning ? onPause(timer.id) : onStart(timer.id)
+                }
+                className={`grid size-6 shrink-0 place-items-center rounded-md transition-colors hover:bg-surface-strong ${
+                  isRunning ? "text-accent" : "text-fg-soft hover:text-fg"
+                }`}
+              >
+                {isRunning ? <PauseIcon /> : <PlayIcon />}
+              </button>
+            </Tooltip>
           </div>
         );
       })}

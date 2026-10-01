@@ -24,9 +24,9 @@ pub const MAX_RETENTION_DAYS: u32 = 3650;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum Theme {
-    #[default]
     System,
     Light,
+    #[default]
     Dark,
 }
 
@@ -48,6 +48,16 @@ pub enum SizeMode {
     Normal,
     Relaxed,
     VeryRelaxed,
+}
+
+/// How panels are drawn: spaced rounded cards, or edge-to-edge sections split
+/// by plain dividers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum Shape {
+    #[default]
+    Rounded,
+    Sharper,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -419,6 +429,7 @@ impl BreakSettings {
 pub struct Settings {
     pub theme: Theme,
     pub accent: Accent,
+    pub shape: Shape,
     pub size_mode: SizeMode,
     /// What the window's close button does while the tray is enabled.
     pub close_behavior: CloseBehavior,
@@ -441,8 +452,9 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            theme: Theme::System,
+            theme: Theme::default(),
             accent: Accent::default(),
+            shape: Shape::default(),
             size_mode: SizeMode::default(),
             close_behavior: CloseBehavior::Hide,
             tray_enabled: true,
@@ -498,6 +510,26 @@ pub fn config_dir() -> PathBuf {
 pub struct SettingsStore {
     path: PathBuf,
     settings: Settings,
+}
+
+/// Runs in every webview before the page's own scripts, and seeds the
+/// `localStorage` copy of the saved theme and shape that `index.html` paints
+/// from. Without it a user upgrading from a build that had no copy (or a fresh
+/// profile) gets the defaults on the first frame and only switches once the
+/// settings arrive over IPC. A copy that already exists is left alone: it is
+/// kept current by `applyAppearance` in `src/lib/settings.ts`, which owns the
+/// key names. Read-only, so a damaged file is still quarantined by `load`.
+pub fn appearance_init_script(dir: &Path) -> String {
+    let settings = fs::read(dir.join(FILE_NAME))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Settings>(&bytes).ok())
+        .unwrap_or_default();
+    // The enums serialize to quoted JSON strings, which are valid JS literals.
+    let theme = serde_json::to_string(&settings.theme).unwrap_or_default();
+    let shape = serde_json::to_string(&settings.shape).unwrap_or_default();
+    format!(
+        "try {{ const seed = (key, value) => {{ if (localStorage.getItem(key) === null) localStorage.setItem(key, value); }}; seed(\"openrize.theme\", {theme}); seed(\"openrize.shape\", {shape}); }} catch (_) {{}}"
+    )
 }
 
 impl SettingsStore {
@@ -571,6 +603,7 @@ mod tests {
                 .set(Settings {
                     theme: Theme::Light,
                     accent: Accent::Orange,
+                    shape: Shape::Sharper,
                     size_mode: SizeMode::VeryRelaxed,
                     close_behavior: CloseBehavior::Quit,
                     tray_enabled: false,
@@ -608,6 +641,7 @@ mod tests {
         let reloaded = SettingsStore::load(&dir).unwrap().snapshot();
         assert_eq!(reloaded.theme, Theme::Light);
         assert_eq!(reloaded.accent, Accent::Orange);
+        assert_eq!(reloaded.shape, Shape::Sharper);
         assert_eq!(reloaded.size_mode, SizeMode::VeryRelaxed);
         assert_eq!(reloaded.close_behavior, CloseBehavior::Quit);
         assert!(!reloaded.tray_enabled);
@@ -620,6 +654,64 @@ mod tests {
         assert!(reloaded.tracking_hours.per_day);
         assert_eq!(reloaded.tracking_hours.monday.start, "09:00");
         assert!(!reloaded.tracking_hours.tuesday.enabled);
+    }
+
+    #[test]
+    fn theme_defaults_to_dark_but_keeps_saved_choices() {
+        assert_eq!(Settings::default().theme, Theme::Dark);
+        let unset: Settings = serde_json::from_str(r#"{"accent":"blue"}"#).unwrap();
+        assert_eq!(unset.theme, Theme::Dark);
+        let system: Settings = serde_json::from_str(r#"{"theme":"system"}"#).unwrap();
+        assert_eq!(system.theme, Theme::System);
+        let light: Settings = serde_json::from_str(r#"{"theme":"light"}"#).unwrap();
+        assert_eq!(light.theme, Theme::Light);
+    }
+
+    #[test]
+    fn appearance_init_script_seeds_the_saved_choices() {
+        let dir = temp_dir("init-script");
+        let mut store = SettingsStore::load(&dir).unwrap();
+        store
+            .set(Settings {
+                theme: Theme::Light,
+                shape: Shape::Sharper,
+                ..Settings::default()
+            })
+            .unwrap();
+        let script = appearance_init_script(&dir);
+        assert!(script.contains("seed(\"openrize.theme\", \"light\")"));
+        assert!(script.contains("seed(\"openrize.shape\", \"sharper\")"));
+        // Only fills a missing copy; an existing one is current.
+        assert!(script.contains("localStorage.getItem(key) === null"));
+
+        let system = temp_dir("init-script-system");
+        fs::write(system.join(FILE_NAME), r#"{"theme":"system"}"#).unwrap();
+        let script = appearance_init_script(&system);
+        assert!(script.contains("\"system\""));
+        assert!(script.contains("\"rounded\""));
+    }
+
+    #[test]
+    fn appearance_init_script_falls_back_to_the_defaults() {
+        let missing = temp_dir("init-script-missing");
+        let script = appearance_init_script(&missing);
+        assert!(script.contains("seed(\"openrize.theme\", \"dark\")"));
+        assert!(script.contains("seed(\"openrize.shape\", \"rounded\")"));
+
+        let corrupt = temp_dir("init-script-corrupt");
+        fs::write(corrupt.join(FILE_NAME), "not json").unwrap();
+        let script = appearance_init_script(&corrupt);
+        assert!(script.contains("\"dark\""));
+        // Reading must not quarantine the file; `load` owns that.
+        assert!(corrupt.join(FILE_NAME).exists());
+    }
+
+    #[test]
+    fn older_settings_default_to_rounded_shape() {
+        let loaded: Settings = serde_json::from_str(r#"{"theme":"light"}"#).unwrap();
+        assert_eq!(loaded.shape, Shape::Rounded);
+        let sharper: Settings = serde_json::from_str(r#"{"shape":"sharper"}"#).unwrap();
+        assert_eq!(sharper.shape, Shape::Sharper);
     }
 
     #[test]

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Tooltip } from "./Tooltip";
 
 interface TopBarProps {
   canGoBack: boolean;
@@ -101,26 +102,27 @@ function IconButton({
   children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className="grid size-7 shrink-0 place-items-center rounded-lg text-fg-soft hover:bg-surface-strong disabled:pointer-events-none disabled:text-fg-ghost"
-    >
-      <svg
-        viewBox="0 0 24 24"
-        className={large ? "size-[18px]" : "size-3.5"}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={2.2}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
+    <Tooltip content={label}>
+      <button
+        type="button"
+        aria-label={label}
+        disabled={disabled}
+        onClick={onClick}
+        className="grid size-7 shrink-0 place-items-center rounded-lg text-fg-soft hover:bg-surface-strong disabled:pointer-events-none disabled:text-fg-ghost"
       >
-        {children}
-      </svg>
-    </button>
+        <svg
+          viewBox="0 0 24 24"
+          className={large ? "size-[18px]" : "size-3.5"}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2.2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          {children}
+        </svg>
+      </button>
+    </Tooltip>
   );
 }

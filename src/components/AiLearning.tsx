@@ -6,6 +6,7 @@
  * Everything here renders a snapshot Rust computed (`ai_metrics`); nothing is
  * derived from local state beyond formatting.
  */
+
 import { useEffect, useId, useState } from "react";
 import { percent } from "../lib/confidence";
 import type {
@@ -14,6 +15,7 @@ import type {
   ArtifactVersion,
   ReliabilityBin,
 } from "../lib/types";
+import { Tooltip } from "./Tooltip";
 
 const THRESHOLD_MIN = 50;
 const THRESHOLD_MAX = 100;
@@ -202,9 +204,9 @@ function Stat({
       <div className="mt-0.5 text-[17px] font-semibold tabular-nums text-fg-strong">
         {value}
       </div>
-      <div className="truncate text-[11px] text-fg-muted" title={detail}>
-        {detail}
-      </div>
+      <Tooltip content={detail}>
+        <div className="truncate text-[11px] text-fg-muted">{detail}</div>
+      </Tooltip>
     </div>
   );
 }

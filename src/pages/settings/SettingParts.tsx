@@ -60,7 +60,7 @@ export function SettingGroup({
       <h2 className="px-1 font-mono text-[11px] font-semibold uppercase tracking-wider text-fg-muted">
         {title}
       </h2>
-      <div className="settings-group-card rounded-xl border border-settings-card-border bg-settings-card">
+      <div className="settings-group-card shape-bleed-table rounded-xl border border-settings-card-border bg-settings-card">
         {children}
       </div>
     </section>

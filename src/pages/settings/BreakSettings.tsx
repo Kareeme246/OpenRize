@@ -4,6 +4,7 @@ import {
   type SegmentedOption,
   Toggle,
 } from "../../components/SegmentedControl";
+import { Tooltip } from "../../components/Tooltip";
 import { useBreaks } from "../../hooks/useBreaks";
 import { useSettings } from "../../hooks/useSettings";
 import * as api from "../../lib/api";
@@ -118,21 +119,21 @@ function DayChips({
     <fieldset className="m-0 flex gap-1 border-0 p-0">
       <legend className="sr-only">Repeats on</legend>
       {WEEKDAY_KEYS.map((key) => (
-        <button
-          key={key}
-          type="button"
-          aria-pressed={days[key]}
-          aria-label={DAY_NAMES[key]}
-          title={DAY_NAMES[key]}
-          onClick={() => onChange({ ...days, [key]: !days[key] })}
-          className={`size-7 rounded-md border text-[11px] font-semibold transition-colors ${
-            days[key]
-              ? "border-accent/40 bg-accent-soft text-fg-strong"
-              : "border-line bg-surface text-fg-soft hover:bg-surface-strong"
-          }`}
-        >
-          {DAY_LETTERS[key]}
-        </button>
+        <Tooltip key={key} content={DAY_NAMES[key]}>
+          <button
+            type="button"
+            aria-pressed={days[key]}
+            aria-label={DAY_NAMES[key]}
+            onClick={() => onChange({ ...days, [key]: !days[key] })}
+            className={`size-7 rounded-md border text-[11px] font-semibold transition-colors ${
+              days[key]
+                ? "border-accent/40 bg-accent-soft text-fg-strong"
+                : "border-line bg-surface text-fg-soft hover:bg-surface-strong"
+            }`}
+          >
+            {DAY_LETTERS[key]}
+          </button>
+        </Tooltip>
       ))}
     </fieldset>
   );
@@ -163,26 +164,27 @@ function ScheduleEditor({
           label={`${schedule.label} enabled`}
           onChange={(enabled) => onChange({ enabled })}
         />
-        <button
-          type="button"
-          aria-label={`Delete ${schedule.label}`}
-          title="Delete"
-          onClick={onDelete}
-          className="grid size-7 shrink-0 place-items-center rounded-md text-fg-soft transition-colors hover:bg-danger-soft hover:text-danger"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            className="size-3.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.9}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
+        <Tooltip content="Delete">
+          <button
+            type="button"
+            aria-label={`Delete ${schedule.label}`}
+            onClick={onDelete}
+            className="grid size-7 shrink-0 place-items-center rounded-md text-fg-soft transition-colors hover:bg-danger-soft hover:text-danger"
           >
-            <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" />
-          </svg>
-        </button>
+            <svg
+              viewBox="0 0 24 24"
+              className="size-3.5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.9}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" />
+            </svg>
+          </button>
+        </Tooltip>
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <label className="flex items-center gap-2 text-[12px] text-fg-muted">

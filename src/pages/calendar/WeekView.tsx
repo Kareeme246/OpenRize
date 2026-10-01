@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef } from "react";
+import { Tooltip } from "../../components/Tooltip";
 import { type BreakEntry, breakEnd, takenBreaks } from "../../lib/breaks";
 import {
   addDays,
@@ -113,38 +114,38 @@ export function WeekView({
         {columns.map((column) => {
           const isToday = isSameDay(column.day, today);
           return (
-            <button
-              key={column.start}
-              type="button"
-              onClick={() => onOpenDay(localDateString(column.day))}
-              title="Open this day"
-              className="min-w-0 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-surface"
-            >
-              <div className="flex items-baseline gap-1.5">
-                <span className="font-medium text-[11px] text-fg-soft uppercase">
-                  {column.day.toLocaleDateString(undefined, {
-                    weekday: "short",
-                  })}
-                </span>
-                <span
-                  className={`font-semibold text-[14px] tabular-nums ${
-                    isToday
-                      ? "rounded-full bg-accent px-1.5 text-accent-fg"
-                      : "text-fg-strong"
-                  }`}
-                >
-                  {column.day.getDate()}
-                </span>
-              </div>
-              <div className="mt-0.5 flex items-center gap-1.5 truncate font-mono text-[10.5px] text-fg-faint tabular-nums">
-                {column.totalMs > 0 ? formatDuration(column.totalMs) : "–"}
-                {column.pending > 0 && (
-                  <span className="rounded-full bg-review/15 px-1.5 font-sans font-semibold text-review">
-                    {column.pending}
+            <Tooltip key={column.start} content="Open this day">
+              <button
+                type="button"
+                onClick={() => onOpenDay(localDateString(column.day))}
+                className="min-w-0 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-surface"
+              >
+                <div className="flex items-baseline gap-1.5">
+                  <span className="font-medium text-[11px] text-fg-soft uppercase">
+                    {column.day.toLocaleDateString(undefined, {
+                      weekday: "short",
+                    })}
                   </span>
-                )}
-              </div>
-            </button>
+                  <span
+                    className={`font-semibold text-[14px] tabular-nums ${
+                      isToday
+                        ? "rounded-full bg-accent px-1.5 text-accent-fg"
+                        : "text-fg-strong"
+                    }`}
+                  >
+                    {column.day.getDate()}
+                  </span>
+                </div>
+                <div className="mt-0.5 flex items-center gap-1.5 truncate font-mono text-[10.5px] text-fg-faint tabular-nums">
+                  {column.totalMs > 0 ? formatDuration(column.totalMs) : "–"}
+                  {column.pending > 0 && (
+                    <span className="rounded-full bg-review/15 px-1.5 font-sans font-semibold text-review">
+                      {column.pending}
+                    </span>
+                  )}
+                </div>
+              </button>
+            </Tooltip>
           );
         })}
       </div>

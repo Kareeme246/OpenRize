@@ -11,6 +11,7 @@ import {
   SkeletonRows,
   StatCard,
 } from "../../components/Page";
+import { Tooltip } from "../../components/Tooltip";
 import type { Catalog } from "../../hooks/useCatalog";
 import { useEntryReview } from "../../hooks/useEntryReview";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
@@ -232,14 +233,15 @@ export function ProjectDetail({
                 Archive
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => setConfirmDelete(true)}
-              title="Delete project"
-              className={`${BUTTON_SECONDARY} text-danger`}
-            >
-              Delete
-            </button>
+            <Tooltip content="Delete project">
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(true)}
+                className={`${BUTTON_SECONDARY} text-danger`}
+              >
+                Delete
+              </button>
+            </Tooltip>
           </div>
         </div>
         {project.description && (
@@ -256,7 +258,7 @@ export function ProjectDetail({
           </div>
         )}
 
-        <div className="mt-4 grid grid-cols-4 gap-3">
+        <div className="shape-strip mt-4 grid grid-cols-4 gap-3">
           <StatCard
             label="Total"
             value={formatDuration(stats?.totalMs ?? 0)}
@@ -306,7 +308,7 @@ export function ProjectDetail({
         </div>
 
         {(stats?.unbilledEntries ?? 0) > 0 && (
-          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-accent/30 bg-accent-soft px-4 py-3 text-[12px]">
+          <div className="shape-bleed mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-accent/30 bg-accent-soft px-4 py-3 text-[12px]">
             <p className="min-w-0 flex-1 text-fg">
               <span className="font-semibold">
                 {formatDuration(stats?.unbilledMs ?? 0)} ready to invoice
@@ -333,13 +335,13 @@ export function ProjectDetail({
         )}
 
         {data === null ? (
-          <div className="mt-4 rounded-xl border border-line bg-panel">
+          <div className="shape-bleed-table mt-4 rounded-xl border border-line bg-panel">
             <SkeletonRows />
           </div>
         ) : (
           <>
-            <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
-              <div className="rounded-xl border border-line bg-panel p-4">
+            <div className="shape-strip shape-narrow-rows-xl mt-4 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+              <div className="shape-cell rounded-xl border border-line bg-panel p-4">
                 <Donut
                   title="Time by category"
                   slices={data.categories.map((cell) => {
@@ -355,7 +357,7 @@ export function ProjectDetail({
                   })}
                 />
               </div>
-              <div className="rounded-xl border border-line bg-panel p-4">
+              <div className="shape-cell rounded-xl border border-line bg-panel p-4">
                 <StackedColumns
                   title={`Time per week · last ${WEEKS} weeks`}
                   height={140}
@@ -385,8 +387,8 @@ export function ProjectDetail({
               </div>
             </div>
 
-            <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-              <section className="rounded-xl border border-line bg-panel">
+            <div className="shape-strip shape-narrow-rows-xl mt-4 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+              <section className="shape-cell rounded-xl border border-line bg-panel">
                 <h3 className="border-line border-b px-4 py-2.5 font-semibold text-[12.5px] text-fg-strong">
                   Recent entries
                 </h3>
@@ -438,7 +440,7 @@ export function ProjectDetail({
                 )}
               </section>
 
-              <section className="space-y-4 rounded-xl border border-line bg-panel p-4">
+              <section className="shape-cell space-y-4 rounded-xl border border-line bg-panel p-4">
                 <div className="space-y-2">
                   <h3 className="font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
                     Matched apps

@@ -210,7 +210,7 @@ export function Timesheets({
         {!loaded ? (
           <SkeletonRows />
         ) : (
-          <div className="space-y-4">
+          <div className="shape-stack space-y-4">
             {scale === "day" && <DaySummary summary={summary} />}
             <SheetGrid
               sheet={sheet}

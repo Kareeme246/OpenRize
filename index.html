@@ -8,15 +8,27 @@
 
   <body>
     <div id="root"></div>
-    <!-- Pre-paint theme hint: set the system scheme before styles run so a
-         light-mode user never sees a dark flash. Rust stays the source of
-         truth - applyAppearance overwrites this as soon as settings load. -->
+    <!-- Pre-paint appearance hint: Dark and Rounded are the defaults, so paint
+         them before styles run unless the last saved preferences (mirrored here
+         by applyAppearance) say otherwise. Rust stays the source of truth -
+         applyAppearance overwrites this as soon as settings load. -->
     <script>
-      document.documentElement.dataset.theme = window.matchMedia(
-        "(prefers-color-scheme: light)",
-      ).matches
-        ? "light"
-        : "dark";
+      (() => {
+        let preference = "dark";
+        try {
+          preference = localStorage.getItem("openrize.theme") || "dark";
+        } catch {}
+        const light =
+          preference === "light" ||
+          (preference === "system" &&
+            window.matchMedia("(prefers-color-scheme: light)").matches);
+        document.documentElement.dataset.theme = light ? "light" : "dark";
+        let shape = "rounded";
+        try {
+          shape = localStorage.getItem("openrize.shape") || "rounded";
+        } catch {}
+        document.documentElement.dataset.shape = shape;
+      })();
     </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>

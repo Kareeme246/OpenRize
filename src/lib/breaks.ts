@@ -115,10 +115,34 @@ export function formatUntil(ms: number): string {
   return `in ${Math.floor(minutes / 60)}h${rest === 0 ? "" : ` ${rest}m`}`;
 }
 
-/** Breaks that were actually taken, as they draw on the Calendar. */
+/**
+ * A break the user took on purpose: Take a break now, or Start break on an
+ * interval or scheduled reminder. Rest credited from idle time (source
+ * `idle`, or a scheduled break credited while away, which never came due)
+ * still resets the work clock but is not one.
+ */
+export function isOfficialBreak(entry: BreakEntry): boolean {
+  switch (entry.source) {
+    case "manual":
+    case "interval":
+      return true;
+    case "scheduled":
+      return entry.dueAt !== null;
+    case "idle":
+      return false;
+  }
+}
+
+/**
+ * Official breaks that were actually taken, as they draw on the Calendar.
+ * Inactivity (sleep, overnight, a backfilled meeting) draws nothing.
+ */
 export function takenBreaks(entries: BreakEntry[]): BreakEntry[] {
   return entries.filter(
-    (entry) => entry.status === "taken" && entry.startedAt !== null,
+    (entry) =>
+      entry.status === "taken" &&
+      entry.startedAt !== null &&
+      isOfficialBreak(entry),
   );
 }
 

@@ -1,6 +1,7 @@
 import { createContext, type ReactNode, useContext } from "react";
 import { formatCountdown } from "../lib/breaks";
 import type { Route } from "../lib/types";
+import { Tooltip } from "./Tooltip";
 
 interface SidebarProps {
   currentRoute: Route;
@@ -51,42 +52,43 @@ function NavTab({ active, label, badge, onSelect, children }: NavTabProps) {
   const collapsed = useContext(CollapsedContext);
   const hasBadge = badge !== undefined && badge > 0;
   return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      onClick={onSelect}
-      aria-current={active ? "page" : undefined}
-      className={`relative flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left text-[13px] font-medium transition-colors ${
-        collapsed ? "justify-center" : ""
-      } ${
-        active
-          ? "bg-accent-soft text-fg-strong font-semibold"
-          : "text-fg-soft hover:bg-surface hover:text-fg"
-      }`}
-    >
-      <svg
-        viewBox="0 0 24 24"
-        className="size-4 shrink-0"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.8}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
+    <Tooltip content={label} placement="right">
+      <button
+        type="button"
+        aria-label={label}
+        onClick={onSelect}
+        aria-current={active ? "page" : undefined}
+        className={`relative flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left text-[13px] font-medium transition-colors ${
+          collapsed ? "justify-center" : ""
+        } ${
+          active
+            ? "bg-accent-soft text-fg-strong font-semibold"
+            : "text-fg-soft hover:bg-surface hover:text-fg"
+        }`}
       >
-        {children}
-      </svg>
-      {!collapsed && <span className="min-w-0 flex-1 truncate">{label}</span>}
-      {hasBadge &&
-        (collapsed ? (
-          <span className="absolute top-1 right-1 size-2 rounded-full bg-review" />
-        ) : (
-          <span className="ml-auto rounded-full bg-review/20 px-2 py-0.5 text-[11px] font-bold text-review">
-            {badge}
-          </span>
-        ))}
-    </button>
+        <svg
+          viewBox="0 0 24 24"
+          className="size-4 shrink-0"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.8}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          {children}
+        </svg>
+        {!collapsed && <span className="min-w-0 flex-1 truncate">{label}</span>}
+        {hasBadge &&
+          (collapsed ? (
+            <span className="absolute top-1 right-1 size-2 rounded-full bg-review" />
+          ) : (
+            <span className="ml-auto rounded-full bg-review/20 px-2 py-0.5 text-[11px] font-bold text-review">
+              {badge}
+            </span>
+          ))}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -230,28 +232,29 @@ export function Sidebar({
         {/* Bottom Pinned Controls */}
         <div className="mt-auto flex shrink-0 flex-col gap-2 pt-2 border-t border-line">
           {updateVersion !== undefined && onOpenUpdate && (
-            <button
-              type="button"
-              title={`OpenRize ${updateVersion} is available`}
-              onClick={onOpenUpdate}
-              aria-label="Update available"
-              className={`flex w-full items-center gap-2.5 rounded-[9px] bg-success-soft px-2.5 py-2 text-left text-[13px] font-semibold text-success transition-colors hover:bg-success/20 ${
-                collapsed ? "justify-center" : ""
-              }`}
-            >
-              <svg
-                viewBox="0 0 24 24"
-                className="size-4 shrink-0 fill-current"
-                aria-hidden="true"
+            <Tooltip content={`OpenRize ${updateVersion} is available`}>
+              <button
+                type="button"
+                onClick={onOpenUpdate}
+                aria-label="Update available"
+                className={`flex w-full items-center gap-2.5 rounded-[9px] bg-success-soft px-2.5 py-2 text-left text-[13px] font-semibold text-success transition-colors hover:bg-success/20 ${
+                  collapsed ? "justify-center" : ""
+                }`}
               >
-                <path d="M12 2.5l2.3 6.6 6.7 2.4-6.7 2.4L12 20.5l-2.3-6.6L3 11.5l6.7-2.4z" />
-              </svg>
-              {!collapsed && (
-                <span className="min-w-0 flex-1 truncate">
-                  Update available
-                </span>
-              )}
-            </button>
+                <svg
+                  viewBox="0 0 24 24"
+                  className="size-4 shrink-0 fill-current"
+                  aria-hidden="true"
+                >
+                  <path d="M12 2.5l2.3 6.6 6.7 2.4-6.7 2.4L12 20.5l-2.3-6.6L3 11.5l6.7-2.4z" />
+                </svg>
+                {!collapsed && (
+                  <span className="min-w-0 flex-1 truncate">
+                    Update available
+                  </span>
+                )}
+              </button>
+            </Tooltip>
           )}
           <NavTab
             active={currentName === "settings"}
@@ -263,60 +266,64 @@ export function Sidebar({
           </NavTab>
 
           {/* Live capture status strip */}
-          <div
-            className={`flex items-center gap-2 rounded-lg bg-surface text-[11.5px] ${
-              collapsed ? "flex-col px-1 py-1.5" : "px-2.5 py-1.5"
-            }`}
-            title={statusText}
-          >
-            <span
-              className={`size-2 shrink-0 rounded-full ${
-                onBreak
-                  ? "bg-break animate-pulse"
-                  : trackingActive
-                    ? "bg-accent animate-pulse"
-                    : "bg-fg-soft"
+          <Tooltip content={statusText}>
+            <div
+              className={`flex items-center gap-2 rounded-lg bg-surface text-[11.5px] ${
+                collapsed ? "flex-col px-1 py-1.5" : "px-2.5 py-1.5"
               }`}
-            />
-            {!collapsed && (
-              <span className="min-w-0 flex-1 truncate text-fg-muted font-medium">
-                {statusText}
-              </span>
-            )}
-            {onToggleCapture && (
-              <button
-                type="button"
-                onClick={onToggleCapture}
-                title={
-                  trackingActive
-                    ? "Pause tracking"
-                    : captureEnabled
-                      ? "Start tracking"
-                      : "Resume tracking"
-                }
-                className="rounded p-1 text-fg-soft hover:bg-surface-strong hover:text-fg transition-colors"
-              >
-                {trackingActive ? (
-                  <svg
-                    viewBox="0 0 24 24"
-                    className="size-3.5 fill-current"
-                    aria-label="Pause"
+            >
+              <span
+                className={`size-2 shrink-0 rounded-full ${
+                  onBreak
+                    ? "bg-break animate-pulse"
+                    : trackingActive
+                      ? "bg-accent animate-pulse"
+                      : "bg-fg-soft"
+                }`}
+              />
+              {!collapsed && (
+                <span className="min-w-0 flex-1 truncate text-fg-muted font-medium">
+                  {statusText}
+                </span>
+              )}
+              {onToggleCapture && (
+                <Tooltip
+                  content={
+                    trackingActive
+                      ? "Pause tracking"
+                      : captureEnabled
+                        ? "Start tracking"
+                        : "Resume tracking"
+                  }
+                >
+                  <button
+                    type="button"
+                    onClick={onToggleCapture}
+                    className="rounded p-1 text-fg-soft hover:bg-surface-strong hover:text-fg transition-colors"
                   >
-                    <rect x="6" y="4" width="4" height="16" rx="1" />
-                    <rect x="14" y="4" width="4" height="16" rx="1" />
-                  </svg>
-                ) : (
-                  <svg
-                    viewBox="0 0 24 24"
-                    className="size-3.5 fill-current"
-                    aria-label="Resume"
-                  >
-                    <polygon points="5 3 19 12 5 21 5 3" />
-                  </svg>
-                )}
-              </button>
-            )}
-          </div>
+                    {trackingActive ? (
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="size-3.5 fill-current"
+                        aria-label="Pause"
+                      >
+                        <rect x="6" y="4" width="4" height="16" rx="1" />
+                        <rect x="14" y="4" width="4" height="16" rx="1" />
+                      </svg>
+                    ) : (
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="size-3.5 fill-current"
+                        aria-label="Resume"
+                      >
+                        <polygon points="5 3 19 12 5 21 5 3" />
+                      </svg>
+                    )}
+                  </button>
+                </Tooltip>
+              )}
+            </div>
+          </Tooltip>
         </div>
       </aside>
     </CollapsedContext.Provider>

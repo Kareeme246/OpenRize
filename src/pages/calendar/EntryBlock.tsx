@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import { Tooltip } from "../../components/Tooltip";
 import { BAND_LABEL, BAND_TONE, band, percent } from "../../lib/confidence";
 import { type BlockState, blockState, confidenceOf } from "../../lib/entries";
 import { formatDuration, formatTime } from "../../lib/format";
@@ -305,14 +306,13 @@ export function EntryBlock({
     </span>
   );
   const approvedMark = state === "approved" && (
-    <span
-      className="shrink-0 text-[11px] text-accent"
-      title={`Approved by ${entry.approvedBy ?? "you"}`}
-    >
-      {!narrow && (entry.approvedBy === "auto" || entry.approvedBy === "rule")
-        ? `✓ ${entry.approvedBy}`
-        : "✓"}
-    </span>
+    <Tooltip content={`Approved by ${entry.approvedBy ?? "you"}`}>
+      <span className="shrink-0 text-[11px] text-accent">
+        {!narrow && (entry.approvedBy === "auto" || entry.approvedBy === "rule")
+          ? `✓ ${entry.approvedBy}`
+          : "✓"}
+      </span>
+    </Tooltip>
   );
   const status = (
     <span className="ml-auto shrink-0 font-semibold text-[10px]">
@@ -381,89 +381,90 @@ export function EntryBlock({
     .join("\n");
 
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(entry.id)}
-      title={density === "full" && !narrow ? undefined : tooltip}
-      aria-label={`${description}, ${timeText}`}
-      className={`calendar-entry @container absolute cursor-pointer select-none overflow-hidden border text-left transition-all ${
-        narrow ? "right-1 left-0.5" : "right-4 left-0"
-      } ${(narrow ? NARROW_DENSITY_CLASSES : DENSITY_CLASSES)[density]} ${
-        selected
-          ? "z-20 shadow-lg ring-2 ring-accent"
-          : "z-10 hover:border-fg-soft/40"
-      } ${recording ? "border-dashed border-danger/45 bg-danger/5" : BLOCK_CLASSES[state]}`}
-      style={{
-        top: `${top}px`,
-        height: `${height}px`,
-        ...blockStyle(state),
-      }}
-    >
-      {narrow ? (
-        <NarrowContent
-          density={density}
-          height={height}
-          description={description}
-          categoryName={
-            state === "processing"
-              ? "Categorizing…"
-              : (category?.name ??
-                (state === "approved" ? "Uncategorized" : BAND_LABEL.low))
-          }
-          duration={state === "building" ? liveLabel : duration}
-          approvedMark={approvedMark}
-        />
-      ) : (
-        <>
-          {density === "full" && (
-            <div className="flex h-full min-w-0 flex-col overflow-hidden">
-              <div className="flex items-center gap-1.5 font-semibold text-[12px] text-fg-strong leading-[18px]">
-                {title}
-                {approvedMark}
-              </div>
-              <div className="mt-0.5 truncate text-[11px] text-fg-soft leading-[16.5px]">
-                {timeText}
-              </div>
-              <div
-                className={`mt-1.5 flex items-center gap-1.5 overflow-hidden ${
-                  budget.wrapRow ? "flex-wrap" : ""
-                }`}
-              >
-                {chips}
-                {status}
-              </div>
-            </div>
-          )}
-          {density === "compact" && (
-            <div className="flex h-full flex-col justify-center gap-0.5 overflow-hidden">
-              <div className="flex items-center gap-1.5 font-semibold text-[11.5px] text-fg-strong leading-[17.25px]">
-                {title}
-                {approvedMark}
-                {height < 40 && status}
-              </div>
-              {height >= 40 && (
+    <Tooltip content={density === "full" && !narrow ? undefined : tooltip}>
+      <button
+        type="button"
+        onClick={() => onSelect(entry.id)}
+        aria-label={`${description}, ${timeText}`}
+        className={`calendar-entry @container absolute cursor-pointer select-none overflow-hidden border text-left transition-all ${
+          narrow ? "right-1 left-0.5" : "right-4 left-0"
+        } ${(narrow ? NARROW_DENSITY_CLASSES : DENSITY_CLASSES)[density]} ${
+          selected
+            ? "z-20 shadow-lg ring-2 ring-accent"
+            : "z-10 hover:border-fg-soft/40"
+        } ${recording ? "border-dashed border-danger/45 bg-danger/5" : BLOCK_CLASSES[state]}`}
+        style={{
+          top: `${top}px`,
+          height: `${height}px`,
+          ...blockStyle(state),
+        }}
+      >
+        {narrow ? (
+          <NarrowContent
+            density={density}
+            height={height}
+            description={description}
+            categoryName={
+              state === "processing"
+                ? "Categorizing…"
+                : (category?.name ??
+                  (state === "approved" ? "Uncategorized" : BAND_LABEL.low))
+            }
+            duration={state === "building" ? liveLabel : duration}
+            approvedMark={approvedMark}
+          />
+        ) : (
+          <>
+            {density === "full" && (
+              <div className="flex h-full min-w-0 flex-col overflow-hidden">
+                <div className="flex items-center gap-1.5 font-semibold text-[12px] text-fg-strong leading-[18px]">
+                  {title}
+                  {approvedMark}
+                </div>
+                <div className="mt-0.5 truncate text-[11px] text-fg-soft leading-[16.5px]">
+                  {timeText}
+                </div>
                 <div
-                  className={`flex items-center gap-x-1.5 gap-y-0.5 overflow-hidden text-[10.5px] text-fg-soft leading-[15.75px] ${
+                  className={`mt-1.5 flex items-center gap-1.5 overflow-hidden ${
                     budget.wrapRow ? "flex-wrap" : ""
                   }`}
                 >
-                  <span className="shrink-0">{timeText}</span>
                   {chips}
                   {status}
                 </div>
-              )}
-            </div>
-          )}
-          {density === "line" && (
-            <div className="flex h-full items-center gap-1.5 overflow-hidden font-semibold text-[10.5px] text-fg-strong leading-none">
-              {title}
-              {approvedMark}
-              {status}
-            </div>
-          )}
-        </>
-      )}
-    </button>
+              </div>
+            )}
+            {density === "compact" && (
+              <div className="flex h-full flex-col justify-center gap-0.5 overflow-hidden">
+                <div className="flex items-center gap-1.5 font-semibold text-[11.5px] text-fg-strong leading-[17.25px]">
+                  {title}
+                  {approvedMark}
+                  {height < 40 && status}
+                </div>
+                {height >= 40 && (
+                  <div
+                    className={`flex items-center gap-x-1.5 gap-y-0.5 overflow-hidden text-[10.5px] text-fg-soft leading-[15.75px] ${
+                      budget.wrapRow ? "flex-wrap" : ""
+                    }`}
+                  >
+                    <span className="shrink-0">{timeText}</span>
+                    {chips}
+                    {status}
+                  </div>
+                )}
+              </div>
+            )}
+            {density === "line" && (
+              <div className="flex h-full items-center gap-1.5 overflow-hidden font-semibold text-[10.5px] text-fg-strong leading-none">
+                {title}
+                {approvedMark}
+                {status}
+              </div>
+            )}
+          </>
+        )}
+      </button>
+    </Tooltip>
   );
 }
 

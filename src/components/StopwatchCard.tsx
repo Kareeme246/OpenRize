@@ -2,6 +2,7 @@ import { useState } from "react";
 import { elapsedMs, formatDuration, type Timer } from "../lib/timers";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { HourRing } from "./HourRing";
+import { Tooltip } from "./Tooltip";
 
 interface StopwatchCardProps {
   timer: Timer;
@@ -64,40 +65,42 @@ export function StopwatchCard({
           />
         ) : (
           <div className="group flex min-w-0 max-w-full items-center justify-center gap-1">
-            <button
-              type="button"
-              title="Double-click to rename"
-              onDoubleClick={() => {
-                setDraft(timer.label);
-                setEditing(true);
-              }}
-              className="min-w-0 truncate text-center text-[13px] font-semibold text-fg-strong hover:text-accent transition-colors"
-            >
-              {timer.label}
-            </button>
-            <button
-              type="button"
-              title="Rename"
-              aria-label="Rename tracker"
-              onClick={() => {
-                setDraft(timer.label);
-                setEditing(true);
-              }}
-              className="p-0.5 text-fg-faint opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 hover:text-fg"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                className="size-3"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
+            <Tooltip content="Double-click to rename">
+              <button
+                type="button"
+                onDoubleClick={() => {
+                  setDraft(timer.label);
+                  setEditing(true);
+                }}
+                className="min-w-0 truncate text-center text-[13px] font-semibold text-fg-strong hover:text-accent transition-colors"
               >
-                <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-              </svg>
-            </button>
+                {timer.label}
+              </button>
+            </Tooltip>
+            <Tooltip content="Rename">
+              <button
+                type="button"
+                aria-label="Rename tracker"
+                onClick={() => {
+                  setDraft(timer.label);
+                  setEditing(true);
+                }}
+                className="p-0.5 text-fg-faint opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 hover:text-fg"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  className="size-3"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                </svg>
+              </button>
+            </Tooltip>
           </div>
         )}
       </div>
@@ -119,34 +122,36 @@ export function StopwatchCard({
       </div>
 
       <div className="flex gap-1.5">
-        <button
-          type="button"
-          title="Reset to zero and stop"
-          aria-label="Reset to zero and stop"
-          onClick={() => setPending("reset")}
-          className="grid size-8 shrink-0 place-items-center rounded-lg border border-line bg-surface text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            className="size-3.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2.2}
-            strokeLinecap="round"
-            aria-hidden="true"
+        <Tooltip content="Reset to zero and stop">
+          <button
+            type="button"
+            aria-label="Reset to zero and stop"
+            onClick={() => setPending("reset")}
+            className="grid size-8 shrink-0 place-items-center rounded-lg border border-line bg-surface text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
           >
-            <path d="M3 11a9 9 0 1 0 3-6.7M3 4v5h5" />
-          </svg>
-        </button>
-        <button
-          type="button"
-          title="Delete"
-          aria-label="Delete"
-          onClick={() => setPending("delete")}
-          className="grid size-8 shrink-0 place-items-center rounded-lg border border-line bg-surface text-sm text-fg-soft transition-colors hover:bg-surface-strong hover:text-danger"
-        >
-          ×
-        </button>
+            <svg
+              viewBox="0 0 24 24"
+              className="size-3.5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2.2}
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <path d="M3 11a9 9 0 1 0 3-6.7M3 4v5h5" />
+            </svg>
+          </button>
+        </Tooltip>
+        <Tooltip content="Delete">
+          <button
+            type="button"
+            aria-label="Delete"
+            onClick={() => setPending("delete")}
+            className="grid size-8 shrink-0 place-items-center rounded-lg border border-line bg-surface text-sm text-fg-soft transition-colors hover:bg-surface-strong hover:text-danger"
+          >
+            ×
+          </button>
+        </Tooltip>
       </div>
 
       {pending === "reset" && (

@@ -18,6 +18,7 @@ import {
   Tabs,
 } from "../components/Page";
 import { Picker, type PickerOption } from "../components/Picker";
+import { Tooltip } from "../components/Tooltip";
 import { useCatalog } from "../hooks/useCatalog";
 import { useEntryReview } from "../hooks/useEntryReview";
 import { useSettings } from "../hooks/useSettings";
@@ -444,7 +445,7 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-4">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="shape-strip shape-top grid grid-cols-3 gap-3">
             <StatCard
               label="Pending review"
               value={formatDuration(totalDuration(toReview))}
@@ -539,15 +540,20 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
                   Review {toReview.length}
                 </button>
               )}
-              <button
-                type="button"
-                onClick={openApproveAll}
-                disabled={approvable.length === 0}
-                className={BUTTON_PRIMARY}
-                title="Approve all (⌘⇧↵)"
+              <Tooltip
+                content="Approve all (⌘⇧↵)"
+                wrapperClassName="inline-flex"
               >
-                Approve all <span className="text-[10px] opacity-70">⌘⇧↵</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={openApproveAll}
+                  disabled={approvable.length === 0}
+                  className={BUTTON_PRIMARY}
+                >
+                  Approve all{" "}
+                  <span className="text-[10px] opacity-70">⌘⇧↵</span>
+                </button>
+              </Tooltip>
             </div>
           </div>
 
@@ -590,7 +596,7 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
             </div>
           )}
 
-          <div className="mt-3 overflow-hidden rounded-xl border border-line bg-panel">
+          <div className="shape-bleed-table mt-3 overflow-hidden rounded-xl border border-line bg-panel">
             <div
               className="grid items-center gap-3 border-line border-b bg-surface px-3 py-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider"
               style={{ gridTemplateColumns: gridColumns(columns) }}
@@ -861,28 +867,33 @@ function BulkBar({
       <span className="font-semibold text-fg-strong">
         {entries.length} selected · {formatDuration(totalDuration(entries))}
       </span>
-      <button
-        type="button"
-        onClick={onApprove}
-        disabled={approvable.length === 0}
-        className={BUTTON_PRIMARY}
-        title={
+      <Tooltip
+        content={
           approvable.length < entries.length
             ? "Entries without a category, or still categorizing, are skipped"
             : undefined
         }
+        wrapperClassName="inline-flex"
       >
-        Approve {approvable.length}
-      </button>
-      {unapprovable.length > 0 && (
         <button
           type="button"
-          onClick={() => onUnapprove(unapprovable.map((entry) => entry.id))}
-          className={BUTTON_SECONDARY}
-          title="Return approved entries to pending to edit them"
+          onClick={onApprove}
+          disabled={approvable.length === 0}
+          className={BUTTON_PRIMARY}
         >
-          Unapprove {unapprovable.length}
+          Approve {approvable.length}
         </button>
+      </Tooltip>
+      {unapprovable.length > 0 && (
+        <Tooltip content="Return approved entries to pending to edit them">
+          <button
+            type="button"
+            onClick={() => onUnapprove(unapprovable.map((entry) => entry.id))}
+            className={BUTTON_SECONDARY}
+          >
+            Unapprove {unapprovable.length}
+          </button>
+        </Tooltip>
       )}
       <Picker
         ariaLabel="Set category"
@@ -1117,27 +1128,31 @@ function TimesheetRow({
             className="min-w-0 flex-1 rounded border border-accent bg-canvas px-1.5 py-0.5 text-[12px] text-fg outline-hidden"
           />
         ) : (
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              setDraft(entry.description);
-              setEditing(true);
-            }}
-            title={
+          <Tooltip
+            content={
               isApproved ? "Unapprove to edit this entry" : "Edit description"
             }
-            disabled={isApproved}
-            className={`min-w-0 truncate text-left hover:text-accent disabled:cursor-default disabled:hover:text-fg-strong ${
-              inFlight ? "text-fg-soft" : "text-fg-strong"
-            }`}
+            wrapperClassName="inline-flex min-w-0"
           >
-            {state === "processing"
-              ? "Categorizing…"
-              : state === "building"
-                ? `${entry.description} · recording`
-                : entry.description}
-          </button>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setDraft(entry.description);
+                setEditing(true);
+              }}
+              disabled={isApproved}
+              className={`min-w-0 truncate text-left hover:text-accent disabled:cursor-default disabled:hover:text-fg-strong ${
+                inFlight ? "text-fg-soft" : "text-fg-strong"
+              }`}
+            >
+              {state === "processing"
+                ? "Categorizing…"
+                : state === "building"
+                  ? `${entry.description} · recording`
+                  : entry.description}
+            </button>
+          </Tooltip>
         )}
       </span>
       {columns.project &&
@@ -1171,74 +1186,82 @@ function TimesheetRow({
         {formatDuration(durationOf(entry))}
       </span>
       {columns.billable && (
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onUpdate({ billable: !entry.billable });
-          }}
-          aria-pressed={entry.billable}
-          disabled={isApproved}
-          title={
+        <Tooltip
+          content={
             isApproved
               ? "Unapprove to edit this entry"
               : entry.billable
                 ? "Billable"
                 : "Not billable"
           }
-          className={`mx-auto flex size-6 items-center justify-center rounded font-semibold text-[11px] transition-colors ${
-            entry.billable
-              ? "bg-accent/20 text-accent"
-              : "text-fg-ghost hover:bg-surface hover:text-fg-soft"
-          }`}
+          wrapperClassName="mx-auto flex"
         >
-          {entry.billable ? "$" : "–"}
-        </button>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onUpdate({ billable: !entry.billable });
+            }}
+            aria-pressed={entry.billable}
+            disabled={isApproved}
+            className={`mx-auto flex size-6 items-center justify-center rounded font-semibold text-[11px] transition-colors ${
+              entry.billable
+                ? "bg-accent/20 text-accent"
+                : "text-fg-ghost hover:bg-surface hover:text-fg-soft"
+            }`}
+          >
+            {entry.billable ? "$" : "–"}
+          </button>
+        </Tooltip>
       )}
       <span className="flex items-center justify-end gap-1 whitespace-nowrap">
         {isApproved ? (
           <>
-            <span
-              className="shrink-0 whitespace-nowrap text-[11px] text-accent"
-              title={`Approved by ${entry.approvedBy ?? "you"}`}
-            >
-              {entry.approvedBy === "auto" || entry.approvedBy === "rule"
-                ? `✓ ${entry.approvedBy}`
-                : "✓ Approved"}
-            </span>
+            <Tooltip content={`Approved by ${entry.approvedBy ?? "you"}`}>
+              <span className="shrink-0 whitespace-nowrap text-[11px] text-accent">
+                {entry.approvedBy === "auto" || entry.approvedBy === "rule"
+                  ? `✓ ${entry.approvedBy}`
+                  : "✓ Approved"}
+              </span>
+            </Tooltip>
             {!entry.invoiceId && (
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onUnapprove();
-                }}
-                title="Return this entry to pending so it can be edited"
-                className="rounded-md border border-line px-2 py-0.5 font-semibold text-[11px] text-fg-soft hover:bg-surface hover:text-fg"
-              >
-                Unapprove
-              </button>
+              <Tooltip content="Return this entry to pending so it can be edited">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onUnapprove();
+                  }}
+                  className="rounded-md border border-line px-2 py-0.5 font-semibold text-[11px] text-fg-soft hover:bg-surface hover:text-fg"
+                >
+                  Unapprove
+                </button>
+              </Tooltip>
             )}
           </>
         ) : (
-          <button
-            type="button"
-            disabled={inFlight || !entry.categoryId}
-            onClick={(event) => {
-              event.stopPropagation();
-              onAccept();
-            }}
-            title={
+          <Tooltip
+            content={
               inFlight
                 ? "Still categorizing"
                 : entry.categoryId
                   ? "Accept"
                   : "Choose a category first"
             }
-            className="rounded-md border border-accent/40 px-2 py-0.5 font-semibold text-[11px] text-accent transition-colors hover:bg-accent-soft disabled:cursor-not-allowed disabled:border-line disabled:text-fg-ghost disabled:hover:bg-transparent"
+            wrapperClassName="inline-flex"
           >
-            ✓ Accept
-          </button>
+            <button
+              type="button"
+              disabled={inFlight || !entry.categoryId}
+              onClick={(event) => {
+                event.stopPropagation();
+                onAccept();
+              }}
+              className="rounded-md border border-accent/40 px-2 py-0.5 font-semibold text-[11px] text-accent transition-colors hover:bg-accent-soft disabled:cursor-not-allowed disabled:border-line disabled:text-fg-ghost disabled:hover:bg-transparent"
+            >
+              ✓ Accept
+            </button>
+          </Tooltip>
         )}
         <RowMenu
           onOpenInCalendar={onOpenInCalendar}

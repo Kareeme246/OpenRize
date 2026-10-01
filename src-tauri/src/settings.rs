@@ -24,9 +24,9 @@ pub const MAX_RETENTION_DAYS: u32 = 3650;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum Theme {
-    #[default]
     System,
     Light,
+    #[default]
     Dark,
 }
 
@@ -48,6 +48,16 @@ pub enum SizeMode {
     Normal,
     Relaxed,
     VeryRelaxed,
+}
+
+/// How panels are drawn: spaced rounded cards, or edge-to-edge sections split
+/// by plain dividers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum Shape {
+    #[default]
+    Rounded,
+    Sharper,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -419,6 +429,7 @@ impl BreakSettings {
 pub struct Settings {
     pub theme: Theme,
     pub accent: Accent,
+    pub shape: Shape,
     pub size_mode: SizeMode,
     /// What the window's close button does while the tray is enabled.
     pub close_behavior: CloseBehavior,
@@ -441,8 +452,9 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            theme: Theme::System,
+            theme: Theme::default(),
             accent: Accent::default(),
+            shape: Shape::default(),
             size_mode: SizeMode::default(),
             close_behavior: CloseBehavior::Hide,
             tray_enabled: true,
@@ -571,6 +583,7 @@ mod tests {
                 .set(Settings {
                     theme: Theme::Light,
                     accent: Accent::Orange,
+                    shape: Shape::Sharper,
                     size_mode: SizeMode::VeryRelaxed,
                     close_behavior: CloseBehavior::Quit,
                     tray_enabled: false,
@@ -608,6 +621,7 @@ mod tests {
         let reloaded = SettingsStore::load(&dir).unwrap().snapshot();
         assert_eq!(reloaded.theme, Theme::Light);
         assert_eq!(reloaded.accent, Accent::Orange);
+        assert_eq!(reloaded.shape, Shape::Sharper);
         assert_eq!(reloaded.size_mode, SizeMode::VeryRelaxed);
         assert_eq!(reloaded.close_behavior, CloseBehavior::Quit);
         assert!(!reloaded.tray_enabled);
@@ -620,6 +634,25 @@ mod tests {
         assert!(reloaded.tracking_hours.per_day);
         assert_eq!(reloaded.tracking_hours.monday.start, "09:00");
         assert!(!reloaded.tracking_hours.tuesday.enabled);
+    }
+
+    #[test]
+    fn theme_defaults_to_dark_but_keeps_saved_choices() {
+        assert_eq!(Settings::default().theme, Theme::Dark);
+        let unset: Settings = serde_json::from_str(r#"{"accent":"blue"}"#).unwrap();
+        assert_eq!(unset.theme, Theme::Dark);
+        let system: Settings = serde_json::from_str(r#"{"theme":"system"}"#).unwrap();
+        assert_eq!(system.theme, Theme::System);
+        let light: Settings = serde_json::from_str(r#"{"theme":"light"}"#).unwrap();
+        assert_eq!(light.theme, Theme::Light);
+    }
+
+    #[test]
+    fn older_settings_default_to_rounded_shape() {
+        let loaded: Settings = serde_json::from_str(r#"{"theme":"light"}"#).unwrap();
+        assert_eq!(loaded.shape, Shape::Rounded);
+        let sharper: Settings = serde_json::from_str(r#"{"shape":"sharper"}"#).unwrap();
+        assert_eq!(sharper.shape, Shape::Sharper);
     }
 
     #[test]

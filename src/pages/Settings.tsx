@@ -12,6 +12,7 @@ import {
   type SegmentedOption,
   Toggle,
 } from "../components/SegmentedControl";
+import { Tooltip } from "../components/Tooltip";
 import { useAiMetrics } from "../hooks/useAiMetrics";
 import { llmUnavailableReason, useAiStatus } from "../hooks/useAiStatus";
 import { useEnergy } from "../hooks/useEnergy";
@@ -29,6 +30,7 @@ import {
   isInsideTrackingHours,
   type LoginItemState,
   type Settings as SettingsType,
+  type Shape,
   type SizeMode,
   type Theme,
   type TrackingHours,
@@ -46,6 +48,11 @@ const THEME_OPTIONS: SegmentedOption<Theme>[] = [
   { value: "system", label: "System" },
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
+];
+
+const SHAPE_OPTIONS: SegmentedOption<Shape>[] = [
+  { value: "rounded", label: "Rounded" },
+  { value: "sharper", label: "Sharper" },
 ];
 
 const SIZE_OPTIONS: SegmentedOption<SizeMode>[] = [
@@ -248,12 +255,11 @@ function PathLine({ label, path }: { label: string; path: string }) {
       <span className="font-mono text-[10px] uppercase tracking-wider text-fg-muted">
         {label}
       </span>
-      <code
-        title={path}
-        className="truncate rounded-lg border border-line-soft bg-inset-soft px-2.5 py-1.5 font-mono text-[11.5px] text-fg-muted"
-      >
-        {path}
-      </code>
+      <Tooltip content={path}>
+        <code className="truncate rounded-lg border border-line-soft bg-inset-soft px-2.5 py-1.5 font-mono text-[11.5px] text-fg-muted">
+          {path}
+        </code>
+      </Tooltip>
     </div>
   );
 }
@@ -262,12 +268,11 @@ function FileLine({ label, path }: { label: string; path: string }) {
   return (
     <div className="flex items-center justify-between gap-3 text-[11.5px]">
       <span className="shrink-0 text-fg-muted">{label}</span>
-      <span
-        title={path}
-        className="min-w-0 truncate font-mono text-[11px] text-fg-muted"
-      >
-        {path}
-      </span>
+      <Tooltip content={path}>
+        <span className="min-w-0 truncate font-mono text-[11px] text-fg-muted">
+          {path}
+        </span>
+      </Tooltip>
     </div>
   );
 }
@@ -883,6 +888,17 @@ export function Settings({
                   value={settings.theme}
                   options={THEME_OPTIONS}
                   onChange={(theme) => update({ theme })}
+                />
+              </SettingRow>
+              <SettingRow
+                title="Shape"
+                description="Spaced rounded cards, or edge-to-edge sections with dividers"
+              >
+                <SegmentedControl
+                  name="shape"
+                  value={settings.shape}
+                  options={SHAPE_OPTIONS}
+                  onChange={(shape) => update({ shape })}
                 />
               </SettingRow>
               <SettingBlock

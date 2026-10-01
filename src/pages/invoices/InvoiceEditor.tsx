@@ -380,7 +380,7 @@ export function InvoiceEditor({
 
   const editor = (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+      <div className="shape-stack min-h-0 flex-1 space-y-3 overflow-y-auto p-4 [--gutter:1rem]">
         {error && <InlineError message={error} />}
         {notice?.path && (
           <p

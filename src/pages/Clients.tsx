@@ -8,6 +8,7 @@ import {
   Tabs,
 } from "../components/Page";
 import { Picker } from "../components/Picker";
+import { Tooltip } from "../components/Tooltip";
 import { useCatalog } from "../hooks/useCatalog";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import * as api from "../lib/api";
@@ -230,7 +231,7 @@ export function Clients({ route, navigate, replace }: ClientsProps) {
             </div>
           )}
 
-          <div className="mt-3 grid grid-cols-4 gap-3">
+          <div className="shape-strip mt-3 grid grid-cols-4 gap-3">
             <StatCard
               label={tab === "active" ? "Active clients" : "Archived clients"}
               value={String(counts[tab])}
@@ -272,7 +273,7 @@ export function Clients({ route, navigate, replace }: ClientsProps) {
             />
           </div>
 
-          <div className="mt-3 overflow-hidden rounded-xl border border-line bg-panel">
+          <div className="shape-bleed-table mt-3 overflow-hidden rounded-xl border border-line bg-panel">
             <div
               className="grid items-center gap-3 border-line border-b bg-surface px-4 py-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider"
               style={{ gridTemplateColumns: TEMPLATE }}
@@ -280,9 +281,9 @@ export function Clients({ route, navigate, replace }: ClientsProps) {
               <span>Client</span>
               <span className="text-right">Projects</span>
               <span>Last activity</span>
-              <span className="text-right" title={rangeLabel}>
-                Time
-              </span>
+              <Tooltip content={rangeLabel}>
+                <span className="text-right">Time</span>
+              </Tooltip>
               <span className="text-right">Unbilled</span>
               <span className="text-right">Invoiced</span>
               <span className="text-right">Rate</span>
@@ -337,12 +338,13 @@ export function Clients({ route, navigate, replace }: ClientsProps) {
                         </span>
                       )}
                     </span>
-                    <span
-                      className="text-right font-mono text-fg-muted tabular-nums"
-                      title={`${plural(rollup?.activeProjects ?? 0, "active project")}`}
+                    <Tooltip
+                      content={`${plural(rollup?.activeProjects ?? 0, "active project")}`}
                     >
-                      {rollup?.projects.length ?? 0}
-                    </span>
+                      <span className="text-right font-mono text-fg-muted tabular-nums">
+                        {rollup?.projects.length ?? 0}
+                      </span>
+                    </Tooltip>
                     <span className="text-[12px] text-fg-soft">
                       {rollup?.lastActivity
                         ? formatRelative(rollup.lastActivity, now)

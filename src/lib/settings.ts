@@ -9,6 +9,7 @@
 
 export type Theme = "system" | "light" | "dark";
 export type Accent = "green" | "blue" | "purple" | "orange";
+export type Shape = "rounded" | "sharper";
 export type SizeMode = "compact" | "normal" | "relaxed" | "veryRelaxed";
 export type CloseBehavior = "quit" | "hide";
 /** What the AI suggests for each entry (Rize's "Suggestion level"). */
@@ -197,6 +198,7 @@ export const DEFAULT_BREAK_SETTINGS: BreakSettings = {
 export interface Settings {
   theme: Theme;
   accent: Accent;
+  shape: Shape;
   sizeMode: SizeMode;
   closeBehavior: CloseBehavior;
   trayEnabled: boolean;
@@ -215,8 +217,9 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  theme: "system",
+  theme: "dark",
   accent: "green",
+  shape: "rounded",
   sizeMode: "normal",
   closeBehavior: "hide",
   trayEnabled: true,
@@ -324,6 +327,14 @@ export interface StoragePaths {
   databaseFile: string;
 }
 
+/**
+ * Where the saved theme and shape are mirrored for index.html's pre-paint
+ * script, so a Light, System, or Sharper user does not see the defaults flash
+ * before settings load.
+ */
+const THEME_HINT_KEY = "openrize.theme";
+const SHAPE_HINT_KEY = "openrize.shape";
+
 /** Which concrete palette a preference means right now. */
 export function resolveTheme(theme: Theme): "light" | "dark" {
   if (theme !== "system") return theme;
@@ -340,10 +351,17 @@ export function resolveTheme(theme: Theme): "light" | "dark" {
 export function applyAppearance(settings: Settings): void {
   const root = document.documentElement;
   const theme = resolveTheme(settings.theme);
+  try {
+    localStorage.setItem(THEME_HINT_KEY, settings.theme);
+    localStorage.setItem(SHAPE_HINT_KEY, settings.shape);
+  } catch {
+    // Storage can be unavailable; the hint only avoids a startup flash.
+  }
   root.dataset.theme = theme;
   // Tells the browser to render native widgets (scrollbars, form controls)
   // for the active scheme.
   root.style.colorScheme = theme;
+  root.dataset.shape = settings.shape;
   root.dataset.sizeMode = settings.sizeMode;
 
   const accent = ACCENTS[settings.accent];

@@ -57,7 +57,7 @@ trap 'exit 143' TERM
 # until the archive hash and executable signature are checked.
 curl_args=(--fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 10 --max-time 120)
 curl "${curl_args[@]}" "$base/$asset" --output "$work/$asset" || \
-  fail 'Could not download the CLI. Standalone releases start at v0.8.4.'
+  fail 'Could not download the CLI. Standalone releases start at v0.8.10.'
 curl "${curl_args[@]}" "$base/$asset.sha256" --output "$work/checksum" || \
   fail 'Could not download the release checksum; nothing was installed.'
 read -r expected filename < "$work/checksum" || fail 'Invalid release checksum.'

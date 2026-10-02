@@ -1,6 +1,6 @@
 [package]
 name = "openrize-cli"
-version = "0.8.4"
+version = "0.8.10"
 edition = "2021"
 license = "AGPL-3.0-only"
 description = "Read-only OpenRize CLI and on-demand local service, independent of the desktop app"

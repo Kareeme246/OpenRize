@@ -550,7 +550,7 @@ mod tests {
 
     fn db() -> Connection {
         let mut conn = Connection::open_in_memory().unwrap();
-        crate::migrations::run_migrations(&mut conn).unwrap();
+        openrize_core::migrations::run_migrations(&mut conn).unwrap();
         conn
     }
 

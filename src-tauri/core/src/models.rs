@@ -1,5 +1,23 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivitySegment {
+    pub id: i64,
+    pub app: String,
+    pub title: String,
+    pub kind: String,
+    pub label: Option<String>,
+    pub started_at: u64,
+    pub ended_at: Option<u64>,
+    pub reviewed: bool,
+    pub app_id: Option<String>,
+    pub bundle_id: Option<String>,
+    pub url: Option<String>,
+    pub domain: Option<String>,
+    pub entry_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Category {
@@ -77,15 +95,35 @@ pub struct NewClient {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateClient {
     pub name: Option<String>,
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub email: Option<Option<String>>,
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub address: Option<Option<String>>,
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub default_rate: Option<Option<f64>>,
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub currency: Option<Option<String>>,
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub notes: Option<Option<String>>,
     pub archived: Option<bool>,
 }
@@ -133,23 +171,47 @@ pub struct NewProject {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateProject {
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub client_id: Option<Option<String>>,
     pub name: Option<String>,
     pub color: Option<String>,
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub description: Option<Option<String>>,
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub ai_hints: Option<Option<String>>,
     pub status: Option<String>,
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub due_date: Option<Option<u64>>,
     pub budget_kind: Option<String>,
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub budget_value: Option<Option<f64>>,
     pub budget_period: Option<String>,
     pub billable_default: Option<bool>,
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub hourly_rate: Option<Option<f64>>,
 }
 
@@ -283,7 +345,7 @@ pub struct TitleItem {
 #[serde(rename_all = "camelCase")]
 pub struct EntryDetail {
     pub entry: TimeEntry,
-    pub segments: Vec<crate::activity::ActivitySegment>,
+    pub segments: Vec<ActivitySegment>,
     pub apps: Vec<AppContribution>,
     pub titles: Vec<TitleItem>,
     pub events: Vec<EntryEvent>,

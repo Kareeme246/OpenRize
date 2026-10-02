@@ -9,11 +9,14 @@
 //! stops or attaches a Herdr session.
 
 use std::io::{BufRead, BufReader, Read, Write};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::time::Duration;
+#[cfg(windows)]
+use windows_socket::UnixStream;
 
 use serde_json::{json, Value};
 
@@ -312,7 +315,57 @@ pub fn watch(
     Ok(())
 }
 
-#[cfg(test)]
+/// Herdr serves a Unix-domain socket, which `std` cannot open on Windows.
+/// There every connection fails as if no Herdr were listening, and the
+/// stream itself can never exist.
+#[cfg(windows)]
+mod windows_socket {
+    use std::convert::Infallible;
+    use std::io;
+    use std::path::Path;
+    use std::time::Duration;
+
+    pub struct UnixStream(Infallible);
+
+    impl UnixStream {
+        pub fn connect(_path: &Path) -> io::Result<Self> {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "Herdr's socket is not supported on Windows",
+            ))
+        }
+
+        pub fn set_read_timeout(&self, _timeout: Option<Duration>) -> io::Result<()> {
+            match self.0 {}
+        }
+
+        pub fn set_write_timeout(&self, _timeout: Option<Duration>) -> io::Result<()> {
+            match self.0 {}
+        }
+
+        pub fn try_clone(&self) -> io::Result<Self> {
+            match self.0 {}
+        }
+    }
+
+    impl io::Read for UnixStream {
+        fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+            match self.0 {}
+        }
+    }
+
+    impl io::Write for UnixStream {
+        fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+            match self.0 {}
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            match self.0 {}
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
 pub(crate) mod fixture {
     //! A disposable synthetic Herdr: a Unix socket in a temp directory that
     //! answers the handful of requests the bridge makes, from a script. It is
@@ -420,13 +473,11 @@ pub(crate) mod fixture {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
-    use std::sync::Arc;
-    use std::time::Duration;
-
+    #[cfg(unix)]
     use super::fixture::{agent, FakeHerdr};
     use super::*;
 
+    #[cfg(unix)]
     fn endpoint(fake: &FakeHerdr) -> Endpoint {
         Endpoint {
             id: "fixture".to_string(),
@@ -445,6 +496,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn polling_reads_only_state_folder_and_focus_over_ping_and_agent_list() {
         let fake = FakeHerdr::start("poll");
         *fake.agents.lock().unwrap() = vec![
@@ -490,7 +542,12 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn the_event_subscription_only_wakes_the_poller() {
+        use std::sync::mpsc;
+        use std::sync::Arc;
+        use std::time::Duration;
+
         let fake = FakeHerdr::start("watch");
         let (wake, woken) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));

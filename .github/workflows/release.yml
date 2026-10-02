@@ -36,6 +36,13 @@ jobs:
               exit
             }
           ' src-tauri/Cargo.toml)
+          for manifest in src-tauri/cli/Cargo.toml src-tauri/core/Cargo.toml; do
+            version=$(awk -F '"' '/^version = / { print $2; exit }' "$manifest")
+            if [[ "$version" != "$package_version" ]]; then
+              printf '%s version does not match the release\n' "$manifest" >&2
+              exit 1
+            fi
+          done
           if [[ "$package_version" != "$tauri_version" ||
                 "$package_version" != "$cargo_version" ||
                 "$TAG" != "v$package_version" ]]; then
@@ -102,6 +109,16 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app"
           spctl --assess --type execute --verbose=2 "$app"
           xcrun stapler validate "$app"
+
+      # install.sh extracts the CLI from the updater's openrize.app.tar.gz and
+      # accepts it only under this exact requirement, so check it here first.
+      - name: Verify the bundled CLI passes the installer's check
+        run: |
+          cli=src-tauri/target/release/bundle/macos/openrize.app/Contents/MacOS/rize
+          requirement=$(sed -n "s/^requirement='\(.*\)'$/\1/p" install.sh)
+          [[ -n "$requirement" ]]
+          codesign --verify --strict --check-notarization --verbose=2 \
+            -R="$requirement" "$cli"
 
       - name: Zip the .app bundle for upload
         run: |

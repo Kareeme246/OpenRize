@@ -22,16 +22,16 @@ pnpm exec tsc --noEmit
 
 echo "==> cargo fmt (backend)"
 if $FIX; then
-  cargo fmt --manifest-path src-tauri/Cargo.toml
+  cargo fmt --manifest-path src-tauri/Cargo.toml --all
 else
-  cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+  cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 fi
 
 echo "==> cargo clippy (backend)"
 if $FIX; then
-  cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --fix --allow-dirty --allow-staged -- -D warnings
+  cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets --fix --allow-dirty --allow-staged -- -D warnings
 else
-  cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+  cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
 fi
 
 echo "verify: all checks passed"

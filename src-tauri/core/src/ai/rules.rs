@@ -64,7 +64,7 @@ impl Rule {
         format!("{origin}: {kind} {}", self.pattern)
     }
 
-    pub(crate) fn matches(&self, segment: &ActivitySegment) -> bool {
+    pub fn matches(&self, segment: &ActivitySegment) -> bool {
         let pattern = self.pattern.trim();
         if pattern.is_empty() {
             return false;

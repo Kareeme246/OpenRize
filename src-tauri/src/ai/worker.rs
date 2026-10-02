@@ -1379,7 +1379,7 @@ mod tests {
 
     fn db() -> Connection {
         let mut conn = Connection::open_in_memory().unwrap();
-        crate::migrations::run_migrations(&mut conn).unwrap();
+        openrize_core::migrations::run_migrations(&mut conn).unwrap();
         conn.execute(
             "INSERT INTO time_entries (id, started_at, ended_at, description, status, source, created_at, updated_at)
              VALUES ('e1', 0, 1000, 'Xcode: main.rs', 'processing', 'auto', 0, 0);",

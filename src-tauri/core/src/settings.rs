@@ -586,6 +586,36 @@ impl SettingsStore {
         Ok(self.snapshot())
     }
 
+    /// Sets one field by its camelCase path (`breaks.enabled`), leaving every
+    /// other field as stored, so a change made elsewhere a moment earlier is
+    /// never written back over. The value must have the field's type.
+    pub fn patch(&mut self, key: &str, value: serde_json::Value) -> Result<Settings, String> {
+        let mut document = serde_json::to_value(&self.settings).map_err(|e| e.to_string())?;
+        let parts: Vec<&str> = key.split('.').collect();
+        let (last, parents) = parts.split_last().ok_or("empty settings key")?;
+        let mut slot = &mut document;
+        for part in parents {
+            slot = slot
+                .get_mut(*part)
+                .filter(|value| value.is_object())
+                .ok_or_else(|| format!("unknown setting {key}"))?;
+        }
+        let fields = slot
+            .as_object_mut()
+            .ok_or_else(|| format!("unknown setting {key}"))?;
+        // Extensions are a map keyed by id, so an id may not be stored yet.
+        if !fields.contains_key(*last) && parents != ["extensions"] {
+            return Err(format!("unknown setting {key}"));
+        }
+        fields.insert((*last).to_string(), value);
+        let next: Settings = serde_json::from_value(document)
+            .map_err(|error| format!("invalid value for {key}: {error}"))?;
+        if parents == ["extensions"] && !EXTENSION_IDS.contains(last) {
+            return Err(format!("unknown extension {last}"));
+        }
+        self.set(next)
+    }
+
     fn persist(&self) -> Result<(), String> {
         let json = serde_json::to_vec_pretty(&self.settings).map_err(|e| e.to_string())?;
         let temp = self.path.with_extension("json.tmp");
@@ -603,6 +633,59 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("openrize-settings-{name}-{}", now_epoch_ms()));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn patch_changes_one_field_and_validates_it() {
+        let dir = temp_dir("patch");
+        let mut store = SettingsStore::load(&dir).unwrap();
+        store
+            .set(Settings {
+                retention_days: 30,
+                ..Settings::default()
+            })
+            .unwrap();
+        let next = store
+            .patch("weeklyTargetHours", serde_json::json!(32))
+            .unwrap();
+        assert_eq!(next.weekly_target_hours, 32);
+        assert_eq!(next.retention_days, 30);
+        let breaks = !next.breaks.enabled;
+        assert_eq!(
+            store
+                .patch("breaks.enabled", serde_json::json!(breaks))
+                .unwrap()
+                .breaks
+                .enabled,
+            breaks
+        );
+        assert!(
+            !store
+                .patch("extensions.tmux", serde_json::json!(false))
+                .unwrap()
+                .extensions["tmux"]
+        );
+        // Clamped like any other write.
+        assert_eq!(
+            store
+                .patch("weeklyTargetHours", serde_json::json!(1_000))
+                .unwrap()
+                .weekly_target_hours,
+            MAX_WEEKLY_TARGET_HOURS
+        );
+        for (key, value) in [
+            ("nope", serde_json::json!(1)),
+            ("breaks.nope", serde_json::json!(1)),
+            ("extensions.unknown", serde_json::json!(true)),
+            ("breaks.enabled", serde_json::json!("maybe")),
+            ("weeklyTargetHours.deeper", serde_json::json!(1)),
+        ] {
+            assert!(store.patch(key, value).is_err(), "accepted {key}");
+        }
+        // Failed patches leave the file as it was.
+        let reloaded = SettingsStore::load(&dir).unwrap().snapshot();
+        assert_eq!(reloaded, store.snapshot());
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

@@ -250,7 +250,7 @@ export function DayView({
             Agents
           </span>
           <span className="w-[114px] shrink-0 truncate border-line border-l px-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
-            Labels
+            Categories
           </span>
           <span className="w-[114px] shrink-0 truncate border-line border-l px-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
             Projects
@@ -332,7 +332,7 @@ export function DayView({
             })}
           </div>
 
-          {/* Time Entries / Labels / Projects / Productivity lanes, sharing one
+          {/* Time Entries / Categories / Projects / Productivity lanes, sharing one
               continuous set of hour lines and one now line across the whole
               width instead of a copy per lane. */}
           <div className="relative min-w-0 flex-1">
@@ -696,7 +696,7 @@ interface LaneBlockProps {
 }
 
 /**
- * A time entry's colour and name in the Labels or Projects lane, aligned to
+ * A time entry's colour and name in the Categories or Projects lane, aligned to
  * the same top/height as its block in the Time Entries lane.
  */
 function LaneBlock({

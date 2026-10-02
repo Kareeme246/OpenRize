@@ -27,7 +27,7 @@ pub const SAMPLE_SECS: u64 = 1;
 pub const APP_SWITCH_GRACE_MS: u64 = 20_000;
 const HEARTBEAT_MS: u64 = 30_000;
 pub const DEFAULT_IDLE_THRESHOLD_MS: u64 = 5 * 60 * 1000;
-pub(crate) const DB_FILE: &str = "activity.db";
+pub(crate) const DB_FILE: &str = openrize_core::paths::DATABASE_FILE;
 
 const ONE_DAY_MS: u64 = 24 * 60 * 60 * 1000;
 const RETENTION_DAYS: u64 = 90;

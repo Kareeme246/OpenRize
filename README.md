@@ -164,17 +164,20 @@ the last snapshot Rust sent it; Rust pushes events when something changes.
 
 Stack: [Tauri 2](https://tauri.app) · Rust · SQLite · Swift · [React 19](https://react.dev) · TypeScript · [Tailwind CSS 4](https://tailwindcss.com) · [Vite](https://vite.dev)
 
-## CLI installation
+## CLI
 
-Standalone CLI releases start at **v0.8.10** and support **Apple Silicon macOS**:
+`rize` reads your OpenRize time entries from the terminal, even with the app closed (read-only
+for now: `rize --help` lists the commands). It ships inside the app from **v0.8.10** on
+**Apple Silicon macOS**, and this installs just the CLI:
 
 ```sh
-curl -fsSL https://github.com/Kareeme246/OpenRize/releases/latest/download/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Kareeme246/OpenRize/main/install.sh | bash
 ```
 
-Installs into `~/.local/bin`; add that directory to PATH if needed. The installer verifies
-SHA-256 and requires a notarized OpenRize Developer ID signature before installing. It does not replace existing
-files or edit shell profiles.
+It takes `rize` out of the latest release's app bundle, requires OpenRize's Developer ID
+signature and Apple notarization, and installs into `~/.local/bin` (add that to PATH if needed).
+It never replaces existing files or edits shell profiles. On Windows, build it from source with
+`./scripts/install-cli.sh`.
 
 ## Building from source
 

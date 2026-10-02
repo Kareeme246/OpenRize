@@ -5,5 +5,7 @@ edition = "2021"
 license = "AGPL-3.0-only"
 
 [dependencies]
+# The same resolver Tauri uses for app_data_dir, so paths.rs cannot drift.
+dirs = "6"
 serde = { version = "1", features = ["derive"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }

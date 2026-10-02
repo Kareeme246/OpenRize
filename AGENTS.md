@@ -45,8 +45,9 @@ is a decision, not an oversight.
 below, which needs Xcode 26+; verify that GitHub-hosted image still provides it before changing
 the runner label. `.github/workflows/release.yml` builds a signed, notarized macOS `.dmg`/`.app`
 on `v*` tags and publishes it to a GitHub Release, along with the `latest.json` manifest the
-in-app updater (`src-tauri/src/updater.rs`) reads and the standalone CLI zip, checksum, and
-`install.sh` - publishing a release ships it to every user.
+in-app updater (`src-tauri/src/updater.rs`) reads - publishing a release ships it to every user.
+The `rize` CLI (`src-tauri/cli`) ships inside the app; `install.sh` extracts it from the
+updater's `openrize.app.tar.gz`, so there is no separate CLI asset.
 Windows is deliberately not released: it is built from source only, and its updater stays off.
 Every user-facing change bumps the patch version in the same PR and uses a Conventional
 Commit subject; see `RELEASING.md` for the release and changelog procedure.

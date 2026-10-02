@@ -45,10 +45,8 @@ fn build_cli_sidecar() {
         .status()
         .expect("could not build the CLI sidecar");
     assert!(status.success(), "CLI sidecar build failed: {status}");
-    let built = output.join(&target).join("release/openrize");
-    let staged = manifest
-        .join("binaries")
-        .join(format!("openrize-cli-{target}"));
+    let built = output.join(&target).join("release/rize");
+    let staged = manifest.join("binaries").join(format!("rize-{target}"));
     if !matches!((fs::read(&built), fs::read(&staged)), (Ok(a), Ok(b)) if a == b) {
         fs::create_dir_all(staged.parent().expect("binaries dir")).expect("binaries dir");
         fs::copy(built, staged).expect("could not stage the CLI sidecar");

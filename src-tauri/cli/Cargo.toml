@@ -3,19 +3,27 @@ name = "openrize-cli"
 version = "0.8.10"
 edition = "2021"
 license = "AGPL-3.0-only"
-description = "Read-only OpenRize CLI and on-demand local service, independent of the desktop app"
+description = "Read-only rize CLI for OpenRize and its on-demand local service, independent of the desktop app"
 
 [[bin]]
-name = "openrize"
+name = "rize"
 path = "src/main.rs"
 
 [dependencies]
 openrize-core = { path = "../core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-chrono = { version = "0.4", default-features = false, features = ["std"] }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 clap = { version = "4", features = ["derive"] }
+# Unix sockets and Windows named pipes behind one local-socket API.
+interprocess = "2"
+
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# Same version interprocess uses, for its security descriptor strings.
+widestring = "1"
 
 [dev-dependencies]
 rusqlite = { version = "0.40.2", features = ["bundled"] }

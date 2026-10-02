@@ -1,25 +1,24 @@
 //! Read-only terminal client. All database access lives behind local IPC in
 //! the on-demand service and shared Rust domain operations, never in commands.
-#[cfg(not(unix))]
-compile_error!("The OpenRize CLI currently requires Unix local sockets (macOS release target).");
 
 mod ipc;
 mod protocol;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, NaiveDateTime};
+use chrono::{DateTime, Local, LocalResult, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
 use clap::{Parser, Subcommand, ValueEnum};
 
 use ipc::Endpoint;
+use openrize_core::paths;
 use protocol::{Data, Operation, Request, Response};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "openrize",
+    name = "rize",
     version,
     about = "Read-only OpenRize queries, even with the GUI closed",
-    after_help = "With no command, shows stored totals. The local service starts on demand and exits after 30 idle seconds.\nExit codes: 0 success, 1 operation/service error, 2 invalid arguments.\nExample: openrize entries list --from 2026-09-01T00:00:00 --to 2026-09-30T23:59:59Z --json"
+    after_help = "With no command, shows stored totals. The local service starts on demand and exits after 30 idle seconds.\nExit codes: 0 success, 1 operation/service error, 2 invalid arguments.\nExample: rize entries list --from 2026-09-01 --to 2026-09-30 --json"
 )]
 struct Args {
     /// Stable schemaVersion=1 JSON response (including errors)
@@ -28,7 +27,7 @@ struct Args {
     /// Existing app data directory, for isolated/dev stores (never created)
     #[arg(long, global = true)]
     data_dir: Option<PathBuf>,
-    /// Private (0700) IPC directory; defaults to the OpenRize CLI cache
+    /// Private IPC location: a 0700 socket directory (Unix) or pipe namespace (Windows)
     #[arg(long, global = true)]
     runtime_dir: Option<PathBuf>,
     #[command(subcommand)]
@@ -44,7 +43,7 @@ enum Command {
         #[command(subcommand)]
         command: EntriesCommand,
     },
-    /// Opt-in: symlink this executable as <dir>/openrize, without replacing files
+    /// Opt-in: symlink this executable as <dir>/rize, without replacing files
     InstallPath {
         /// Destination directory; defaults to ~/.local/bin (add it to PATH yourself)
         #[arg(long)]
@@ -58,11 +57,11 @@ enum Command {
 enum EntriesCommand {
     /// Newest first, bounded. Both inclusive bounds filter entry START time.
     List {
-        /// ISO 8601 date-time, omitted offset = UTC; date-only inputs rejected
-        #[arg(long, value_parser = parse_time)]
+        /// Local date (from its start) or ISO 8601 date-time; no offset = local time
+        #[arg(long, value_parser = parse_from)]
         from: u64,
-        /// Inclusive ISO 8601 date-time at millisecond precision
-        #[arg(long, value_parser = parse_time)]
+        /// Local date (through its end) or ISO 8601 date-time, inclusive
+        #[arg(long, value_parser = parse_to)]
         to: u64,
         #[arg(long, value_enum)]
         status: Option<EntryStatus>,
@@ -81,26 +80,55 @@ enum EntryStatus {
     Approved,
 }
 
-fn parse_time(input: &str) -> Result<u64, String> {
+fn parse_from(input: &str) -> Result<u64, String> {
+    parse_time(input, false)
+}
+
+fn parse_to(input: &str) -> Result<u64, String> {
+    parse_time(input, true)
+}
+
+/// A bare date covers the whole local day, so `--from` takes its first and
+/// `--to` its last millisecond. Date-times without an offset are local too.
+fn parse_time(input: &str, end_of_day: bool) -> Result<u64, String> {
     let error = || {
-        "expected ISO 8601 date-time (e.g. 2026-09-01T00:00:00Z); omitted offset is UTC, precision <= milliseconds".to_string()
+        "expected a date (2026-09-01) or ISO 8601 date-time (2026-09-01T09:00:00, local unless it has an offset), precision <= milliseconds".to_string()
     };
-    if !input.contains('T') {
+    let utc = if let Ok(date) = NaiveDate::parse_from_str(input, "%Y-%m-%d") {
+        let day = if end_of_day {
+            date.succ_opt().ok_or_else(error)?
+        } else {
+            date
+        };
+        let midnight = local(day.and_time(NaiveTime::MIN)).ok_or_else(error)?;
+        midnight - chrono::Duration::milliseconds(i64::from(end_of_day))
+    } else if !input.contains('T') {
         return Err(error());
-    }
-    let date = DateTime::parse_from_rfc3339(input)
-        .map(|dt| dt.with_timezone(&chrono::Utc))
-        .or_else(|_| {
-            NaiveDateTime::parse_from_str(input, "%Y-%m-%dT%H:%M:%S%.f").map(|dt| dt.and_utc())
-        })
-        .map_err(|_| error())?;
-    if date.timestamp_subsec_nanos() % 1_000_000 != 0
-        || date.timestamp_subsec_nanos() >= 1_000_000_000
+    } else if let Ok(date) = DateTime::parse_from_rfc3339(input) {
+        date.with_timezone(&chrono::Utc)
+    } else {
+        let naive =
+            NaiveDateTime::parse_from_str(input, "%Y-%m-%dT%H:%M:%S%.f").map_err(|_| error())?;
+        local(naive).ok_or_else(|| format!("{input} does not exist in local time"))?
+    };
+    if utc.timestamp_subsec_nanos() % 1_000_000 != 0
+        || utc.timestamp_subsec_nanos() >= 1_000_000_000
     {
         return Err(error());
     }
-    u64::try_from(date.timestamp_millis())
+    u64::try_from(utc.timestamp_millis())
         .map_err(|_| "date-time must be on or after the Unix epoch".into())
+}
+
+/// A local wall-clock time in UTC. A time repeated by a DST change resolves
+/// to its first occurrence; one skipped by it does not exist.
+fn local(naive: NaiveDateTime) -> Option<DateTime<chrono::Utc>> {
+    match Local.from_local_datetime(&naive) {
+        LocalResult::Single(time) | LocalResult::Ambiguous(time, _) => {
+            Some(time.with_timezone(&chrono::Utc))
+        }
+        LocalResult::None => None,
+    }
 }
 
 fn main() {
@@ -121,8 +149,8 @@ fn main() {
         }
     };
     if matches!(args.command, Some(Command::Serve)) {
-        let result = paths(&args)
-            .and_then(|(data, runtime)| Endpoint::new(&data, &runtime))
+        let result = data_dir(&args)
+            .and_then(|data| Endpoint::new(&data, args.runtime_dir.as_deref()))
             .and_then(|endpoint| endpoint.serve());
         if let Err(error) = result {
             eprintln!("SERVICE_UNAVAILABLE: {}", quoted(&error));
@@ -180,10 +208,11 @@ fn execute(args: &Args) -> (Response, i32) {
         }
         Some(Command::InstallPath { .. } | Command::Serve) => unreachable!(),
     };
-    let endpoint = match paths(args).and_then(|(data, runtime)| Endpoint::new(&data, &runtime)) {
-        Ok(endpoint) => endpoint,
-        Err(error) => return (Response::error("INVALID_PATH", error), 1),
-    };
+    let endpoint =
+        match data_dir(args).and_then(|data| Endpoint::new(&data, args.runtime_dir.as_deref())) {
+            Ok(endpoint) => endpoint,
+            Err(error) => return (Response::error("INVALID_PATH", error), 1),
+        };
     match endpoint.call(&Request {
         protocol_version: protocol::VERSION,
         operation,
@@ -196,56 +225,45 @@ fn execute(args: &Args) -> (Response, i32) {
     }
 }
 
-fn home() -> Result<PathBuf, String> {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or_else(|| "HOME is not set; provide explicit directories".into())
+fn absolute(path: &Path) -> Result<PathBuf, String> {
+    std::path::absolute(path).map_err(|e| e.to_string())
 }
 
-fn absolute(path: PathBuf) -> Result<PathBuf, String> {
-    if path.is_absolute() {
-        Ok(path)
-    } else {
-        std::env::current_dir()
-            .map(|cwd| cwd.join(path))
-            .map_err(|e| e.to_string())
-    }
-}
-
-fn paths(args: &Args) -> Result<(PathBuf, PathBuf), String> {
-    // Matches Tauri 2 app_data_dir on macOS: data_dir/bundle_identifier.
-    let identifier = openrize_core::APP_IDENTIFIER;
+fn data_dir(args: &Args) -> Result<PathBuf, String> {
     let data = match &args.data_dir {
-        Some(path) => absolute(path.clone())?,
-        None if cfg!(target_os = "macos") => {
-            home()?.join("Library/Application Support").join(identifier)
-        }
-        None => {
-            return Err(
-                "default store discovery currently supports macOS only; provide --data-dir".into(),
-            )
-        }
+        Some(path) => absolute(path)?,
+        None => paths::app_data_dir().ok_or("no home directory; provide --data-dir")?,
     };
     // Canonicalize existing stores so symlink/relative aliases reuse the same
     // service. Missing stores remain missing and yield NO_DATA, not migrations.
-    let data = data.canonicalize().unwrap_or(data);
-    let runtime = match &args.runtime_dir {
-        Some(path) => absolute(path.clone())?,
-        None => home()?.join("Library/Caches").join(identifier).join("cli"),
-    };
-    Ok((data, runtime))
+    // Windows canonical paths are verbatim (`\\?\`), which SQLite should not
+    // have to parse, so there the absolute path is the key.
+    if cfg!(unix) {
+        Ok(data.canonicalize().unwrap_or(data))
+    } else {
+        Ok(data)
+    }
 }
 
+#[cfg(windows)]
+fn install_path(_dir: Option<PathBuf>) -> Result<Data, String> {
+    Err("not available on Windows, where symlinks need extra privileges; `cargo install` already puts rize on PATH".into())
+}
+
+#[cfg(unix)]
 fn install_path(dir: Option<PathBuf>) -> Result<Data, String> {
-    let dir = absolute(match dir {
+    let dir = absolute(&match dir {
         Some(dir) => dir,
-        None => home()?.join(".local/bin"),
+        None => std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .ok_or("HOME is not set; pass --dir")?
+            .join(".local/bin"),
     })?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let executable = std::env::current_exe()
         .and_then(|path| path.canonicalize())
         .map_err(|e| e.to_string())?;
-    let path = dir.join("openrize");
+    let path = dir.join("rize");
     match std::fs::symlink_metadata(&path) {
         Ok(meta)
             if meta.file_type().is_symlink()
@@ -305,7 +323,7 @@ fn emit(response: &Response, json: bool) {
         Some(Data::Status(status)) => {
             println!("Stored entries (all time): {}\nPending review: {}\nTracked: {}\nBillable: {}", status.entries, status.pending, duration(status.tracked_ms), duration(status.billable_ms));
             if status.entries == 0 { println!("0 results"); }
-            println!("Next: openrize entries list --from <datetime> --to <datetime>");
+            println!("Next: rize entries list --from <date> --to <date>");
         }
         Some(Data::Entries(page)) => {
             println!("{} results{}", page.count, if page.truncated { " (truncated; narrow the range or increase --limit, max 500)" } else { "" });
@@ -324,23 +342,35 @@ fn emit(response: &Response, json: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn local_midnight(day: u32) -> u64 {
+        let date = NaiveDate::from_ymd_opt(2026, 9, day).unwrap();
+        local(date.and_time(NaiveTime::MIN))
+            .unwrap()
+            .timestamp_millis() as u64
+    }
+
     #[test]
-    fn exact_dates() {
+    fn dates_and_times() {
         assert_eq!(
-            parse_time("2026-09-01T00:00:00").unwrap(),
-            parse_time("2026-09-01T00:00:00Z").unwrap()
+            parse_from("2026-09-01T01:00:00+01:00").unwrap(),
+            parse_from("2026-09-01T00:00:00Z").unwrap()
         );
         assert_eq!(
-            parse_time("2026-09-01T01:00:00+01:00").unwrap(),
-            parse_time("2026-09-01T00:00:00Z").unwrap()
+            parse_from("2026-09-01T00:00:00").unwrap(),
+            local_midnight(1)
         );
+        assert_eq!(parse_from("2026-09-01").unwrap(), local_midnight(1));
+        assert_eq!(parse_to("2026-09-01").unwrap(), local_midnight(2) - 1);
+        assert_eq!(parse_to("2026-09-01T00:00:00").unwrap(), local_midnight(1));
         for value in [
-            "2026-09-01",
+            "2026-09-32",
+            "09/01/2026",
             "2026-09-01T00:00:00.0001Z",
             "1969-01-01T00:00:00Z",
+            "1969-01-01",
             "2026-09-01T00:00:60Z",
         ] {
-            assert!(parse_time(value).is_err(), "accepted {value}");
+            assert!(parse_from(value).is_err(), "accepted {value}");
         }
     }
 }

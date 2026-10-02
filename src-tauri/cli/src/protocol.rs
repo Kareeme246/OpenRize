@@ -73,7 +73,7 @@ impl Response {
                 code: code.into(),
                 message: message.into(),
             }),
-            help: vec!["openrize --help".into()],
+            help: vec!["rize --help".into()],
         }
     }
 }

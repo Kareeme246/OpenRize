@@ -23,13 +23,14 @@ To cut a release:
    git push origin main vX.Y.Z
    ```
    The release workflow rejects a tag unless all five versions match. It uses
-   the same `cliff.toml` to generate GitHub Release notes, builds a signed,
-   notarized macOS `.dmg`/`.app` with `pnpm tauri build`, and notarizes the
-   standalone CLI.
+   the same `cliff.toml` to generate GitHub Release notes and builds a signed,
+   notarized macOS `.dmg`/`.app` with `pnpm tauri build`. The `rize` CLI ships
+   inside that app as a sidecar.
 3. Watch the `Release` workflow. When it finishes, it publishes the GitHub
    Release with the `.dmg` and zipped `.app` attached, plus the in-app
-   updater's `openrize.app.tar.gz` and `latest.json`, and the standalone CLI's
-   `openrize-cli-darwin-aarch64.zip`, its `.sha256`, and `install.sh`.
+   updater's `openrize.app.tar.gz` and `latest.json`. `install.sh` installs the
+   CLI by extracting it from that same `openrize.app.tar.gz`, so there is no
+   separate CLI download.
 
 Publishing a release ships it to every installed copy: the app checks
 `releases/latest/download/latest.json` hourly (see `src-tauri/src/updater.rs`)
@@ -54,7 +55,7 @@ notarizes with an App Store Connect API key. It needs these repository secrets
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | password chosen when generating that key |
 
 `install.sh` only accepts a CLI notarized and signed by team `Z899WY5Y94`, and
-the release workflow runs that same check before publishing. If the signing
+the release workflow runs that same check on the bundled `rize` before publishing. If the signing
 identity's team ever changes, update the requirement in `install.sh`.
 
 

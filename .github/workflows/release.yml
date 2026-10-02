@@ -25,8 +25,7 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           package_version=$(node -p "require('./package.json').version")
-          tauri_version=$(node -p \
-            "require('./src-tauri/tauri.conf.json').version")
+          tauri_version=$(node -p "require('./src-tauri/tauri.conf.json').version")
           cargo_version=$(awk '
             /^\[package\]$/ { package=1; next }
             /^\[/ { package=0 }
@@ -111,21 +110,15 @@ jobs:
           spctl --assess --type execute --verbose=2 "$app"
           xcrun stapler validate "$app"
 
-      # The standalone CLI is packaged with an ad-hoc signature. It includes the
-      # headless read service and needs neither the app nor the Swift sidecar.
-      - name: Package the standalone CLI
+      # install.sh extracts the CLI from the updater's openrize.app.tar.gz and
+      # accepts it only under this exact requirement, so check it here first.
+      - name: Verify the bundled CLI passes the installer's check
         run: |
-          mkdir -p "$RUNNER_TEMP/openrize-cli"
-          app=src-tauri/target/release/bundle/macos/openrize.app
-          cli="$RUNNER_TEMP/openrize-cli/openrize"
-          cp "$app/Contents/MacOS/openrize-cli" "$cli"
-          cp LICENSE "$RUNNER_TEMP/openrize-cli/LICENSE"
-          codesign --force --sign - "$cli"
-          codesign --verify --strict --verbose=2 "$cli"
-          ditto -c -k --keepParent "$RUNNER_TEMP/openrize-cli" \
-            openrize-cli-darwin-aarch64.zip
-          shasum -a 256 openrize-cli-darwin-aarch64.zip \
-            > openrize-cli-darwin-aarch64.zip.sha256
+          cli=src-tauri/target/release/bundle/macos/openrize.app/Contents/MacOS/rize
+          requirement=$(sed -n "s/^requirement='\(.*\)'$/\1/p" install.sh)
+          [[ -n "$requirement" ]]
+          codesign --verify --strict --check-notarization --verbose=2 \
+            -R="$requirement" "$cli"
 
       - name: Zip the .app bundle for upload
         run: |
@@ -141,12 +134,11 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: |
           bundle=src-tauri/target/release/bundle/macos
-          url="https://github.com/$REPOSITORY/releases/download/$TAG"
           jq -n \
             --arg version "${TAG#v}" \
             --rawfile notes release-notes.md \
             --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg url "$url/openrize.app.tar.gz" \
+            --arg url "https://github.com/$REPOSITORY/releases/download/$TAG/openrize.app.tar.gz" \
             --rawfile signature "$bundle/openrize.app.tar.gz.sig" \
             '{
               version: $version,
@@ -168,8 +160,5 @@ jobs:
             src-tauri/target/release/bundle/macos/openrize.app.zip
             src-tauri/target/release/bundle/macos/openrize.app.tar.gz
             latest.json
-            openrize-cli-darwin-aarch64.zip
-            openrize-cli-darwin-aarch64.zip.sha256
-            install.sh
           body: |
             ${{ steps.git-cliff.outputs.content }}

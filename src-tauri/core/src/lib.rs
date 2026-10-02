@@ -1,6 +1,7 @@
 //! Shared read domain operations. No Tauri, capture, or database writes.
 
 pub mod models;
+pub mod paths;
 pub mod readonly;
 
 /// Canonical installed app identity, also used by independent clients.

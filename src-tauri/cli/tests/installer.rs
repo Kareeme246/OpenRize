@@ -1,16 +1,17 @@
 //! Installer behavior with local release fixtures. Apple codesign checks are
-//! tested both with a recorded mock and against macOS's real `/usr/bin/codesign`.
+//! tested both with a recorded mock and against macOS's real `/usr/bin/codesign`,
+//! which must reject a CLI that OpenRize did not sign and notarize.
 #![cfg(target_os = "macos")]
 
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
-const ASSET: &str = "openrize-cli-darwin-aarch64.zip";
+const ASSET: &str = "openrize.app.tar.gz";
 
 struct Fixture {
     root: PathBuf,
@@ -36,26 +37,11 @@ impl Fixture {
         for dir in [&home, &assets, &mocks, &root.join("tmp")] {
             fs::create_dir_all(dir).unwrap();
         }
-        fs::create_dir(assets.join("openrize-cli")).unwrap();
-        fs::copy(
-            env!("CARGO_BIN_EXE_openrize"),
-            assets.join("openrize-cli/openrize"),
-        )
-        .unwrap();
-        fs::write(assets.join("openrize-cli/LICENSE"), "fixture license\n").unwrap();
-        assert!(Command::new("/usr/bin/zip")
-            .current_dir(&assets)
-            .args(["-qr", ASSET, "openrize-cli"])
-            .status()
-            .unwrap()
-            .success());
-        let checksum = Command::new("/usr/bin/shasum")
-            .current_dir(&assets)
-            .args(["-a", "256", ASSET])
-            .output()
-            .unwrap();
-        assert!(checksum.status.success());
-        fs::write(assets.join(format!("{ASSET}.sha256")), checksum.stdout).unwrap();
+        let macos = assets.join("openrize.app/Contents/MacOS");
+        fs::create_dir_all(&macos).unwrap();
+        fs::copy(env!("CARGO_BIN_EXE_rize"), macos.join("rize")).unwrap();
+        fs::write(macos.join("openrize"), "desktop app").unwrap();
+        pack(&assets);
         let fixture = Self {
             root,
             home,
@@ -125,8 +111,24 @@ cp "$TEST_ASSETS/${url##*/}" "$output""#,
     }
 
     fn binary(&self) -> PathBuf {
-        self.home.join(".local/bin/openrize")
+        self.home.join(".local/bin/rize")
     }
+}
+
+/// Archives `openrize.app` the way the release's updater bundle is laid out.
+fn pack(assets: &Path) {
+    assert!(Command::new("/usr/bin/tar")
+        .current_dir(assets)
+        .args(["-czf", ASSET, "openrize.app"])
+        .status()
+        .unwrap()
+        .success());
+}
+
+fn version_of(binary: &Path) -> String {
+    let output = Command::new(binary).arg("--version").output().unwrap();
+    assert_success(&output);
+    String::from_utf8(output.stdout).unwrap().trim().to_string()
 }
 
 impl Drop for Fixture {
@@ -147,26 +149,25 @@ fn assert_success(output: &Output) {
 fn piped_installer_uses_default_path_without_rust_or_gui() {
     let fixture = Fixture::new();
     assert_success(&fixture.run(fixture.command()));
-    let version = Command::new(fixture.binary())
-        .arg("--version")
-        .output()
-        .unwrap();
-    assert_success(&version);
     assert_eq!(
-        String::from_utf8(version.stdout).unwrap().trim(),
-        format!("openrize {}", env!("CARGO_PKG_VERSION"))
+        version_of(&fixture.binary()),
+        format!("rize {}", env!("CARGO_PKG_VERSION"))
     );
     assert_eq!(
         fs::metadata(fixture.binary()).unwrap().permissions().mode() & 0o777,
         0o755
     );
+    // Only the CLI comes out of the app archive.
     assert_eq!(
-        fs::read_to_string(fixture.binary().with_file_name("openrize.LICENSE")).unwrap(),
-        "fixture license\n"
+        fs::read_dir(fixture.binary().parent().unwrap())
+            .unwrap()
+            .count(),
+        1
     );
     let checks = fs::read_to_string(fixture.root.join("checks")).unwrap();
     assert_eq!(checks.lines().count(), 1);
-    assert!(checks.starts_with("--verify --strict "));
+    assert!(checks.starts_with("--verify --strict --check-notarization "));
+    assert!(checks.contains(r#"certificate leaf[subject.OU] = "Z899WY5Y94""#));
     assert!(!fixture.home.join(".zshrc").exists());
     assert_eq!(fs::read_dir(fixture.root.join("tmp")).unwrap().count(), 0);
     let repeat = fixture.run(fixture.command());
@@ -176,7 +177,9 @@ fn piped_installer_uses_default_path_without_rust_or_gui() {
         .contains("already installed"));
     let requests = fs::read_to_string(fixture.root.join("downloads")).unwrap();
     assert!(requests.contains("--proto =https --proto-redir =https"));
-    assert!(requests.contains("https://github.com/Kareeme246/OpenRize/releases/latest/download/"));
+    assert!(requests.contains(
+        "https://github.com/Kareeme246/OpenRize/releases/latest/download/openrize.app.tar.gz"
+    ));
 }
 
 #[test]
@@ -200,11 +203,7 @@ fn concurrent_installations_never_clobber_each_other() {
     assert!(outputs.iter().any(|output| output.status.success()));
     assert_eq!(
         fs::read(fixture.binary()).unwrap(),
-        fs::read(env!("CARGO_BIN_EXE_openrize")).unwrap()
-    );
-    assert_eq!(
-        fs::read_to_string(fixture.binary().with_file_name("openrize.LICENSE")).unwrap(),
-        "fixture license\n"
+        fs::read(env!("CARGO_BIN_EXE_rize")).unwrap()
     );
     assert_eq!(
         fs::metadata(fixture.binary()).unwrap().permissions().mode() & 0o777,
@@ -213,116 +212,53 @@ fn concurrent_installations_never_clobber_each_other() {
 }
 
 #[test]
-fn checksum_download_and_apple_verification_fail_closed() {
-    for failure in ["checksum", "TEST_FAIL_DOWNLOAD", "TEST_FAIL_SIGNATURE"] {
+fn download_and_apple_verification_fail_closed() {
+    for failure in ["TEST_FAIL_DOWNLOAD", "TEST_FAIL_SIGNATURE"] {
         let fixture = Fixture::new();
         let mut command = fixture.command();
-        if failure == "checksum" {
-            fs::write(
-                fixture.assets.join(format!("{ASSET}.sha256")),
-                format!("{}  {ASSET}\n", "0".repeat(64)),
-            )
-            .unwrap();
-        } else {
-            command.env(failure, "1");
-        }
+        command.env(failure, "1");
         let output = fixture.run(command);
         assert_eq!(output.status.code(), Some(1), "accepted {failure}");
         assert!(!fixture.binary().exists());
         assert_eq!(fs::read_dir(fixture.root.join("tmp")).unwrap().count(), 0);
-        if ["checksum", "TEST_FAIL_DOWNLOAD"].contains(&failure) {
+        if failure == "TEST_FAIL_DOWNLOAD" {
             assert!(!fixture.root.join("checks").exists());
         }
     }
 }
 
 #[test]
-fn locally_signed_ad_hoc_cli_succeeds_with_real_codesign_and_runs() {
+fn real_codesign_rejects_a_cli_openrize_did_not_notarize() {
+    // The locally built CLI carries only the linker's ad-hoc signature.
     let fixture = Fixture::new();
     fs::remove_file(fixture.mocks.join("codesign")).unwrap();
     let output = fixture.run(fixture.command());
-    assert_success(&output);
-    let version = Command::new(fixture.binary())
-        .arg("--version")
-        .output()
-        .unwrap();
-    assert_success(&version);
-    assert_eq!(
-        String::from_utf8(version.stdout).unwrap().trim(),
-        format!("openrize {}", env!("CARGO_PKG_VERSION"))
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("not notarized and signed by OpenRize")
     );
-    assert_eq!(
-        fs::metadata(fixture.binary()).unwrap().permissions().mode() & 0o777,
-        0o755
-    );
-    assert_eq!(
-        fs::read_to_string(fixture.binary().with_file_name("openrize.LICENSE")).unwrap(),
-        "fixture license\n"
-    );
+    assert!(!fixture.binary().exists());
     assert_eq!(fs::read_dir(fixture.root.join("tmp")).unwrap().count(), 0);
-    let repeat = fixture.run(fixture.command());
-    assert_success(&repeat);
-    assert!(String::from_utf8(repeat.stdout)
-        .unwrap()
-        .contains("already installed"));
 }
 
 #[test]
-fn real_codesign_rejects_corrupted_signature_without_installation() {
-    let fixture = Fixture::new();
-    fs::remove_file(fixture.mocks.join("codesign")).unwrap();
-    let binary_path = fixture.assets.join("openrize-cli/openrize");
-    let mut bytes = fs::read(&binary_path).unwrap();
-    if bytes.len() > 2000 {
-        bytes[1500] ^= 0xff;
+fn release_without_the_cli_or_a_valid_archive_fails_without_installation() {
+    for corrupt in [false, true] {
+        let fixture = Fixture::new();
+        if corrupt {
+            fs::write(fixture.assets.join(ASSET), b"not a valid archive").unwrap();
+        } else {
+            // Releases before the CLI shipped carry only the desktop app.
+            fs::remove_file(fixture.assets.join("openrize.app/Contents/MacOS/rize")).unwrap();
+            pack(&fixture.assets);
+        }
+        let output = fixture.run(fixture.command());
+        assert_eq!(output.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("does not include the CLI"));
+        assert!(!fixture.binary().exists());
+        assert!(!fixture.root.join("checks").exists());
+        assert_eq!(fs::read_dir(fixture.root.join("tmp")).unwrap().count(), 0);
     }
-    fs::write(&binary_path, bytes).unwrap();
-    assert!(Command::new("/usr/bin/zip")
-        .current_dir(&fixture.assets)
-        .args(["-qr", ASSET, "openrize-cli"])
-        .status()
-        .unwrap()
-        .success());
-    let checksum = Command::new("/usr/bin/shasum")
-        .current_dir(&fixture.assets)
-        .args(["-a", "256", ASSET])
-        .output()
-        .unwrap();
-    assert!(checksum.status.success());
-    fs::write(
-        fixture.assets.join(format!("{ASSET}.sha256")),
-        checksum.stdout,
-    )
-    .unwrap();
-
-    let output = fixture.run(fixture.command());
-    assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("signature verification failed"));
-    assert!(!fixture.binary().exists());
-    assert_eq!(fs::read_dir(fixture.root.join("tmp")).unwrap().count(), 0);
-}
-
-#[test]
-fn corrupted_archive_fails_without_installation() {
-    let fixture = Fixture::new();
-    fs::write(fixture.assets.join(ASSET), b"not a valid zip file").unwrap();
-    let checksum = Command::new("/usr/bin/shasum")
-        .current_dir(&fixture.assets)
-        .args(["-a", "256", ASSET])
-        .output()
-        .unwrap();
-    assert!(checksum.status.success());
-    fs::write(
-        fixture.assets.join(format!("{ASSET}.sha256")),
-        checksum.stdout,
-    )
-    .unwrap();
-
-    let output = fixture.run(fixture.command());
-    assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("Invalid CLI archive"));
-    assert!(!fixture.binary().exists());
-    assert_eq!(fs::read_dir(fixture.root.join("tmp")).unwrap().count(), 0);
 }
 
 #[test]
@@ -344,7 +280,6 @@ fn existing_executable_and_symlink_are_never_replaced() {
             "do not replace"
         );
         assert_eq!(fixture.binary().is_symlink(), symlink);
-        assert!(!fixture.binary().with_file_name("openrize.LICENSE").exists());
     }
 }
 
@@ -356,12 +291,12 @@ fn pinned_version_custom_destination_and_invalid_inputs() {
     command
         .arg("--dir")
         .arg(&destination)
-        .args(["--version", "0.8.4"]);
+        .args(["--version", "0.8.10"]);
     assert_success(&fixture.run(command));
-    assert!(destination.join("openrize").is_file());
+    assert!(destination.join("rize").is_file());
     assert!(fs::read_to_string(fixture.root.join("downloads"))
         .unwrap()
-        .contains("/download/v0.8.4/"));
+        .contains("/download/v0.8.10/openrize.app.tar.gz"));
     for args in [
         vec!["--unknown"],
         vec!["--version", "../main"],

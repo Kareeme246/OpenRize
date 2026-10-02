@@ -1,4 +1,7 @@
 //! Real executable + local service coverage, without launching Tauri or a GUI.
+//! The fixtures reach into the Unix socket directly.
+#![cfg(unix)]
+
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
@@ -46,7 +49,7 @@ impl Fixture {
     }
 
     fn command(&self) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_openrize"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_rize"));
         command
             .arg("--data-dir")
             .arg(&self.data)
@@ -153,7 +156,7 @@ fn actual_cli_read_surface_and_privacy() {
         "entries",
         "list",
         "--from",
-        "1970-01-01T00:00:01",
+        "1970-01-01T00:00:01Z",
         "--to",
         "1970-01-01T01:00:02+01:00",
     ];
@@ -264,9 +267,9 @@ fn empty_results_and_argument_errors() {
             "entries",
             "list",
             "--from",
-            "2026-09-01",
-            "--to",
             "2026-09-02",
+            "--to",
+            "2026-09-01",
         ],
         vec![
             "entries",
@@ -375,12 +378,12 @@ fn optional_path_install_is_explicit_idempotent_and_non_destructive() {
     let args = ["install-path", "--dir", bin.to_str().unwrap()];
     assert_eq!(fixture.json(&args, 0)["ok"], true);
     assert_eq!(fixture.json(&args, 0)["ok"], true);
-    assert!(bin.join("openrize").is_symlink());
-    fs::remove_file(bin.join("openrize")).unwrap();
-    fs::write(bin.join("openrize"), "existing executable").unwrap();
+    assert!(bin.join("rize").is_symlink());
+    fs::remove_file(bin.join("rize")).unwrap();
+    fs::write(bin.join("rize"), "existing executable").unwrap();
     assert_eq!(fixture.json(&args, 1)["error"]["code"], "INSTALL_FAILED");
     assert_eq!(
-        fs::read_to_string(bin.join("openrize")).unwrap(),
+        fs::read_to_string(bin.join("rize")).unwrap(),
         "existing executable"
     );
 }
@@ -402,7 +405,7 @@ fn unsafe_runtime_directory_is_rejected() {
         .unwrap();
     // Clap rejects duplicate flags rather than accepting ambiguous routing.
     assert_eq!(output.status.code(), Some(2));
-    let output = Command::new(env!("CARGO_BIN_EXE_openrize"))
+    let output = Command::new(env!("CARGO_BIN_EXE_rize"))
         .arg("--data-dir")
         .arg(&fixture.data)
         .arg("--runtime-dir")

@@ -1,5 +1,5 @@
-//! The Pulse panel: a small glance at capture and today, anchored under the
-//! menu-bar icon (design board option A). Left click on the icon toggles it;
+//! The Pulse panel: a small glance at capture and today, anchored to the
+//! tray icon (design board option A). Left click on the icon toggles it;
 //! right click keeps the native menu.
 //!
 //! The panel exists only while the icon does. It is created on the first
@@ -211,26 +211,49 @@ fn reveal(window: &WebviewWindow) {
     let _ = window.set_focus();
 }
 
-/// Centres the panel under the icon, kept inside the screen's usable area.
+/// Centres the panel on the icon, kept inside the screen's usable area: under
+/// it for a menu bar at the top (macOS), above it for a taskbar at the bottom
+/// (Windows' default).
 fn place(app: &AppHandle, window: &WebviewWindow, icon: Rect, height: f64) {
-    let (x, y) = anchor(app, icon);
-    let (scale, left, right) = match app.monitor_from_point(x, y).ok().flatten() {
+    let anchor = anchor(app, icon);
+    let (scale, area) = match app.monitor_from_point(anchor.x, anchor.top).ok().flatten() {
         Some(monitor) => {
             let area = monitor.work_area();
+            let left = f64::from(area.position.x);
+            let top = f64::from(area.position.y);
             (
                 monitor.scale_factor(),
-                f64::from(area.position.x),
-                f64::from(area.position.x) + f64::from(area.size.width),
+                Area {
+                    left,
+                    top,
+                    right: left + f64::from(area.size.width),
+                    bottom: top + f64::from(area.size.height),
+                },
             )
         }
-        None => (window.scale_factor().unwrap_or(1.0), f64::MIN, f64::MAX),
+        None => (
+            window.scale_factor().unwrap_or(1.0),
+            Area {
+                left: f64::MIN,
+                top: f64::MIN,
+                right: f64::MAX,
+                bottom: f64::MAX,
+            },
+        ),
     };
 
     let width = WIDTH * scale;
+    let tall = height * scale;
+    let gap = GAP * scale;
     let edge = EDGE * scale;
-    let max_left = (right - width - edge).max(left + edge);
-    let panel_x = (x - width / 2.0).clamp(left + edge, max_left);
-    let panel_y = y + GAP * scale;
+    let max_left = (area.right - width - edge).max(area.left + edge);
+    let panel_x = (anchor.x - width / 2.0).clamp(area.left + edge, max_left);
+    let below = anchor.bottom + gap;
+    let panel_y = if below + tall <= area.bottom {
+        below
+    } else {
+        (anchor.top - gap - tall).max(area.top + edge)
+    };
 
     // Order matters on macOS: a resize keeps the bottom-left corner fixed, so
     // the position is set after it to pin the top edge under the icon.
@@ -238,10 +261,24 @@ fn place(app: &AppHandle, window: &WebviewWindow, icon: Rect, height: f64) {
     let _ = window.set_position(PhysicalPosition::new(panel_x, panel_y));
 }
 
-/// The icon's bottom centre in physical pixels.
-fn anchor(app: &AppHandle, icon: Rect) -> (f64, f64) {
-    // The tray reports physical pixels on macOS; any logical value is scaled
-    // with the primary monitor as a best effort.
+/// A screen's usable area in physical pixels.
+struct Area {
+    left: f64,
+    top: f64,
+    right: f64,
+    bottom: f64,
+}
+
+/// The icon's horizontal centre and vertical extent in physical pixels.
+struct Anchor {
+    x: f64,
+    top: f64,
+    bottom: f64,
+}
+
+fn anchor(app: &AppHandle, icon: Rect) -> Anchor {
+    // The tray reports physical pixels on macOS and Windows; any logical
+    // value is scaled with the primary monitor as a best effort.
     let scale = app
         .primary_monitor()
         .ok()
@@ -250,5 +287,9 @@ fn anchor(app: &AppHandle, icon: Rect) -> (f64, f64) {
         .unwrap_or(1.0);
     let position = icon.position.to_physical::<f64>(scale);
     let size = icon.size.to_physical::<f64>(scale);
-    (position.x + size.width / 2.0, position.y + size.height)
+    Anchor {
+        x: position.x + size.width / 2.0,
+        top: position.y,
+        bottom: position.y + size.height,
+    }
 }

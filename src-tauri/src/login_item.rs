@@ -1,10 +1,13 @@
-//! Launch at login, through macOS's own `SMAppService` login-item API
-//! (macOS 13+). The OS is the source of truth, not `settings.json`: the user
-//! can switch it off under System Settings > General > Login Items, so every
-//! read asks macOS instead of trusting a stored flag.
+//! Launch at login. The OS is the source of truth, not `settings.json`: the
+//! user can switch it off behind the app's back, so every read asks the OS
+//! instead of trusting a stored flag.
 //!
-//! `SMAppService.mainAppService` registers the running app itself, so there
-//! is no helper bundle or LaunchAgent plist to ship.
+//! - macOS: `SMAppService.mainAppService` (macOS 13+) registers the running
+//!   app itself, so there is no helper bundle or LaunchAgent plist to ship.
+//!   The user can switch it off under System Settings > General > Login Items.
+//! - Windows: a value under the per-user `Run` key. The user can switch it
+//!   off in Task Manager > Startup apps, which records an override under
+//!   `StartupApproved\Run` rather than deleting our value.
 
 use serde::Serialize;
 
@@ -16,7 +19,8 @@ pub enum LoginItemState {
     Disabled,
     /// Registered, but the user has to allow it in System Settings first.
     RequiresApproval,
-    /// macOS older than 13, or not macOS at all.
+    /// macOS older than 13, or a platform without an implementation.
+    #[cfg_attr(windows, allow(dead_code))]
     Unsupported,
 }
 
@@ -34,75 +38,20 @@ impl LoginItemState {
     }
 }
 
-#[cfg(target_os = "macos")]
-mod imp {
-    use objc2::msg_send;
-    use objc2::rc::Retained;
-    use objc2::runtime::{AnyClass, AnyObject, NSObject};
-    use objc2_foundation::NSString;
-
-    use super::LoginItemState;
-
-    // SMAppService lives in ServiceManagement, which nothing else links.
-    #[link(name = "ServiceManagement", kind = "framework")]
-    extern "C" {}
-
-    /// `SMAppService.mainAppService`, or `None` before macOS 13.
-    fn main_app_service() -> Option<Retained<AnyObject>> {
-        let class = AnyClass::get(c"SMAppService")?;
-        // SAFETY: `mainAppService` is a class property returning the shared
-        // service object for the running app bundle.
-        unsafe { msg_send![class, mainAppService] }
-    }
-
-    pub fn state() -> LoginItemState {
-        match main_app_service() {
-            // SAFETY: `status` is a plain NSInteger property getter.
-            Some(service) => LoginItemState::from_status(unsafe { msg_send![&service, status] }),
-            None => LoginItemState::Unsupported,
-        }
-    }
-
-    pub fn set(enabled: bool) -> Result<(), String> {
-        let service = main_app_service().ok_or("Launch at login needs macOS 13 or later")?;
-        // SAFETY: both selectors take one trailing `NSError **` and return
-        // BOOL; `_` makes objc2 supply the out-parameter and map NO to Err.
-        let result: Result<(), Retained<NSObject>> = unsafe {
-            if enabled {
-                msg_send![&service, registerAndReturnError: _]
-            } else {
-                msg_send![&service, unregisterAndReturnError: _]
-            }
-        };
-        result.map_err(|error| {
-            // SAFETY: the error is an NSError, whose localizedDescription is
-            // a non-null NSString.
-            let description: Retained<NSString> =
-                unsafe { msg_send![&error, localizedDescription] };
-            description.to_string()
-        })
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-mod imp {
-    use super::LoginItemState;
-
-    pub fn state() -> LoginItemState {
-        LoginItemState::Unsupported
-    }
-
-    pub fn set(_enabled: bool) -> Result<(), String> {
-        Err("Launch at login is only available on macOS".to_string())
-    }
-}
+#[cfg_attr(target_os = "macos", path = "login_item/macos.rs")]
+#[cfg_attr(windows, path = "login_item/windows.rs")]
+#[cfg_attr(
+    not(any(target_os = "macos", windows)),
+    path = "login_item/unsupported.rs"
+)]
+mod imp;
 
 pub fn state() -> LoginItemState {
     imp::state()
 }
 
-/// Registers or unregisters the app, then reports what macOS now says: a
-/// successful register can still land on `RequiresApproval`.
+/// Registers or unregisters the app, then reports what the OS now says: on
+/// macOS a successful register can still land on `RequiresApproval`.
 pub fn set(enabled: bool) -> Result<LoginItemState, String> {
     // Unregistering an app that is not registered is an error in macOS but
     // not in intent, so asking for the state it already has is a no-op.

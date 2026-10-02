@@ -14,10 +14,19 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event.label.name == 'run-ci'
-    # Needs Xcode 26+ (src-tauri/build.rs compiles the Swift sidecar, which
-    # requires the Foundation Models SDK). macos-26 ships Xcode 26.6 as its
-    # default toolchain - see AGENTS.md "On-device AI sidecar".
-    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS needs Xcode 26+ (src-tauri/build.rs compiles the Swift
+        # sidecar, which requires the Foundation Models SDK). macos-26 ships
+        # Xcode 26.6 as its default toolchain - see AGENTS.md "On-device AI
+        # sidecar". Windows checks the same code with its own cfg branches.
+        runner: [macos-26, windows-latest]
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        # Git Bash on Windows, so `pnpm verify` runs scripts/verify.sh as-is.
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

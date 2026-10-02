@@ -188,6 +188,20 @@ pub fn chime() {
             sound.play();
         }
     }
+    #[cfg(windows)]
+    {
+        use windows::core::w;
+        use windows::Win32::Media::Audio::{PlaySoundW, SND_ALIAS, SND_ASYNC, SND_NODEFAULT};
+        // SAFETY: plays a named system sound asynchronously; the alias is a
+        // static string.
+        unsafe {
+            let _ = PlaySoundW(
+                w!("SystemNotification"),
+                None,
+                SND_ALIAS | SND_ASYNC | SND_NODEFAULT,
+            );
+        }
+    }
 }
 
 /// Runs `act` on the engine under its lock, applies the effects it returns,

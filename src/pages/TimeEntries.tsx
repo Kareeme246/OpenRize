@@ -47,6 +47,7 @@ import {
   plural,
 } from "../lib/format";
 import { assignColors } from "../lib/palette";
+import { FILE_MANAGER } from "../lib/platform";
 import type {
   EntriesGroup,
   EntriesRange,
@@ -530,7 +531,7 @@ export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
               onClick={() => notice.path && void revealItemInDir(notice.path)}
               className="shrink-0 font-semibold text-accent hover:underline"
             >
-              Show in Finder
+              Show in {FILE_MANAGER}
             </button>
           )}
           <button

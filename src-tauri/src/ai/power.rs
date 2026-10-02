@@ -75,7 +75,12 @@ fn on_ac_power() -> bool {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+fn on_ac_power() -> bool {
+    !crate::energy::read_battery_info().on_battery
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
 fn on_ac_power() -> bool {
     true
 }
@@ -85,7 +90,17 @@ fn low_power_mode() -> bool {
     objc2_foundation::NSProcessInfo::processInfo().isLowPowerModeEnabled()
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows' Battery Saver, its counterpart to Low Power Mode.
+#[cfg(windows)]
+fn low_power_mode() -> bool {
+    use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+
+    let mut status = SYSTEM_POWER_STATUS::default();
+    // SAFETY: fills the struct on this stack.
+    unsafe { GetSystemPowerStatus(&mut status) }.is_ok() && status.SystemStatusFlag == 1
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
 fn low_power_mode() -> bool {
     false
 }

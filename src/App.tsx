@@ -9,6 +9,7 @@ import { useTauriEvent } from "./hooks/useTauriEvent";
 import { useUpdates } from "./hooks/useUpdates";
 import * as api from "./lib/api";
 import { currentCalendarDay, localDateString } from "./lib/dates";
+import { hasPrimaryModifier } from "./lib/platform";
 import type { ActivitySnapshot, ActivityTick, Route } from "./lib/types";
 import { Apps } from "./pages/Apps";
 import { Calendar } from "./pages/Calendar";
@@ -112,10 +113,10 @@ export default function App() {
     }));
   }, []);
 
-  /* ⌘, — the macOS Settings convention. */
+  /* ⌘, (Ctrl+, elsewhere) - the macOS Settings convention. */
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (!event.metaKey || event.ctrlKey || event.altKey) return;
+      if (!hasPrimaryModifier(event) || event.altKey) return;
       if (event.key === ",") {
         event.preventDefault();
         navigate({ name: "settings" });

@@ -22,6 +22,7 @@ import {
   recordingEntry,
 } from "./lib/entries";
 import { formatDuration, formatTime } from "./lib/format";
+import { hasPrimaryModifier, shortcutLabel } from "./lib/platform";
 import {
   dailyTargetMs,
   formatTargetHours,
@@ -123,7 +124,7 @@ function PulsePanel() {
       if (event.key === "Escape") {
         event.preventDefault();
         void api.hidePulsePanel();
-      } else if (event.metaKey && event.key.toLowerCase() === "o") {
+      } else if (hasPrimaryModifier(event) && event.key.toLowerCase() === "o") {
         event.preventDefault();
         void api.openMainWindow(false);
       }
@@ -217,7 +218,9 @@ function PulsePanel() {
           className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 font-semibold text-[11.5px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
         >
           Open OpenRize
-          <kbd className="font-mono text-[10px] text-fg-faint">⌘O</kbd>
+          <kbd className="font-mono text-[10px] text-fg-faint">
+            {shortcutLabel("O")}
+          </kbd>
         </button>
       </footer>
     </div>

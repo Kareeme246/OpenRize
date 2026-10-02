@@ -291,6 +291,7 @@ pub fn run() {
         .expect("error while building OpenRize")
         .run(|app, event| match event {
             // macOS: clicking the dock icon with no visible window reopens it.
+            #[cfg(target_os = "macos")]
             RunEvent::Reopen { .. } => tray::show_main_window(app),
             // Close the open segment at the real quit time. Left open, the
             // next launch can only close it at its own start, losing its time.

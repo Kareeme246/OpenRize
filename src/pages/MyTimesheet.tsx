@@ -44,6 +44,7 @@ import {
   workDuration,
 } from "../lib/entries";
 import { formatDuration, formatTime, plural } from "../lib/format";
+import { shortcutLabel } from "../lib/platform";
 import { formatTargetHours, targetMsFor } from "../lib/settings";
 import type {
   CalendarScale,
@@ -542,7 +543,7 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
                 </button>
               )}
               <Tooltip
-                content="Approve all (⌘⇧↵)"
+                content={`Approve all (${shortcutLabel("Enter", { shift: true })})`}
                 wrapperClassName="inline-flex"
               >
                 <button
@@ -552,7 +553,9 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
                   className={BUTTON_PRIMARY}
                 >
                   Approve all{" "}
-                  <span className="text-[10px] opacity-70">⌘⇧↵</span>
+                  <span className="text-[10px] opacity-70">
+                    {shortcutLabel("Enter", { shift: true })}
+                  </span>
                 </button>
               </Tooltip>
             </div>

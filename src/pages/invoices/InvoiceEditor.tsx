@@ -33,6 +33,7 @@ import {
   TERMS_OPTIONS,
   toDraftInput,
 } from "../../lib/invoices";
+import { FILE_MANAGER } from "../../lib/platform";
 import type { BillableEntry, InvoiceProfile } from "../../lib/types";
 import { EditorSection } from "./EditorSection";
 import { LineItems } from "./LineItems";
@@ -394,7 +395,7 @@ export function InvoiceEditor({
                 className="shrink-0 text-fg underline"
                 onClick={() => notice.path && void revealItemInDir(notice.path)}
               >
-                Show in Finder
+                Show in {FILE_MANAGER}
               </button>
             )}
           </p>

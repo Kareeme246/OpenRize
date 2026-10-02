@@ -19,6 +19,8 @@
 //!
 //! Debug builds never check: installing would overwrite `target/debug`. Set
 //! `OPENRIZE_SIMULATE_UPDATE=1` there to exercise the UI with a fake update.
+//! Nor do builds for platforms the release feed doesn't carry (Windows is
+//! experimental and only built from source), which would fail every check.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -112,10 +114,21 @@ impl UpdaterState {
     }
 }
 
+/// Why this build never checks for updates, if it doesn't.
+fn no_updates_reason() -> Option<&'static str> {
+    if cfg!(debug_assertions) {
+        Some("Development builds don't check for updates.")
+    } else if cfg!(target_os = "macos") {
+        None
+    } else {
+        Some("Builds from source don't update in place. Pull and rebuild to update.")
+    }
+}
+
 /// Starts the launch + hourly schedule.
 pub fn spawn_scheduler(app: AppHandle) {
-    if cfg!(debug_assertions) {
-        if std::env::var_os("OPENRIZE_SIMULATE_UPDATE").is_some() {
+    if no_updates_reason().is_some() {
+        if cfg!(debug_assertions) && std::env::var_os("OPENRIZE_SIMULATE_UPDATE").is_some() {
             simulate(&app);
         }
         return;
@@ -131,7 +144,7 @@ pub fn spawn_scheduler(app: AppHandle) {
 
 /// Called when an OpenRize window regains focus.
 pub fn on_focus(app: &AppHandle) {
-    if cfg!(debug_assertions) {
+    if no_updates_reason().is_some() {
         return;
     }
     let state = app.state::<UpdaterState>();
@@ -150,9 +163,9 @@ pub fn on_focus(app: &AppHandle) {
 /// status; automatic ones only log them.
 pub async fn check(app: &AppHandle, manual: bool) {
     let state = app.state::<UpdaterState>();
-    if cfg!(debug_assertions) {
+    if let Some(reason) = no_updates_reason() {
         if let (true, Ok(mut status)) = (manual, state.status.lock()) {
-            status.error = Some("Development builds don't check for updates.".to_string());
+            status.error = Some(reason.to_string());
             emit(app, &status);
         }
         return;

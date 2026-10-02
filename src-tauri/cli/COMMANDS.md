@@ -32,9 +32,11 @@ command: `rize track start`, or `rize app start --track` to do both.
 
 ## Commands
 
-"Needs app" means the command depends on live app state, so rize says the app is not running
-and suggests `rize app start`. "Starts app" means the command launches the app itself, because
-that is what it asks for.
+In the "App closed" column, "Yes" means the command works with the app closed or not installed
+at all, as long as the app has run once on this machine. "Needs app" means the command depends on
+live app state, so rize says the app is not running and suggests `rize app start`. "Starts app"
+means the command launches the app itself, because that is what it asks for, so it needs the app
+installed.
 
 | Command | What it does | App command | App closed | Status |
 | --- | --- | --- | --- | --- |
@@ -42,7 +44,7 @@ that is what it asks for.
 | `rize app start [--track] [--show]` | Launch the app in the background (menu bar only, no window or Dock icon). `--track` also turns tracking on; `--show` opens the window. Waits until the app answers. | launches the app with `--background` | Starts app | Shipped |
 | `rize app status` | Running or not, app version and data directory. | `Hello` handshake | Yes | Shipped |
 | `rize app open [--review]` | Show the window, on today's review queue with `--review`. | `open_main_window` | Starts app | Shipped |
-| `rize app quit` | Close the open segment and exit, as the tray's Quit does. | `AppHandle::exit` | Nothing to do | Shipped |
+| `rize app quit` | Close the open segment and exit, as the tray's Quit does. Returns once the app has released the data. | `AppHandle::exit` | Nothing to do | Shipped |
 | `rize track start` | Turn tracking on, launching the app if needed. | `set_capture_enabled` | Starts app | Shipped |
 | `rize track stop` | Turn tracking off. | `set_capture_enabled` | Yes (saved for next launch) | Shipped |
 | `rize track idle <minutes>` | Set the idle threshold. | `set_idle_threshold` | Yes | Shipped |
@@ -112,8 +114,8 @@ stay reachable through `rize settings set`.
 | --- | --- |
 | Output | Plain aligned tables, no color. Durations as `3h 25m`, times local. |
 | `--json` | One envelope for every command, errors included: `schemaVersion`, `ok`, `data`, `error { code, message }`. Adding a field is compatible; removing or renaming one bumps `schemaVersion`. |
-| Exit codes | 0 success, 1 operation failed, 2 invalid arguments (including an unconfirmed deletion), 3 app needed but not running, 4 app and rize versions incompatible. |
-| Error codes | `INVALID_ARGUMENT`, `NOT_FOUND`, `AMBIGUOUS` (with `candidates`), `NO_DATA`, `APP_NOT_RUNNING`, `INCOMPATIBLE`, `FAILED`. |
+| Exit codes | 0 success, 1 operation failed, 2 invalid arguments (including an unconfirmed deletion), 3 app needed but not running, 4 incompatible versions (the running app speaks another rize protocol, or the stored data is from another app version). |
+| Error codes | `INVALID_ARGUMENT`, `NOT_FOUND`, `AMBIGUOUS` (with `candidates`), `NO_DATA`, `APP_NOT_RUNNING`, `INCOMPATIBLE`, `FAILED`. `NO_DATA` means the app never ran on this machine. |
 | Dates | A bare date covers the whole local day (`--to 2026-09-30` includes that day); offset-less times are local. `today`, `yesterday`, weekday names, `this-week`, `last-week`, `this-month` and `last-month` work for `--from`, `--to` and `--period`; `--last 7d` (or `90m`, `12h`, `2w`) runs up to now. Weeks start on Monday. Ranges default to today. |
 | Names | Projects, clients, categories and timers take an id, an exact name or a unique case-insensitive prefix; two matches fail with `AMBIGUOUS` and list both. Entries take a full id or its last characters (lists show the last eight). |
 | Confirmation | Deleting, voiding, finalizing, resetting and rebuilding prompt on a terminal and need `--yes` otherwise. |

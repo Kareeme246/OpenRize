@@ -53,7 +53,7 @@ installed.
 | `rize timers new <label>` | Create a timer. | `create_timer` | Yes | Shipped |
 | `rize timers start` / `pause` / `reset` / `rm <timer>` | Control or delete a timer by id or label; reset and rm are confirmed. | `start_timer`, `pause_timer`, `reset_timer`, `delete_timer` | Yes | Shipped |
 | `rize timers rename <timer> <label>` | Rename a timer. | `rename_timer` | Yes | Shipped |
-| `rize entries list` | Filter by range, project, client, category, app, status, billable, search and scope (`agent` and `all` are refused until `advancedWorkflowTracking` is on). Newest first, `--limit` 1 to 5000. | `query_time_entries` | Yes | Shipped |
+| `rize entries list` | Filter by range, project, client, category, app, status, billable, search and scope. Newest first, `--limit` 1 to 5000. | `query_time_entries` | Yes | Shipped |
 | `rize entries show <id>` | One entry with its apps, events and AI suggestion; window titles with `--full`. | `get_entry_detail` | Yes | Shipped |
 | `rize entries add --from --to [fields]` | Create a manual entry. | `create_time_entry` | Yes | Shipped |
 | `rize entries edit <id...> [fields]` | Change description, project, category, billable, start or end on one or many entries; `none` clears a project or category. | `update_time_entry`, `update_time_entries` | Yes | Shipped |

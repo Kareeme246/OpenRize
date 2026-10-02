@@ -180,6 +180,9 @@ pub struct ActivityStore {
     pub watch_since_ms: Option<u64>,
     tracking_hours: crate::settings::TrackingHours,
     manual_tracking: bool,
+    /// Whether advanced workflow tracking is on: only then does time in an
+    /// agent's pane become entries of its own.
+    agents_enabled: bool,
 }
 
 impl ActivityStore {
@@ -217,6 +220,7 @@ impl ActivityStore {
             watch_since_ms: None,
             tracking_hours: crate::settings::TrackingHours::default(),
             manual_tracking: false,
+            agents_enabled: false,
         };
         store.capture_enabled = store
             .read_setting("capture_enabled")
@@ -286,6 +290,10 @@ impl ActivityStore {
 
     pub fn set_tracking_hours(&mut self, hours: crate::settings::TrackingHours) {
         self.tracking_hours = hours;
+    }
+
+    pub fn set_agents_enabled(&mut self, enabled: bool) {
+        self.agents_enabled = enabled;
     }
 
     pub fn is_in_tracking_window(&self, now: u64) -> bool {
@@ -1991,7 +1999,7 @@ impl ActivityStore {
             frozen.iter().map(|e| e.id.as_str()).collect();
 
         // Time the person spent in agents' panes becomes entries of its own.
-        let carves = {
+        let carves = if self.agents_enabled {
             let focus =
                 crate::agents::store::focus_in(&tx, start_ms, end_ms.saturating_add(ONE_DAY_MS))?;
             carves_from_focus(
@@ -2006,6 +2014,8 @@ impl ActivityStore {
                     })
                     .collect::<Vec<_>>(),
             )
+        } else {
+            Vec::new()
         };
         let built = build_entries_with(&segments, &frozen, &EntrySettings::default(), now, &carves);
         let linked: std::collections::HashMap<i64, Option<&str>> = segments
@@ -2697,7 +2707,7 @@ mod tests {
     fn categories_crud_works() {
         let mut store = store();
         let cats = store.list_categories().unwrap();
-        assert_eq!(cats.len(), 12); // Seeded default 12 categories
+        assert_eq!(cats.len(), 11); // Seeded default 11 categories
 
         let created = store
             .create_category(
@@ -2735,7 +2745,7 @@ mod tests {
 
         store.delete_category(&created.id, 3_000).unwrap();
         let remaining = store.list_categories().unwrap();
-        assert_eq!(remaining.len(), 12);
+        assert_eq!(remaining.len(), 11);
     }
 
     #[test]
@@ -3010,6 +3020,40 @@ mod tests {
             crate::ai::store::enqueue_live_due(store.conn(), start + 75 * MIN).unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn time_in_an_agents_pane_is_carved_out_only_while_workflow_tracking_is_on() {
+        let mut store = store();
+        let project = store
+            .create_project(new_project_for(None, "Swap"), 2)
+            .unwrap();
+        store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
+        store.stop_session(60 * MIN).unwrap();
+        store
+            .conn()
+            .execute(
+                "INSERT INTO agent_focus (pane_key, project_id, agent, started_at, ended_at)
+                 VALUES ('pane', ?1, 'claude', ?2, ?3)",
+                params![project.id, (20 * MIN) as i64, (35 * MIN) as i64],
+            )
+            .unwrap();
+
+        store.rebuild_range(0, 70 * MIN, 70 * MIN).unwrap();
+        let off = live_entries(&store);
+        assert!(off.iter().all(|e| e.project_id.is_none()));
+
+        // Entries already built stay as they are; start over to see the carve.
+        store.set_agents_enabled(true);
+        store
+            .conn()
+            .execute("DELETE FROM time_entries", [])
+            .unwrap();
+        store.rebuild_range(0, 70 * MIN, 70 * MIN).unwrap();
+        let on = live_entries(&store);
+        assert!(on
+            .iter()
+            .any(|e| e.project_id.as_deref() == Some(project.id.as_str())));
     }
 
     #[test]

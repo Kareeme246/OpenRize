@@ -299,13 +299,15 @@ pub fn get(conn: &Connection, id: &str) -> Result<Invoice, String> {
 
 /// Approved, billable, uninvoiced time for a client in `[start_ms, end_ms)`,
 /// with the rate each entry would bill at. Entries already on `invoice_id`
-/// (the draft being edited) are included and flagged.
+/// (the draft being edited) are included and flagged. Agent time is offered
+/// only when `with_agents` (advanced workflow tracking is on).
 pub fn billable_entries(
     conn: &Connection,
     client_id: &str,
     start_ms: u64,
     end_ms: u64,
     invoice_id: Option<&str>,
+    with_agents: bool,
 ) -> Result<Vec<BillableEntry>, String> {
     if start_ms >= end_ms || end_ms > i64::MAX as u64 {
         return Err("Choose a valid date range".into());
@@ -321,13 +323,20 @@ pub fn billable_entries(
              WHERE c.id = ?1 AND c.deleted_at IS NULL AND p.deleted_at IS NULL
                AND e.status = 'approved' AND e.billable = 1 AND e.deleted_at IS NULL
                AND (e.invoice_id IS NULL OR e.invoice_id = ?4)
+               AND (?5 OR e.source != 'agent')
                AND e.started_at >= ?2 AND e.started_at < ?3
              ORDER BY e.started_at, e.id",
         )
         .map_err(err)?;
     let rows = stmt
         .query_map(
-            params![client_id, start_ms as i64, end_ms as i64, invoice_id],
+            params![
+                client_id,
+                start_ms as i64,
+                end_ms as i64,
+                invoice_id,
+                with_agents
+            ],
             |row| {
                 let started: i64 = row.get(4)?;
                 let ended: i64 = row.get(5)?;

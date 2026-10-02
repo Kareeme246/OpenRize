@@ -73,6 +73,7 @@ export function Timesheets({
   replace: (route: Route) => void;
 }) {
   const { settings } = useSettings();
+  const agentsOn = settings.advancedWorkflowTracking;
   const catalog = useCatalog();
   const scale: Scale = route.scale ?? "week";
   const rows = route.rows ?? "project";
@@ -100,7 +101,7 @@ export function Timesheets({
       const [next, report] = await Promise.all([
         api.listTimeEntries(start, end - 1),
         // The agent figures are a bonus: a failure never blocks the sheet.
-        api.agentReport(start, end).catch(() => null),
+        agentsOn ? api.agentReport(start, end).catch(() => null) : null,
       ]);
       if (shown.current !== `${start}-${end}`) return;
       setLoaded({ start, end, entries: next });
@@ -111,7 +112,7 @@ export function Timesheets({
         setError(api.describeError(cause));
       }
     }
-  }, [start, end]);
+  }, [start, end, agentsOn]);
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -271,7 +272,7 @@ export function Timesheets({
               }
               onApprove={(entry) => void approve(entry)}
             />
-            {agents && !filtered && (
+            {agentsOn && agents && !filtered && (
               <AgentSplit report={agents} projectById={catalog.projectById} />
             )}
           </div>

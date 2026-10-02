@@ -61,7 +61,7 @@ function PulsePanel() {
   const timers = useTimers();
   const { now } = timers;
   const breaks = useBreaks();
-  const board = useAgentBoard();
+  const board = useAgentBoard(settings.advancedWorkflowTracking);
 
   // Only the live fields are read; a full snapshot is a tick plus segments.
   const [live, setLive] = useState<ActivityTick | null>(null);

@@ -106,7 +106,8 @@ type SettingsSection =
   | "notifications"
   | "ai"
   | "extensions"
-  | "advanced";
+  | "advanced"
+  | "experimental";
 
 const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   "overview",
@@ -119,7 +120,23 @@ const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   "ai",
   "extensions",
   "advanced",
+  "experimental",
 ];
+
+/** The sections under the Advanced settings group in the nav. */
+const ADVANCED_SECTIONS: readonly SettingsSection[] = [
+  "ai",
+  "advanced",
+  "experimental",
+];
+
+function isAdvancedSection(section: SettingsSection): boolean {
+  return ADVANCED_SECTIONS.includes(section);
+}
+
+function parseAdvancedSection(value: string | null | undefined): boolean {
+  return ADVANCED_SECTIONS.some((section) => section === value);
+}
 
 function parseSettingsSection(value: string | null): SettingsSection | null {
   return SETTINGS_SECTIONS.find((section) => section === value) ?? null;
@@ -840,12 +857,12 @@ export function Settings({
     });
   }, []);
 
-  const [advancedExpanded, setAdvancedExpanded] = useState<boolean>(
-    () => route.section === "ai" || route.section === "advanced",
+  const [advancedExpanded, setAdvancedExpanded] = useState<boolean>(() =>
+    parseAdvancedSection(route.section),
   );
 
   useEffect(() => {
-    if (activeSection === "ai" || activeSection === "advanced") {
+    if (isAdvancedSection(activeSection)) {
       setAdvancedExpanded(true);
     }
   }, [activeSection]);
@@ -868,6 +885,7 @@ export function Settings({
     selectSection("overview");
   }, [route.section, revealUpdates, selectSection]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the Extensions section only exists while advanced workflow tracking is on, so the sections are looked up again when it flips.
   useEffect(() => {
     const content = contentRef.current;
     if (content === null) return;
@@ -897,13 +915,29 @@ export function Settings({
     sections.forEach((section) => {
       observer.observe(section);
     });
-    return () => observer.disconnect();
-  }, []);
+    // The last section can be too short to ever reach the observed band, so
+    // scrolled all the way down it is the one in view.
+    const onScroll = (): void => {
+      if (content.scrollTop + content.clientHeight < content.scrollHeight - 2) {
+        return;
+      }
+      const last = parseSettingsSection(
+        sections[sections.length - 1]?.getAttribute("data-settings-section") ??
+          null,
+      );
+      if (last !== null) setActiveSection(last);
+    };
+    content.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      observer.disconnect();
+      content.removeEventListener("scroll", onScroll);
+    };
+  }, [settings.advancedWorkflowTracking]);
 
   const toggleAdvanced = (): void => {
     setAdvancedExpanded((prev) => {
       const next = !prev;
-      if (next && activeSection !== "ai" && activeSection !== "advanced") {
+      if (next && !isAdvancedSection(activeSection)) {
         selectSection("ai");
       }
       return next;
@@ -961,7 +995,10 @@ export function Settings({
           >
             Overview
           </button>
-          {SETTINGS_NAV_ITEMS.map((item) => (
+          {SETTINGS_NAV_ITEMS.filter(
+            (item) =>
+              item.id !== "extensions" || settings.advancedWorkflowTracking,
+          ).map((item) => (
             <button
               type="button"
               key={item.id}
@@ -978,8 +1015,7 @@ export function Settings({
               aria-expanded={advancedExpanded}
               onClick={toggleAdvanced}
               className={`settings-nav-item flex items-center justify-between cursor-pointer ${
-                (activeSection === "ai" || activeSection === "advanced") &&
-                !advancedExpanded
+                isAdvancedSection(activeSection) && !advancedExpanded
                   ? "settings-nav-item-active"
                   : ""
               }`}
@@ -1020,6 +1056,20 @@ export function Settings({
                   }`}
                 >
                   Battery & Energy
+                </button>
+                <button
+                  type="button"
+                  aria-current={
+                    activeSection === "experimental" ? "location" : undefined
+                  }
+                  onClick={() => selectSection("experimental")}
+                  className={`settings-nav-item !text-[11.5px] !py-1.5 cursor-pointer ${
+                    activeSection === "experimental"
+                      ? "settings-nav-item-active"
+                      : ""
+                  }`}
+                >
+                  Experimental
                 </button>
               </div>
             )}
@@ -1383,17 +1433,19 @@ export function Settings({
             </SettingGroup>
           </section>
 
-          <section
-            id="settings-section-extensions"
-            data-settings-section="extensions"
-            className="settings-page-section flex flex-col gap-4"
-          >
-            <SettingsSectionHeading
-              title="Extensions"
-              description="Connect the terminal tools your coding agents run in. Tools found on this Mac are turned on automatically."
-            />
-            <ExtensionSettingsGroups />
-          </section>
+          {settings.advancedWorkflowTracking && (
+            <section
+              id="settings-section-extensions"
+              data-settings-section="extensions"
+              className="settings-page-section flex flex-col gap-4"
+            >
+              <SettingsSectionHeading
+                title="Extensions"
+                description="Connect the terminal tools your coding agents run in. Tools found on this Mac are turned on automatically."
+              />
+              <ExtensionSettingsGroups />
+            </section>
+          )}
 
           <section
             id="settings-section-advanced"
@@ -1412,6 +1464,31 @@ export function Settings({
                 onRangeChange={setEnergyDays}
                 onReset={resetEnergyHistory}
               />
+            </SettingGroup>
+          </section>
+
+          <section
+            id="settings-section-experimental"
+            data-settings-section="experimental"
+            className="settings-page-section flex flex-col gap-4"
+          >
+            <SettingsSectionHeading
+              title="Experimental"
+              description="Features still taking shape. They are off by default and may change."
+            />
+            <SettingGroup title="Workflow">
+              <SettingRow
+                title="Advanced workflow tracking"
+                description="Track coding agents running in Herdr or tmux as jobs, bill their time separately from yours, and see them in Pulse, Calendar threads, Timesheets and invoices. Turning it off stops all tracking and hides these views; what was recorded is kept."
+              >
+                <Toggle
+                  checked={settings.advancedWorkflowTracking}
+                  label="Advanced workflow tracking"
+                  onChange={(enabled) =>
+                    update({ advancedWorkflowTracking: enabled })
+                  }
+                />
+              </SettingRow>
             </SettingGroup>
           </section>
           {confirmReset && (

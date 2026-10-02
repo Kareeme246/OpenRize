@@ -325,8 +325,16 @@ pub fn list_billable_entries(
     end_ms: u64,
     invoice_id: Option<String>,
 ) -> Result<Vec<BillableEntry>, String> {
+    let with_agents = workflow_tracking_on(&app);
     with_reader(&app, |conn| {
-        invoices::billable_entries(conn, &client_id, start_ms, end_ms, invoice_id.as_deref())
+        invoices::billable_entries(
+            conn,
+            &client_id,
+            start_ms,
+            end_ms,
+            invoice_id.as_deref(),
+            with_agents,
+        )
     })
 }
 
@@ -642,10 +650,29 @@ pub fn rebuild_time_entries(
 
 // --- Agents -------------------------------------------------------------
 
+/// Whether advanced workflow tracking (the agents feature) is switched on.
+pub(crate) fn workflow_tracking_on(app: &AppHandle) -> bool {
+    app.state::<AppState>()
+        .settings_snapshot()
+        .advanced_workflow_tracking
+}
+
+/// The error every agent command gives while advanced workflow tracking is off.
+fn require_workflow_tracking(app: &AppHandle) -> Result<(), String> {
+    if workflow_tracking_on(app) {
+        Ok(())
+    } else {
+        Err("Advanced workflow tracking is off".to_string())
+    }
+}
+
 /// The extensions with fresh detection. Asking also nudges the bridge to pick
 /// up a tool that was just installed.
 #[tauri::command]
 pub fn list_extensions(app: AppHandle) -> Vec<crate::agents::ExtensionStatus> {
+    if !workflow_tracking_on(&app) {
+        return Vec::new();
+    }
     crate::agents::recheck(&app);
     crate::agents::extensions(&app)
 }
@@ -662,6 +689,7 @@ pub fn agent_report(
     start_ms: u64,
     end_ms: u64,
 ) -> Result<crate::agents::ledger::Report, String> {
+    require_workflow_tracking(&app)?;
     let state = app.state::<AppState>();
     let reader = state
         .activity_reader
@@ -677,6 +705,7 @@ pub fn thread_days(
     app: AppHandle,
     boundaries: Vec<u64>,
 ) -> Result<Vec<crate::threads::DayThreads>, String> {
+    require_workflow_tracking(&app)?;
     if boundaries.len() < 2 || boundaries.len() > crate::threads::MAX_DAYS + 1 {
         return Err(format!(
             "expected 2 to {} day boundaries",
@@ -704,6 +733,7 @@ pub fn thread_days(
 /// not supervise it.
 #[tauri::command]
 pub fn confirm_agent_job(app: AppHandle, id: String) -> Result<(), String> {
+    require_workflow_tracking(&app)?;
     {
         let state = app.state::<AppState>();
         let store = state.activity.lock().map_err(|e| e.to_string())?;
@@ -723,6 +753,9 @@ pub fn list_agent_entries(
     start_ms: u64,
     end_ms: u64,
 ) -> Result<Vec<TimeEntry>, String> {
+    if !workflow_tracking_on(&app) {
+        return Ok(Vec::new());
+    }
     let state = app.state::<AppState>();
     let store = state.activity.lock().map_err(|e| e.to_string())?;
     store.list_agent_entries(start_ms, end_ms)
@@ -901,8 +934,9 @@ pub fn project_stats(
     range_end: u64,
     month_start: u64,
 ) -> Result<Vec<ProjectStats>, String> {
+    let with_agents = workflow_tracking_on(&app);
     with_reader(&app, |conn| {
-        crate::projects::project_stats(conn, range_start, range_end, month_start)
+        crate::projects::project_stats(conn, range_start, range_end, month_start, with_agents)
     })
 }
 
@@ -1006,8 +1040,20 @@ pub(crate) fn apply_settings_change(app: &AppHandle, previous: &Settings, next: 
         }
     }
 
-    if next.extensions != previous.extensions {
+    if next.extensions != previous.extensions
+        || next.advanced_workflow_tracking != previous.advanced_workflow_tracking
+    {
         crate::agents::recheck(app);
+    }
+
+    if next.advanced_workflow_tracking != previous.advanced_workflow_tracking {
+        let state = app.state::<AppState>();
+        if let Ok(mut store) = state.activity.lock() {
+            store.set_agents_enabled(next.advanced_workflow_tracking);
+        }
+        // Carved agent stretches come or go with it: rebuild what is shown.
+        activity::emit_full(app);
+        let _ = app.emit(crate::EVENT_ENTRIES_CHANGED, ());
     }
 
     if next.retention_days != previous.retention_days {

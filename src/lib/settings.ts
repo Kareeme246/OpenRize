@@ -219,6 +219,12 @@ export interface Settings {
    * auto-detection: a tool found on this Mac is on until they turn it off.
    */
   extensions: Record<string, boolean>;
+  /**
+   * Advanced workflow tracking, the experimental switch for everything about
+   * coding agents: the bridge, jobs, threads and agent time. While it is off
+   * Rust records nothing for it and every surface for it stays hidden.
+   */
+  advancedWorkflowTracking: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -237,6 +243,7 @@ export const DEFAULT_SETTINGS: Settings = {
   trackingHours: DEFAULT_TRACKING_HOURS,
   breaks: DEFAULT_BREAK_SETTINGS,
   extensions: {},
+  advancedWorkflowTracking: false,
 };
 
 /** A working day's share of the weekly target, in milliseconds. */

@@ -45,8 +45,8 @@ interface FieldModel {
   options: PickOption[];
 }
 
-/** Number keys 1-9 pick from the active field's first nine options. */
-const KEYED_OPTIONS = 9;
+/** Number keys 1-3 pick from the active field's top three options; the rest sit in a dropdown. */
+const KEYED_OPTIONS = 3;
 /** Options shown as full rows (with their confidence) before the chips. */
 const ROW_OPTIONS = 4;
 const NO_PROJECT_COLOR = "var(--fg-faint)";
@@ -275,7 +275,7 @@ export function EntryReviewPanel({
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (isTyping(event.target)) return;
       const key = event.key.toLowerCase();
-      if (/^[1-9]$/.test(key) && active && !locked) {
+      if (/^[1-3]$/.test(key) && active && !locked) {
         const option = active.options[Number(key) - 1];
         if (option) {
           event.preventDefault();
@@ -789,6 +789,7 @@ function FieldSection({
   const chips = keyed.slice(rows.length);
   const overflow = options.slice(KEYED_OPTIONS);
   const label = field === "category" ? "Category" : "Project";
+  const plural = field === "category" ? "categories" : "projects";
   const shortcut = field === "category" ? "C" : "P";
   const isProjectEmpty = field === "project" && options.length === 0;
 
@@ -891,14 +892,14 @@ function FieldSection({
             )}
             {overflow.length > 0 && (
               <Picker
-                ariaLabel={`More ${label.toLowerCase()} options`}
+                ariaLabel={`More ${plural}`}
                 value=""
-                placeholder={`More ${label.toLowerCase()}…`}
+                placeholder={`More ${plural}…`}
                 onChange={(val) => onPick(val === "" ? null : val)}
                 options={[
                   {
                     value: "",
-                    label: `More ${label.toLowerCase()}…`,
+                    label: `More ${plural}…`,
                     disabled: true,
                   },
                   ...overflow.map((option) => ({

@@ -476,25 +476,19 @@ export function EntryReviewPanel({
           />
         ))}
 
-        <div className="flex items-center gap-2 rounded-lg border border-line p-2.5">
-          <span className="font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
-            Billable
-          </span>
-          <Tooltip content={entry.billable ? "Billable" : "Not billable"}>
-            <button
-              type="button"
-              onClick={onToggleBillable}
-              aria-pressed={entry.billable}
-              className={`ml-auto flex size-6 items-center justify-center rounded font-semibold text-[11px] transition-colors ${
-                entry.billable
-                  ? "bg-accent/20 text-accent"
-                  : "text-fg-ghost hover:bg-surface hover:text-fg-soft"
-              }`}
-            >
-              {entry.billable ? "$" : "–"}
-            </button>
-          </Tooltip>
-        </div>
+        <Tooltip content={entry.billable ? "Billable" : "Not billable"}>
+          <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-line p-2.5">
+            <span className="font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
+              Billable
+            </span>
+            <input
+              type="checkbox"
+              checked={entry.billable}
+              onChange={onToggleBillable}
+              className="ml-auto accent-(--accent)"
+            />
+          </label>
+        </Tooltip>
 
         {detail.ruleSuggestion && !approved && (
           <RulePrompt
@@ -793,43 +787,39 @@ function FieldSection({
   const shortcut = field === "category" ? "C" : "P";
   const isProjectEmpty = field === "project" && options.length === 0;
 
-  return (
+  const section = (
     <section
       className={`rounded-lg border p-2.5 transition-colors ${
         active && !locked ? "border-accent/50 bg-accent/5" : "border-line"
       }`}
     >
-      <Tooltip
-        content={
-          isProjectEmpty
-            ? "No projects yet"
-            : `Choose ${label.toLowerCase()} (${shortcut})`
-        }
+      <button
+        type="button"
+        onClick={onActivate}
+        className="flex w-full items-center gap-2 text-left"
       >
-        <button
-          type="button"
-          onClick={onActivate}
-          className="flex w-full items-center gap-2 text-left"
-        >
-          <span className="font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
-            {label}
-          </span>
-          <Kbd>{shortcut}</Kbd>
-          <span className="ml-auto flex items-center gap-2">
-            {processing && !suggestion ? (
-              <span className="animate-pulse text-[11px] text-fg-soft">
-                Categorizing…
-              </span>
-            ) : suggestion ? (
-              <ConfidenceSummary suggestion={suggestion} />
-            ) : model.rejected ? (
-              <span className="text-[11px] text-fg-faint">Rejected</span>
-            ) : null}
-          </span>
-        </button>
-      </Tooltip>
+        <span className="font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
+          {label}
+        </span>
+        <Kbd>{shortcut}</Kbd>
+        <span className="ml-auto flex items-center gap-2">
+          {processing && !suggestion ? (
+            <span className="animate-pulse text-[11px] text-fg-soft">
+              Categorizing…
+            </span>
+          ) : suggestion ? (
+            <ConfidenceSummary suggestion={suggestion} />
+          ) : model.rejected ? (
+            <span className="text-[11px] text-fg-faint">Rejected</span>
+          ) : null}
+        </span>
+      </button>
 
-      <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+      <button
+        type="button"
+        onClick={onActivate}
+        className="mt-1.5 flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-left"
+      >
         {current ? (
           <Chip option={current} strong />
         ) : isProjectEmpty ? (
@@ -849,7 +839,7 @@ function FieldSection({
             {suggestion.outcome === "auto" ? "auto-approved" : "suggested"}
           </span>
         )}
-      </div>
+      </button>
 
       {active &&
         !locked &&
@@ -915,6 +905,18 @@ function FieldSection({
           </div>
         ))}
     </section>
+  );
+
+  return (
+    <Tooltip
+      content={
+        isProjectEmpty
+          ? "No projects yet"
+          : `Choose ${label.toLowerCase()} (${shortcut})`
+      }
+    >
+      {section}
+    </Tooltip>
   );
 }
 

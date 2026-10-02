@@ -411,6 +411,7 @@ export function DayView({
                       top={top}
                       height={bandHeight}
                       now={now}
+                      labelled
                     />
                   );
                 })}
@@ -539,13 +540,24 @@ interface BreakBandProps {
   top: number;
   height: number;
   now: number;
+  /** Name the break inside the band when it is tall enough to hold a line. */
+  labelled?: boolean;
 }
+
+/** Shortest block that can hold one line of text without clipping it. */
+const TEXT_MIN_HEIGHT = 12;
 
 /**
  * A taken break: a neutral gray block in the gap the segment leaves behind.
  * It carries no label or project, only its time and length.
  */
-export function BreakBand({ entry, top, height, now }: BreakBandProps) {
+export function BreakBand({
+  entry,
+  top,
+  height,
+  now,
+  labelled = false,
+}: BreakBandProps) {
   const start = entry.startedAt ?? now;
   const length = formatDuration(Math.max(0, breakEnd(entry, now) - start));
   return (
@@ -555,13 +567,22 @@ export function BreakBand({ entry, top, height, now }: BreakBandProps) {
         style={{ top: `${top}px`, height: `${height}px` }}
         role="img"
         aria-label={`Break, ${length}`}
-      />
+      >
+        {labelled && height >= TEXT_MIN_HEIGHT && (
+          <div className="flex h-full items-center gap-1.5 px-2 font-medium text-[10.5px] text-fg-soft leading-none">
+            <span>Break</span>
+            <span className="truncate tabular-nums">{length}</span>
+          </div>
+        )}
+      </div>
     </Tooltip>
   );
 }
 
 /** Line height of a lane label (10.5px, leading-tight). */
 const LANE_LINE = 13.125;
+/** Lane padding: one line sits in the middle, wrapped lines keep a margin. */
+const LANE_PAD = 4;
 
 interface LaneBlockProps {
   entryId: string;
@@ -593,7 +614,7 @@ function LaneBlock({
         type="button"
         onClick={() => onSelect(entryId)}
         aria-label={label}
-        className={`calendar-entry absolute right-1 left-0.5 overflow-hidden rounded-md px-1.5 text-left text-[10.5px] font-medium leading-tight transition-all ${
+        className={`calendar-entry absolute right-1 left-0.5 flex items-center overflow-hidden rounded-md px-1.5 text-left font-medium text-[10.5px] leading-tight transition-all ${
           selected ? "z-20 ring-2 ring-accent" : "z-10 hover:border-fg-soft/40"
         }`}
         style={{
@@ -603,12 +624,23 @@ function LaneBlock({
           color: tone,
         }}
       >
-        <span
-          className="min-w-0"
-          style={clampStyle(Math.max(1, Math.floor(height / LANE_LINE)))}
-        >
-          {label}
-        </span>
+        {/* Like the entry cards beside it, a lane block too short for a
+            line shows no text (the tooltip and aria-label still name it)
+            rather than a half-clipped label. */}
+        {height >= TEXT_MIN_HEIGHT && (
+          <span
+            className="min-w-0"
+            style={{
+              ...clampStyle(
+                Math.max(1, Math.floor((height - LANE_PAD) / LANE_LINE)),
+              ),
+              // A single squeezed line drops its leading so it fits whole.
+              ...(height < LANE_LINE + LANE_PAD && { lineHeight: 1 }),
+            }}
+          >
+            {label}
+          </span>
+        )}
       </button>
     </Tooltip>
   );

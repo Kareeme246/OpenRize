@@ -244,7 +244,7 @@ pub fn show(command: Option<&Command>, data: &Value, full: bool) {
                 );
             }
         }
-        Some(Command::Completions { .. }) => {}
+        Some(Command::UninstallPath) | Some(Command::Completions { .. }) => {}
     }
 }
 

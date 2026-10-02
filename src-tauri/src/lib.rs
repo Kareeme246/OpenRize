@@ -51,6 +51,33 @@ pub const EVENT_OPEN_REVIEW: &str = "open-review";
 
 pub use openrize_core::state::AppState;
 
+/// Keep the standalone command in sync with the app release. `rize` ships
+/// beside the app executable and the replacement is atomic for running shells.
+#[cfg(target_os = "macos")]
+fn install_bundled_cli() {
+    let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+        let bundled = std::env::current_exe()?.with_file_name("rize");
+        if !bundled.is_file() {
+            return Ok(());
+        }
+        let home = std::env::var_os("HOME").ok_or("HOME is not set")?;
+        let directory = std::path::PathBuf::from(home).join(".local/bin");
+        std::fs::create_dir_all(&directory)?;
+        let destination = directory.join("rize");
+        let temporary = directory.join(format!(".rize-{}", std::process::id()));
+        let _ = std::fs::remove_file(&temporary);
+        std::os::unix::fs::symlink(&bundled, &temporary)?;
+        std::fs::rename(&temporary, &destination)?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        eprintln!("could not update ~/.local/bin/rize: {error}");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn install_bundled_cli() {}
+
 /// Launched by `rize app start`: run in the menu bar with no window until
 /// one is asked for.
 const BACKGROUND_ARG: &str = "--background";
@@ -77,6 +104,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
+            install_bundled_cli();
             let dir = app.path().app_data_dir()?;
             // Waits out a `rize` edit made while the app was closed, then
             // keeps the stores for as long as the app runs.

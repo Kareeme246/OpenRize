@@ -423,7 +423,6 @@ export function DayView({
                       top={top}
                       height={bandHeight}
                       now={now}
-                      labelled
                     />
                   );
                 })}
@@ -584,8 +583,6 @@ interface BreakBandProps {
   top: number;
   height: number;
   now: number;
-  /** Name the break inside the band when it is tall enough to hold a line. */
-  labelled?: boolean;
 }
 
 /** Shortest block that can hold one line of text without clipping it. */
@@ -593,14 +590,14 @@ const TEXT_MIN_HEIGHT = 12;
 
 /**
  * A taken break: a neutral gray block in the gap the segment leaves behind.
- * It carries no label or project, only its time and length.
+ * It carries no category or project, only "Break" and its length when tall
+ * enough to hold a line.
  */
 export function BreakBand({
   entry,
   top,
   height,
   now,
-  labelled = false,
 }: BreakBandProps) {
   const start = entry.startedAt ?? now;
   const length = formatDuration(Math.max(0, breakEnd(entry, now) - start));
@@ -612,9 +609,9 @@ export function BreakBand({
         role="img"
         aria-label={`Break, ${length}`}
       >
-        {labelled && height >= TEXT_MIN_HEIGHT && (
+        {height >= TEXT_MIN_HEIGHT && (
           <div className="flex h-full items-center gap-1.5 px-2 font-medium text-[10.5px] text-fg-soft leading-none">
-            <span>Break</span>
+            <span className="shrink-0">Break</span>
             <span className="truncate tabular-nums">{length}</span>
           </div>
         )}

@@ -412,7 +412,7 @@ export function EntryReviewPanel({
                 rows={2}
               />
               <div className="flex justify-end gap-1.5">
-                {/* Pressing it must not blur the field first: blur saves. */}
+                {/* Keep focus while clicking so blur cannot preempt the explicit action. */}
                 <button
                   type="button"
                   onMouseDown={(event) => event.preventDefault()}
@@ -420,6 +420,14 @@ export function EntryReviewPanel({
                   className="rounded px-2 py-0.5 text-[11px] text-fg-soft hover:text-fg"
                 >
                   Cancel
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={saveDescription}
+                  className="rounded px-2 py-0.5 font-medium text-[11px] text-accent hover:text-fg"
+                >
+                  Save
                 </button>
               </div>
             </div>
@@ -485,7 +493,7 @@ export function EntryReviewPanel({
               type="checkbox"
               checked={entry.billable}
               onChange={onToggleBillable}
-              className="ml-auto accent-(--accent)"
+              className="accent-(--accent)"
             />
           </label>
         </Tooltip>
@@ -790,7 +798,9 @@ function FieldSection({
   const section = (
     <section
       className={`rounded-lg border p-2.5 transition-colors ${
-        active && !locked ? "border-accent/50 bg-accent/5" : "border-line"
+        active && !locked
+          ? "border-accent/50 bg-accent/5"
+          : `border-line ${!locked ? "hover:border-accent/40" : ""}`
       }`}
     >
       <button

@@ -453,6 +453,11 @@ pub struct Settings {
     /// when the tool is installed. An explicit value, on or off, persists and
     /// is never overridden by detection.
     pub extensions: BTreeMap<String, bool>,
+    /// Advanced workflow tracking: the experimental master switch for coding
+    /// agent tracking (the agent bridge, jobs, threads and agent time). Off by
+    /// default; while off nothing runs, nothing new is recorded, and every
+    /// surface for it is hidden. What was recorded before is kept.
+    pub advanced_workflow_tracking: bool,
 }
 
 impl Default for Settings {
@@ -473,6 +478,7 @@ impl Default for Settings {
             tracking_hours: TrackingHours::default(),
             breaks: BreakSettings::default(),
             extensions: BTreeMap::new(),
+            advanced_workflow_tracking: false,
         }
     }
 }
@@ -737,6 +743,7 @@ mod tests {
                     },
                     breaks: BreakSettings::default(),
                     extensions: BTreeMap::new(),
+                    advanced_workflow_tracking: true,
                 })
                 .unwrap();
         }
@@ -753,9 +760,23 @@ mod tests {
         assert_eq!(reloaded.auto_accept_percent, 90);
         assert_eq!(reloaded.ai_custom_prompt, "OpenRize is Coding");
         assert_eq!(reloaded.weekly_target_hours, 32);
+        assert!(reloaded.advanced_workflow_tracking);
         assert!(reloaded.tracking_hours.per_day);
         assert_eq!(reloaded.tracking_hours.monday.start, "09:00");
         assert!(!reloaded.tracking_hours.tuesday.enabled);
+    }
+
+    #[test]
+    fn advanced_workflow_tracking_is_off_until_switched_on() {
+        let dir = temp_dir("workflow-tracking");
+        let mut store = SettingsStore::load(&dir).unwrap();
+        assert!(!store.snapshot().advanced_workflow_tracking);
+
+        store
+            .patch("advancedWorkflowTracking", serde_json::json!(true))
+            .unwrap();
+        let reloaded = SettingsStore::load(&dir).unwrap().snapshot();
+        assert!(reloaded.advanced_workflow_tracking);
     }
 
     #[test]

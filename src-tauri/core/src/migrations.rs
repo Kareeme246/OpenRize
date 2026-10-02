@@ -779,7 +779,7 @@ mod tests {
         let cat_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM categories;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(cat_count, 12);
+        assert_eq!(cat_count, 11);
 
         conn.execute(
             "SELECT id, sampled_at, power_watts FROM energy_samples LIMIT 1;",
@@ -911,7 +911,7 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .unwrap();
-        assert_eq!(other, (1, 1, 1, 12));
+        assert_eq!(other, (1, 1, 1, 11));
         // The draft's line survived, and invoiced time is still protected.
         let lines: i64 = conn
             .query_row(

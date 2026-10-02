@@ -102,6 +102,24 @@ fn linked(conn: &Connection, entry: &str) -> Option<String> {
 }
 
 #[test]
+fn agent_time_is_offered_for_billing_only_while_workflow_tracking_is_on() {
+    let conn = db();
+    entry(&conn, "you", "p", HOUR, 2 * HOUR, "approved", true);
+    entry(&conn, "bot", "p", 3 * HOUR, 4 * HOUR, "approved", true);
+    conn.execute(
+        "UPDATE time_entries SET source = 'agent' WHERE id = 'bot'",
+        [],
+    )
+    .unwrap();
+
+    let on = billable_entries(&conn, "c", 0, 10 * HOUR as u64, None, true).unwrap();
+    assert!(on.iter().any(|e| e.entry_id == "bot" && e.agent));
+    let off = billable_entries(&conn, "c", 0, 10 * HOUR as u64, None, false).unwrap();
+    assert!(off.iter().any(|e| e.entry_id == "you"));
+    assert!(!off.iter().any(|e| e.entry_id == "bot"));
+}
+
+#[test]
 fn lists_only_approved_billable_uninvoiced_time_for_the_client() {
     let conn = db();
     entry(&conn, "pending", "p", 5 * HOUR, 6 * HOUR, "pending", true);
@@ -124,14 +142,14 @@ fn lists_only_approved_billable_uninvoiced_time_for_the_client() {
         true,
     );
     entry(&conn, "late", "p", 90 * HOUR, 91 * HOUR, "approved", true);
-    let found = billable_entries(&conn, "c", 0, 10 * HOUR as u64, None).unwrap();
+    let found = billable_entries(&conn, "c", 0, 10 * HOUR as u64, None, true).unwrap();
     let ids: Vec<_> = found.iter().map(|e| e.entry_id.as_str()).collect();
     assert_eq!(ids, ["e1", "e2"]);
     assert_eq!(found[0].rate_cents, Some(10_000)); // client fallback
     assert_eq!(found[1].rate_cents, Some(15_000)); // project rate
     assert_eq!(found[1].quantity_hundredths, 150);
     assert_eq!(found[1].amount_cents, Some(22_500));
-    assert!(billable_entries(&conn, "c", 5, 5, None).is_err());
+    assert!(billable_entries(&conn, "c", 5, 5, None, true).is_err());
 }
 
 #[test]

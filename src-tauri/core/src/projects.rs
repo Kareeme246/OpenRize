@@ -238,12 +238,15 @@ pub struct ProjectStats {
 }
 
 /// Totals for every project with at least one entry. Budgets are derived in
-/// the view from these and the project's rate.
+/// the view from these and the project's rate. Agent time is counted only when
+/// `with_agents` (advanced workflow tracking is on); otherwise it is left out
+/// of every figure, billable and unbilled included.
 pub fn project_stats(
     conn: &Connection,
     range_start: u64,
     range_end: u64,
     month_start: u64,
+    with_agents: bool,
 ) -> Result<Vec<ProjectStats>, String> {
     let mut stmt = conn
         .prepare(
@@ -260,12 +263,18 @@ pub fn project_stats(
                     SUM(CASE WHEN source = 'agent' THEN ended_at - started_at ELSE 0 END)
              FROM time_entries
              WHERE deleted_at IS NULL AND project_id IS NOT NULL
+               AND (?4 OR source != 'agent')
              GROUP BY project_id;",
         )
         .map_err(err)?;
     let rows = stmt
         .query_map(
-            params![range_start as i64, range_end as i64, month_start as i64],
+            params![
+                range_start as i64,
+                range_end as i64,
+                month_start as i64,
+                with_agents
+            ],
             |row| {
                 let ms = |index: usize| -> rusqlite::Result<u64> {
                     Ok(row.get::<_, i64>(index)?.max(0) as u64)
@@ -1060,7 +1069,7 @@ mod tests {
             )
             .unwrap();
         }
-        let stats = project_stats(conn, 90 * MIN, 200 * MIN, 50 * MIN).unwrap();
+        let stats = project_stats(conn, 90 * MIN, 200 * MIN, 50 * MIN, true).unwrap();
         assert_eq!(stats.len(), 1);
         let s = &stats[0];
         assert_eq!(s.entries, 2);
@@ -1243,12 +1252,37 @@ mod tests {
             .unwrap();
         }
 
-        let stats = project_stats(conn, 0, 24 * 60 * MIN, 0).unwrap();
+        let stats = project_stats(conn, 0, 24 * 60 * MIN, 0, true).unwrap();
         let found = stats.iter().find(|s| s.project_id == project.id).unwrap();
 
         assert_eq!(found.total_ms, 60 * MIN);
         assert_eq!(found.entries, 1);
         assert_eq!(found.agent_ms, 30 * MIN);
         assert_eq!(found.unbilled_ms, 90 * MIN);
+    }
+
+    #[test]
+    fn agent_time_is_left_out_of_every_figure_while_workflow_tracking_is_off() {
+        let mut store = store();
+        let project = store
+            .create_project(new_project("OpenRize", None), 1)
+            .unwrap();
+        let conn = store.conn();
+        for (id, source, minutes) in [("you", "auto", 60u64), ("bot", "agent", 30)] {
+            conn.execute(
+                "INSERT INTO time_entries (id, started_at, ended_at, description, project_id, status, source, billable, created_at, updated_at)
+                 VALUES (?1, 0, ?2, 'Work', ?3, 'approved', ?4, 1, 0, 0);",
+                params![id, (minutes * MIN) as i64, project.id, source],
+            )
+            .unwrap();
+        }
+
+        let stats = project_stats(conn, 0, 24 * 60 * MIN, 0, false).unwrap();
+        let found = stats.iter().find(|s| s.project_id == project.id).unwrap();
+
+        assert_eq!(found.total_ms, 60 * MIN);
+        assert_eq!(found.agent_ms, 0);
+        assert_eq!(found.billable_ms, 60 * MIN);
+        assert_eq!(found.unbilled_ms, 60 * MIN);
     }
 }

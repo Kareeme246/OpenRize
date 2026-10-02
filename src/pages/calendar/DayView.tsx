@@ -29,6 +29,8 @@ export interface ProjectRail extends Rail {
 
 interface DayViewProps {
   dayStart: number;
+  /** Whether advanced workflow tracking is on: only then is there an agents column. */
+  showAgents: boolean;
   /** What agents did today: drawn as hatched rails, never counted. */
   rails?: ProjectRail[];
   entries: TimeEntry[];
@@ -68,6 +70,7 @@ export function useMinuteClock(): number {
 
 export function DayView({
   dayStart,
+  showAgents,
   rails = [],
   entries,
   segments,
@@ -246,9 +249,11 @@ export function DayView({
           <span className="min-w-0 flex-1 truncate font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
             Time Entries
           </span>
-          <span className="w-[72px] shrink-0 truncate border-line border-l px-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
-            Agents
-          </span>
+          {showAgents && (
+            <span className="w-[72px] shrink-0 truncate border-line border-l px-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
+              Agents
+            </span>
+          )}
           <span className="w-[114px] shrink-0 truncate border-line border-l px-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
             Category
           </span>
@@ -484,37 +489,39 @@ export function DayView({
                 )}
               </div>
 
-              <div
-                className="relative w-[72px] shrink-0 border-line border-l"
-                role="img"
-                aria-label="Agent rails"
-              >
-                {packRails(rails).map(({ rail, column, columns }) => {
-                  const { top, height: railHeight } = place(
-                    timeline,
-                    rail.startedAt,
-                    Math.min(rail.endedAt, dayEnd),
-                    dayStart,
-                    "elapsed",
-                    3,
-                  );
-                  const project = rail.projectId
-                    ? projectById.get(rail.projectId)
-                    : undefined;
-                  return (
-                    <AgentRail
-                      key={`${rail.jobId}-${rail.startedAt}-${rail.state}`}
-                      rail={rail}
-                      top={top}
-                      height={railHeight}
-                      color={project?.color}
-                      name={project?.name}
-                      column={column}
-                      columns={columns}
-                    />
-                  );
-                })}
-              </div>
+              {showAgents && (
+                <div
+                  className="relative w-[72px] shrink-0 border-line border-l"
+                  role="img"
+                  aria-label="Agent rails"
+                >
+                  {packRails(rails).map(({ rail, column, columns }) => {
+                    const { top, height: railHeight } = place(
+                      timeline,
+                      rail.startedAt,
+                      Math.min(rail.endedAt, dayEnd),
+                      dayStart,
+                      "elapsed",
+                      3,
+                    );
+                    const project = rail.projectId
+                      ? projectById.get(rail.projectId)
+                      : undefined;
+                    return (
+                      <AgentRail
+                        key={`${rail.jobId}-${rail.startedAt}-${rail.state}`}
+                        rail={rail}
+                        top={top}
+                        height={railHeight}
+                        color={project?.color}
+                        name={project?.name}
+                        column={column}
+                        columns={columns}
+                      />
+                    );
+                  })}
+                </div>
+              )}
 
               <div className="relative w-[114px] shrink-0 border-line border-l">
                 {entries.map((entry) => {

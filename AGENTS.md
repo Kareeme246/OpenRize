@@ -86,6 +86,14 @@ Tauri `externalBin` (`tauri.macos.conf.json`), so every macOS Rust build needs
 Xcode 26+ command line tools. Bump `protocolVersion` in `Entry.swift` and
 `PROTOCOL_VERSION` in `ai/sidecar.rs` together when the wire format changes.
 
+## Agent tracking is experimental
+
+Everything about coding agents (the `src-tauri/src/agents/` bridge, jobs, threads, agent time, the
+Pulse board, Calendar threads, Timesheets split) sits behind `Settings::advanced_workflow_tracking`
+(Settings > Advanced > Experimental), off by default. New agent surfaces must check it: Rust
+commands refuse or return empty (`commands::workflow_tracking_on`), the UI reads
+`settings.advancedWorkflowTracking`. Recorded agent data is kept when it is switched off.
+
 ## Invoices
 
 Invoices are drafts (editable, time reserved) that Finalize turns into numbered,

@@ -60,6 +60,8 @@ type CalendarRoute = Extract<Route, { name: "calendar" }>;
 
 type CalendarView = "entries" | "threads";
 
+const NO_THREADS: DayThreads[] = [];
+
 const VIEW_OPTIONS = [
   { value: "entries", label: "Entries" },
   { value: "threads", label: "Threads" },
@@ -99,6 +101,7 @@ function categorySlices(
 
 export function Calendar({ route, navigate }: CalendarProps) {
   const { settings } = useSettings();
+  const agentsOn = settings.advancedWorkflowTracking;
   const aiStatus = useAiStatus();
   const catalog = useCatalog();
   const { categoryById, projectById } = catalog;
@@ -139,7 +142,9 @@ export function Calendar({ route, navigate }: CalendarProps) {
   const [segments, setSegments] = useState<ActivitySegment[]>([]);
   const [cells, setCells] = useState<RollupCell[]>([]);
   const [breakEntries, setBreakEntries] = useState<BreakEntry[]>([]);
-  const [threadDays, setThreadDays] = useState<DayThreads[]>([]);
+  const [loadedThreads, setThreadDays] = useState<DayThreads[]>([]);
+  // Threads loaded before advanced workflow tracking went off must not show.
+  const threadDays = agentsOn ? loadedThreads : NO_THREADS;
   const [view, setView] = useState<CalendarView>("entries");
   const [layout, setLayout] = useState<ThreadsLayout>("lanes");
   const [loading, setLoading] = useState(true);
@@ -173,7 +178,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
           api.listTimeEntries(startMs, endMs - 1),
           scale === "day" ? api.fetchActivitySnapshot(startMs) : null,
           api.listBreaks(startMs, endMs),
-          api.threadDays(threadEdges),
+          agentsOn ? api.threadDays(threadEdges) : [],
         ]);
         if (shownKey.current === key) {
           setEntries(list);
@@ -193,7 +198,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
     } catch (cause) {
       setError(describeError(cause));
     }
-  }, [scale, startMs, endMs, grid, threadEdges]);
+  }, [scale, startMs, endMs, grid, threadEdges, agentsOn]);
 
   /**
    * Full load: rebuild the range's entries from its segments (a past day
@@ -208,7 +213,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
         api.rebuildTimeEntries(startMs, endMs - 1),
         scale === "day" ? api.fetchActivitySnapshot(startMs) : null,
         api.listBreaks(startMs, endMs),
-        scale === "month" ? [] : api.threadDays(threadEdges),
+        scale === "month" || !agentsOn ? [] : api.threadDays(threadEdges),
       ]);
       if (shownKey.current !== key) return;
       setBreakEntries(breakList);
@@ -231,7 +236,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
     } finally {
       setLoading(false);
     }
-  }, [scale, startMs, endMs, refresh, threadEdges]);
+  }, [scale, startMs, endMs, refresh, threadEdges, agentsOn]);
 
   useEffect(() => {
     load();
@@ -470,7 +475,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
     [threadDays],
   );
   const agentsMs = threadDays.reduce((sum, day) => sum + day.agentsMs, 0);
-  const threadsShown = view === "threads" && scale !== "month";
+  const threadsShown = agentsOn && view === "threads" && scale !== "month";
   const title =
     scale === "day"
       ? date.toLocaleDateString(undefined, {
@@ -505,7 +510,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
           }
           isToday={now >= startMs && now < endMs}
         />
-        {scale !== "month" && (
+        {agentsOn && scale !== "month" && (
           <SegmentedControl
             name="calendar-view"
             value={view}
@@ -552,6 +557,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
           {scale === "day" && !threadsShown && (
             <DayView
               dayStart={startMs}
+              showAgents={agentsOn}
               rails={rails}
               entries={visible}
               segments={segments}

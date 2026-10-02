@@ -296,9 +296,16 @@ impl Context<'_> {
                     .into_iter()
                     .find(|project| project.id == id)
                     .ok_or_else(|| not_found("project", &project))?;
+                let with_agents = self.state.settings_snapshot().advanced_workflow_tracking;
                 let stats = self
                     .read(|conn| {
-                        crate::projects::project_stats(conn, range_start, range_end, month_start)
+                        crate::projects::project_stats(
+                            conn,
+                            range_start,
+                            range_end,
+                            month_start,
+                            with_agents,
+                        )
                     })?
                     .into_iter()
                     .find(|stats| stats.project_id == id);

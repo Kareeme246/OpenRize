@@ -3,6 +3,12 @@
 //! with several agents in flight can be tracked and billed honestly (design
 //! board `multitask-tracking`, stage 1).
 //!
+//! The whole bridge sits behind Settings > Advanced > Experimental > Advanced
+//! workflow tracking (`Settings::advanced_workflow_tracking`, off by default).
+//! While it is off no source is detected or polled, nothing is recorded, the
+//! board is empty and the agent commands refuse; what was recorded earlier is
+//! kept on disk and returns when it is switched back on.
+//!
 //! Everything runs inside the app process, with no daemon, LaunchAgent or CLI.
 //! Each *extension* (Herdr, tmux; hooks later) is a source of pane
 //! observations. It is on by default when its tool is detected, and a
@@ -322,6 +328,19 @@ pub struct Board {
 pub fn board(app: &AppHandle) -> Result<Board, String> {
     let now = now_epoch_ms();
     let (day_start, day_end) = ledger::calendar_day(now);
+    if !crate::commands::workflow_tracking_on(app) {
+        return Ok(Board {
+            live: Vec::new(),
+            running: 0,
+            needs_you: 0,
+            ready: 0,
+            to_confirm: 0,
+            waited_ms: 0,
+            jobs: Vec::new(),
+            day_start,
+            day_end,
+        });
+    }
     let report = {
         let state = app.state::<AppState>();
         let reader = state
@@ -568,12 +587,24 @@ impl Supervisor {
             }
             if self.last_refresh.elapsed() >= REFRESH_EVERY {
                 self.last_refresh = std::time::Instant::now();
-                self.refresh_ledger(true);
+                if self.enabled() {
+                    self.refresh_ledger(true);
+                }
             }
         }
     }
 
+    /// Whether advanced workflow tracking is on.
+    fn enabled(&self) -> bool {
+        crate::commands::workflow_tracking_on(&self.app)
+    }
+
     fn handle(&mut self, msg: Msg) {
+        // A snapshot already in flight when the switch went off is dropped, so
+        // nothing is recorded once the person has turned this off.
+        if !self.enabled() && !matches!(msg, Msg::Recheck) {
+            return;
+        }
         match msg {
             Msg::Recheck => self.reconcile_if_due(true),
             Msg::Refresh => self.refresh_ledger(true),
@@ -744,7 +775,13 @@ impl Supervisor {
         let mut herdr_endpoints: HashMap<String, herdr::Endpoint> = HashMap::new();
         let mut tmux_servers: HashMap<String, tmux::Server> = HashMap::new();
         let mut detections = HashMap::new();
-        for (id, detected, detail) in detect_all() {
+        // Off means no looking at all: no detection, so no workers.
+        let found = if settings.advanced_workflow_tracking {
+            detect_all()
+        } else {
+            Vec::new()
+        };
+        for (id, detected, detail) in found {
             detections.insert(id, (detected, detail));
             if !settings.extension_enabled(id, detected) {
                 continue;
@@ -781,6 +818,7 @@ impl Supervisor {
             .cloned()
             .collect();
         let mut closed = false;
+        let removed = !stale.is_empty();
         for id in stale {
             self.workers.remove(&id);
             if let Ok(outcome) = self.tracker.forget_source(&self.conn, &id, now_epoch_ms()) {
@@ -814,9 +852,13 @@ impl Supervisor {
                 active != shared.active || detected != shared.detections
             })
         };
-        if closed {
+        if closed || removed {
             self.sync_live();
-            self.refresh_ledger(false);
+            if closed {
+                // Settles the jobs the stopped sources left open, also when
+                // this is the switch going off.
+                self.refresh_ledger(false);
+            }
             publish(&self.app);
         }
         if changed {

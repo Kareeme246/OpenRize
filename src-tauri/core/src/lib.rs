@@ -98,6 +98,18 @@ fn search_terms(search: &str) -> Vec<String> {
 }
 
 impl EntryFilter {
+    /// The filter as long as it asks for no agent time, or agent time is on.
+    /// Recorded agent entries stay hidden while Advanced workflow tracking is off.
+    pub fn gated(self, with_agents: bool) -> Result<Self, String> {
+        match self.scope.as_deref() {
+            Some("agent" | "all") if !with_agents => Err(
+                "agent time is hidden while Advanced workflow tracking is off (Settings > Advanced)"
+                    .to_string(),
+            ),
+            _ => Ok(self),
+        }
+    }
+
     /// WHERE conditions over `te` (time_entries) and `p`, its project, which
     /// every query LEFT JOINs.
     pub fn clause(&self) -> Result<Clause, String> {

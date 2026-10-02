@@ -540,7 +540,9 @@ impl Context<'_> {
         if filter.end_ms <= filter.start_ms {
             return Err(invalid("--to must be after --from"));
         }
-        Ok(filter)
+        filter
+            .gated(self.state.settings_snapshot().advanced_workflow_tracking)
+            .map_err(invalid)
     }
 
     /// `none` (or an empty value) clears an entry's category or project,

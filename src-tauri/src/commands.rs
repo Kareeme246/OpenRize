@@ -889,6 +889,7 @@ pub fn query_time_entries(
     filter: EntryFilter,
     limit: Option<u32>,
 ) -> Result<Vec<TimeEntry>, String> {
+    let filter = filter.gated(workflow_tracking_on(&app))?;
     with_reader(&app, |conn| {
         reports::query_entries(conn, &filter, limit.unwrap_or(reports::MAX_QUERY_ROWS))
     })
@@ -902,6 +903,7 @@ pub fn entry_rollup(
     group_by: String,
 ) -> Result<Vec<RollupCell>, String> {
     let group_by = GroupBy::parse(&group_by)?;
+    let filter = filter.gated(workflow_tracking_on(&app))?;
     with_reader(&app, |conn| {
         reports::rollup(conn, &filter, &boundaries, group_by)
     })
@@ -915,6 +917,7 @@ pub fn export_time_entries(
     format: String,
 ) -> Result<ExportResult, String> {
     let format = ExportFormat::parse(&format)?;
+    let filter = filter.gated(workflow_tracking_on(&app))?;
     let dir = app
         .path()
         .download_dir()

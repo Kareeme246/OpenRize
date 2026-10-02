@@ -11,7 +11,6 @@ import {
   BAND_LABEL,
   BAND_TONE,
   band,
-  HIGH,
   METER_SEGMENTS,
   percent,
 } from "../lib/confidence";
@@ -169,25 +168,6 @@ function buildOptions(
   return ranked;
 }
 
-/** A field is settled when it has a value nobody needs to double-check. */
-function settled(model: FieldModel): boolean {
-  if (model.value === null && model.field === "category") return false;
-  if (
-    model.value === null &&
-    model.field === "project" &&
-    model.options.length === 0
-  ) {
-    return true;
-  }
-  const suggestion = model.suggestion;
-  if (!suggestion) return model.value !== null;
-  if (suggestion.outcome !== undefined) return true;
-  const matches = (suggestion.valueId ?? null) === model.value;
-  return (
-    matches && (suggestion.engine === "rules" || suggestion.confidence >= HIGH)
-  );
-}
-
 function isTyping(target: EventTarget | null): boolean {
   const element = target as HTMLElement | null;
   return (
@@ -247,15 +227,11 @@ export function EntryReviewPanel({
     });
   }, [detail, entry, categories, projects, suggestProjects]);
 
-  // The panel pre-fills the confident field and asks about the other: start
-  // on the first field that still needs a decision.
-  const firstOpenField =
-    models.find((model) => !settled(model))?.field ?? "category";
-  const [activeField, setActiveField] =
-    useState<SuggestionField>(firstOpenField);
+  // Keep both pickers collapsed until the user opens one.
+  const [activeField, setActiveField] = useState<SuggestionField | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-aim only when a different entry opens, not on every edit.
   useEffect(() => {
-    setActiveField(firstOpenField);
+    setActiveField(null);
     setEditing(false);
     setDraft(entry.description);
   }, [entry.id]);
@@ -283,10 +259,10 @@ export function EntryReviewPanel({
         }
       } else if (key === "c") {
         event.preventDefault();
-        setActiveField("category");
+        setActiveField((field) => (field === "category" ? null : "category"));
       } else if (key === "p" && suggestProjects) {
         event.preventDefault();
-        setActiveField("project");
+        setActiveField((field) => (field === "project" ? null : "project"));
       } else if (key === "e") {
         event.preventDefault();
         editFinished.current = false;
@@ -412,7 +388,7 @@ export function EntryReviewPanel({
                 rows={2}
               />
               <div className="flex justify-end gap-1.5">
-                {/* Pressing it must not blur the field first: blur saves. */}
+                {/* Keep focus while clicking so blur cannot preempt the explicit action. */}
                 <button
                   type="button"
                   onMouseDown={(event) => event.preventDefault()}
@@ -420,6 +396,14 @@ export function EntryReviewPanel({
                   className="rounded px-2 py-0.5 text-[11px] text-fg-soft hover:text-fg"
                 >
                   Cancel
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={saveDescription}
+                  className="rounded bg-accent px-2.5 py-0.5 font-semibold text-[11px] text-accent-fg"
+                >
+                  Save
                 </button>
               </div>
             </div>
@@ -470,7 +454,11 @@ export function EntryReviewPanel({
             active={model.field === activeField && !editing}
             processing={processing}
             locked={locked}
-            onActivate={() => setActiveField(model.field)}
+            onActivate={() =>
+              setActiveField((field) =>
+                field === model.field ? null : model.field,
+              )
+            }
             onPick={(valueId) => onSetField(model.field, valueId)}
             nameOf={(valueId) => nameOf(model.field, valueId)}
           />
@@ -485,7 +473,7 @@ export function EntryReviewPanel({
               type="checkbox"
               checked={entry.billable}
               onChange={onToggleBillable}
-              className="ml-auto accent-(--accent)"
+              className="accent-(--accent)"
             />
           </label>
         </Tooltip>
@@ -790,7 +778,9 @@ function FieldSection({
   const section = (
     <section
       className={`rounded-lg border p-2.5 transition-colors ${
-        active && !locked ? "border-accent/50 bg-accent/5" : "border-line"
+        active && !locked
+          ? "border-accent/50 bg-accent/5"
+          : `border-line ${!locked ? "hover:border-accent/40" : ""}`
       }`}
     >
       <button

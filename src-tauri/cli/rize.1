@@ -1,0 +1,112 @@
+.TH RIZE 1 "2026-09-01" "OpenRize 0.8.10" "User Commands"
+.SH NAME
+rize \- OpenRize from the terminal
+.SH SYNOPSIS
+.B rize
+.RI [ options ]
+.RI [ command ]
+.br
+.B rize
+.B --help
+.SH DESCRIPTION
+.B rize
+reads and edits time-tracking data managed by OpenRize. With no command it shows today's status. When OpenRize is closed, stored data operations continue to work and changes are picked up when the app next starts. Tracking itself requires the app.
+.PP
+Times use local time. Date values accept YYYY-MM-DD; date-times accept YYYY-MM-DDTHH:MM. Relative values include today, yesterday, weekday names, this-week, last-week, this-month, and last-month. Ranges also accept values such as 90m, 12h, 7d, or 2w with --last.
+.SH COMMANDS
+.TP
+.B status
+Show running/tracking state, today's totals, entries to review, and timers.
+.TP
+.B app start [--track] [--show]
+Launch OpenRize, optionally enabling tracking or showing the window.
+.TP
+.B app status | open [--review] | quit
+Inspect the app, show its window, or quit it.
+.TP
+.B track start | stop | idle MINUTES
+Control tracking or set the idle threshold.
+.TP
+.B focus start [LABEL] | stop
+Start or end a manual focus session (requires the app running).
+.TP
+.B timers list | new LABEL | start TIMER | pause TIMER | reset TIMER | rename TIMER LABEL | rm TIMER
+List and manage stopwatch timers.
+.TP
+.B entries list | show | add | edit | approve | unapprove | reject | split | rm | rebuild | export
+List, create, edit, review, split, delete, rebuild, or export time entries.
+.TP
+.B review [RANGE OPTIONS]
+List entries waiting for review, today by default.
+.TP
+.B report [RANGE OPTIONS] --by GROUP --per PERIOD
+Show totals grouped by project, client, category, app, status, or none.
+.TP
+.B projects list | show | add | edit | rm
+Manage projects.
+.TP
+.B clients list | show | add | edit | rm
+Manage clients.
+.TP
+.B categories list | add | edit | rm
+Manage categories.
+.TP
+.B settings list | get KEY | set KEY VALUE
+Read or change preferences.
+.TP
+.B paths
+Show the settings, data, and database paths.
+.TP
+.B install-path [--dir DIR]
+Add rize to PATH (a symlink on macOS; user PATH on Windows).
+.TP
+.B completions SHELL
+Print shell completions for bash, zsh, fish, powershell, or elvish.
+.SH OPTIONS
+.TP
+.B --help
+Print help, including available subcommands and arguments.
+.TP
+.B --version
+Print version information.
+.TP
+.B --json
+Print one JSON envelope containing schemaVersion, ok, data, and error.
+.TP
+.B --full
+Include window titles and URLs in output.
+.TP
+.BR -y , " --yes"
+Confirm destructive operations without prompting.
+.TP
+.BI --data-dir " DIR"
+Use another OpenRize data directory, such as a development build's.
+.PP
+Global options may be placed before or after a subcommand.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Operation failed.
+.TP
+.B 2
+Invalid arguments or an unconfirmed destructive operation.
+.TP
+.B 3
+The app must be running.
+.TP
+.B 4
+App and rize versions differ, or stored data is incompatible.
+.SH FILES
+The settings file and database locations are printed by
+.BR "rize paths" .
+.B rize
+never creates OpenRize data; the app must have been run at least once.
+.SH SEE ALSO
+Full command and option details are available with
+.BR "rize --help" ,
+and in the bundled COMMANDS.md reference.
+.SH AUTHORS
+OpenRize contributors.

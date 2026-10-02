@@ -1,8 +1,11 @@
-//! Shared read domain operations. No Tauri, capture, or database writes.
+//! What the desktop app and `rize` share without Tauri: the domain models,
+//! entry queries, where the app keeps its files, and the protocol and local
+//! endpoint `rize` reaches the app through.
 
+pub mod ipc;
 pub mod models;
 pub mod paths;
-pub mod readonly;
+pub mod protocol;
 
 /// Canonical installed app identity, also used by independent clients.
 pub const APP_IDENTIFIER: &str = "com.offlinestudios.openrize";

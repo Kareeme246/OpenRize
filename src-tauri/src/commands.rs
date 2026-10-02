@@ -26,7 +26,7 @@ use crate::AppState;
 
 type Timers = Result<Vec<Timer>, String>;
 
-fn refresh_tray(app: &AppHandle, timers: &[Timer]) {
+pub(crate) fn refresh_tray(app: &AppHandle, timers: &[Timer]) {
     if let Err(error) = tray::refresh(app, timers) {
         eprintln!("tray refresh failed: {error}");
     }
@@ -474,7 +474,7 @@ pub fn clear_invoice_logo(app: AppHandle) -> Result<(), String> {
 
 /// Tells views to refetch, and wakes the AI worker: an entry mutation can
 /// queue work (an approval queues its embedding, a rebuild a classification).
-fn entries_changed(app: &AppHandle) {
+pub(crate) fn entries_changed(app: &AppHandle) {
     let _ = app.emit(crate::EVENT_ENTRIES_CHANGED, ());
     ai::nudge(app);
 }
@@ -635,15 +635,14 @@ pub fn rebuild_time_entries(
     };
     // A past day may never have had its agent time written: recompute the
     // days the range touches (the sessions it just rebuilt are its basis).
-    refresh_agent_days(&app, start_ms, end_ms, now);
+    refresh_agent_days(&app.state::<AppState>(), start_ms, end_ms, now);
     entries_changed(&app);
     Ok(entries)
 }
 
 /// Recomputes the agent ledger of every calendar day in `[start, end]`.
-fn refresh_agent_days(app: &AppHandle, start_ms: u64, end_ms: u64, now: u64) {
-    let auto_accept = app.state::<AppState>().settings_snapshot().auto_accept;
-    let state = app.state::<AppState>();
+pub(crate) fn refresh_agent_days(state: &AppState, start_ms: u64, end_ms: u64, now: u64) {
+    let auto_accept = state.settings_snapshot().auto_accept;
     let Ok(mut store) = state.activity.lock() else {
         return;
     };
@@ -1007,7 +1006,12 @@ pub fn update_settings(app: AppHandle, settings: Settings) -> Result<Settings, S
         let next = store.set(settings)?;
         (previous, next)
     };
+    apply_settings_change(&app, &previous, &next);
+    Ok(next)
+}
 
+/// Carries a settings change out to the parts of the app that hold a copy.
+pub(crate) fn apply_settings_change(app: &AppHandle, previous: &Settings, next: &Settings) {
     if next.tray_enabled != previous.tray_enabled {
         let timers = {
             let state = app.state::<AppState>();
@@ -1018,18 +1022,18 @@ pub fn update_settings(app: AppHandle, settings: Settings) -> Result<Settings, S
                 .and_then(|store| store.snapshot().ok())
         };
         if let Some(timers) = timers {
-            if let Err(error) = tray::set_enabled(&app, next.tray_enabled, &timers) {
+            if let Err(error) = tray::set_enabled(app, next.tray_enabled, &timers) {
                 eprintln!("could not toggle the tray: {error}");
             }
         }
     }
 
     if next.extensions != previous.extensions {
-        crate::agents::recheck(&app);
+        crate::agents::recheck(app);
     }
 
     if next.retention_days != previous.retention_days {
-        let _ = sweep_retention(&app);
+        let _ = sweep_retention(app);
     }
 
     if next.tracking_hours != previous.tracking_hours {
@@ -1037,11 +1041,10 @@ pub fn update_settings(app: AppHandle, settings: Settings) -> Result<Settings, S
         if let Ok(mut store) = state.activity.lock() {
             store.set_tracking_hours(next.tracking_hours.clone());
         }
-        activity::emit_full(&app);
+        activity::emit_full(app);
     }
 
-    let _ = app.emit(crate::EVENT_SETTINGS_CHANGED, &next);
-    Ok(next)
+    let _ = app.emit(crate::EVENT_SETTINGS_CHANGED, next);
 }
 
 pub fn sweep_retention(app: &AppHandle) -> Result<u64, String> {
@@ -1067,6 +1070,22 @@ pub struct StoragePaths {
     pub database_file: String,
 }
 
+impl StoragePaths {
+    pub fn new(data_dir: &std::path::Path) -> Self {
+        Self {
+            config_file: crate::settings::config_dir()
+                .join("settings.json")
+                .display()
+                .to_string(),
+            data_dir: data_dir.display().to_string(),
+            database_file: data_dir
+                .join(crate::activity::DB_FILE)
+                .display()
+                .to_string(),
+        }
+    }
+}
+
 /// Whether macOS will launch OpenRize at login (see login_item.rs).
 #[tauri::command]
 pub fn launch_at_login() -> LoginItemState {
@@ -1084,15 +1103,7 @@ pub fn storage_paths(app: AppHandle) -> Result<StoragePaths, String> {
         .path()
         .app_data_dir()
         .map_err(|error| error.to_string())?;
-    let config_dir = crate::settings::config_dir();
-    Ok(StoragePaths {
-        config_file: config_dir.join("settings.json").display().to_string(),
-        data_dir: data_dir.display().to_string(),
-        database_file: data_dir
-            .join(crate::activity::DB_FILE)
-            .display()
-            .to_string(),
-    })
+    Ok(StoragePaths::new(&data_dir))
 }
 
 #[tauri::command]

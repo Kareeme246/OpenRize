@@ -142,6 +142,9 @@ pub fn refresh(app: &AppHandle, timers: &[Timer]) -> tauri::Result<()> {
 }
 
 pub fn show_main_window(app: &AppHandle) {
+    // A background launch (`rize app start`) starts with no Dock icon.
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.show();

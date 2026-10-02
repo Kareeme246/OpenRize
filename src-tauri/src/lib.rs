@@ -13,6 +13,7 @@ use openrize_core::models;
 mod projects;
 mod pulse;
 mod reports;
+mod rpc;
 mod settings;
 mod threads;
 mod timers;
@@ -73,6 +74,23 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Opens every store in `dir`. The caller must hold the stores' lock
+    /// (`rpc::lock_stores`): loading closes any segment left open.
+    pub fn load(dir: &std::path::Path) -> Result<Self, String> {
+        let store = TimerStore::load(dir)?;
+        let mut activity = ActivityStore::load(dir)?;
+        let activity_reader = ActivityStore::open_reader(dir)?;
+        let settings = SettingsStore::load(&settings::config_dir())?;
+        activity.set_tracking_hours(settings.snapshot().tracking_hours.clone());
+        Ok(Self {
+            store: Mutex::new(store),
+            activity: Mutex::new(activity),
+            activity_reader: Mutex::new(activity_reader),
+            foreground: AtomicBool::new(true),
+            settings: Mutex::new(settings),
+        })
+    }
+
     pub fn settings_snapshot(&self) -> Settings {
         self.settings
             .lock()
@@ -81,13 +99,29 @@ impl AppState {
     }
 }
 
+/// Launched by `rize app start`: run in the menu bar with no window until
+/// one is asked for.
+const BACKGROUND_ARG: &str = "--background";
+
+/// `openrize __rize ...` answers one `rize` request without the GUI; see
+/// `rpc`. Returns `None` for an ordinary launch.
+pub fn rize_headless(args: &[String]) -> Option<i32> {
+    match args {
+        [first, rest @ ..] if first == rpc::HEADLESS_ARG => Some(rpc::headless(rest)),
+        _ => None,
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let background = std::env::args().any(|arg| arg == BACKGROUND_ARG);
     tauri::Builder::default()
         // Registered first so a second launch exits before it opens the
         // database; the running copy comes forward instead.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            tray::show_main_window(app);
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if !args.iter().any(|arg| arg == BACKGROUND_ARG) {
+                tray::show_main_window(app);
+            }
         }))
         .plugin(
             // Seeds the page's theme/shape hint before its first paint; see
@@ -99,26 +133,18 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .setup(|app| {
+        .setup(move |app| {
             let dir = app.path().app_data_dir()?;
-            std::fs::create_dir_all(&dir)?;
+            // Waits out a `rize` edit made while the app was closed, then
+            // keeps the stores for as long as the app runs.
+            let lock = rpc::lock_stores(&dir, true)?.expect("a blocking lock");
+            app.manage(rpc::StoresLock(lock));
 
-            let store = TimerStore::load(&dir)?;
-            let timers = store.snapshot()?;
-            let mut activity = ActivityStore::load(&dir)?;
-            let activity_reader = ActivityStore::open_reader(&dir)?;
-            let settings = SettingsStore::load(&settings::config_dir())
+            let state = AppState::load(&dir)
                 .map_err(|error| -> Box<dyn std::error::Error> { error.into() })?;
-            let preferences = settings.snapshot();
-            activity.set_tracking_hours(preferences.tracking_hours.clone());
-
-            app.manage(AppState {
-                store: Mutex::new(store),
-                activity: Mutex::new(activity),
-                activity_reader: Mutex::new(activity_reader),
-                foreground: AtomicBool::new(true),
-                settings: Mutex::new(settings),
-            });
+            let timers = state.store.lock().map_err(|e| e.to_string())?.snapshot()?;
+            let preferences = state.settings_snapshot();
+            app.manage(state);
             app.manage(ai::AiRuntime::default());
             app.manage(pulse::PulseState::default());
             app.manage(agents::AgentRuntime::default());
@@ -145,6 +171,15 @@ pub fn run() {
             // the first hour-long wait elapses.
             if let Err(error) = commands::sweep_retention(app.handle()) {
                 eprintln!("retention sweep failed: {error}");
+            }
+            rpc::serve(app.handle().clone(), dir);
+            // The window is created hidden (tauri.conf.json), so a background
+            // launch never flashes it.
+            if background {
+                #[cfg(target_os = "macos")]
+                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            } else {
+                tray::show_main_window(app.handle());
             }
             Ok(())
         })
@@ -327,34 +362,7 @@ fn spawn_retention_sweeper(app: tauri::AppHandle) {
 }
 
 #[cfg(test)]
-mod cli_read_tests {
-    #[test]
-    fn shared_reads_match_the_real_migrated_app_schema() {
-        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
-        crate::migrations::run_migrations(&mut conn).unwrap();
-        conn.execute(
-            "INSERT INTO time_entries (id, started_at, ended_at, description, created_at, updated_at)
-             VALUES ('cli-test', 1000, 2000, 'private', 1000, 1000)", [],
-        ).unwrap();
-        let totals = openrize_core::readonly::status(&conn).unwrap();
-        assert_eq!(totals.entries, 1);
-        assert_eq!(totals.pending, 1);
-        assert_eq!(totals.tracked_ms, 1000);
-        let entries = openrize_core::readonly::entries(&conn, 1000, 1000, None, 50, false).unwrap();
-        assert_eq!(entries.count, 1);
-        assert!(entries.entries[0].detail.is_none());
-        // The GUI report adapter enriches the same shared row with AI/app data.
-        let filter = crate::reports::EntryFilter {
-            start_ms: 1000,
-            end_ms: 1001,
-            ..Default::default()
-        };
-        assert_eq!(
-            crate::reports::query_entries(&conn, &filter, 50).unwrap()[0].id,
-            entries.entries[0].id
-        );
-    }
-
+mod cli_tests {
     #[test]
     fn independent_client_identity_matches_the_release_bundle() {
         let config: serde_json::Value =

@@ -95,15 +95,35 @@ pub struct NewClient {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateClient {
     pub name: Option<String>,
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub email: Option<Option<String>>,
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub address: Option<Option<String>>,
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub default_rate: Option<Option<f64>>,
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub currency: Option<Option<String>>,
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub notes: Option<Option<String>>,
     pub archived: Option<bool>,
 }
@@ -151,23 +171,47 @@ pub struct NewProject {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateProject {
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub client_id: Option<Option<String>>,
     pub name: Option<String>,
     pub color: Option<String>,
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub description: Option<Option<String>>,
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub ai_hints: Option<Option<String>>,
     pub status: Option<String>,
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub due_date: Option<Option<u64>>,
     pub budget_kind: Option<String>,
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub budget_value: Option<Option<f64>>,
     pub budget_period: Option<String>,
     pub billable_default: Option<bool>,
-    #[serde(default, deserialize_with = "double_option")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub hourly_rate: Option<Option<f64>>,
 }
 

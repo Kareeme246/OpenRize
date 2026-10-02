@@ -166,18 +166,22 @@ Stack: [Tauri 2](https://tauri.app) · Rust · SQLite · Swift · [React 19](htt
 
 ## CLI
 
-`rize` reads your OpenRize time entries from the terminal, even with the app closed (read-only
-for now: `rize --help` lists the commands). It ships inside the app from **v0.8.10** on
-**Apple Silicon macOS**, and this installs just the CLI:
+`rize` drives OpenRize from the terminal: start the app in the background, check today's status,
+and list, add, edit, approve, report on and export your time, plus timers, projects, clients,
+categories and settings. The app does the tracking; with it closed, everything except tracking
+still works on the stored data. `rize --help` and [`src-tauri/cli/COMMANDS.md`](src-tauri/cli/COMMANDS.md)
+list the commands.
+
+`rize` ships inside the app from **v0.8.10** on. On macOS, with OpenRize installed, this links it
+into `~/.local/bin` (add that to PATH if needed):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Kareeme246/OpenRize/main/install.sh | bash
 ```
 
-It takes `rize` out of the latest release's app bundle, requires OpenRize's Developer ID
-signature and Apple notarization, and installs into `~/.local/bin` (add that to PATH if needed).
-It never replaces existing files or edits shell profiles. On Windows, build it from source with
-`./scripts/install-cli.sh`.
+It downloads nothing, requires OpenRize's Developer ID signature and Apple notarization on the
+`rize` it links, and never replaces existing files or edits shell profiles. On Windows, build the
+app from source and run `rize install-path` from its install folder to add it to your PATH.
 
 ## Building from source
 

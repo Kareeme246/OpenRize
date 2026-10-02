@@ -9,9 +9,11 @@ command, or changes the app command behind one, updates its row here.
 - **App running:** rize sends the request to the app's local endpoint (a Unix socket on macOS,
   a named pipe on Windows), and the app runs the same command function its window uses. The app
   stays the only writer while it runs, and open windows and the tray update at once.
-- **App closed:** rize runs the same domain code from `openrize-core` against the app's data
-  directly. Everything that reads or edits stored data still works; nothing new is tracked until
-  the app runs again.
+- **App closed:** rize runs the app binary headless (`openrize __rize`, see
+  `src-tauri/src/rpc.rs`), which answers the one request from the stored data with the same code
+  and exits. Everything that reads or edits stored data still works; nothing new is tracked until
+  the app runs again, and it picks the edits up at launch. A lock file keeps the app and a
+  headless run from ever holding the stores at once.
 - **No data at all:** rize exits with "No rize tracking information found. Are you sure you've
   installed the app?"
 
@@ -21,8 +23,7 @@ command: `rize track start`, or `rize app start --track` to do both.
 ## Status
 
 - **Shipped:** in the current binary.
-- **M1:** the first launch.
-- **M2:** the release after it.
+- **M2:** next.
 - **Later:** planned, not scheduled.
 
 ## Commands
@@ -33,39 +34,40 @@ that is what it asks for.
 
 | Command | What it does | App command | App closed | Status |
 | --- | --- | --- | --- | --- |
-| `rize` / `rize status [--full]` | Whether the app is running, tracking state, current activity, today's totals, unreviewed count, running timers and break state. Titles and URLs only with `--full`. | `activity_snapshot`, `list_timers`, `break_state` | Stored totals and timers; no live activity | Shipped (stored totals only), M1 |
-| `rize app start [--track] [--show]` | Launch the app in the background. `--track` also turns tracking on; `--show` opens the window. Waits until the endpoint answers. | launches the app | Starts app | M1 |
-| `rize app status` | Running or not, app version, protocol version, data directory. | handshake | Yes | M1 |
-| `rize app open [page]` | Show the window, optionally on a page (timesheet, review, calendar, projects). | `open_main_window` + a page argument | Starts app | M1 |
-| `rize app quit` | Close the open segment and exit, as the tray's Quit does. | new | Nothing to do | M1 |
-| `rize track start` | Turn tracking on, launching the app if needed. | `set_capture_enabled` | Starts app | M1 |
-| `rize track stop` | Turn tracking off. | `set_capture_enabled` | Yes (saved for next launch) | M1 |
-| `rize track idle <minutes>` | Set the idle threshold. | `set_idle_threshold` | Yes | M1 |
-| `rize focus start [label]` / `rize focus stop` | Start or end a manual focus session. | `start_session`, `stop_session` | Needs app | M1 |
-| `rize timers list` | All timers with elapsed time and state. | `list_timers` | Yes | M1 |
-| `rize timers new <label>` | Create a timer. | `create_timer` | Yes | M1 |
-| `rize timers start` / `pause` / `reset` / `rm <timer>` | Control or delete a timer by id or label. | `start_timer`, `pause_timer`, `reset_timer`, `delete_timer` | Yes | M1 |
-| `rize timers rename <timer> <label>` | Rename a timer. | `rename_timer` | Yes | M1 |
-| `rize entries list` | Filter by range, project, client, category, app, status, billable, search and scope. Paged, newest first. | `query_time_entries` | Yes | Shipped (range and status only), M1 |
-| `rize entries show <id>` | One entry with its events, segments and AI suggestion. | `get_entry_detail` | Yes | M1 |
-| `rize entries add --from --to [fields]` | Create a manual entry. | `create_time_entry` | Yes | M1 |
-| `rize entries edit <id...> [fields]` | Change description, project, category, billable, start or end on one or many entries. | `update_time_entry`, `update_time_entries` | Yes | M1 |
-| `rize entries approve` / `unapprove <id...>` | Approve or reopen entries; `--pending --from --to` approves a whole range. | `approve_time_entries`, `unapprove_time_entries` | Yes | M1 |
-| `rize entries reject <id>` | Reject an AI suggestion. | `reject_time_entry` | Yes | M1 |
-| `rize entries split <id> --at <time>` | Split one entry in two. | `split_time_entry` | Yes | M1 |
-| `rize entries rm <id...>` | Delete entries (confirmed). | `delete_time_entry`, `delete_time_entries` | Yes | M1 |
-| `rize entries rebuild --from --to` | Rebuild entries from raw activity (confirmed). | `rebuild_time_entries` | Yes | M1 |
-| `rize entries export --format csv\|json [--out file]` | Export filtered entries to stdout or a file. | `export_time_entries`, split so it returns bytes | Yes | M1 |
-| `rize review` | Today's pending queue, the list the Review sheet shows. | `query_time_entries` (pending) | Yes | M1 |
-| `rize report --by project\|client\|category\|app\|status --per day\|week\|month` | Totals for a range, with the filters of `entries list`. | `entry_rollup` | Yes | M1 |
-| `rize projects list` / `show <project>` | Projects with budget, rate, stats and rules. | `list_projects`, `project_stats`, `project_rules` | Yes | M1 |
-| `rize projects add` / `edit` / `rm` | Manage projects. | `create_project`, `update_project`, `delete_project` | Yes | M1 |
-| `rize clients list` / `show` / `add` / `edit` / `rm` | Manage clients. | `list_clients`, `create_client`, `update_client`, `delete_client` | Yes | M1 |
-| `rize categories list` / `add` / `edit` / `rm` | Manage categories. | `list_categories`, `create_category`, `update_category`, `delete_category` | Yes | M1 |
-| `rize settings list` / `get <key>` / `set <key> <value>` | Every preference by dotted key, such as `tracking-hours.start` or `breaks.enabled`. Writes one field at a time. | `get_settings` + a new field-level patch | Yes (applies on next launch) | M1 |
-| `rize paths` | Settings file, data directory and database path. | `storage_paths` | Yes | M1 |
-| `rize install-path` | Put `rize` on PATH: a symlink on macOS, the user PATH on Windows. | client only | Yes | Shipped (macOS), M1 |
-| `rize completions bash\|zsh\|fish\|powershell` | Print a shell completion script. | client only | Yes | M1 |
+| `rize` / `rize status [--full]` | Whether the app is running, tracking state, current activity, today's totals, entries to review and running timers (break state in `--json`). Titles and URLs only with `--full`. | `activity_snapshot`, `list_timers`, `break_state` | Stored totals and timers; no live activity | Shipped |
+| `rize app start [--track] [--show]` | Launch the app in the background (menu bar only, no window or Dock icon). `--track` also turns tracking on; `--show` opens the window. Waits until the app answers. | launches the app with `--background` | Starts app | Shipped |
+| `rize app status` | Running or not, app version and data directory. | `Hello` handshake | Yes | Shipped |
+| `rize app open [--review]` | Show the window, on today's review queue with `--review`. | `open_main_window` | Starts app | Shipped |
+| `rize app quit` | Close the open segment and exit, as the tray's Quit does. | `AppHandle::exit` | Nothing to do | Shipped |
+| `rize track start` | Turn tracking on, launching the app if needed. | `set_capture_enabled` | Starts app | Shipped |
+| `rize track stop` | Turn tracking off. | `set_capture_enabled` | Yes (saved for next launch) | Shipped |
+| `rize track idle <minutes>` | Set the idle threshold. | `set_idle_threshold` | Yes | Shipped |
+| `rize focus start [label]` / `rize focus stop` | Start or end a manual focus session. | `start_session`, `stop_session` | Needs app | Shipped |
+| `rize timers list` | All timers with elapsed time and state. | `list_timers` | Yes | Shipped |
+| `rize timers new <label>` | Create a timer. | `create_timer` | Yes | Shipped |
+| `rize timers start` / `pause` / `reset` / `rm <timer>` | Control or delete a timer by id or label; reset and rm are confirmed. | `start_timer`, `pause_timer`, `reset_timer`, `delete_timer` | Yes | Shipped |
+| `rize timers rename <timer> <label>` | Rename a timer. | `rename_timer` | Yes | Shipped |
+| `rize entries list` | Filter by range, project, client, category, app, status, billable, search and scope. Newest first, `--limit` 1 to 5000. | `query_time_entries` | Yes | Shipped |
+| `rize entries show <id>` | One entry with its apps, events and AI suggestion; window titles with `--full`. | `get_entry_detail` | Yes | Shipped |
+| `rize entries add --from --to [fields]` | Create a manual entry. | `create_time_entry` | Yes | Shipped |
+| `rize entries edit <id...> [fields]` | Change description, project, category, billable, start or end on one or many entries; `none` clears a project or category. | `update_time_entry`, `update_time_entries` | Yes | Shipped |
+| `rize entries approve <id...>` / `--all-pending [range]` | Approve entries, or every pending entry in a range. | `approve_time_entries` | Yes | Shipped |
+| `rize entries unapprove <id...>` | Send entries back to review. | `unapprove_time_entries` | Yes | Shipped |
+| `rize entries reject <id>` | Reject an AI suggestion. | `reject_time_entry` | Yes | Shipped |
+| `rize entries split <id> --at <time>` | Split one entry in two. | `split_time_entry` | Yes | Shipped |
+| `rize entries rm <id...>` | Delete entries (confirmed). | `delete_time_entries` | Yes | Shipped |
+| `rize entries rebuild [range]` | Rebuild entries from recorded activity (confirmed). | `rebuild_time_entries` | Yes | Shipped |
+| `rize entries export --format csv\|json [--out file]` | Export filtered entries to stdout or a file. | `export_time_entries` (`reports::export_body`) | Yes | Shipped |
+| `rize review [range]` | Pending entries, today by default. | `query_time_entries` (pending) | Yes | Shipped |
+| `rize report --by project\|client\|category\|app\|status\|none --per day\|week\|month\|total` | Totals for a range, with the filters of `entries list`. | `entry_rollup` | Yes | Shipped |
+| `rize projects list` / `show <project>` | Projects; one with this month's time, budget and rules. | `list_projects`, `project_stats`, `project_rules` | Yes | Shipped |
+| `rize projects add` / `edit` / `rm` | Manage projects; rm is confirmed. | `create_project`, `update_project`, `delete_project` | Yes | Shipped |
+| `rize clients list` / `show` / `add` / `edit` / `rm` | Manage clients; show lists their projects; rm is confirmed. | `list_clients`, `create_client`, `update_client`, `delete_client` | Yes | Shipped |
+| `rize categories list` / `add` / `edit` / `rm` | Manage categories; rm is confirmed. | `list_categories`, `create_category`, `update_category`, `delete_category` | Yes | Shipped |
+| `rize settings list` / `get <key>` / `set <key> <value>` | Every preference by dotted key, such as `tracking-hours.start` or `breaks.enabled`. Writes one field at a time. | `get_settings`, `SettingsStore::patch` | Yes (applies on next launch) | Shipped |
+| `rize paths` | Settings file, data directory and database path. | `storage_paths` | Yes | Shipped |
+| `rize install-path` | Put `rize` on PATH: a symlink on macOS, the user PATH on Windows. | client only | Yes | Shipped |
+| `rize completions bash\|zsh\|fish\|powershell\|elvish` | Print a shell completion script. | client only | Yes | Shipped |
 | `rize projects discover` / `dismiss <key>` | Suggested projects from recent activity. | `discover_projects`, `dismiss_project_suggestion` | Yes | M2 |
 | `rize projects import <file.csv>` | Bulk import projects. | `import_projects_csv` | Yes | M2 |
 | `rize projects hints <project> --preview` | Preview which activity a hint list would match. | `preview_project_hints` | Yes | M2 |
@@ -104,11 +106,13 @@ stay reachable through `rize settings set`.
 
 | Area | Rule |
 | --- | --- |
-| Output | Aligned tables on a terminal; color off with `NO_COLOR` or `--no-color`. Durations as `3h 25m`, times local. |
+| Output | Plain aligned tables, no color. Durations as `3h 25m`, times local. |
 | `--json` | One envelope for every command, errors included: `schemaVersion`, `ok`, `data`, `error { code, message }`. Adding a field is compatible; removing or renaming one bumps `schemaVersion`. |
-| Exit codes | 0 success, 1 operation failed, 2 invalid arguments (shipped); 3 app needed but not running, 4 app and rize versions incompatible (M1). |
-| Dates | A bare date covers the whole local day; offset-less times are local (shipped). `today`, `yesterday`, weekday names, `this-week`, `last-week`, `this-month`, `last-month` and `--last 7d` (M1). |
-| Names | Projects, clients, categories and timers take an id, an exact name or a unique case-insensitive prefix; two matches fail with `AMBIGUOUS` and list both. |
+| Exit codes | 0 success, 1 operation failed, 2 invalid arguments (including an unconfirmed deletion), 3 app needed but not running, 4 app and rize versions incompatible. |
+| Error codes | `INVALID_ARGUMENT`, `NOT_FOUND`, `AMBIGUOUS` (with `candidates`), `NO_DATA`, `APP_NOT_RUNNING`, `INCOMPATIBLE`, `FAILED`. |
+| Dates | A bare date covers the whole local day (`--to 2026-09-30` includes that day); offset-less times are local. `today`, `yesterday`, weekday names, `this-week`, `last-week`, `this-month` and `last-month` work for `--from`, `--to` and `--period`; `--last 7d` (or `90m`, `12h`, `2w`) runs up to now. Weeks start on Monday. Ranges default to today. |
+| Names | Projects, clients, categories and timers take an id, an exact name or a unique case-insensitive prefix; two matches fail with `AMBIGUOUS` and list both. Entries take a full id or its last characters (lists show the last eight). |
 | Confirmation | Deleting, voiding, finalizing, resetting and rebuilding prompt on a terminal and need `--yes` otherwise. |
-| Paging | Lists take `--limit` (default 50) and report `truncated` when more match. |
+| Paging | `entries list` takes `--limit` (default 50) and reports `truncated` when more match. |
 | Privacy | Window titles and URLs only with `--full`. |
+| Global flags | `--json`, `--full`, `--yes` (`-y`), `--data-dir` (another app data directory, such as a dev build's). `RIZE_APP` points rize at a specific app binary for dev builds. |

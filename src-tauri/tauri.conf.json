@@ -14,6 +14,7 @@
     "windows": [
       {
         "title": "OpenRize",
+        "visible": false,
         "width": 1160,
         "height": 780,
         "minWidth": 720,

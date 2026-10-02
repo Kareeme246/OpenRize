@@ -396,16 +396,25 @@ pub fn export_entries(
     format: ExportFormat,
     dir: &Path,
 ) -> Result<ExportResult, String> {
-    let rows = export_rows(conn, filter)?;
-    let body = render(&rows, format)?;
+    let (body, count) = export_body(conn, filter, format)?;
     fs::create_dir_all(dir)
         .map_err(|error| format!("could not create {}: {error}", dir.display()))?;
     let path = export_path(dir, filter, format);
     fs::write(&path, body).map_err(|error| format!("could not write the export: {error}"))?;
     Ok(ExportResult {
         path: path.display().to_string(),
-        count: rows.len() as u32,
+        count,
     })
+}
+
+/// The export file's contents and how many entries it holds.
+pub fn export_body(
+    conn: &Connection,
+    filter: &EntryFilter,
+    format: ExportFormat,
+) -> Result<(String, u32), String> {
+    let rows = export_rows(conn, filter)?;
+    Ok((render(&rows, format)?, rows.len() as u32))
 }
 
 #[cfg(test)]

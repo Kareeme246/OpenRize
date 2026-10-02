@@ -4,21 +4,24 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
-    // The Swift ML sidecar is macOS-only. It must exist before
-    // `tauri_build::build()` runs, because that step copies every
-    // `bundle.externalBin` (declared in tauri.macos.conf.json) next to the
-    // app binary and fails if one is missing.
-    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+    // The Swift ML sidecar is macOS-only; rize ships on macOS and Windows.
+    // Each must exist before `tauri_build::build()` runs, because that step
+    // copies every `bundle.externalBin` (tauri.macos.conf.json,
+    // tauri.windows.conf.json) next to the app binary and fails if one is
+    // missing.
+    let os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if os == "macos" {
         build_ml_sidecar();
+    }
+    if os == "macos" || os == "windows" {
         build_cli_sidecar();
     }
     tauri_build::build()
 }
 
-/// Builds the independent CLI package, not the Tauri application. A separate
-/// target directory avoids a nested Cargo lock on the app build. The executable
-/// also contains its headless service, so no GUI/Swift runtime is needed when
-/// installing just this sidecar.
+/// Builds the CLI package, not the Tauri application. A separate target
+/// directory avoids a nested Cargo lock on the app build. Its path is exposed
+/// as `RIZE_SIDECAR` for the app's end-to-end tests.
 fn build_cli_sidecar() {
     println!("cargo:rerun-if-changed=cli/Cargo.toml");
     println!("cargo:rerun-if-changed=cli/src");
@@ -45,12 +48,20 @@ fn build_cli_sidecar() {
         .status()
         .expect("could not build the CLI sidecar");
     assert!(status.success(), "CLI sidecar build failed: {status}");
-    let built = output.join(&target).join("release/rize");
-    let staged = manifest.join("binaries").join(format!("rize-{target}"));
+    let suffix = if target.contains("windows") {
+        ".exe"
+    } else {
+        ""
+    };
+    let built = output.join(&target).join(format!("release/rize{suffix}"));
+    let staged = manifest
+        .join("binaries")
+        .join(format!("rize-{target}{suffix}"));
     if !matches!((fs::read(&built), fs::read(&staged)), (Ok(a), Ok(b)) if a == b) {
         fs::create_dir_all(staged.parent().expect("binaries dir")).expect("binaries dir");
-        fs::copy(built, staged).expect("could not stage the CLI sidecar");
+        fs::copy(built, &staged).expect("could not stage the CLI sidecar");
     }
+    println!("cargo:rustc-env=RIZE_SIDECAR={}", staged.display());
 }
 
 /// Builds `swift/` (the `openrize-ml` executable) and stages it as

@@ -58,12 +58,14 @@ pub struct Server {
     pub socket: PathBuf,
 }
 
+#[cfg(unix)]
 fn uid() -> u32 {
     // SAFETY: getuid has no preconditions and cannot fail.
     unsafe { libc::getuid() }
 }
 
 /// `$TMUX_TMPDIR/tmux-<uid>` (default `/tmp/tmux-<uid>`).
+#[cfg(unix)]
 pub fn socket_dir() -> PathBuf {
     let base = std::env::var_os("TMUX_TMPDIR")
         .filter(|value| !value.is_empty())
@@ -71,8 +73,15 @@ pub fn socket_dir() -> PathBuf {
     base.join(format!("tmux-{}", uid()))
 }
 
+/// tmux has no native Windows build, so there are no servers to find.
+#[cfg(windows)]
+pub fn servers() -> Vec<Server> {
+    Vec::new()
+}
+
 /// The tmux servers with a socket on disk. A stale socket is harmless: asking
 /// it for panes just fails.
+#[cfg(unix)]
 pub fn servers() -> Vec<Server> {
     let Ok(entries) = std::fs::read_dir(socket_dir()) else {
         return Vec::new();

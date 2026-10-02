@@ -1,0 +1,220 @@
+//! Reaching OpenRize: the running app over its local endpoint, or, with the
+//! app closed, a headless run of the app binary (`openrize __rize`) that
+//! answers one request from the stored data. rize itself never opens the
+//! database, so there is one implementation of every operation: the app's.
+
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use openrize_core::ipc::{self, Endpoint};
+use openrize_core::paths;
+use openrize_core::protocol::{
+    self, code, Hello, Operation, Request, Response, MAX_REQUEST, MAX_RESPONSE,
+};
+
+/// How long a freshly launched app may take to answer.
+const LAUNCH_TIMEOUT: Duration = Duration::from_secs(60);
+/// Lets a dev or test build point rize at a specific app binary.
+const APP_ENV: &str = "RIZE_APP";
+const HEADLESS_ARG: &str = "__rize";
+pub const NO_DATA: &str =
+    "No rize tracking information found. Are you sure you've installed the app?";
+
+pub struct Client {
+    data_dir: PathBuf,
+    endpoint: Endpoint,
+}
+
+impl Client {
+    pub fn new(data_dir: Option<&Path>) -> Result<Self, String> {
+        let data_dir = match data_dir {
+            Some(dir) => std::path::absolute(dir).map_err(|e| e.to_string())?,
+            None => paths::app_data_dir().ok_or("no home directory; pass --data-dir")?,
+        };
+        let endpoint = Endpoint::new(&data_dir)?;
+        Ok(Self { data_dir, endpoint })
+    }
+
+    pub fn running(&self) -> bool {
+        self.endpoint.connect().is_ok()
+    }
+
+    /// Asks the running app, or answers from the stored data when it is
+    /// closed. An operation that needs the app fails with `APP_NOT_RUNNING`.
+    pub fn request(&self, operation: Operation) -> Response {
+        let request = Request::new(operation);
+        if let Ok(stream) = self.endpoint.connect() {
+            return ipc::exchange(stream, &request)
+                .unwrap_or_else(|error| Response::error(code::FAILED, error));
+        }
+        if request.operation.needs_app() {
+            return Response::error(
+                code::APP_NOT_RUNNING,
+                "OpenRize is not running. Start it with `rize app start`.",
+            );
+        }
+        if !self.data_dir.join(paths::DATABASE_FILE).is_file() {
+            return Response::error(code::NO_DATA, NO_DATA);
+        }
+        let response = match self.headless(&request) {
+            Ok(response) => response,
+            Err(error) => return Response::error(code::FAILED, error),
+        };
+        // The app was starting while we looked; it has the stores now.
+        if response.code() == Some(code::APP_RUNNING) {
+            return match self.wait_for_app(LAUNCH_TIMEOUT) {
+                Ok(()) => self
+                    .endpoint
+                    .call(&request)
+                    .unwrap_or_else(|error| Response::error(code::FAILED, error)),
+                Err(error) => Response::error(code::FAILED, error),
+            };
+        }
+        response
+    }
+
+    /// Starts the app in the background (or with its window, `show`) unless
+    /// it is already running, and waits until it answers. Returns whether
+    /// this call launched it.
+    pub fn start_app(&self, show: bool) -> Result<bool, String> {
+        if self.running() {
+            return Ok(false);
+        }
+        launch(&app_executable()?, show)?;
+        self.wait_for_app(LAUNCH_TIMEOUT)?;
+        Ok(true)
+    }
+
+    pub fn hello(&self) -> Result<Hello, String> {
+        let response = self.request(Operation::Hello {});
+        match (response.data, response.error) {
+            (Some(data), _) => serde_json::from_value(data).map_err(|e| e.to_string()),
+            (_, Some(error)) => Err(error.message),
+            _ => Err("empty answer".into()),
+        }
+    }
+
+    fn wait_for_app(&self, timeout: Duration) -> Result<(), String> {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if self.running() {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        Err("OpenRize did not start answering in time".into())
+    }
+
+    fn headless(&self, request: &Request) -> Result<Response, String> {
+        let executable = app_executable()?;
+        let mut child = Command::new(&executable)
+            .arg(HEADLESS_ARG)
+            .arg("--data-dir")
+            .arg(&self.data_dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(|e| format!("could not run {}: {e}", executable.display()))?;
+        {
+            let mut stdin = child.stdin.take().ok_or("no stdin")?;
+            protocol::write_frame(&mut stdin, request, MAX_REQUEST)?;
+            stdin.flush().map_err(|e| e.to_string())?;
+        }
+        let mut stdout = child.stdout.take().ok_or("no stdout")?;
+        let response = protocol::read_frame(&mut stdout, MAX_RESPONSE);
+        let status = child.wait().map_err(|e| e.to_string())?;
+        response.map_err(|error| format!("{} failed ({status}): {error}", executable.display()))
+    }
+}
+
+/// The OpenRize binary this rize belongs to: `RIZE_APP`, else the
+/// `openrize` next to rize (inside the app bundle, or in a build directory).
+pub fn app_executable() -> Result<PathBuf, String> {
+    if let Some(path) = std::env::var_os(APP_ENV) {
+        return Ok(PathBuf::from(path));
+    }
+    let rize = std::env::current_exe()
+        .and_then(|path| path.canonicalize())
+        .map_err(|e| e.to_string())?;
+    let sibling = rize.with_file_name(format!("openrize{}", std::env::consts::EXE_SUFFIX));
+    if sibling.is_file() {
+        return Ok(sibling);
+    }
+    Err(format!(
+        "{NO_DATA} (looked for {} next to rize)",
+        sibling.display()
+    ))
+}
+
+/// The `.app` bundle an executable sits in, if any.
+fn bundle(executable: &Path) -> Option<&Path> {
+    let macos = executable.parent()?;
+    let contents = macos.parent()?;
+    let bundle = contents.parent()?;
+    (macos.ends_with("Contents/MacOS")
+        && bundle
+            .extension()
+            .is_some_and(|extension| extension == "app"))
+    .then_some(bundle)
+}
+
+fn launch(executable: &Path, show: bool) -> Result<(), String> {
+    let mut command = match bundle(executable).filter(|_| cfg!(target_os = "macos")) {
+        // Through LaunchServices, as a Finder launch would be; `-g` keeps the
+        // terminal in front.
+        Some(bundle) => {
+            let mut command = Command::new("/usr/bin/open");
+            if !show {
+                command.arg("-g");
+            }
+            command.arg("-a").arg(bundle);
+            if !show {
+                command.args(["--args", "--background"]);
+            }
+            command
+        }
+        None => {
+            let mut command = Command::new(executable);
+            if !show {
+                command.arg("--background");
+            }
+            detach(&mut command);
+            command
+        }
+    };
+    let status = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("could not start {}: {e}", executable.display()))?;
+    drop(status);
+    Ok(())
+}
+
+/// Runs the app outside this terminal's session, so closing the terminal
+/// does not end it.
+#[cfg(unix)]
+fn detach(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: setsid is async-signal-safe and touches no Rust state.
+    unsafe {
+        command.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+}
+
+#[cfg(windows)]
+fn detach(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    /// No console, and outside the caller's Ctrl+C group.
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+}

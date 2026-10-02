@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Installs the read-only `rize` CLI from a release's notarized app bundle.
-# No Rust, GUI install, sudo, or shell edits.
+# Puts `rize` on PATH by linking to the copy inside the installed OpenRize app,
+# so rize always matches the app and updates with it. Downloads nothing; no
+# sudo or shell edits.
 set -euo pipefail
-umask 077
+
+identifier='com.offlinestudios.openrize'
+no_app="No rize tracking information found. Are you sure you've installed the app?"
 
 fail() {
   printf 'rize installer: %s\n' "$1" >&2
@@ -11,19 +14,19 @@ fail() {
 
 usage() {
   printf '%s\n' \
-    'Install the rize CLI for OpenRize (Apple Silicon macOS).' \
-    'Usage: bash install.sh [--dir DIRECTORY] [--version X.Y.Z]' \
-    'Default: latest release, ~/.local/bin; existing files are never replaced.' \
-    'The CLI must be notarized and signed by the OpenRize Developer ID.'
+    'Link the rize CLI from the installed OpenRize app (macOS).' \
+    'Usage: bash install.sh [--dir DIRECTORY] [--app PATH/TO/openrize.app]' \
+    'Default: ~/.local/bin; existing files are never replaced.' \
+    'The linked rize must be notarized and signed by the OpenRize Developer ID.'
 }
 
 install_dir=''
-version=latest
+app=''
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --dir|--version)
+    --dir|--app)
       [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || { usage >&2; exit 2; }
-      if [[ "$1" == --dir ]]; then install_dir="$2"; else version="$2"; fi
+      if [[ "$1" == --dir ]]; then install_dir="$2"; else app="$2"; fi
       shift 2
       ;;
     -h|--help) usage; exit 0 ;;
@@ -31,68 +34,54 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "$version" != latest && ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  printf 'Version must be X.Y.Z or latest.\n' >&2
-  exit 2
-fi
+[[ "$(uname -s)" == Darwin ]] || \
+  fail 'This installer is for macOS. On Windows, run `rize install-path` from your build.'
 if [[ -z "$install_dir" ]]; then
   [[ -n "${HOME:-}" ]] || fail 'HOME is unset; pass --dir explicitly.'
   install_dir="$HOME/.local/bin"
 fi
 [[ "$install_dir" == /* ]] || install_dir="$PWD/$install_dir"
-[[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || \
-  fail 'Prebuilt releases currently support Apple Silicon macOS only.'
-for tool in curl tar codesign; do
-  command -v "$tool" >/dev/null 2>&1 || fail "Required command is missing: $tool"
-done
 
-base='https://github.com/Kareeme246/OpenRize/releases'
-if [[ "$version" == latest ]]; then base="$base/latest/download"; else base="$base/download/v$version"; fi
-# The CLI ships inside the app bundle, so it reuses the updater's archive.
-asset='openrize.app.tar.gz'
-member='openrize.app/Contents/MacOS/rize'
-work=$(mktemp -d "${TMPDIR:-/tmp}/rize-install.XXXXXX")
-trap 'rm -rf "$work"' EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
+# The usual install locations, then wherever Spotlight knows the app to be.
+if [[ -z "$app" ]]; then
+  for candidate in /Applications/openrize.app "${HOME:-}/Applications/openrize.app"; do
+    if [[ -d "$candidate" ]]; then app="$candidate"; break; fi
+  done
+fi
+if [[ -z "$app" ]] && command -v mdfind >/dev/null 2>&1; then
+  app=$(mdfind "kMDItemCFBundleIdentifier == '$identifier'" 2>/dev/null | head -n 1 || true)
+fi
+[[ -n "$app" && -d "$app" ]] || fail "$no_app"
+app=$(cd "$app" && pwd -P)
+cli="$app/Contents/MacOS/rize"
+[[ -f "$cli" && -x "$cli" ]] || \
+  fail "$app does not include rize yet. Update OpenRize; rize ships with it from v0.8.10."
 
-# Constrain redirects to HTTPS, bound the wait, and never execute a download
-# until its signature and notarization are checked.
-curl_args=(--fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 10 --max-time 300)
-curl "${curl_args[@]}" "$base/$asset" --output "$work/$asset" || \
-  fail 'Could not download the OpenRize release.'
-# Extract only the one known file to a chosen path, never archive-supplied paths.
-tar -xzOf "$work/$asset" "$member" > "$work/rize" 2>/dev/null && [[ -s "$work/rize" ]] || \
-  fail 'This release does not include the CLI; it ships from v0.8.10.'
-chmod 755 "$work/rize"
 # Gatekeeper's spctl rejects every bare command-line tool, so require Apple's
 # notarization and the OpenRize Developer ID team directly. Keep the team in
 # sync with RELEASING.md.
 requirement='notarized and anchor apple generic and certificate leaf[subject.OU] = "Z899WY5Y94"'
-codesign --verify --strict --check-notarization -R="$requirement" "$work/rize" || \
-  fail 'CLI is not notarized and signed by OpenRize; nothing was installed.'
+codesign --verify --strict --check-notarization -R="$requirement" "$cli" || \
+  fail "$cli is not notarized and signed by OpenRize; nothing was linked. For a build of your own, run its \`rize install-path\`."
 
 destination="$install_dir/rize"
+if [[ -L "$destination" && "$(readlink "$destination")" == "$cli" ]]; then
+  printf 'rize is already installed at %s\n' "$destination"
+  exit 0
+fi
 if [[ -e "$destination" || -L "$destination" ]]; then
-  if [[ -f "$destination" && ! -L "$destination" ]] && cmp -s "$work/rize" "$destination"; then
-    printf 'rize is already installed at %s\n' "$destination"
-    exit 0
-  fi
   fail "$destination already exists; nothing was replaced. Remove it explicitly to reinstall."
 fi
-
 mkdir -p "$install_dir"
-# Bash noclobber creates the file exclusively, including during racing
-# installs. It stays non-executable until the copy finishes, and a failed copy
-# removes only the file this invocation created.
-(
-  set -o noclobber
-  exec 3> "$destination"
-  trap 'rm -f "$destination"' EXIT
-  cat "$work/rize" >&3
-  chmod 755 "$destination"
-  trap - EXIT
-)
-printf 'Installed rize at %s\n' "$destination"
-printf 'No shell configuration was changed. If needed, add %s to PATH.\n' "$install_dir"
-printf 'Next: rize --json status\n'
+# `ln -s` without -f refuses an existing path, so a racing install never
+# replaces what another one just created.
+ln -s "$cli" "$destination" 2>/dev/null || {
+  [[ -L "$destination" && "$(readlink "$destination")" == "$cli" ]] || \
+    fail "$destination already exists; nothing was replaced."
+}
+printf 'Installed rize at %s, linked to %s\n' "$destination" "$cli"
+case ":${PATH:-}:" in
+  *":$install_dir:"*) ;;
+  *) printf 'No shell configuration was changed; add %s to PATH.\n' "$install_dir" ;;
+esac
+printf 'Next: rize status\n'

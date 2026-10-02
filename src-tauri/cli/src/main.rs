@@ -1,134 +1,537 @@
-//! Read-only terminal client. All database access lives behind local IPC in
-//! the on-demand service and shared Rust domain operations, never in commands.
+//! rize: OpenRize from the terminal. Every operation is the app's own; rize
+//! parses arguments, reaches the app (see `client`) and prints the answer.
+//! `COMMANDS.md` lists every command and the app command behind it.
 
-mod ipc;
-mod protocol;
+mod client;
+mod dates;
+mod install;
+mod render;
 
-use std::path::{Path, PathBuf};
+use std::io::{IsTerminal, Write};
+use std::path::PathBuf;
 
-use chrono::{DateTime, Local, LocalResult, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args as ClapArgs, CommandFactory, Parser, Subcommand, ValueEnum};
+use openrize_core::models::{
+    NewCategory, NewClient, NewProject, NewTimeEntry, UpdateCategory, UpdateClient, UpdateProject,
+    UpdateTimeEntry,
+};
+use openrize_core::protocol::{code, Operation, Response};
+use openrize_core::EntryFilter;
+use serde_json::{json, Value};
 
-use ipc::Endpoint;
-use openrize_core::paths;
-use protocol::{Data, Operation, Request, Response};
+use client::Client;
 
 #[derive(Parser, Debug)]
 #[command(
     name = "rize",
     version,
-    about = "Read-only OpenRize queries, even with the GUI closed",
-    after_help = "With no command, shows stored totals. The local service starts on demand and exits after 30 idle seconds.\nExit codes: 0 success, 1 operation/service error, 2 invalid arguments.\nExample: rize entries list --from 2026-09-01 --to 2026-09-30 --json"
+    about = "OpenRize from the terminal: see and edit your tracked time, with the app open or closed",
+    after_help = "With no command, shows today's status.\n\
+        The app does the tracking; rize reads and edits what it stored. With the app closed,\n\
+        everything but tracking still works and the app picks the changes up at its next launch.\n\n\
+        Times are local: a date (2026-09-01), a date-time (2026-09-01T09:00), today, yesterday,\n\
+        a weekday (monday), this-week, last-week, this-month or last-month.\n\
+        Projects, clients, categories and timers take an id, a name or the start of one name.\n\n\
+        Exit codes: 0 success, 1 failed, 2 invalid arguments, 3 the app must be running, 4 app and rize versions differ."
 )]
 struct Args {
-    /// Stable schemaVersion=1 JSON response (including errors)
+    /// Print one JSON envelope: schemaVersion, ok, data, error
     #[arg(long, global = true)]
     json: bool,
-    /// Existing app data directory, for isolated/dev stores (never created)
+    /// Include window titles and URLs
     #[arg(long, global = true)]
+    full: bool,
+    /// Confirm deletions and resets without asking
+    #[arg(long, short = 'y', global = true)]
+    yes: bool,
+    /// Another app data directory, such as a dev build's
+    #[arg(long, global = true, value_name = "DIR")]
     data_dir: Option<PathBuf>,
-    /// Private IPC location: a 0700 socket directory (Unix) or pipe namespace (Windows)
-    #[arg(long, global = true)]
-    runtime_dir: Option<PathBuf>,
     #[command(subcommand)]
     command: Option<Command>,
 }
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Stored entry totals only; does not start capture or report live GUI state
+    /// Whether the app is running and tracking, today's totals, and timers
     Status,
-    /// Query stored time entries without window titles or URLs
+    /// Start, show or quit the app
+    App {
+        #[command(subcommand)]
+        command: AppCommand,
+    },
+    /// Turn automatic tracking on or off
+    Track {
+        #[command(subcommand)]
+        command: TrackCommand,
+    },
+    /// Manual focus sessions (needs the app running)
+    Focus {
+        #[command(subcommand)]
+        command: FocusCommand,
+    },
+    /// Stopwatch timers
+    Timers {
+        #[command(subcommand)]
+        command: TimersCommand,
+    },
+    /// List, add, edit, approve and export time entries
     Entries {
         #[command(subcommand)]
         command: EntriesCommand,
     },
-    /// Opt-in: symlink this executable as <dir>/rize, without replacing files
+    /// Entries waiting for review (today unless a range is given)
+    Review {
+        #[command(flatten)]
+        range: RangeArgs,
+    },
+    /// Totals grouped by project, client, category, app or status
+    Report(ReportArgs),
+    /// List, show, add, edit and delete projects
+    Projects {
+        #[command(subcommand)]
+        command: ProjectsCommand,
+    },
+    /// List, show, add, edit and delete clients
+    Clients {
+        #[command(subcommand)]
+        command: ClientsCommand,
+    },
+    /// List, add, edit and delete categories
+    Categories {
+        #[command(subcommand)]
+        command: CategoriesCommand,
+    },
+    /// Read or change preferences by key, such as breaks.enabled
+    Settings {
+        #[command(subcommand)]
+        command: SettingsCommand,
+    },
+    /// Where the settings file and database live
+    Paths,
+    /// Put rize on PATH: a symlink in ~/.local/bin (macOS), the user PATH (Windows)
     InstallPath {
-        /// Destination directory; defaults to ~/.local/bin (add it to PATH yourself)
+        /// Folder for the symlink (macOS and Linux)
         #[arg(long)]
         dir: Option<PathBuf>,
     },
-    #[command(name = "__serve", hide = true)]
-    Serve,
+    /// Print a shell completion script
+    Completions { shell: clap_complete::Shell },
 }
 
 #[derive(Subcommand, Debug)]
-enum EntriesCommand {
-    /// Newest first, bounded. Both inclusive bounds filter entry START time.
-    List {
-        /// Local date (from its start) or ISO 8601 date-time; no offset = local time
-        #[arg(long, value_parser = parse_from)]
-        from: u64,
-        /// Local date (through its end) or ISO 8601 date-time, inclusive
-        #[arg(long, value_parser = parse_to)]
-        to: u64,
-        #[arg(long, value_enum)]
-        status: Option<EntryStatus>,
-        /// 1..500, default 50; truncated=true if more entries match
-        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=500))]
-        limit: u32,
-        /// Opt into description (max 4096 characters), project ID, and billable
+enum AppCommand {
+    /// Launch the app in the background (menu bar only), if it is not running
+    Start {
+        /// Also turn tracking on
         #[arg(long)]
-        full: bool,
+        track: bool,
+        /// Open the window too
+        #[arg(long)]
+        show: bool,
+    },
+    /// Whether the app is running, and its version
+    Status,
+    /// Show the app's window
+    Open {
+        /// Open on today's review queue
+        #[arg(long)]
+        review: bool,
+    },
+    /// Quit the app (ends the current activity, as the menu's Quit does)
+    Quit,
+}
+
+#[derive(Subcommand, Debug)]
+enum TrackCommand {
+    /// Turn tracking on, starting the app if needed
+    Start,
+    /// Turn tracking off
+    Stop,
+    /// Minutes without input before time counts as idle
+    Idle { minutes: u64 },
+}
+
+#[derive(Subcommand, Debug)]
+enum FocusCommand {
+    Start { label: Option<String> },
+    Stop,
+}
+
+#[derive(Subcommand, Debug)]
+enum TimersCommand {
+    List,
+    /// Create a timer
+    New {
+        label: String,
+    },
+    Start {
+        timer: String,
+    },
+    Pause {
+        timer: String,
+    },
+    /// Set a timer back to zero (asks first)
+    Reset {
+        timer: String,
+    },
+    Rename {
+        timer: String,
+        label: String,
+    },
+    /// Delete a timer (asks first)
+    Rm {
+        timer: String,
     },
 }
 
-#[derive(ValueEnum, Clone, Debug)]
-enum EntryStatus {
+#[derive(ClapArgs, Debug, Default)]
+struct RangeArgs {
+    /// today, yesterday, a weekday, this-week, last-week, this-month or last-month
+    #[arg(long, conflicts_with_all = ["from", "to", "last"])]
+    period: Option<String>,
+    /// Start: a date, a date-time or a word such as monday
+    #[arg(long)]
+    from: Option<String>,
+    /// End, inclusive for a date: --to 2026-09-30 covers that whole day
+    #[arg(long)]
+    to: Option<String>,
+    /// The time up to now, such as 90m, 12h, 7d or 2w
+    #[arg(long, conflicts_with_all = ["from", "to"])]
+    last: Option<String>,
+}
+
+#[derive(ClapArgs, Debug, Default)]
+struct FilterArgs {
+    /// A project, or none
+    #[arg(long)]
+    project: Option<String>,
+    /// A client, or none
+    #[arg(long)]
+    client: Option<String>,
+    /// A category, or none
+    #[arg(long)]
+    category: Option<String>,
+    /// An app name or website domain
+    #[arg(long)]
+    app: Option<String>,
+    #[arg(long, value_enum)]
+    status: Option<Status>,
+    #[arg(long)]
+    billable: Option<bool>,
+    /// Words that must all appear in the description or a window title
+    #[arg(long)]
+    search: Option<String>,
+    /// Your own entries (work, the default), counted agent time, or both
+    #[arg(long, value_enum)]
+    scope: Option<Scope>,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug)]
+enum Status {
     Pending,
     Approved,
 }
 
-fn parse_from(input: &str) -> Result<u64, String> {
-    parse_time(input, false)
+#[derive(ValueEnum, Clone, Copy, Debug)]
+enum Scope {
+    Work,
+    Agent,
+    All,
 }
 
-fn parse_to(input: &str) -> Result<u64, String> {
-    parse_time(input, true)
+#[derive(Subcommand, Debug)]
+enum EntriesCommand {
+    /// Entries in a range (today by default), newest first
+    List {
+        #[command(flatten)]
+        range: RangeArgs,
+        #[command(flatten)]
+        filter: FilterArgs,
+        /// 1 to 5000
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+    },
+    /// One entry with its apps, events and AI suggestions
+    Show { entry: String },
+    /// Add an entry by hand
+    Add {
+        #[arg(long)]
+        from: String,
+        #[arg(long)]
+        to: String,
+        #[arg(long, short = 'd', default_value = "")]
+        description: String,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        billable: Option<bool>,
+    },
+    /// Change one or more entries; `none` clears a project or category
+    Edit {
+        #[arg(required = true)]
+        entries: Vec<String>,
+        #[arg(long, short = 'd')]
+        description: Option<String>,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        billable: Option<bool>,
+        /// New start time
+        #[arg(long)]
+        from: Option<String>,
+        /// New end time
+        #[arg(long)]
+        to: Option<String>,
+    },
+    /// Approve entries, or with --all-pending every pending entry in a range
+    Approve {
+        entries: Vec<String>,
+        #[arg(long, conflicts_with = "entries")]
+        all_pending: bool,
+        #[command(flatten)]
+        range: RangeArgs,
+    },
+    /// Send approved entries back to review
+    Unapprove {
+        #[arg(required = true)]
+        entries: Vec<String>,
+    },
+    /// Reject an entry's AI suggestion
+    Reject { entry: String },
+    /// Split an entry in two at a time
+    Split {
+        entry: String,
+        #[arg(long)]
+        at: String,
+    },
+    /// Delete entries (asks first)
+    Rm {
+        #[arg(required = true)]
+        entries: Vec<String>,
+    },
+    /// Rebuild entries from recorded activity (asks first)
+    Rebuild {
+        #[command(flatten)]
+        range: RangeArgs,
+    },
+    /// Write entries as CSV or JSON to stdout or a file
+    Export {
+        #[arg(long, value_enum, default_value = "csv")]
+        format: Format,
+        /// File to write; stdout by default
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[command(flatten)]
+        range: RangeArgs,
+        #[command(flatten)]
+        filter: FilterArgs,
+    },
 }
 
-/// A bare date covers the whole local day, so `--from` takes its first and
-/// `--to` its last millisecond. Date-times without an offset are local too.
-fn parse_time(input: &str, end_of_day: bool) -> Result<u64, String> {
-    let error = || {
-        "expected a date (2026-09-01) or ISO 8601 date-time (2026-09-01T09:00:00, local unless it has an offset), precision <= milliseconds".to_string()
-    };
-    let utc = if let Ok(date) = NaiveDate::parse_from_str(input, "%Y-%m-%d") {
-        let day = if end_of_day {
-            date.succ_opt().ok_or_else(error)?
-        } else {
-            date
-        };
-        let midnight = local(day.and_time(NaiveTime::MIN)).ok_or_else(error)?;
-        midnight - chrono::Duration::milliseconds(i64::from(end_of_day))
-    } else if !input.contains('T') {
-        return Err(error());
-    } else if let Ok(date) = DateTime::parse_from_rfc3339(input) {
-        date.with_timezone(&chrono::Utc)
-    } else {
-        let naive =
-            NaiveDateTime::parse_from_str(input, "%Y-%m-%dT%H:%M:%S%.f").map_err(|_| error())?;
-        local(naive).ok_or_else(|| format!("{input} does not exist in local time"))?
-    };
-    if utc.timestamp_subsec_nanos() % 1_000_000 != 0
-        || utc.timestamp_subsec_nanos() >= 1_000_000_000
-    {
-        return Err(error());
-    }
-    u64::try_from(utc.timestamp_millis())
-        .map_err(|_| "date-time must be on or after the Unix epoch".into())
+#[derive(ValueEnum, Clone, Copy, Debug)]
+enum Format {
+    Csv,
+    Json,
 }
 
-/// A local wall-clock time in UTC. A time repeated by a DST change resolves
-/// to its first occurrence; one skipped by it does not exist.
-fn local(naive: NaiveDateTime) -> Option<DateTime<chrono::Utc>> {
-    match Local.from_local_datetime(&naive) {
-        LocalResult::Single(time) | LocalResult::Ambiguous(time, _) => {
-            Some(time.with_timezone(&chrono::Utc))
-        }
-        LocalResult::None => None,
-    }
+#[derive(ClapArgs, Debug)]
+struct ReportArgs {
+    #[arg(long, value_enum, default_value = "project")]
+    by: Group,
+    /// One column per day, week or month, or a single total
+    #[arg(long, value_enum, default_value = "total")]
+    per: Per,
+    #[command(flatten)]
+    range: RangeArgs,
+    #[command(flatten)]
+    filter: FilterArgs,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug)]
+enum Group {
+    Project,
+    Client,
+    Category,
+    App,
+    Status,
+    None,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug)]
+enum Per {
+    Day,
+    Week,
+    Month,
+    Total,
+}
+
+#[derive(ClapArgs, Debug, Default)]
+struct ProjectFields {
+    /// A client, or none
+    #[arg(long)]
+    client: Option<String>,
+    /// A hex color such as #75a4e5
+    #[arg(long)]
+    color: Option<String>,
+    #[arg(long)]
+    description: Option<String>,
+    /// Hourly rate
+    #[arg(long)]
+    rate: Option<f64>,
+    /// New entries default to billable
+    #[arg(long)]
+    billable: Option<bool>,
+    /// Words that point activity at this project, one per line or comma
+    #[arg(long)]
+    hints: Option<String>,
+    /// active or archived
+    #[arg(long)]
+    status: Option<String>,
+    /// none, hours or amount
+    #[arg(long)]
+    budget_kind: Option<String>,
+    #[arg(long)]
+    budget: Option<f64>,
+    /// total or monthly
+    #[arg(long)]
+    budget_period: Option<String>,
+    /// Due date
+    #[arg(long)]
+    due: Option<String>,
+}
+
+#[derive(Subcommand, Debug)]
+enum ProjectsCommand {
+    List,
+    /// A project with this month's time, budget and matching rules
+    Show {
+        project: String,
+    },
+    Add {
+        name: String,
+        #[command(flatten)]
+        fields: ProjectFields,
+    },
+    /// Change a project; --client none removes its client
+    Edit {
+        project: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[command(flatten)]
+        fields: ProjectFields,
+    },
+    /// Delete a project (asks first)
+    Rm {
+        project: String,
+    },
+}
+
+#[derive(ClapArgs, Debug, Default)]
+struct ClientFields {
+    #[arg(long)]
+    email: Option<String>,
+    #[arg(long)]
+    address: Option<String>,
+    /// Default hourly rate
+    #[arg(long)]
+    rate: Option<f64>,
+    /// Currency code, such as USD
+    #[arg(long)]
+    currency: Option<String>,
+    #[arg(long)]
+    notes: Option<String>,
+}
+
+#[derive(Subcommand, Debug)]
+enum ClientsCommand {
+    List,
+    /// A client and its projects
+    Show {
+        client: String,
+    },
+    Add {
+        name: String,
+        #[command(flatten)]
+        fields: ClientFields,
+    },
+    Edit {
+        client: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        archived: Option<bool>,
+        #[command(flatten)]
+        fields: ClientFields,
+    },
+    /// Delete a client (asks first)
+    Rm {
+        client: String,
+    },
+}
+
+#[derive(ClapArgs, Debug, Default)]
+struct CategoryFields {
+    /// A hex color such as #75a4e5
+    #[arg(long)]
+    color: Option<String>,
+    #[arg(long)]
+    description: Option<String>,
+    /// New entries in it default to billable
+    #[arg(long)]
+    billable: Option<bool>,
+    /// Counts toward work totals
+    #[arg(long)]
+    work: Option<bool>,
+}
+
+#[derive(Subcommand, Debug)]
+enum CategoriesCommand {
+    List,
+    Add {
+        name: String,
+        #[command(flatten)]
+        fields: CategoryFields,
+    },
+    Edit {
+        category: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        archived: Option<bool>,
+        #[command(flatten)]
+        fields: CategoryFields,
+    },
+    /// Delete a category (asks first)
+    Rm {
+        category: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum SettingsCommand {
+    /// Every preference with its value
+    List,
+    Get {
+        key: String,
+    },
+    /// Change one preference; the value is JSON (true, 40, "dark") or plain text
+    Set {
+        key: String,
+        value: String,
+    },
+}
+
+/// What a command prints, and how.
+enum Outcome {
+    /// An answer from the app, rendered by `render`.
+    Answer(Response),
+    /// Text rize produced itself (completions, an export written to stdout).
+    Raw(String),
 }
 
 fn main() {
@@ -136,241 +539,638 @@ fn main() {
     let args = match Args::try_parse() {
         Ok(args) => args,
         Err(error) => {
-            let code = error.exit_code();
-            if code == 0 {
+            if error.exit_code() == 0 {
                 print!("{error}");
+                std::process::exit(0);
+            }
+            if wants_json {
+                print_json(
+                    &Response::error(code::INVALID_ARGUMENT, error.to_string()),
+                    true,
+                );
             } else {
-                emit(
-                    &Response::error("INVALID_ARGUMENT", error.to_string()),
-                    wants_json,
-                );
+                eprint!("{error}");
             }
-            std::process::exit(code);
+            std::process::exit(2);
         }
     };
-    if matches!(args.command, Some(Command::Serve)) {
-        let result = data_dir(&args)
-            .and_then(|data| Endpoint::new(&data, args.runtime_dir.as_deref()))
-            .and_then(|endpoint| endpoint.serve());
-        if let Err(error) = result {
-            eprintln!("SERVICE_UNAVAILABLE: {}", quoted(&error));
-            std::process::exit(1);
+    let response = match run(&args) {
+        Ok(Outcome::Raw(text)) => {
+            print!("{text}");
+            return;
         }
-        return;
+        Ok(Outcome::Answer(response)) => response,
+        Err(response) => response,
+    };
+    if args.json {
+        print_json(&response, args.full);
+    } else if let Some(error) = &response.error {
+        eprintln!("{}", error.message);
+        for candidate in &error.candidates {
+            eprintln!("  {candidate}");
+        }
+    } else if let Some(data) = &response.data {
+        render::show(args.command.as_ref(), data, args.full);
     }
-    let (response, exit) = execute(&args);
-    emit(&response, args.json);
-    std::process::exit(exit);
+    std::process::exit(exit_code(&response));
 }
 
-fn execute(args: &Args) -> (Response, i32) {
-    if let Some(Command::InstallPath { dir }) = &args.command {
-        return match install_path(dir.clone()) {
-            Ok(data) => (Response::success(data), 0),
-            Err(error) => (Response::error("INSTALL_FAILED", error), 1),
-        };
+fn exit_code(response: &Response) -> i32 {
+    match response.code() {
+        None => 0,
+        Some(code::INVALID_ARGUMENT) => 2,
+        Some(code::APP_NOT_RUNNING) => 3,
+        Some(code::INCOMPATIBLE) => 4,
+        Some(_) => 1,
     }
-    let operation = match &args.command {
-        None | Some(Command::Status) => Operation::Status {},
-        Some(Command::Entries {
-            command:
-                EntriesCommand::List {
-                    from,
-                    to,
-                    status,
-                    limit,
-                    full,
-                },
-        }) => {
-            if from > to || *to >= i64::MAX as u64 {
-                return (
-                    Response::error(
-                        "INVALID_ARGUMENT",
-                        "--from must not exceed --to; bounds must fit epoch milliseconds",
-                    ),
-                    2,
-                );
-            }
-            let status = status.as_ref().map(|s| {
-                match s {
-                    EntryStatus::Pending => "pending",
-                    EntryStatus::Approved => "approved",
+}
+
+fn print_json(response: &Response, full: bool) {
+    let mut value = serde_json::to_value(response).unwrap_or(Value::Null);
+    if !full {
+        render::redact(&mut value);
+    }
+    println!("{value}");
+}
+
+fn invalid(message: impl Into<String>) -> Response {
+    Response::error(code::INVALID_ARGUMENT, message)
+}
+
+fn run(args: &Args) -> Result<Outcome, Response> {
+    let command = match &args.command {
+        Some(Command::Completions { shell }) => {
+            let mut script = Vec::new();
+            clap_complete::generate(*shell, &mut Args::command(), "rize", &mut script);
+            return Ok(Outcome::Raw(String::from_utf8_lossy(&script).into_owned()));
+        }
+        Some(Command::InstallPath { dir }) => {
+            return install::install(dir.clone())
+                .map(|installation| Outcome::Answer(Response::success(installation)))
+                .map_err(|error| Response::error(code::FAILED, error));
+        }
+        command => command,
+    };
+    let client = Client::new(args.data_dir.as_deref()).map_err(invalid)?;
+    let today = dates::today();
+    let ask = |operation: Operation| Ok(Outcome::Answer(client.request(operation)));
+    let time = |input: &str| dates::instant(input, false, today).map_err(invalid);
+    let confirm = |question: &str| confirm(args.yes, question);
+
+    let Some(command) = command else {
+        return ask(Operation::Status {
+            day_start: dates::day_start(today),
+        });
+    };
+    match command {
+        Command::Status => ask(Operation::Status {
+            day_start: dates::day_start(today),
+        }),
+        Command::App { command } => match command {
+            AppCommand::Start { track, show } => {
+                let launched = client
+                    .start_app(*show)
+                    .map_err(|error| Response::error(code::FAILED, error))?;
+                if *track {
+                    let response = client.request(Operation::TrackSet { enabled: true });
+                    if !response.ok {
+                        return Err(response);
+                    }
                 }
-                .to_string()
-            });
-            Operation::Entries {
-                from: *from,
-                to: *to,
-                status,
-                limit: *limit,
-                full: *full,
+                if *show && !launched {
+                    let response = client.request(Operation::AppOpen { review: false });
+                    if !response.ok {
+                        return Err(response);
+                    }
+                }
+                let hello = client
+                    .hello()
+                    .map_err(|error| Response::error(code::FAILED, error))?;
+                Ok(Outcome::Answer(Response::success(json!({
+                    "launched": launched,
+                    "tracking": *track,
+                    "appVersion": hello.app_version,
+                }))))
             }
+            AppCommand::Status => ask(Operation::Hello {}),
+            AppCommand::Open { review } => {
+                if !client.running() {
+                    client
+                        .start_app(true)
+                        .map_err(|error| Response::error(code::FAILED, error))?;
+                    if !*review {
+                        return Ok(Outcome::Answer(Response::success(json!({}))));
+                    }
+                }
+                ask(Operation::AppOpen { review: *review })
+            }
+            AppCommand::Quit => {
+                if !client.running() {
+                    return Ok(Outcome::Answer(Response::success(
+                        json!({ "alreadyClosed": true }),
+                    )));
+                }
+                ask(Operation::AppQuit {})
+            }
+        },
+        Command::Track { command } => match command {
+            TrackCommand::Start => {
+                client
+                    .start_app(false)
+                    .map_err(|error| Response::error(code::FAILED, error))?;
+                ask(Operation::TrackSet { enabled: true })
+            }
+            TrackCommand::Stop => ask(Operation::TrackSet { enabled: false }),
+            TrackCommand::Idle { minutes } => ask(Operation::TrackIdle { minutes: *minutes }),
+        },
+        Command::Focus { command } => match command {
+            FocusCommand::Start { label } => ask(Operation::FocusStart {
+                label: label.clone(),
+            }),
+            FocusCommand::Stop => ask(Operation::FocusStop {}),
+        },
+        Command::Timers { command } => match command {
+            TimersCommand::List => ask(Operation::TimersList {}),
+            TimersCommand::New { label } => ask(Operation::TimerCreate {
+                label: label.clone(),
+            }),
+            TimersCommand::Start { timer } => ask(Operation::TimerStart {
+                timer: timer.clone(),
+            }),
+            TimersCommand::Pause { timer } => ask(Operation::TimerPause {
+                timer: timer.clone(),
+            }),
+            TimersCommand::Reset { timer } => {
+                confirm(&format!("Reset timer \"{timer}\" to zero?"))?;
+                ask(Operation::TimerReset {
+                    timer: timer.clone(),
+                })
+            }
+            TimersCommand::Rename { timer, label } => ask(Operation::TimerRename {
+                timer: timer.clone(),
+                label: label.clone(),
+            }),
+            TimersCommand::Rm { timer } => {
+                confirm(&format!("Delete timer \"{timer}\"?"))?;
+                ask(Operation::TimerDelete {
+                    timer: timer.clone(),
+                })
+            }
+        },
+        Command::Entries { command } => match command {
+            EntriesCommand::List {
+                range,
+                filter,
+                limit,
+            } => ask(Operation::EntriesList {
+                filter: entry_filter(range, filter, today)?,
+                limit: *limit,
+            }),
+            EntriesCommand::Show { entry } => ask(Operation::EntryShow {
+                entry: entry.clone(),
+            }),
+            EntriesCommand::Add {
+                from,
+                to,
+                description,
+                project,
+                category,
+                billable,
+            } => ask(Operation::EntryCreate {
+                entry: NewTimeEntry {
+                    started_at: time(from)?,
+                    ended_at: dates::instant(to, true, today).map_err(invalid)?,
+                    description: description.clone(),
+                    category_id: category.clone(),
+                    project_id: project.clone(),
+                    billable: *billable,
+                    review: false,
+                },
+            }),
+            EntriesCommand::Edit {
+                entries,
+                description,
+                project,
+                category,
+                billable,
+                from,
+                to,
+            } => {
+                let patch = UpdateTimeEntry {
+                    description: description.clone(),
+                    category_id: category.clone(),
+                    project_id: project.clone(),
+                    started_at: from.as_deref().map(time).transpose()?,
+                    ended_at: to
+                        .as_deref()
+                        .map(|to| dates::instant(to, true, today).map_err(invalid))
+                        .transpose()?,
+                    status: None,
+                    billable: *billable,
+                };
+                if serde_json::to_value(&patch)
+                    .ok()
+                    .and_then(|value| {
+                        value
+                            .as_object()
+                            .map(|fields| fields.values().all(Value::is_null))
+                    })
+                    .unwrap_or(true)
+                {
+                    return Err(invalid("nothing to change; pass a field such as --project"));
+                }
+                ask(Operation::EntriesEdit {
+                    entries: entries.clone(),
+                    patch,
+                })
+            }
+            EntriesCommand::Approve {
+                entries,
+                all_pending,
+                range,
+            } => {
+                if !*all_pending {
+                    if entries.is_empty() {
+                        return Err(invalid("name entries to approve, or pass --all-pending"));
+                    }
+                    return ask(Operation::EntriesApprove {
+                        entries: entries.clone(),
+                    });
+                }
+                let mut filter = entry_filter(range, &FilterArgs::default(), today)?;
+                filter.status = Some("pending".into());
+                let pending = client.request(Operation::EntriesList {
+                    filter,
+                    limit: 5_000,
+                });
+                let Some(list) = pending
+                    .data
+                    .as_ref()
+                    .and_then(|data| data["entries"].as_array())
+                else {
+                    return Err(pending);
+                };
+                let ids: Vec<String> = list
+                    .iter()
+                    .filter_map(|entry| entry["id"].as_str().map(str::to_owned))
+                    .collect();
+                if ids.is_empty() {
+                    return Ok(Outcome::Answer(Response::success(json!([]))));
+                }
+                ask(Operation::EntriesApprove { entries: ids })
+            }
+            EntriesCommand::Unapprove { entries } => ask(Operation::EntriesUnapprove {
+                entries: entries.clone(),
+            }),
+            EntriesCommand::Reject { entry } => ask(Operation::EntryReject {
+                entry: entry.clone(),
+            }),
+            EntriesCommand::Split { entry, at } => ask(Operation::EntrySplit {
+                entry: entry.clone(),
+                at: time(at)?,
+            }),
+            EntriesCommand::Rm { entries } => {
+                let count = entries.len();
+                confirm(&format!(
+                    "Delete {count} {}?",
+                    if count == 1 { "entry" } else { "entries" }
+                ))?;
+                ask(Operation::EntriesDelete {
+                    entries: entries.clone(),
+                })
+            }
+            EntriesCommand::Rebuild { range } => {
+                let (from, to) = span(range, "today", today)?;
+                confirm(
+                    "Rebuild entries from recorded activity? Edits to automatic entries in this range are replaced.",
+                )?;
+                ask(Operation::EntriesRebuild { from, to })
+            }
+            EntriesCommand::Export {
+                format,
+                out,
+                range,
+                filter,
+            } => {
+                let format = match format {
+                    Format::Csv => "csv",
+                    Format::Json => "json",
+                };
+                let response = client.request(Operation::EntriesExport {
+                    filter: entry_filter(range, filter, today)?,
+                    format: format.into(),
+                });
+                let Some(content) = response
+                    .data
+                    .as_ref()
+                    .and_then(|data| data["content"].as_str())
+                    .map(str::to_owned)
+                else {
+                    return Err(response);
+                };
+                match out {
+                    Some(path) => {
+                        std::fs::write(path, &content).map_err(|error| {
+                            Response::error(code::FAILED, format!("{}: {error}", path.display()))
+                        })?;
+                        let count = response
+                            .data
+                            .as_ref()
+                            .map_or(Value::Null, |data| data["count"].clone());
+                        Ok(Outcome::Answer(Response::success(json!({
+                            "path": path.display().to_string(),
+                            "count": count,
+                        }))))
+                    }
+                    None if args.json => Ok(Outcome::Answer(response)),
+                    None => Ok(Outcome::Raw(content)),
+                }
+            }
+        },
+        Command::Review { range } => {
+            let mut filter = entry_filter(range, &FilterArgs::default(), today)?;
+            filter.status = Some("pending".into());
+            ask(Operation::EntriesList {
+                filter,
+                limit: 5_000,
+            })
         }
-        Some(Command::InstallPath { .. } | Command::Serve) => unreachable!(),
-    };
-    let endpoint =
-        match data_dir(args).and_then(|data| Endpoint::new(&data, args.runtime_dir.as_deref())) {
-            Ok(endpoint) => endpoint,
-            Err(error) => return (Response::error("INVALID_PATH", error), 1),
-        };
-    match endpoint.call(&Request {
-        protocol_version: protocol::VERSION,
-        operation,
-    }) {
-        Ok(response) => {
-            let exit = i32::from(!response.ok);
-            (response, exit)
+        Command::Report(report) => {
+            let filter = entry_filter(&report.range, &report.filter, today)?;
+            let per = match report.per {
+                Per::Day => "day",
+                Per::Week => "week",
+                Per::Month => "month",
+                Per::Total => "total",
+            };
+            let boundaries =
+                dates::boundaries(filter.start_ms, filter.end_ms, per).map_err(invalid)?;
+            let group_by = match report.by {
+                Group::Project => "project",
+                Group::Client => "client",
+                Group::Category => "category",
+                Group::App => "app",
+                Group::Status => "status",
+                Group::None => "none",
+            };
+            ask(Operation::Report {
+                filter,
+                boundaries,
+                group_by: group_by.into(),
+            })
         }
-        Err(error) => (Response::error("SERVICE_UNAVAILABLE", error), 1),
+        Command::Projects { command } => match command {
+            ProjectsCommand::List => ask(Operation::ProjectsList {}),
+            ProjectsCommand::Show { project } => {
+                let month = dates::named("this-month", today).expect("this-month");
+                ask(Operation::ProjectShow {
+                    project: project.clone(),
+                    range_start: dates::day_start(month.start),
+                    range_end: dates::day_start(month.end),
+                    month_start: dates::day_start(month.start),
+                })
+            }
+            ProjectsCommand::Add { name, fields } => ask(Operation::ProjectCreate {
+                project: NewProject {
+                    client_id: fields.client.clone(),
+                    name: name.clone(),
+                    color: fields
+                        .color
+                        .clone()
+                        .unwrap_or_else(|| render::color_for(name)),
+                    description: fields.description.clone(),
+                    ai_hints: fields.hints.clone(),
+                    status: fields.status.clone(),
+                    due_date: fields.due.as_deref().map(time).transpose()?,
+                    budget_kind: fields.budget_kind.clone(),
+                    budget_value: fields.budget,
+                    budget_period: fields.budget_period.clone(),
+                    billable_default: fields.billable,
+                    hourly_rate: fields.rate,
+                },
+            }),
+            ProjectsCommand::Edit {
+                project,
+                name,
+                fields,
+            } => ask(Operation::ProjectEdit {
+                project: project.clone(),
+                patch: UpdateProject {
+                    client_id: fields
+                        .client
+                        .as_ref()
+                        .map(|client| (client != "none").then(|| client.clone())),
+                    name: name.clone(),
+                    color: fields.color.clone(),
+                    description: fields.description.clone().map(Some),
+                    ai_hints: fields.hints.clone().map(Some),
+                    status: fields.status.clone(),
+                    due_date: fields.due.as_deref().map(time).transpose()?.map(Some),
+                    budget_kind: fields.budget_kind.clone(),
+                    budget_value: fields.budget.map(Some),
+                    budget_period: fields.budget_period.clone(),
+                    billable_default: fields.billable,
+                    hourly_rate: fields.rate.map(Some),
+                },
+            }),
+            ProjectsCommand::Rm { project } => {
+                confirm(&format!("Delete project \"{project}\"?"))?;
+                ask(Operation::ProjectDelete {
+                    project: project.clone(),
+                })
+            }
+        },
+        Command::Clients { command } => match command {
+            ClientsCommand::List => ask(Operation::ClientsList {}),
+            ClientsCommand::Show { client: reference } => ask(Operation::ClientShow {
+                client: reference.clone(),
+            }),
+            ClientsCommand::Add { name, fields } => ask(Operation::ClientCreate {
+                client: NewClient {
+                    name: name.clone(),
+                    email: fields.email.clone(),
+                    address: fields.address.clone(),
+                    default_rate: fields.rate,
+                    currency: fields.currency.clone(),
+                    notes: fields.notes.clone(),
+                },
+            }),
+            ClientsCommand::Edit {
+                client: reference,
+                name,
+                archived,
+                fields,
+            } => ask(Operation::ClientEdit {
+                client: reference.clone(),
+                patch: UpdateClient {
+                    name: name.clone(),
+                    email: fields.email.clone().map(Some),
+                    address: fields.address.clone().map(Some),
+                    default_rate: fields.rate.map(Some),
+                    currency: fields.currency.clone().map(Some),
+                    notes: fields.notes.clone().map(Some),
+                    archived: *archived,
+                },
+            }),
+            ClientsCommand::Rm { client: reference } => {
+                confirm(&format!("Delete client \"{reference}\"?"))?;
+                ask(Operation::ClientDelete {
+                    client: reference.clone(),
+                })
+            }
+        },
+        Command::Categories { command } => match command {
+            CategoriesCommand::List => ask(Operation::CategoriesList {}),
+            CategoriesCommand::Add { name, fields } => ask(Operation::CategoryCreate {
+                category: NewCategory {
+                    name: name.clone(),
+                    color: fields
+                        .color
+                        .clone()
+                        .unwrap_or_else(|| render::color_for(name)),
+                    description: fields.description.clone(),
+                    ai_prompt: None,
+                    billable_default: fields.billable,
+                    counts_as_work: fields.work,
+                    sort: None,
+                },
+            }),
+            CategoriesCommand::Edit {
+                category,
+                name,
+                archived,
+                fields,
+            } => ask(Operation::CategoryEdit {
+                category: category.clone(),
+                patch: UpdateCategory {
+                    name: name.clone(),
+                    color: fields.color.clone(),
+                    description: fields.description.clone(),
+                    ai_prompt: None,
+                    billable_default: fields.billable,
+                    counts_as_work: fields.work,
+                    archived: *archived,
+                    sort: None,
+                },
+            }),
+            CategoriesCommand::Rm { category } => {
+                confirm(&format!("Delete category \"{category}\"?"))?;
+                ask(Operation::CategoryDelete {
+                    category: category.clone(),
+                })
+            }
+        },
+        Command::Settings { command } => match command {
+            SettingsCommand::List => ask(Operation::SettingsGet {}),
+            SettingsCommand::Get { key } => {
+                let response = client.request(Operation::SettingsGet {});
+                let Some(settings) = &response.data else {
+                    return Err(response);
+                };
+                let path = setting_path(key);
+                let value = path
+                    .split('.')
+                    .try_fold(settings, |value, part| value.get(part))
+                    .ok_or_else(|| invalid(format!("unknown setting {key}")))?;
+                Ok(Outcome::Answer(Response::success(value)))
+            }
+            SettingsCommand::Set { key, value } => ask(Operation::SettingsSet {
+                key: setting_path(key),
+                value: serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.clone())),
+            }),
+        },
+        Command::Paths => ask(Operation::Paths {}),
+        Command::InstallPath { .. } | Command::Completions { .. } => unreachable!(),
     }
 }
 
-fn absolute(path: &Path) -> Result<PathBuf, String> {
-    std::path::absolute(path).map_err(|e| e.to_string())
+/// `tracking-hours.start` and `trackingHours.start` name the same setting.
+fn setting_path(key: &str) -> String {
+    key.split('.')
+        .map(|part| {
+            let mut camel = String::with_capacity(part.len());
+            let mut upper = false;
+            for c in part.chars() {
+                if c == '-' || c == '_' {
+                    upper = true;
+                } else if upper {
+                    camel.extend(c.to_uppercase());
+                    upper = false;
+                } else {
+                    camel.push(c);
+                }
+            }
+            camel
+        })
+        .collect::<Vec<_>>()
+        .join(".")
 }
 
-fn data_dir(args: &Args) -> Result<PathBuf, String> {
-    let data = match &args.data_dir {
-        Some(path) => absolute(path)?,
-        None => paths::app_data_dir().ok_or("no home directory; provide --data-dir")?,
-    };
-    // Canonicalize existing stores so symlink/relative aliases reuse the same
-    // service. Missing stores remain missing and yield NO_DATA, not migrations.
-    // Windows canonical paths are verbatim (`\\?\`), which SQLite should not
-    // have to parse, so there the absolute path is the key.
-    if cfg!(unix) {
-        Ok(data.canonicalize().unwrap_or(data))
-    } else {
-        Ok(data)
-    }
+fn span(
+    range: &RangeArgs,
+    default: &str,
+    today: chrono::NaiveDate,
+) -> Result<(u64, u64), Response> {
+    dates::range(
+        range.period.as_deref(),
+        range.from.as_deref(),
+        range.to.as_deref(),
+        range.last.as_deref(),
+        default,
+        today,
+    )
+    .map_err(invalid)
 }
 
-#[cfg(windows)]
-fn install_path(_dir: Option<PathBuf>) -> Result<Data, String> {
-    Err("not available on Windows, where symlinks need extra privileges; `cargo install` already puts rize on PATH".into())
-}
-
-#[cfg(unix)]
-fn install_path(dir: Option<PathBuf>) -> Result<Data, String> {
-    let dir = absolute(&match dir {
-        Some(dir) => dir,
-        None => std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .ok_or("HOME is not set; pass --dir")?
-            .join(".local/bin"),
-    })?;
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let executable = std::env::current_exe()
-        .and_then(|path| path.canonicalize())
-        .map_err(|e| e.to_string())?;
-    let path = dir.join("rize");
-    match std::fs::symlink_metadata(&path) {
-        Ok(meta)
-            if meta.file_type().is_symlink()
-                && std::fs::read_link(&path).ok().as_ref() == Some(&executable) => {}
-        Ok(_) => {
-            return Err(format!(
-                "{} already exists; nothing was replaced",
-                path.display()
-            ))
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            std::os::unix::fs::symlink(&executable, &path).map_err(|e| e.to_string())?;
-        }
-        Err(e) => return Err(e.to_string()),
-    }
-    Ok(Data::Installation {
-        executable: executable.display().to_string(),
-        path: path.display().to_string(),
+fn entry_filter(
+    range: &RangeArgs,
+    filter: &FilterArgs,
+    today: chrono::NaiveDate,
+) -> Result<EntryFilter, Response> {
+    let (start_ms, end_ms) = span(range, "today", today)?;
+    Ok(EntryFilter {
+        start_ms,
+        end_ms,
+        category_id: filter.category.clone(),
+        project_id: filter.project.clone(),
+        client_id: filter.client.clone(),
+        app: filter.app.clone(),
+        status: filter.status.map(|status| {
+            match status {
+                Status::Pending => "pending",
+                Status::Approved => "approved",
+            }
+            .into()
+        }),
+        billable: filter.billable,
+        search: filter.search.clone(),
+        scope: filter.scope.map(|scope| {
+            match scope {
+                Scope::Work => "work",
+                Scope::Agent => "agent",
+                Scope::All => "all",
+            }
+            .into()
+        }),
     })
 }
 
-fn quoted(value: &str) -> String {
-    serde_json::to_string(value).unwrap_or_default()
-}
-
-fn duration(ms: u64) -> String {
-    format!(
-        "{}h {:02}m {:02}.{:03}s",
-        ms / 3_600_000,
-        (ms / 60_000) % 60,
-        (ms / 1000) % 60,
-        ms % 1000
-    )
-}
-
-fn timestamp(ms: u64) -> String {
-    i64::try_from(ms)
-        .ok()
-        .and_then(DateTime::from_timestamp_millis)
-        .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
-        .unwrap_or_else(|| format!("{ms} epoch-ms"))
-}
-
-fn emit(response: &Response, json: bool) {
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string(response).expect("serializable response")
-        );
-        return;
+/// Asks on a terminal; elsewhere only `--yes` goes ahead, so a script never
+/// waits on a prompt or deletes by accident.
+fn confirm(yes: bool, question: &str) -> Result<(), Response> {
+    if yes {
+        return Ok(());
     }
-    if let Some(error) = &response.error {
-        println!("{}: {}", error.code, quoted(&error.message));
-        return;
+    if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
+        return Err(invalid(format!("{question} Pass --yes to confirm.")));
     }
-    match &response.data {
-        Some(Data::Status(status)) => {
-            println!("Stored entries (all time): {}\nPending review: {}\nTracked: {}\nBillable: {}", status.entries, status.pending, duration(status.tracked_ms), duration(status.billable_ms));
-            if status.entries == 0 { println!("0 results"); }
-            println!("Next: rize entries list --from <date> --to <date>");
-        }
-        Some(Data::Entries(page)) => {
-            println!("{} results{}", page.count, if page.truncated { " (truncated; narrow the range or increase --limit, max 500)" } else { "" });
-            for entry in &page.entries {
-                println!("{}  {}  {}  {}", quoted(&entry.id), timestamp(entry.started_at), duration(entry.duration_ms), quoted(&entry.status));
-                if let Some(detail) = &entry.detail {
-                    println!("  description={}{}  project={}  billable={}", quoted(&detail.description), if detail.description_truncated { " (truncated at 4096 characters)" } else { "" }, detail.project_id.as_deref().map(quoted).unwrap_or_else(|| "none".into()), detail.billable);
-                }
-            }
-        }
-        Some(Data::Installation { path, .. }) => println!("Installed {}. Add its directory to PATH if needed; no shell configuration was changed.", quoted(path)),
-        None => {}
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    fn local_midnight(day: u32) -> u64 {
-        let date = NaiveDate::from_ymd_opt(2026, 9, day).unwrap();
-        local(date.and_time(NaiveTime::MIN))
-            .unwrap()
-            .timestamp_millis() as u64
-    }
-
-    #[test]
-    fn dates_and_times() {
-        assert_eq!(
-            parse_from("2026-09-01T01:00:00+01:00").unwrap(),
-            parse_from("2026-09-01T00:00:00Z").unwrap()
-        );
-        assert_eq!(
-            parse_from("2026-09-01T00:00:00").unwrap(),
-            local_midnight(1)
-        );
-        assert_eq!(parse_from("2026-09-01").unwrap(), local_midnight(1));
-        assert_eq!(parse_to("2026-09-01").unwrap(), local_midnight(2) - 1);
-        assert_eq!(parse_to("2026-09-01T00:00:00").unwrap(), local_midnight(1));
-        for value in [
-            "2026-09-32",
-            "09/01/2026",
-            "2026-09-01T00:00:00.0001Z",
-            "1969-01-01T00:00:00Z",
-            "1969-01-01",
-            "2026-09-01T00:00:60Z",
-        ] {
-            assert!(parse_from(value).is_err(), "accepted {value}");
-        }
+    eprint!("{question} [y/N] ");
+    let _ = std::io::stderr().flush();
+    let mut answer = String::new();
+    let _ = std::io::stdin().read_line(&mut answer);
+    if matches!(answer.trim(), "y" | "Y" | "yes") {
+        Ok(())
+    } else {
+        Err(Response::error(code::FAILED, "Nothing was changed."))
     }
 }

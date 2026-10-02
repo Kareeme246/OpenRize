@@ -18,6 +18,10 @@ use crate::APP_IDENTIFIER;
 /// The activity database inside the app data directory.
 pub const DATABASE_FILE: &str = "activity.db";
 
+/// Held exclusively by whichever process owns the stores: the running app for
+/// its whole life, or `rize` while it edits them with the app closed.
+pub const LOCK_FILE: &str = "app.lock";
+
 /// The installed app's data directory, or `None` when the OS has no home.
 pub fn app_data_dir() -> Option<PathBuf> {
     dirs::data_dir().map(|dir| dir.join(APP_IDENTIFIER))

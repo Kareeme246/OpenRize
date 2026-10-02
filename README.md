@@ -172,16 +172,23 @@ categories and settings. The app does the tracking; with it closed, everything e
 still works on the stored data. `rize --help` and [`src-tauri/cli/COMMANDS.md`](src-tauri/cli/COMMANDS.md)
 list the commands.
 
-`rize` ships inside the app from **v0.8.10** on. On macOS, with OpenRize installed, this links it
-into `~/.local/bin` (add that to PATH if needed):
+There are two ways to get it, both from **v0.8.10** on:
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/Kareeme246/OpenRize/main/install.sh | bash
-```
+- **With the app:** `rize` comes bundled inside it. To put it on PATH, run
+  `/Applications/openrize.app/Contents/MacOS/rize install-path`.
+- **On its own** (Apple Silicon macOS):
 
-It downloads nothing, requires OpenRize's Developer ID signature and Apple notarization on the
-`rize` it links, and never replaces existing files or edits shell profiles. On Windows, build the
-app from source and run `rize install-path` from its install folder to add it to your PATH.
+  ```sh
+  curl -fsSL https://raw.githubusercontent.com/Kareeme246/OpenRize/main/install.sh | bash
+  ```
+
+  It takes `rize` out of the latest release's app bundle, requires OpenRize's Developer ID
+  signature and Apple notarization, and installs into `~/.local/bin` (add that to PATH if
+  needed). It never replaces existing files or edits shell profiles.
+
+rize works on the data the app records, so without the app it reports that this machine has no
+rize data. On Windows, build from source: the app bundles `rize.exe`, or
+`./scripts/install-cli.sh` builds just the CLI.
 
 ## Building from source
 

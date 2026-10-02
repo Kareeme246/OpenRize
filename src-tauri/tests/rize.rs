@@ -210,6 +210,7 @@ fn no_data_means_the_app_was_never_installed() {
     fs::remove_file(store.root.join("data/activity.db")).unwrap();
     let output = store.rize(&["entries", "list"]);
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr)
-        .contains("No rize tracking information found. Are you sure you've installed the app?"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains(
+        "This laptop doesn't have any rize data. Are you sure you've installed the app before?"
+    ));
 }

@@ -14,8 +14,12 @@ command, or changes the app command behind one, updates its row here.
   and exits. Everything that reads or edits stored data still works; nothing new is tracked until
   the app runs again, and it picks the edits up at launch. A lock file keeps the app and a
   headless run from ever holding the stores at once.
-- **No data at all:** rize exits with "No rize tracking information found. Are you sure you've
-  installed the app?"
+- **No data at all:** rize exits with "This laptop doesn't have any rize data. Are you sure
+  you've installed the app before?"
+
+There are two ways to get rize: it comes bundled with the app (`rize install-path` puts it on
+PATH), or the curl installer (`install.sh`) installs it on its own. A standalone rize finds the
+installed app when it needs it.
 
 `rize app start` only launches the app (in the background, no window). Tracking is its own
 command: `rize track start`, or `rize app start --track` to do both.

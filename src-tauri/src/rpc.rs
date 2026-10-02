@@ -124,7 +124,7 @@ fn run_headless(args: &[String]) -> Response {
         return Response::error(
             code::NO_DATA,
             format!(
-                "No rize tracking information found in {}. Are you sure you've installed the app?",
+                "This laptop doesn't have any rize data (looked in {}). Are you sure you've installed the app before?",
                 data_dir.display()
             ),
         );

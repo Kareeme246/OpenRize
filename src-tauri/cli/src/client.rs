@@ -21,7 +21,7 @@ const LAUNCH_TIMEOUT: Duration = Duration::from_secs(60);
 const APP_ENV: &str = "RIZE_APP";
 const HEADLESS_ARG: &str = "__rize";
 pub const NO_DATA: &str =
-    "No rize tracking information found. Are you sure you've installed the app?";
+    "This laptop doesn't have any rize data. Are you sure you've installed the app before?";
 
 pub struct Client {
     data_dir: PathBuf,
@@ -83,7 +83,15 @@ impl Client {
         if self.running() {
             return Ok(false);
         }
-        launch(&app_executable()?, show)?;
+        let executable = app_executable().map_err(|error| {
+            if self.data_dir.join(paths::DATABASE_FILE).is_file() {
+                error
+            } else {
+                NO_DATA.into()
+            }
+        })?;
+        check_version(&executable)?;
+        launch(&executable, show)?;
         self.wait_for_app(LAUNCH_TIMEOUT)?;
         Ok(true)
     }
@@ -110,6 +118,7 @@ impl Client {
 
     fn headless(&self, request: &Request) -> Result<Response, String> {
         let executable = app_executable()?;
+        check_version(&executable)?;
         let mut child = Command::new(&executable)
             .arg(HEADLESS_ARG)
             .arg("--data-dir")
@@ -131,23 +140,100 @@ impl Client {
     }
 }
 
-/// The OpenRize binary this rize belongs to: `RIZE_APP`, else the
-/// `openrize` next to rize (inside the app bundle, or in a build directory).
+/// The OpenRize binary to run: `RIZE_APP`, else the `openrize` next to rize
+/// (rize bundled in the app, or a build directory), else the installed app,
+/// for a rize installed on its own.
 pub fn app_executable() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os(APP_ENV) {
         return Ok(PathBuf::from(path));
     }
-    let rize = std::env::current_exe()
+    let name = format!("openrize{}", std::env::consts::EXE_SUFFIX);
+    let sibling = std::env::current_exe()
         .and_then(|path| path.canonicalize())
-        .map_err(|e| e.to_string())?;
-    let sibling = rize.with_file_name(format!("openrize{}", std::env::consts::EXE_SUFFIX));
-    if sibling.is_file() {
-        return Ok(sibling);
+        .map(|rize| rize.with_file_name(&name));
+    sibling
+        .into_iter()
+        .chain(installed_apps())
+        .find(|candidate| candidate.is_file())
+        .ok_or_else(|| {
+            "Could not find the OpenRize app. Install it, or set RIZE_APP to its executable."
+                .to_string()
+        })
+}
+
+/// Where an installed OpenRize usually lives.
+#[cfg(target_os = "macos")]
+fn installed_apps() -> Vec<PathBuf> {
+    let executable = |app: PathBuf| app.join("Contents/MacOS/openrize");
+    let mut apps = vec![executable(PathBuf::from("/Applications/openrize.app"))];
+    if let Some(home) = std::env::var_os("HOME") {
+        apps.push(executable(
+            PathBuf::from(home).join("Applications/openrize.app"),
+        ));
     }
-    Err(format!(
-        "{NO_DATA} (looked for {} next to rize)",
-        sibling.display()
-    ))
+    // Anywhere else Spotlight knows the app to be.
+    if let Ok(found) = Command::new("/usr/bin/mdfind")
+        .arg(format!(
+            "kMDItemCFBundleIdentifier == '{}'",
+            openrize_core::APP_IDENTIFIER
+        ))
+        .output()
+    {
+        apps.extend(
+            String::from_utf8_lossy(&found.stdout)
+                .lines()
+                .map(|line| executable(PathBuf::from(line))),
+        );
+    }
+    apps
+}
+
+/// The per-user install folder the Windows installer uses, then a machine-wide one.
+#[cfg(windows)]
+fn installed_apps() -> Vec<PathBuf> {
+    ["LOCALAPPDATA", "ProgramFiles"]
+        .iter()
+        .filter_map(std::env::var_os)
+        .map(|base| PathBuf::from(base).join("openrize").join("openrize.exe"))
+        .collect()
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+fn installed_apps() -> Vec<PathBuf> {
+    Vec::new()
+}
+
+/// The first app version that answers rize (`openrize __rize`). An older
+/// app would just open its window, so rize never runs one.
+const FIRST_RIZE_VERSION: (u64, u64, u64) = (0, 8, 10);
+
+/// Refuses an installed app too old to answer rize. Only a macOS bundle
+/// records its version; elsewhere rize is built with its app.
+fn check_version(executable: &Path) -> Result<(), String> {
+    let Some(bundle) = bundle(executable).filter(|_| cfg!(target_os = "macos")) else {
+        return Ok(());
+    };
+    let output = Command::new("/usr/bin/defaults")
+        .arg("read")
+        .arg(bundle.join("Contents/Info"))
+        .arg("CFBundleShortVersionString")
+        .output()
+        .map_err(|e| e.to_string())?;
+    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let parts: Vec<u64> = version
+        .split('.')
+        .filter_map(|part| part.parse().ok())
+        .collect();
+    match parts.as_slice() {
+        [major, minor, patch] if (*major, *minor, *patch) >= FIRST_RIZE_VERSION => Ok(()),
+        _ => Err(format!(
+            "The OpenRize app at {} is version {version}, too old for rize. Update the app to v{}.{}.{} or later.",
+            bundle.display(),
+            FIRST_RIZE_VERSION.0,
+            FIRST_RIZE_VERSION.1,
+            FIRST_RIZE_VERSION.2
+        )),
+    }
 }
 
 /// The `.app` bundle an executable sits in, if any.

@@ -84,7 +84,7 @@ fn without_any_data_rize_says_the_app_is_missing() {
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(
         String::from_utf8_lossy(&output.stderr).trim(),
-        "No rize tracking information found. Are you sure you've installed the app?"
+        "This laptop doesn't have any rize data. Are you sure you've installed the app before?"
     );
     let (envelope, _) = fixture.json(&["status"]);
     assert_eq!(code(&envelope), "NO_DATA");

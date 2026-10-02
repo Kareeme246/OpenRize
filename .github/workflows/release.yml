@@ -110,8 +110,8 @@ jobs:
           spctl --assess --type execute --verbose=2 "$app"
           xcrun stapler validate "$app"
 
-      # install.sh links the rize inside the installed app only under this
-      # exact requirement, so check it here first.
+      # install.sh extracts the CLI from the updater's openrize.app.tar.gz and
+      # accepts it only under this exact requirement, so check it here first.
       - name: Verify the bundled CLI passes the installer's check
         run: |
           cli=src-tauri/target/release/bundle/macos/openrize.app/Contents/MacOS/rize

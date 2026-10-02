@@ -2,6 +2,8 @@
 //! carries idle vs active. Left click opens the Pulse panel (pulse.rs); right
 //! click opens the native menu with the running timers, Open, and Quit.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuBuilder, MenuEvent, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
@@ -35,16 +37,40 @@ const MAX_LABEL_CHARS: usize = 32;
 /// 44px is deliberate: macOS draws the tray glyph at 18pt, so a 44px bitmap
 /// stays crisp on retina where the old 22px one was blurry.
 fn glyph(active: bool) -> Image<'static> {
-    let template = if active {
-        tauri::include_image!("icons/tray-active.png")
-    } else {
-        tauri::include_image!("icons/tray-idle.png")
+    let template = match (active, REVIEW_DOT.load(Ordering::Relaxed)) {
+        (true, false) => tauri::include_image!("icons/tray-active.png"),
+        (false, false) => tauri::include_image!("icons/tray-idle.png"),
+        (true, true) => tauri::include_image!("icons/tray-active-dot.png"),
+        (false, true) => tauri::include_image!("icons/tray-idle-dot.png"),
     };
     #[cfg(windows)]
     if !taskbar_is_light() {
         return whitened(&template);
     }
     template
+}
+
+/// Whether the glyph carries the review dot: an agent needs the person, or
+/// has finished and waits to be looked at. The `-dot` images are the same
+/// glyphs with a dot in the top right corner (a ring is cut out around it so
+/// it reads on any menu bar).
+static REVIEW_DOT: AtomicBool = AtomicBool::new(false);
+
+/// Shows or hides the review dot. A no-op while the state is unchanged.
+pub fn set_review_dot(app: &AppHandle, dot: bool) {
+    if REVIEW_DOT.swap(dot, Ordering::Relaxed) == dot {
+        return;
+    }
+    let timers = app
+        .state::<AppState>()
+        .store
+        .lock()
+        .ok()
+        .and_then(|store| store.snapshot().ok())
+        .unwrap_or_default();
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_icon_with_as_template(Some(glyph(any_running(&timers))), true);
+    }
 }
 
 /// Windows draws tray icons as they are, so the black template is painted

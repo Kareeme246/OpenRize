@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { AgentReport, Board, DayThreads, ExtensionStatus } from "./agents";
 import type { BreakEntry, BreakState } from "./breaks";
 import type { LoginItemState, Settings, StoragePaths } from "./settings";
 import type { Timer } from "./timers";
@@ -59,6 +60,9 @@ export const UPDATE_STATUS = "update-status";
 export const OPEN_BREAK_SETTINGS = "open-break-settings";
 /** Payload: `BreakState`. */
 export const BREAK_STATE_CHANGED = "break-state-changed";
+/** Payload: `Board`. */
+export const AGENTS_CHANGED = "agents-changed";
+export const EXTENSIONS_CHANGED = "extensions-changed";
 
 /** Tauri rejects with a string; React errors are Error objects. Handle both. */
 export function describeError(error: unknown): string {
@@ -90,6 +94,42 @@ export async function setLaunchAtLogin(
   enabled: boolean,
 ): Promise<LoginItemState> {
   return await invoke<LoginItemState>("set_launch_at_login", { enabled });
+}
+
+// --- Agents ---
+
+/** Re-detects tools first, so one installed since launch is picked up. */
+export async function listExtensions(): Promise<ExtensionStatus[]> {
+  return await invoke<ExtensionStatus[]>("list_extensions");
+}
+
+export async function agentBoard(): Promise<Board> {
+  return await invoke<Board>("agent_board");
+}
+
+export async function agentReport(
+  startMs: number,
+  endMs: number,
+): Promise<AgentReport> {
+  return await invoke<AgentReport>("agent_report", { startMs, endMs });
+}
+
+/** Counts an agent turn the person did not supervise. */
+export async function confirmAgentJob(id: string): Promise<void> {
+  await invoke("confirm_agent_job", { id });
+}
+
+/** Counted agent time as entries, kept out of `listTimeEntries`. */
+export async function listAgentEntries(
+  startMs: number,
+  endMs: number,
+): Promise<TimeEntry[]> {
+  return await invoke<TimeEntry[]>("list_agent_entries", { startMs, endMs });
+}
+
+/** Each day's threads between consecutive boundaries. */
+export async function threadDays(boundaries: number[]): Promise<DayThreads[]> {
+  return await invoke<DayThreads[]>("thread_days", { boundaries });
 }
 
 // --- Pulse panel ---

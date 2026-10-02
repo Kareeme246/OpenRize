@@ -136,6 +136,17 @@ export interface InvoiceLine {
   unit: string;
   rateCents: number;
   amountCents: number;
+  /** Agent time rather than time the person spent. */
+  agent: boolean;
+}
+
+/** How one project's invoiced time divides between you and your agents. */
+export interface ProjectSplit {
+  projectName: string;
+  youMs: number;
+  agentsMs: number;
+  /** As it prints, e.g. `OpenRize · 1h52m (you 45m · agents 1h07m)`. */
+  label: string;
 }
 
 /** A row of the invoice list. Money is integer USD cents throughout. */
@@ -169,6 +180,8 @@ export interface Invoice extends InvoiceSummary {
   notes?: string | null;
   paymentInstructions?: string | null;
   lines: InvoiceLine[];
+  /** Only projects where agents contributed time. */
+  splits: ProjectSplit[];
 }
 
 export interface InvoiceLineInput {
@@ -215,6 +228,8 @@ export interface BillableEntry {
   rateCents?: number | null;
   amountCents?: number | null;
   onThisInvoice: boolean;
+  /** Agent time rather than time the person spent. */
+  agent: boolean;
 }
 
 export interface InvoiceProfile {
@@ -550,6 +565,8 @@ export interface EntryFilters {
   status?: "pending" | "approved";
   billable?: boolean;
   search?: string;
+  /** `work` (default) leaves agent entries out; `agent` is only them. */
+  scope?: "work" | "agent" | "all";
 }
 
 export type Route =
@@ -656,6 +673,8 @@ export interface ProjectStats {
   unbilledMs: number;
   unbilledEntries: number;
   lastActivity?: number | null;
+  /** Counted agent time, on top of `totalMs` and never part of it. */
+  agentMs: number;
 }
 
 export interface ProjectRule {

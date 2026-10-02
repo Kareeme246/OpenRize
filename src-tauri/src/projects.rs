@@ -220,6 +220,7 @@ pub fn preview_hints(conn: &Connection, hints: &str, since_ms: u64) -> Result<Hi
 pub struct ProjectStats {
     pub project_id: String,
     pub entries: u32,
+    /// The person's own time: agent entries are not part of it.
     pub total_ms: u64,
     /// Time in the page's selected range (the Time column).
     pub range_ms: u64,
@@ -231,6 +232,9 @@ pub struct ProjectStats {
     pub unbilled_ms: u64,
     pub unbilled_entries: u32,
     pub last_activity: Option<u64>,
+    /// Counted agent time on the project, on top of the person's own. It is in
+    /// the billable and unbilled figures but never in the work totals above.
+    pub agent_ms: u64,
 }
 
 /// Totals for every project with at least one entry. Budgets are derived in
@@ -244,15 +248,16 @@ pub fn project_stats(
     let mut stmt = conn
         .prepare(
             "SELECT project_id,
-                    COUNT(*),
-                    SUM(ended_at - started_at),
-                    SUM(CASE WHEN started_at >= ?1 AND started_at < ?2 THEN ended_at - started_at ELSE 0 END),
-                    SUM(CASE WHEN started_at >= ?3 THEN ended_at - started_at ELSE 0 END),
+                    SUM(CASE WHEN source != 'agent' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN source != 'agent' THEN ended_at - started_at ELSE 0 END),
+                    SUM(CASE WHEN source != 'agent' AND started_at >= ?1 AND started_at < ?2 THEN ended_at - started_at ELSE 0 END),
+                    SUM(CASE WHEN source != 'agent' AND started_at >= ?3 THEN ended_at - started_at ELSE 0 END),
                     SUM(CASE WHEN billable = 1 THEN ended_at - started_at ELSE 0 END),
                     SUM(CASE WHEN billable = 1 AND started_at >= ?3 THEN ended_at - started_at ELSE 0 END),
                     MAX(ended_at),
                     SUM(CASE WHEN status = 'approved' AND billable = 1 AND invoice_id IS NULL THEN ended_at - started_at ELSE 0 END),
-                    SUM(CASE WHEN status = 'approved' AND billable = 1 AND invoice_id IS NULL THEN 1 ELSE 0 END)
+                    SUM(CASE WHEN status = 'approved' AND billable = 1 AND invoice_id IS NULL THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN source = 'agent' THEN ended_at - started_at ELSE 0 END)
              FROM time_entries
              WHERE deleted_at IS NULL AND project_id IS NOT NULL
              GROUP BY project_id;",
@@ -276,6 +281,7 @@ pub fn project_stats(
                     last_activity: row.get::<_, Option<i64>>(7)?.map(|v| v as u64),
                     unbilled_ms: ms(8)?,
                     unbilled_entries: row.get::<_, i64>(9)?.max(0) as u32,
+                    agent_ms: ms(10)?,
                 })
             },
         )
@@ -1219,5 +1225,30 @@ mod tests {
             )
             .unwrap();
         assert_eq!(cleared.due_date, None);
+    }
+
+    #[test]
+    fn agent_time_is_billable_but_never_part_of_a_projects_work_total() {
+        let mut store = store();
+        let project = store
+            .create_project(new_project("OpenRize", None), 1)
+            .unwrap();
+        let conn = store.conn();
+        for (id, source, minutes) in [("you", "auto", 60u64), ("bot", "agent", 30)] {
+            conn.execute(
+                "INSERT INTO time_entries (id, started_at, ended_at, description, project_id, status, source, billable, created_at, updated_at)
+                 VALUES (?1, 0, ?2, 'Work', ?3, 'approved', ?4, 1, 0, 0);",
+                params![id, (minutes * MIN) as i64, project.id, source],
+            )
+            .unwrap();
+        }
+
+        let stats = project_stats(conn, 0, 24 * 60 * MIN, 0).unwrap();
+        let found = stats.iter().find(|s| s.project_id == project.id).unwrap();
+
+        assert_eq!(found.total_ms, 60 * MIN);
+        assert_eq!(found.entries, 1);
+        assert_eq!(found.agent_ms, 30 * MIN);
+        assert_eq!(found.unbilled_ms, 90 * MIN);
     }
 }

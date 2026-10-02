@@ -1120,12 +1120,15 @@ fn persist(
     let threshold = f64::from(settings.auto_accept_percent) / 100.0;
     let clears =
         |decision: &Option<Decision>| decision.as_ref().is_some_and(|d| d.confidence >= threshold);
-    let untouched = category_id.is_none() && project_id.is_none();
+    // A stretch carved out for an agent's pane already has its project, from
+    // the agent's folder: only its category is left to decide.
+    let carved = entry_id.starts_with(crate::entry_builder::CARVE_ID_PREFIX);
+    let untouched = category_id.is_none() && (project_id.is_none() || carved);
     let auto = status != "building"
         && settings.auto_accept
         && untouched
         && clears(&outcome.category)
-        && (!outcome.want_project || clears(&outcome.project));
+        && (!outcome.want_project || carved || clears(&outcome.project));
     let auto_outcome = auto.then_some("auto");
 
     let mut payload = serde_json::Map::new();

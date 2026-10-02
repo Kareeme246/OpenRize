@@ -214,6 +214,11 @@ export interface Settings {
   weeklyTargetHours: number;
   trackingHours: TrackingHours;
   breaks: BreakSettings;
+  /**
+   * Extensions the person chose by hand, by id. An absent id follows
+   * auto-detection: a tool found on this Mac is on until they turn it off.
+   */
+  extensions: Record<string, boolean>;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -231,6 +236,7 @@ export const DEFAULT_SETTINGS: Settings = {
   weeklyTargetHours: 40,
   trackingHours: DEFAULT_TRACKING_HOURS,
   breaks: DEFAULT_BREAK_SETTINGS,
+  extensions: {},
 };
 
 /** A working day's share of the weekly target, in milliseconds. */

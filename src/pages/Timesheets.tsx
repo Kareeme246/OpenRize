@@ -13,6 +13,7 @@ import {
 import { useCatalog } from "../hooks/useCatalog";
 import { useSettings } from "../hooks/useSettings";
 import { useTauriEvent } from "../hooks/useTauriEvent";
+import type { AgentReport } from "../lib/agents";
 import * as api from "../lib/api";
 import {
   dayEdges,
@@ -31,6 +32,7 @@ import {
   summarize,
 } from "../lib/timesheetGrid";
 import type { Route, TimeEntry, TimesheetFilters } from "../lib/types";
+import { AgentSplit } from "./timesheets/AgentSplit";
 import { DaySummary } from "./timesheets/DaySummary";
 import { FilterBar } from "./timesheets/FilterBar";
 import { SheetGrid } from "./timesheets/SheetGrid";
@@ -86,6 +88,7 @@ export function Timesheets({
     end: number;
     entries: TimeEntry[];
   } | null>(null);
+  const [agents, setAgents] = useState<AgentReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -94,9 +97,14 @@ export function Timesheets({
   shown.current = `${start}-${end}`;
   const refresh = useCallback(async (): Promise<void> => {
     try {
-      const next = await api.listTimeEntries(start, end - 1);
+      const [next, report] = await Promise.all([
+        api.listTimeEntries(start, end - 1),
+        // The agent figures are a bonus: a failure never blocks the sheet.
+        api.agentReport(start, end).catch(() => null),
+      ]);
       if (shown.current !== `${start}-${end}`) return;
       setLoaded({ start, end, entries: next });
+      setAgents(report);
       setError(null);
     } catch (cause) {
       if (shown.current === `${start}-${end}`) {
@@ -109,6 +117,7 @@ export function Timesheets({
   }, [refresh]);
   useTauriEvent(api.ENTRIES_CHANGED, () => void refresh());
   useTauriEvent(api.SUGGESTION_READY, () => void refresh());
+  useTauriEvent(api.AGENTS_CHANGED, () => void refresh());
 
   // Until the new range arrives, the grid keeps drawing the last one.
   const shownEdges = useMemo(
@@ -262,6 +271,9 @@ export function Timesheets({
               }
               onApprove={(entry) => void approve(entry)}
             />
+            {agents && !filtered && (
+              <AgentSplit report={agents} projectById={catalog.projectById} />
+            )}
           </div>
         )}
       </div>

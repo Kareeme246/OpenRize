@@ -31,6 +31,8 @@ interface WeekViewProps {
   projectById: Map<string, Project>;
   onSelect: (id: string) => void;
   onOpenDay: (date: string) => void;
+  /** Counted agent time per day (Monday first): a ghost beside the total. */
+  agentMsByDay?: number[];
   now?: number;
 }
 
@@ -48,6 +50,7 @@ export function WeekView({
   projectById,
   onSelect,
   onOpenDay,
+  agentMsByDay,
   now: propsNow,
 }: WeekViewProps) {
   const clockNow = useMinuteClock();
@@ -138,6 +141,14 @@ export function WeekView({
                 </div>
                 <div className="mt-0.5 flex items-center gap-1.5 truncate font-mono text-[10.5px] text-fg-faint tabular-nums">
                   {column.totalMs > 0 ? formatDuration(column.totalMs) : "–"}
+                  {(agentMsByDay?.[columns.indexOf(column)] ?? 0) > 0 && (
+                    <span className="font-sans text-fg-faint opacity-70">
+                      +
+                      {formatDuration(
+                        agentMsByDay?.[columns.indexOf(column)] ?? 0,
+                      )}
+                    </span>
+                  )}
                   {column.pending > 0 && (
                     <span className="rounded-full bg-review/15 px-1.5 font-sans font-semibold text-review">
                       {column.pending}

@@ -45,6 +45,71 @@ pub struct InvoiceLine {
     pub unit: String,
     pub rate_cents: i64,
     pub amount_cents: i64,
+    /// A time line whose entry is agent time (counted by the agent bridge)
+    /// rather than time the person spent.
+    pub agent: bool,
+}
+
+/// How one project's time on an invoice divides between the person and
+/// their agents. Only projects with agent time have one.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSplit {
+    pub project_name: String,
+    pub you_ms: u64,
+    pub agents_ms: u64,
+    /// The line as it prints, e.g. `OpenRize · 1h52m (you 45m · agents 1h07m)`.
+    pub label: String,
+}
+
+/// `1h07m`, `1h`, `45m`: whole minutes, rounded to the nearest.
+pub fn format_span(ms: u64) -> String {
+    let minutes = (ms + 30_000) / 60_000;
+    match (minutes / 60, minutes % 60) {
+        (0, m) => format!("{m}m"),
+        (h, 0) => format!("{h}h"),
+        (h, m) => format!("{h}h{m:02}m"),
+    }
+}
+
+/// The you/agents split per project over an invoice's time lines, in the order
+/// the projects first appear. Rust owns the arithmetic; nothing downstream
+/// recomputes it.
+pub fn splits_of(lines: &[InvoiceLine]) -> Vec<ProjectSplit> {
+    let mut order: Vec<&str> = Vec::new();
+    let mut totals: std::collections::HashMap<&str, (u64, u64)> = std::collections::HashMap::new();
+    for line in lines.iter().filter(|line| line.kind == "time") {
+        let (Some(start), Some(end)) = (line.started_at, line.ended_at) else {
+            continue;
+        };
+        let duration = end.saturating_sub(start);
+        let slot = totals.entry(line.project_name.as_str()).or_insert_with(|| {
+            order.push(line.project_name.as_str());
+            (0, 0)
+        });
+        if line.agent {
+            slot.1 += duration;
+        } else {
+            slot.0 += duration;
+        }
+    }
+    order
+        .into_iter()
+        .filter_map(|name| {
+            let (you_ms, agents_ms) = totals[name];
+            (agents_ms > 0).then(|| ProjectSplit {
+                project_name: name.to_owned(),
+                you_ms,
+                agents_ms,
+                label: format!(
+                    "{name} · {} (you {} · agents {})",
+                    format_span(you_ms + agents_ms),
+                    format_span(you_ms),
+                    format_span(agents_ms)
+                ),
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -83,6 +148,8 @@ pub struct Invoice {
     pub notes: Option<String>,
     pub payment_instructions: Option<String>,
     pub lines: Vec<InvoiceLine>,
+    /// Present only when agents contributed time: see `ProjectSplit`.
+    pub splits: Vec<ProjectSplit>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -134,6 +201,8 @@ pub struct BillableEntry {
     pub amount_cents: Option<i64>,
     /// Already on the draft being edited.
     pub on_this_invoice: bool,
+    /// Agent time rather than time the person spent.
+    pub agent: bool,
 }
 
 const SUMMARY_COLUMNS: &str = "id, number, client_id, client_name, status, currency,
@@ -189,15 +258,19 @@ pub fn get(conn: &Connection, id: &str) -> Result<Invoice, String> {
                     from_email: row.get(20)?,
                     from_phone: row.get(21)?,
                     lines: Vec::new(),
+                    splits: Vec::new(),
                 })
             },
         )
         .map_err(|_| "Invoice not found".to_string())?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, kind, entry_id, project_name, description, started_at, ended_at,
-                    quantity_hundredths, unit, rate_cents, amount_cents
-             FROM invoice_lines WHERE invoice_id = ?1 ORDER BY position",
+            "SELECT l.id, l.kind, l.entry_id, l.project_name, l.description, l.started_at,
+                    l.ended_at, l.quantity_hundredths, l.unit, l.rate_cents, l.amount_cents,
+                    COALESCE(e.source = 'agent', 0)
+             FROM invoice_lines l
+             LEFT JOIN time_entries e ON e.id = l.entry_id
+             WHERE l.invoice_id = ?1 ORDER BY l.position",
         )
         .map_err(err)?;
     invoice.lines = stmt
@@ -214,11 +287,13 @@ pub fn get(conn: &Connection, id: &str) -> Result<Invoice, String> {
                 unit: row.get(8)?,
                 rate_cents: row.get(9)?,
                 amount_cents: row.get(10)?,
+                agent: row.get::<_, i64>(11)? != 0,
             })
         })
         .map_err(err)?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(err)?;
+    invoice.splits = splits_of(&invoice.lines);
     Ok(invoice)
 }
 
@@ -238,7 +313,8 @@ pub fn billable_entries(
     let mut stmt = conn
         .prepare(
             "SELECT e.id, p.id, p.name, e.description, e.started_at, e.ended_at,
-                    COALESCE(p.hourly_rate, c.default_rate), e.invoice_id
+                    COALESCE(p.hourly_rate, c.default_rate), e.invoice_id,
+                    e.source = 'agent'
              FROM time_entries e
              JOIN projects p ON p.id = e.project_id
              JOIN clients c ON c.id = p.client_id
@@ -266,13 +342,14 @@ pub fn billable_entries(
                     ended,
                     rate,
                     linked.is_some(),
+                    row.get::<_, bool>(8)?,
                 ))
             },
         )
         .map_err(err)?;
     let mut entries = Vec::new();
     for row in rows {
-        let (entry_id, project_id, project_name, description, started, ended, rate, linked) =
+        let (entry_id, project_id, project_name, description, started, ended, rate, linked, agent) =
             row.map_err(err)?;
         let quantity = hours_hundredths(ended - started);
         let rate_cents = rate.and_then(rate_to_cents);
@@ -287,6 +364,7 @@ pub fn billable_entries(
             amount_cents: rate_cents.and_then(|r| line_amount_cents(quantity, r).ok()),
             rate_cents,
             on_this_invoice: linked,
+            agent,
         });
     }
     Ok(entries)
@@ -398,6 +476,7 @@ fn resolve(conn: &Connection, input: &DraftInput) -> Result<Invoice, String> {
         subject,
         notes,
         payment_instructions: payment,
+        splits: splits_of(&lines),
         lines,
     })
 }
@@ -447,6 +526,7 @@ fn resolve_fixed_line(line: &LineInput, index: usize) -> Result<InvoiceLine, Str
         unit,
         rate_cents: rate,
         amount_cents: line_amount_cents(quantity, rate)?,
+        agent: false,
     })
 }
 
@@ -464,10 +544,10 @@ fn resolve_time_line(
     if !seen.insert(entry_id.to_owned()) {
         return Err("The same time entry is on this invoice twice".into());
     }
-    let row: Option<(String, i64, i64, String, Option<f64>)> = conn
+    let row: Option<(String, i64, i64, String, Option<f64>, bool)> = conn
         .query_row(
             "SELECT p.name, e.started_at, e.ended_at, e.description,
-                    COALESCE(p.hourly_rate, c.default_rate)
+                    COALESCE(p.hourly_rate, c.default_rate), e.source = 'agent'
              FROM time_entries e
              JOIN projects p ON p.id = e.project_id
              JOIN clients c ON c.id = p.client_id
@@ -482,12 +562,13 @@ fn resolve_time_line(
                     row.get(2)?,
                     row.get(3)?,
                     row.get(4)?,
+                    row.get(5)?,
                 ))
             },
         )
         .optional()
         .map_err(err)?;
-    let (project_name, started, ended, entry_description, default_rate) = row.ok_or(
+    let (project_name, started, ended, entry_description, default_rate, agent) = row.ok_or(
         "A time entry is no longer available to invoice (it may be on another invoice or changed)",
     )?;
     if ended <= started {
@@ -516,6 +597,7 @@ fn resolve_time_line(
         unit: "hrs".into(),
         rate_cents: rate,
         amount_cents: line_amount_cents(quantity, rate)?,
+        agent,
     })
 }
 
@@ -695,7 +777,8 @@ fn paper(
                     .and_then(|ms| chrono::Local.timestamp_millis_opt(ms as i64).single())
                     .map(|t| format_date(t.date_naive()))
                     .unwrap_or_default();
-                format!("{} · {day}", line.project_name)
+                let who = if line.agent { " · agents" } else { "" };
+                format!("{} · {day}{who}", line.project_name)
             }),
             quantity_hundredths: line.quantity_hundredths,
             unit: line.unit.clone(),
@@ -716,6 +799,11 @@ fn paper(
         bill_to_lines,
         lines,
         subtotal_cents: invoice.summary.total_cents,
+        splits: invoice
+            .splits
+            .iter()
+            .map(|split| split.label.clone())
+            .collect(),
         payment_instructions: invoice.payment_instructions.clone(),
         notes: invoice.notes.clone(),
     })

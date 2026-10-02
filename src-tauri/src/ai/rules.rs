@@ -118,6 +118,15 @@ pub struct RuleHit {
     pub coverage: f64,
 }
 
+/// The project the most specific project rule gives one segment, if any.
+pub fn project_of(rules: &[Rule], segment: &ActivitySegment) -> Option<String> {
+    rules
+        .iter()
+        .filter(|rule| rule.project_id.is_some() && rule.matches(segment))
+        .max_by_key(|rule| (rule.specificity(), rule.priority))
+        .and_then(|rule| rule.project_id.clone())
+}
+
 /// The rule outcome for one field, or `None` when no value covers enough of
 /// the entry.
 pub fn evaluate(rules: &[Rule], segments: &[ActivitySegment], field: Field) -> Option<RuleHit> {

@@ -522,6 +522,7 @@ fn paper_fixture(lines: Vec<PaperLine>, logo: bool, number: Option<&str>) -> Pap
         bill_to_lines: vec!["Accounts Payable Contact".into(), "123 Main St.".into()],
         lines,
         subtotal_cents: subtotal,
+        splits: Vec::new(),
         payment_instructions: Some("ACH: routing 000000000, account 000000000".into()),
         notes: Some("Thank you for your business.".into()),
     }
@@ -629,4 +630,74 @@ fn renders_short_long_unicode_and_draft_specimens() {
         assert!(bytes.starts_with(b"%PDF-"));
     }
     assert!(pdf::render(&paper_fixture(vec![], false, None)).is_err());
+}
+
+#[test]
+fn agent_time_is_billed_as_its_own_lines_and_the_split_is_computed_in_rust() {
+    let mut conn = db();
+    entry(
+        &conn,
+        "ag",
+        "p",
+        10 * HOUR,
+        10 * HOUR + 67 * 60_000,
+        "approved",
+        true,
+    );
+    conn.execute(
+        "UPDATE time_entries SET source = 'agent' WHERE id = 'ag'",
+        [],
+    )
+    .unwrap();
+
+    let saved = save_draft(&mut conn, &draft(None, vec![time("e1"), time("ag")]), 1).unwrap();
+
+    let agent_line = saved
+        .lines
+        .iter()
+        .find(|l| l.entry_id.as_deref() == Some("ag"))
+        .unwrap();
+    assert!(agent_line.agent);
+    assert!(!saved.lines[0].agent);
+    // 1h at $100 plus 1.12h (1h07m rounded to hundredths) at $100.
+    assert_eq!(saved.summary.total_cents, 10_000 + 11_200);
+    assert_eq!(
+        saved.splits,
+        vec![ProjectSplit {
+            project_name: "Swap".into(),
+            you_ms: HOUR as u64,
+            agents_ms: 67 * 60_000,
+            label: "Swap · 2h07m (you 1h · agents 1h07m)".into(),
+        }]
+    );
+    // The split survives a reload and prints on the paper.
+    let reloaded = get(&conn, &saved.summary.id).unwrap();
+    assert_eq!(reloaded.splits, saved.splits);
+    let paper = paper(&reloaded, None, None).unwrap();
+    assert_eq!(
+        paper.splits,
+        vec!["Swap · 2h07m (you 1h · agents 1h07m)".to_string()]
+    );
+    assert!(paper.lines[1]
+        .detail
+        .as_deref()
+        .unwrap()
+        .ends_with(" · agents"));
+    assert!(pdf::render(&paper).unwrap().starts_with(b"%PDF-"));
+}
+
+#[test]
+fn an_invoice_without_agent_time_has_no_split() {
+    let conn = db();
+    let quoted = quote(&conn, &draft(None, vec![time("e1"), time("e2")])).unwrap();
+    assert!(quoted.splits.is_empty());
+}
+
+#[test]
+fn spans_read_as_hours_and_minutes() {
+    assert_eq!(format_span(0), "0m");
+    assert_eq!(format_span(45 * 60_000), "45m");
+    assert_eq!(format_span(60 * 60_000), "1h");
+    assert_eq!(format_span(67 * 60_000 + 20_000), "1h07m");
+    assert_eq!(format_span(112 * 60_000), "1h52m");
 }

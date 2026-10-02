@@ -633,8 +633,122 @@ pub fn rebuild_time_entries(
         let mut store = state.activity.lock().map_err(|e| e.to_string())?;
         store.rebuild_time_entries_in_range(start_ms, end_ms, now)?
     };
+    // A past day may never have had its agent time written: recompute the
+    // days the range touches (the sessions it just rebuilt are its basis).
+    refresh_agent_days(&app, start_ms, end_ms, now);
     entries_changed(&app);
     Ok(entries)
+}
+
+/// Recomputes the agent ledger of every calendar day in `[start, end]`.
+fn refresh_agent_days(app: &AppHandle, start_ms: u64, end_ms: u64, now: u64) {
+    let auto_accept = app.state::<AppState>().settings_snapshot().auto_accept;
+    let state = app.state::<AppState>();
+    let Ok(mut store) = state.activity.lock() else {
+        return;
+    };
+    let mut cursor = start_ms;
+    // At most two weeks, so a stray wide range cannot stall the store.
+    for _ in 0..16 {
+        let (day_start, day_end) = crate::agents::ledger::calendar_day(cursor);
+        if let Err(error) =
+            crate::agents::ledger::refresh(store.conn_mut(), day_start, day_end, now, auto_accept)
+        {
+            eprintln!("agent ledger: {error}");
+        }
+        if day_end > end_ms {
+            break;
+        }
+        cursor = day_end;
+    }
+}
+
+// --- Agents -------------------------------------------------------------
+
+/// The extensions with fresh detection. Asking also nudges the bridge to pick
+/// up a tool that was just installed.
+#[tauri::command]
+pub fn list_extensions(app: AppHandle) -> Vec<crate::agents::ExtensionStatus> {
+    crate::agents::recheck(&app);
+    crate::agents::extensions(&app)
+}
+
+#[tauri::command]
+pub fn agent_board(app: AppHandle) -> Result<crate::agents::Board, String> {
+    crate::agents::board(&app)
+}
+
+/// Jobs, counted agent time and what was left out, for `[start_ms, end_ms)`.
+#[tauri::command]
+pub fn agent_report(
+    app: AppHandle,
+    start_ms: u64,
+    end_ms: u64,
+) -> Result<crate::agents::ledger::Report, String> {
+    let state = app.state::<AppState>();
+    let reader = state
+        .activity_reader
+        .lock()
+        .map_err(|_| "reader lock poisoned".to_string())?;
+    crate::agents::ledger::report(&reader, start_ms, end_ms, now_epoch_ms())
+}
+
+/// Each day's threads (per-project visits, agent rails, focus stats) for the
+/// days between consecutive `boundaries`.
+#[tauri::command]
+pub fn thread_days(
+    app: AppHandle,
+    boundaries: Vec<u64>,
+) -> Result<Vec<crate::threads::DayThreads>, String> {
+    if boundaries.len() < 2 || boundaries.len() > crate::threads::MAX_DAYS + 1 {
+        return Err(format!(
+            "expected 2 to {} day boundaries",
+            crate::threads::MAX_DAYS + 1
+        ));
+    }
+    let state = app.state::<AppState>();
+    let reader = state
+        .activity_reader
+        .lock()
+        .map_err(|_| "reader lock poisoned".to_string())?;
+    let now = now_epoch_ms();
+    boundaries
+        .windows(2)
+        .map(|pair| {
+            if pair[1] <= pair[0] {
+                return Err("day boundaries must increase".to_string());
+            }
+            crate::threads::day(&reader, pair[0], pair[1], now)
+        })
+        .collect()
+}
+
+/// The person confirms an agent turn: its time counts even though they did
+/// not supervise it.
+#[tauri::command]
+pub fn confirm_agent_job(app: AppHandle, id: String) -> Result<(), String> {
+    {
+        let state = app.state::<AppState>();
+        let store = state.activity.lock().map_err(|e| e.to_string())?;
+        if !crate::agents::store::set_confirmed(store.conn(), &id)? {
+            return Err("That agent turn no longer exists".to_string());
+        }
+    }
+    crate::agents::refresh(&app);
+    Ok(())
+}
+
+/// Agent entries (counted agent time) in a range. They are kept out of
+/// `list_time_entries`, so no work total can pick them up by accident.
+#[tauri::command]
+pub fn list_agent_entries(
+    app: AppHandle,
+    start_ms: u64,
+    end_ms: u64,
+) -> Result<Vec<TimeEntry>, String> {
+    let state = app.state::<AppState>();
+    let store = state.activity.lock().map_err(|e| e.to_string())?;
+    store.list_agent_entries(start_ms, end_ms)
 }
 
 // --- P1: Apps -----------------------------------------------------------
@@ -908,6 +1022,10 @@ pub fn update_settings(app: AppHandle, settings: Settings) -> Result<Settings, S
                 eprintln!("could not toggle the tray: {error}");
             }
         }
+    }
+
+    if next.extensions != previous.extensions {
+        crate::agents::recheck(&app);
     }
 
     if next.retention_days != previous.retention_days {

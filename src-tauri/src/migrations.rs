@@ -355,8 +355,69 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
     }
 
+    if current_version < 9 {
+        let tx = conn.transaction()?;
+        tx.execute_batch(AGENTS_V9)?;
+        tx.execute("PRAGMA user_version = 9;", [])?;
+        tx.commit()?;
+    }
+
     Ok(())
 }
+
+/// Agent jobs. A job is one agent turn (prompt to stop) on one project, seen
+/// through an agent bridge (see `agents/mod.rs`): `agent_transitions` holds its
+/// state changes with timestamps, and `agent_focus` the time the person had an
+/// agent's pane in front of them. Counted agent time becomes ordinary
+/// `time_entries` rows with `source = 'agent'`, linked back to their job by
+/// `agent_job_id`. Only a working directory that belongs to a project is ever
+/// stored. Purely additive, so existing installs upgrade in place untouched.
+const AGENTS_V9: &str = "
+CREATE TABLE agent_jobs (
+  id             TEXT PRIMARY KEY,
+  source         TEXT NOT NULL,
+  agent          TEXT NOT NULL,
+  pane_key       TEXT NOT NULL,
+  project_id     TEXT NOT NULL,
+  cwd            TEXT NOT NULL,
+  started_at     INTEGER NOT NULL,
+  stopped_at     INTEGER,
+  reviewed_at    INTEGER,
+  state          TEXT NOT NULL,
+  state_since    INTEGER NOT NULL,
+  output_known   INTEGER NOT NULL DEFAULT 0,
+  last_output_at INTEGER,
+  last_seen_at   INTEGER NOT NULL,
+  confirmed      INTEGER NOT NULL DEFAULT 0,
+  confidence     TEXT,
+  created_at     INTEGER NOT NULL,
+  updated_at     INTEGER NOT NULL
+);
+CREATE INDEX agent_jobs_started_at ON agent_jobs (started_at);
+CREATE INDEX agent_jobs_pane ON agent_jobs (pane_key, started_at);
+CREATE INDEX agent_jobs_project ON agent_jobs (project_id, started_at);
+
+CREATE TABLE agent_transitions (
+  job_id TEXT NOT NULL REFERENCES agent_jobs(id) ON DELETE CASCADE,
+  at     INTEGER NOT NULL,
+  state  TEXT NOT NULL,
+  PRIMARY KEY (job_id, at, state)
+);
+
+CREATE TABLE agent_focus (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  pane_key   TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  agent      TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  ended_at   INTEGER NOT NULL
+);
+CREATE INDEX agent_focus_started_at ON agent_focus (started_at);
+CREATE INDEX agent_focus_pane ON agent_focus (pane_key, started_at);
+
+ALTER TABLE time_entries ADD COLUMN agent_job_id TEXT;
+CREATE INDEX idx_time_entries_agent_job ON time_entries (agent_job_id);
+";
 
 /// Break reminders: one row per break decision (taken, skipped, missed, or
 /// credited from idle time). The break itself stays a `break` segment; this
@@ -701,7 +762,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 8);
+        assert_eq!(v, 9);
 
         let cat_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM categories;", [], |r| r.get(0))
@@ -800,7 +861,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 8);
+        assert_eq!(v, 9);
 
         let ids: Vec<String> = conn
             .prepare("SELECT id FROM invoices ORDER BY id")
@@ -999,7 +1060,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 8);
+        assert_eq!(v, 9);
     }
 
     /// A database the v5 migration already ran on (with `legacy` rows kept) loses
@@ -1114,7 +1175,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 8);
+        assert_eq!(v, 9);
     }
 
     /// A database as v6 shipped it: the fresh schema without the client
@@ -1125,6 +1186,11 @@ mod tests {
         run_migrations(&mut conn).unwrap();
         conn.execute_batch(
             "DROP TABLE breaks;
+             DROP TABLE agent_transitions;
+             DROP TABLE agent_jobs;
+             DROP TABLE agent_focus;
+             DROP INDEX idx_time_entries_agent_job;
+             ALTER TABLE time_entries DROP COLUMN agent_job_id;
              ALTER TABLE clients DROP COLUMN archived_at;
              ALTER TABLE clients DROP COLUMN notes;
              INSERT INTO clients (id, name, email, address, default_rate, currency, created_at, updated_at)
@@ -1155,7 +1221,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 8);
+        assert_eq!(v, 9);
 
         type Row = (
             String,
@@ -1227,6 +1293,11 @@ mod tests {
         run_migrations(&mut conn).unwrap();
         conn.execute_batch(
             "DROP TABLE breaks;
+             DROP TABLE agent_transitions;
+             DROP TABLE agent_jobs;
+             DROP TABLE agent_focus;
+             DROP INDEX idx_time_entries_agent_job;
+             ALTER TABLE time_entries DROP COLUMN agent_job_id;
              INSERT INTO clients (id, name, created_at, updated_at, archived_at, notes)
                VALUES ('c1', 'Acme', 10, 20, 30, 'Net 15');
              INSERT INTO projects (id, client_id, name, color, created_at, updated_at)
@@ -1251,7 +1322,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 8);
+        assert_eq!(v, 9);
         let mut fresh = Connection::open_in_memory().unwrap();
         run_migrations(&mut fresh).unwrap();
         assert_eq!(schema_snapshot(&fresh), schema_snapshot(&conn));

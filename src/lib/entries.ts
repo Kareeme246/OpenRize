@@ -77,11 +77,19 @@ export function durationOf(entry: TimeEntry, now: number = Date.now()): number {
   return Math.max(0, entryEnd(entry, now) - entry.startedAt);
 }
 
+/** Counted agent time: never part of a work total. */
+export function isAgentEntry(entry: TimeEntry): boolean {
+  return entry.source === "agent";
+}
+
 export function totalDuration(
   entries: TimeEntry[],
   now: number = Date.now(),
 ): number {
-  return entries.reduce((sum, entry) => sum + durationOf(entry, now), 0);
+  return entries.reduce(
+    (sum, entry) => (isAgentEntry(entry) ? sum : sum + durationOf(entry, now)),
+    0,
+  );
 }
 
 /** Whether time in this category counts toward work hours. */
@@ -101,7 +109,7 @@ export function workDuration(
 ): number {
   return entries.reduce(
     (sum, entry) =>
-      countsAsWork(entry.categoryId, categoryById)
+      countsAsWork(entry.categoryId, categoryById) && !isAgentEntry(entry)
         ? sum + durationOf(entry, now)
         : sum,
     0,

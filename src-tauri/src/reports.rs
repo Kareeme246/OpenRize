@@ -59,6 +59,10 @@ pub struct EntryFilter {
     pub billable: Option<bool>,
     /// Words that must each appear in the description or a window title.
     pub search: Option<String>,
+    /// `work` (the default: the person's own entries), `agent` (counted agent
+    /// time only) or `all`. Work totals must never include agent entries, so
+    /// leaving this out can only ever give work.
+    pub scope: Option<String>,
 }
 
 struct Clause {
@@ -105,6 +109,12 @@ impl EntryFilter {
         let mut values: Vec<Value> =
             vec![(self.start_ms as i64).into(), (self.end_ms as i64).into()];
 
+        match self.scope.as_deref() {
+            None | Some("") | Some("work") => sql.push("te.source != 'agent'".to_string()),
+            Some("agent") => sql.push("te.source = 'agent'".to_string()),
+            Some("all") => {}
+            Some(other) => return Err(format!("unknown scope {other}")),
+        }
         id_condition("te.category_id", &self.category_id, &mut sql, &mut values);
         id_condition("te.project_id", &self.project_id, &mut sql, &mut values);
         id_condition("p.client_id", &self.client_id, &mut sql, &mut values);
@@ -916,5 +926,45 @@ mod tests {
         assert_eq!(json.as_array().unwrap().len(), 1);
         assert_ne!(result.path, again.path);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn agent_entries_are_outside_work_unless_the_scope_asks_for_them() {
+        let (store, _, _) = seeded();
+        let conn = store.conn();
+        entry(
+            conn,
+            "ag1",
+            3 * HOUR,
+            40,
+            "claude agent",
+            None,
+            Some("openrize"),
+            "approved",
+            true,
+            &[],
+        );
+        conn.execute(
+            "UPDATE time_entries SET source = 'agent' WHERE id = 'ag1'",
+            [],
+        )
+        .unwrap();
+        let total = |scope: Option<&str>| {
+            let mut filter = range(0, 48 * HOUR);
+            filter.scope = scope.map(str::to_string);
+            rollup(conn, &filter, &[0, 48 * HOUR], GroupBy::Project)
+                .unwrap()
+                .iter()
+                .map(|cell| cell.ms)
+                .sum::<u64>()
+        };
+
+        assert_eq!(total(None), (30 + 15 + 45) * MIN);
+        assert_eq!(total(Some("work")), (30 + 15 + 45) * MIN);
+        assert_eq!(total(Some("agent")), 40 * MIN);
+        assert_eq!(total(Some("all")), (30 + 15 + 45 + 40) * MIN);
+        let mut bad = range(0, 48 * HOUR);
+        bad.scope = Some("nope".into());
+        assert!(rollup(conn, &bad, &[0, 48 * HOUR], GroupBy::Project).is_err());
     }
 }

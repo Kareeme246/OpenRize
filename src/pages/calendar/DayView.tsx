@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { EmptyState } from "../../components/Page";
 import { Tooltip } from "../../components/Tooltip";
+import type { Rail } from "../../lib/agents";
 import { type BreakEntry, breakEnd, takenBreaks } from "../../lib/breaks";
 import { recordingEntry } from "../../lib/entries";
 import { formatDuration, formatTime } from "../../lib/format";
@@ -21,8 +22,15 @@ import {
 
 const SNAP_MS = 300_000;
 
+/** An agent rail with the project it ran on. */
+export interface ProjectRail extends Rail {
+  projectId: string | null;
+}
+
 interface DayViewProps {
   dayStart: number;
+  /** What agents did today: drawn as hatched rails, never counted. */
+  rails?: ProjectRail[];
   entries: TimeEntry[];
   segments: ActivitySegment[];
   breaks: BreakEntry[];
@@ -60,6 +68,7 @@ export function useMinuteClock(): number {
 
 export function DayView({
   dayStart,
+  rails = [],
   entries,
   segments,
   breaks,
@@ -236,6 +245,9 @@ export function DayView({
         <div className="flex min-w-0 flex-1">
           <span className="min-w-0 flex-1 truncate font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
             Time Entries
+          </span>
+          <span className="w-[72px] shrink-0 truncate border-line border-l px-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
+            Agents
           </span>
           <span className="w-[114px] shrink-0 truncate border-line border-l px-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
             Labels
@@ -473,6 +485,38 @@ export function DayView({
                 )}
               </div>
 
+              <div
+                className="relative w-[72px] shrink-0 border-line border-l"
+                role="img"
+                aria-label="Agent rails"
+              >
+                {packRails(rails).map(({ rail, column, columns }) => {
+                  const { top, height: railHeight } = place(
+                    timeline,
+                    rail.startedAt,
+                    Math.min(rail.endedAt, dayEnd),
+                    dayStart,
+                    "elapsed",
+                    3,
+                  );
+                  const project = rail.projectId
+                    ? projectById.get(rail.projectId)
+                    : undefined;
+                  return (
+                    <AgentRail
+                      key={`${rail.jobId}-${rail.startedAt}-${rail.state}`}
+                      rail={rail}
+                      top={top}
+                      height={railHeight}
+                      color={project?.color}
+                      name={project?.name}
+                      column={column}
+                      columns={columns}
+                    />
+                  );
+                })}
+              </div>
+
               <div className="relative w-[114px] shrink-0 border-line border-l">
                 {entries.map((entry) => {
                   const { top, height: entryHeight } = place(
@@ -575,6 +619,71 @@ export function BreakBand({
           </div>
         )}
       </div>
+    </Tooltip>
+  );
+}
+
+/**
+ * Gives each rail a sub-column so agents running at once sit side by side
+ * instead of on top of each other.
+ */
+function packRails(
+  rails: ProjectRail[],
+): { rail: ProjectRail; column: number; columns: number }[] {
+  const sorted = [...rails].sort((a, b) => a.startedAt - b.startedAt);
+  const ends: number[] = [];
+  const placed = sorted.map((rail) => {
+    let column = ends.findIndex((end) => end <= rail.startedAt);
+    if (column === -1) column = ends.length;
+    ends[column] = rail.endedAt;
+    return { rail, column };
+  });
+  const columns = Math.max(1, ends.length);
+  return placed.map((item) => ({ ...item, columns }));
+}
+
+/**
+ * One stretch of an agent working (hatched, in its project's colour) or
+ * waiting on the person (dashed, in the review colour). Drawn only: agent
+ * rails are never part of any total.
+ */
+function AgentRail({
+  rail,
+  top,
+  height,
+  color,
+  name,
+  column,
+  columns,
+}: {
+  rail: ProjectRail;
+  top: number;
+  height: number;
+  color?: string;
+  name?: string;
+  column: number;
+  columns: number;
+}) {
+  const waiting = rail.state === "needsYou";
+  const tone = waiting ? "var(--review)" : (color ?? "var(--fg-faint)");
+  const label = `${rail.agent} ${waiting ? "waited on you" : "worked"}${
+    name ? ` · ${name}` : ""
+  } · ${formatTime(rail.startedAt)}-${formatTime(rail.endedAt)} · ${formatDuration(rail.endedAt - rail.startedAt)}`;
+  return (
+    <Tooltip content={label}>
+      <div
+        className="absolute rounded-sm"
+        style={{
+          top: `${top}px`,
+          height: `${height}px`,
+          left: `calc(6px + (100% - 12px) * ${column} / ${columns})`,
+          width: `calc((100% - 12px) / ${columns} - 2px)`,
+          backgroundImage: `repeating-linear-gradient(135deg, ${tone} 0 2px, transparent 2px 6px)`,
+          border: `1px ${waiting ? "dashed" : "solid"} color-mix(in srgb, ${tone} 60%, transparent)`,
+        }}
+        role="img"
+        aria-label={label}
+      />
     </Tooltip>
   );
 }

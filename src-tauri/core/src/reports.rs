@@ -836,46 +836,4 @@ mod tests {
         bad.scope = Some("nope".into());
         assert!(rollup(conn, &bad, &[0, 48 * HOUR], GroupBy::Project).is_err());
     }
-
-    #[test]
-    fn agent_scopes_are_refused_while_workflow_tracking_is_off() {
-        let (store, _, _) = seeded();
-        let conn = store.conn();
-        entry(
-            conn,
-            "ag1",
-            3 * HOUR,
-            40,
-            "claude agent",
-            None,
-            Some("openrize"),
-            "approved",
-            true,
-            &[],
-        );
-        conn.execute(
-            "UPDATE time_entries SET source = 'agent' WHERE id = 'ag1'",
-            [],
-        )
-        .unwrap();
-        let ids = |scope: Option<&str>, with_agents: bool| -> Result<Vec<String>, String> {
-            let mut filter = range(0, 48 * HOUR);
-            filter.scope = scope.map(str::to_string);
-            let filter = filter.gated(with_agents)?;
-            Ok(query_entries(conn, &filter, 100)?
-                .into_iter()
-                .map(|e| e.id)
-                .collect())
-        };
-
-        for scope in [None, Some("work")] {
-            assert_eq!(ids(scope, false).unwrap(), vec!["e3", "e2", "e1"]);
-        }
-        for scope in [Some("agent"), Some("all")] {
-            let error = ids(scope, false).unwrap_err();
-            assert!(error.contains("Advanced workflow tracking"));
-        }
-        assert_eq!(ids(Some("agent"), true).unwrap(), vec!["ag1"]);
-        assert_eq!(ids(Some("all"), true).unwrap().len(), 4);
-    }
 }

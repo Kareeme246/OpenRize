@@ -5,30 +5,22 @@ mod breaks;
 mod capture;
 mod commands;
 mod energy;
-mod entry_builder;
 mod invoices;
 mod login_item;
-mod migrations;
-mod models;
-mod projects;
 mod pulse;
-mod reports;
-mod settings;
+mod rpc;
 mod threads;
-mod timers;
 mod tray;
 mod updater;
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use openrize_core::{entry_builder, models, projects, reports, settings, timers};
+
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use rusqlite::Connection;
 use tauri::{Manager, RunEvent, WindowEvent};
 
-use activity::ActivityStore;
-use settings::{CloseBehavior, Settings, SettingsStore};
-use timers::TimerStore;
+use settings::CloseBehavior;
 
 /// Emitted after every timer mutation so the frontend can adopt the snapshot
 /// Rust already has — the tray can change state without the window asking.
@@ -57,37 +49,22 @@ pub const EVENT_OPEN_BREAK_SETTINGS: &str = "open-break-settings";
 /// open today's review queue.
 pub const EVENT_OPEN_REVIEW: &str = "open-review";
 
-/// Shared application state.
-pub struct AppState {
-    pub store: Mutex<TimerStore>,
-    pub activity: Mutex<ActivityStore>,
-    /// Read-only-by-convention connection to the same database, kept off the
-    /// writer's mutex so a query never blocks behind (or blocks) the
-    /// sampler's tick — see activity.rs's module doc, decision A6.
-    pub activity_reader: Mutex<Connection>,
-    /// Whether an OpenRize window (main or the Pulse panel) is focused.
-    /// Drives the push cadence to the frontend; the underlying sampling rate
-    /// is unaffected.
-    pub foreground: AtomicBool,
-    pub settings: Mutex<SettingsStore>,
-}
+pub use openrize_core::state::AppState;
 
-impl AppState {
-    pub fn settings_snapshot(&self) -> Settings {
-        self.settings
-            .lock()
-            .map(|store| store.snapshot())
-            .unwrap_or_default()
-    }
-}
+/// Launched by `rize app start`: run in the menu bar with no window until
+/// one is asked for.
+const BACKGROUND_ARG: &str = "--background";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let background = std::env::args().any(|arg| arg == BACKGROUND_ARG);
     tauri::Builder::default()
         // Registered first so a second launch exits before it opens the
         // database; the running copy comes forward instead.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            tray::show_main_window(app);
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if !args.iter().any(|arg| arg == BACKGROUND_ARG) {
+                tray::show_main_window(app);
+            }
         }))
         .plugin(
             // Seeds the page's theme/shape hint before its first paint; see
@@ -99,26 +76,19 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .setup(|app| {
+        .setup(move |app| {
             let dir = app.path().app_data_dir()?;
+            // Waits out a `rize` edit made while the app was closed, then
+            // keeps the stores for as long as the app runs.
             std::fs::create_dir_all(&dir)?;
+            let lock = openrize_core::state::lock_stores(&dir, true)?.expect("a blocking lock");
+            app.manage(rpc::StoresLock(lock));
 
-            let store = TimerStore::load(&dir)?;
-            let timers = store.snapshot()?;
-            let mut activity = ActivityStore::load(&dir)?;
-            let activity_reader = ActivityStore::open_reader(&dir)?;
-            let settings = SettingsStore::load(&settings::config_dir())
+            let state = AppState::load(&dir)
                 .map_err(|error| -> Box<dyn std::error::Error> { error.into() })?;
-            let preferences = settings.snapshot();
-            activity.set_tracking_hours(preferences.tracking_hours.clone());
-
-            app.manage(AppState {
-                store: Mutex::new(store),
-                activity: Mutex::new(activity),
-                activity_reader: Mutex::new(activity_reader),
-                foreground: AtomicBool::new(true),
-                settings: Mutex::new(settings),
-            });
+            let timers = state.store.lock().map_err(|e| e.to_string())?.snapshot()?;
+            let preferences = state.settings_snapshot();
+            app.manage(state);
             app.manage(ai::AiRuntime::default());
             app.manage(pulse::PulseState::default());
             app.manage(agents::AgentRuntime::default());
@@ -145,6 +115,15 @@ pub fn run() {
             // the first hour-long wait elapses.
             if let Err(error) = commands::sweep_retention(app.handle()) {
                 eprintln!("retention sweep failed: {error}");
+            }
+            rpc::serve(app.handle().clone(), dir);
+            // The window is created hidden (tauri.conf.json), so a background
+            // launch never flashes it.
+            if background {
+                #[cfg(target_os = "macos")]
+                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            } else {
+                tray::show_main_window(app.handle());
             }
             Ok(())
         })
@@ -324,4 +303,14 @@ fn spawn_retention_sweeper(app: tauri::AppHandle) {
             eprintln!("retention sweep failed: {error}");
         }
     });
+}
+
+#[cfg(test)]
+mod cli_tests {
+    #[test]
+    fn independent_client_identity_matches_the_release_bundle() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(config["identifier"], openrize_core::APP_IDENTIFIER);
+    }
 }

@@ -164,6 +164,33 @@ the last snapshot Rust sent it; Rust pushes events when something changes.
 
 Stack: [Tauri 2](https://tauri.app) · Rust · SQLite · Swift · [React 19](https://react.dev) · TypeScript · [Tailwind CSS 4](https://tailwindcss.com) · [Vite](https://vite.dev)
 
+## CLI
+
+`rize` drives OpenRize from the terminal: start the app in the background, check today's status,
+and list, add, edit, approve, report on and export your time, plus timers, projects, clients,
+categories and settings. The app does the tracking; with it closed, everything except tracking
+still works on the stored data. `rize --help` and [`src-tauri/cli/COMMANDS.md`](src-tauri/cli/COMMANDS.md)
+list the commands.
+
+There are two ways to get it, both from **v0.8.10** on:
+
+- **With the app:** `rize` comes bundled inside it. To put it on PATH, run
+  `/Applications/openrize.app/Contents/MacOS/rize install-path`.
+- **On its own** (Apple Silicon macOS):
+
+  ```sh
+  curl -fsSL https://raw.githubusercontent.com/Kareeme246/OpenRize/main/install.sh | bash
+  ```
+
+  It takes `rize` out of the latest release's app bundle, requires OpenRize's Developer ID
+  signature and Apple notarization, and installs into `~/.local/bin` (add that to PATH if
+  needed). It never replaces existing files or edits shell profiles.
+
+rize reads and edits the data the app records, with or without the app installed, but only the
+app tracks and only the app creates that data: on a machine where it never ran, rize reports that
+there is no rize data. On Windows, build from source: the app bundles `rize.exe`, or
+`./scripts/install-cli.sh` builds just the CLI.
+
 ## Building from source
 
 Packaged builds are available from the [Releases](https://github.com/Kareeme246/OpenRize/releases)

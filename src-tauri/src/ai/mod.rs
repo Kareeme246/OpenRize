@@ -23,17 +23,18 @@
 //! Everything except the ML calls runs in Rust. The ML calls go to the Swift
 //! sidecar `openrize-ml` over JSON lines on stdio (`sidecar.rs`). Nothing
 //! here makes a network call.
+//!
+//! The data side (`rules`, `knn`, `calibration`, `arbiter`, `store`) lives in
+//! `openrize_core::ai`, so `rize` can record approvals and corrections with
+//! the app closed; it is re-exported here.
 
-pub mod arbiter;
-pub mod calibration;
 pub mod features;
-pub mod knn;
 pub mod metrics;
 pub mod power;
-pub mod rules;
 pub mod sidecar;
-pub mod store;
 pub mod worker;
+
+pub use openrize_core::ai::*;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex};
@@ -46,41 +47,6 @@ use tauri::{AppHandle, Emitter, Manager};
 pub const EVENT_SUGGESTION_READY: &str = "suggestion-ready";
 /// Emitted whenever the engine status changes. Payload: `AiStatus`.
 pub const EVENT_AI_STATUS_CHANGED: &str = "ai-status-changed";
-
-pub const FIELD_CATEGORY: &str = "category";
-pub const FIELD_PROJECT: &str = "project";
-
-/// Suggestions at or above this confidence pre-fill the entry's field. Below
-/// it the panel shows "Needs you" with nothing pre-selected.
-pub const PREFILL_THRESHOLD: f64 = 0.60;
-/// Until this many suggestions have a user outcome, there is no calibration
-/// curve and displayed confidence is capped at `COLD_START_CAP`, so nothing
-/// auto-approves during the first week except deterministic rule hits.
-pub const COLD_START_OUTCOMES: u32 = 50;
-pub const COLD_START_CAP: f64 = 0.90;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Field {
-    Category,
-    Project,
-}
-
-impl Field {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Field::Category => FIELD_CATEGORY,
-            Field::Project => FIELD_PROJECT,
-        }
-    }
-
-    pub fn parse(value: &str) -> Result<Self, String> {
-        match value {
-            FIELD_CATEGORY => Ok(Field::Category),
-            FIELD_PROJECT => Ok(Field::Project),
-            other => Err(format!("unknown suggestion field {other}")),
-        }
-    }
-}
 
 /// Engine health as the UI shows it (fallback banner, Settings).
 #[derive(Debug, Clone, Serialize, PartialEq)]

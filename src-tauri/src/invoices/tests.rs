@@ -6,7 +6,7 @@ const HOUR: i64 = 3_600_000;
 
 fn db() -> Connection {
     let mut conn = Connection::open_in_memory().unwrap();
-    crate::migrations::run_migrations(&mut conn).unwrap();
+    openrize_core::migrations::run_migrations(&mut conn).unwrap();
     conn.execute_batch(
         "INSERT INTO clients (id, name, email, address, default_rate, currency, created_at, updated_at)
            VALUES ('c', 'Acme Corp', 'ap@acme.test', '123 Main St.', 100, 'USD', 0, 0);

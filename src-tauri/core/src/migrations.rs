@@ -1,5 +1,8 @@
 use rusqlite::{Connection, Result};
 
+/// The `user_version` `run_migrations` leaves a database at.
+pub const SCHEMA_VERSION: i32 = 9;
+
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     let current_version: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
 
@@ -642,6 +645,16 @@ fn seed_default_categories(tx: &rusqlite::Transaction<'_>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn schema_version_is_where_migrations_end() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        let version: i32 = conn
+            .query_row("PRAGMA user_version;", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+    }
 
     /// A structural fingerprint of tables, columns, indexes, and triggers.
     /// Columns are unordered because the old ladder's `ALTER TABLE ADD COLUMN`

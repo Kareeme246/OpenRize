@@ -7,10 +7,17 @@ use std::path::{Path, PathBuf};
 const EXTRA_DIRS: &[&str] = &["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
 const HOME_DIRS: &[&str] = &[".local/bin", ".cargo/bin", "bin", ".bun/bin"];
 
+#[cfg(unix)]
 fn is_executable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     path.metadata()
         .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+}
+
+/// Windows has no executable bit; the `.exe` name says it.
+#[cfg(windows)]
+fn is_executable(path: &Path) -> bool {
+    path.is_file()
 }
 
 /// The first executable called `name` on PATH or in the usual install folders.
@@ -23,7 +30,7 @@ pub fn which(name: &str) -> Option<PathBuf> {
         dirs.extend(HOME_DIRS.iter().map(|dir| home.join(dir)));
     }
     dirs.into_iter()
-        .map(|dir| dir.join(name))
+        .map(|dir| dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX)))
         .find(|candidate| is_executable(candidate))
 }
 
@@ -33,6 +40,7 @@ mod tests {
 
     #[test]
     fn finds_a_tool_that_exists_and_not_one_that_does_not() {
+        #[cfg(unix)]
         assert!(which("sh").is_some());
         assert!(which("definitely-not-an-installed-tool-xyz").is_none());
     }

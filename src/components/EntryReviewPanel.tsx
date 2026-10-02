@@ -1,4 +1,11 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   BAND_FILL,
   BAND_LABEL,
@@ -216,6 +223,10 @@ export function EntryReviewPanel({
   const [tab, setTab] = useState<"apps" | "titles" | "log" | "history">("apps");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(entry.description);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  // Set once an edit is saved or cancelled, so the blur that follows the
+  // editor closing does not save a second time (or save a cancelled draft).
+  const editFinished = useRef(false);
 
   const models = useMemo<FieldModel[]>(() => {
     const fields: SuggestionField[] = suggestProjects
@@ -278,6 +289,7 @@ export function EntryReviewPanel({
         setActiveField("project");
       } else if (key === "e") {
         event.preventDefault();
+        editFinished.current = false;
         setEditing(true);
       }
     };
@@ -303,8 +315,33 @@ export function EntryReviewPanel({
     return true;
   };
 
+  // Grow the editor with its text so a long title never scrolls in a box.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure when the text changes or the editor opens.
+  useLayoutEffect(() => {
+    const field = descriptionRef.current;
+    if (!field) return;
+    field.style.height = "auto";
+    field.style.height = `${field.scrollHeight}px`;
+  }, [draft, editing]);
+
+  const startEditing = (): void => {
+    editFinished.current = false;
+    setDraft(entry.description);
+    setEditing(true);
+  };
+
+  /** A draft is kept: leaving the field by any route saves it. */
   const saveDescription = (): void => {
-    onSaveDescription(draft.trim());
+    if (editFinished.current) return;
+    editFinished.current = true;
+    const next = draft.trim();
+    if (next !== entry.description) onSaveDescription(next);
+    setEditing(false);
+  };
+
+  const cancelDescription = (): void => {
+    editFinished.current = true;
+    setDraft(entry.description);
     setEditing(false);
   };
 
@@ -358,34 +395,31 @@ export function EntryReviewPanel({
               <textarea
                 // biome-ignore lint/a11y/noAutofocus: E opens the editor to type into.
                 autoFocus
+                ref={descriptionRef}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
+                onBlur={saveDescription}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
                     saveDescription();
                   } else if (event.key === "Escape") {
                     event.stopPropagation();
-                    setEditing(false);
+                    cancelDescription();
                   }
                 }}
-                className="w-full rounded border border-line bg-canvas px-2 py-1.5 text-[12.5px] text-fg outline-hidden focus:border-accent"
+                className="block w-full resize-none overflow-hidden rounded border border-line bg-canvas px-2 py-1.5 text-[12.5px] text-fg outline-hidden focus:border-accent"
                 rows={2}
               />
               <div className="flex justify-end gap-1.5">
+                {/* Pressing it must not blur the field first: blur saves. */}
                 <button
                   type="button"
-                  onClick={() => setEditing(false)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={cancelDescription}
                   className="rounded px-2 py-0.5 text-[11px] text-fg-soft hover:text-fg"
                 >
                   Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={saveDescription}
-                  className="rounded bg-accent px-2.5 py-0.5 font-semibold text-[11px] text-accent-fg"
-                >
-                  Save
                 </button>
               </div>
             </div>
@@ -393,7 +427,7 @@ export function EntryReviewPanel({
             <Tooltip content="Edit description (E)">
               <button
                 type="button"
-                onClick={() => setEditing(true)}
+                onClick={startEditing}
                 className="w-full cursor-pointer text-left font-medium text-[12.5px] text-fg-strong transition-colors hover:text-accent"
               >
                 {entry.description || (
@@ -433,7 +467,7 @@ export function EntryReviewPanel({
           <FieldSection
             key={model.field}
             model={model}
-            active={model.field === activeField}
+            active={model.field === activeField && !editing}
             processing={processing}
             locked={locked}
             onActivate={() => setActiveField(model.field)}

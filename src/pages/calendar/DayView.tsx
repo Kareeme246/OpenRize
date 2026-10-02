@@ -593,12 +593,7 @@ const TEXT_MIN_HEIGHT = 12;
  * It carries no category or project, only "Break" and its length when tall
  * enough to hold a line.
  */
-export function BreakBand({
-  entry,
-  top,
-  height,
-  now,
-}: BreakBandProps) {
+export function BreakBand({ entry, top, height, now }: BreakBandProps) {
   const start = entry.startedAt ?? now;
   const length = formatDuration(Math.max(0, breakEnd(entry, now) - start));
   return (

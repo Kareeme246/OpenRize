@@ -69,9 +69,9 @@ sleep 2
 # A raw wry/AppKit window has no AppleScript dictionary of its own, so it's
 # addressed through System Events' accessibility proxy — which, unlike a real
 # scriptable app, exposes position/size but not a CGWindowID `id` property.
-# So: bring it forward, pin it to a known on-screen spot (it may have
+# So: bring it forward and pin it to a known on-screen spot (it may have
 # restored a position from a previous run that's now partly off-screen), then
-# capture that exact rectangle instead of capturing by window id.
+# look its CGWindowID up through CoreGraphics below.
 HAS_WINDOW=""
 for _ in $(seq 1 20); do
   HAS_WINDOW="$(osascript -e "tell application \"System Events\" to get exists (first window of (first process whose unix id is $BIN_PID))" 2>/dev/null || true)"
@@ -89,12 +89,24 @@ set frontmost of proc to true
 set position of window 1 of proc to {40, 40}
 end tell" >/dev/null
 
-RECT="$(osascript -e "tell application \"System Events\"
-set proc to first process whose unix id is $BIN_PID
-set {winX, winY} to position of window 1 of proc
-set {winW, winH} to size of window 1 of proc
-return (winX as string) & \",\" & (winY as string) & \",\" & (winW as string) & \",\" & (winH as string)
-end tell")"
+# Capture by window id, not by screen rectangle: a rectangle grabs whatever
+# is on top there, which is the installed OpenRize whenever it is running.
+WINDOW_ID="$(osascript -l JavaScript -e '
+ObjC.import("CoreGraphics");
+function run(argv) {
+  const pid = Number(argv[0]);
+  const windows = ObjC.deepUnwrap(ObjC.castRefToObject(
+    $.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly, 0)));
+  const area = (w) => w.kCGWindowBounds.Width * w.kCGWindowBounds.Height;
+  const mine = windows
+    .filter((w) => w.kCGWindowOwnerPID === pid && w.kCGWindowLayer === 0)
+    .sort((a, b) => area(b) - area(a));
+  return mine.length > 0 ? String(mine[0].kCGWindowNumber) : "";
+}' "$BIN_PID")"
+if [[ -z "$WINDOW_ID" ]]; then
+  echo "could not find the app window's id; see $LOG_FILE" >&2
+  exit 1
+fi
 
-screencapture -x -o -R"$RECT" "$OUT_FILE"
+screencapture -x -o -l"$WINDOW_ID" "$OUT_FILE"
 echo "$OUT_FILE"

@@ -15,6 +15,7 @@ import {
   formatUsd,
   termsLabel,
 } from "../../lib/invoices";
+import { FILE_MANAGER } from "../../lib/platform";
 import type { Invoice } from "../../lib/types";
 import { StatusPill } from "./StatusPill";
 
@@ -159,7 +160,7 @@ export function InvoiceView({
                       notice.path && void revealItemInDir(notice.path)
                     }
                   >
-                    Show in Finder
+                    Show in {FILE_MANAGER}
                   </button>
                 </>
               )}

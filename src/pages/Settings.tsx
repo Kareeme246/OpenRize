@@ -21,6 +21,15 @@ import * as api from "../lib/api";
 import { describeError } from "../lib/api";
 import { formatRelative, formatShortDate } from "../lib/format";
 import {
+  FILE_MANAGER,
+  OS_NAME,
+  PLATFORM,
+  shortcutLabel,
+  THIS_COMPUTER,
+  TRAY_ICON,
+  TRAY_PLACE,
+} from "../lib/platform";
+import {
   ACCENT_ORDER,
   ACCENTS,
   type Accent,
@@ -71,7 +80,7 @@ const ACCENT_OPTIONS: SegmentedOption<Accent>[] = ACCENT_ORDER.map(
 );
 
 const CLOSE_OPTIONS: SegmentedOption<CloseBehavior>[] = [
-  { value: "hide", label: "Hide to menu bar" },
+  { value: "hide", label: `Hide to ${TRAY_PLACE}` },
   { value: "quit", label: "Quit" },
 ];
 
@@ -219,7 +228,9 @@ function LaunchAtLoginRow({
       title="Launch at login"
       description={
         state === "unsupported"
-          ? "Needs macOS 13 or later"
+          ? PLATFORM === "macos"
+            ? "Needs macOS 13 or later"
+            : `Not available on ${OS_NAME} yet`
           : pending
             ? "Allow OpenRize under Login Items in System Settings to finish"
             : "Start OpenRize in the background when you log in"
@@ -920,7 +931,7 @@ export function Settings({
           </p>
         </div>
         <span className="shrink-0 font-mono text-[10.5px] text-fg-muted">
-          ⌘, opens this
+          {shortcutLabel(",")} opens this
         </span>
       </header>
 
@@ -1039,7 +1050,7 @@ export function Settings({
             <SettingGroup title="Theme & accent">
               <SettingRow
                 title="Theme"
-                description="Dark, light, or follow macOS"
+                description={`Dark, light, or follow ${OS_NAME}`}
               >
                 <SegmentedControl
                   name="theme"
@@ -1097,12 +1108,12 @@ export function Settings({
             <SettingGroup title="App behavior">
               <LaunchAtLoginRow onError={setLoginError} />
               <SettingRow
-                title="Menu bar icon"
+                title={TRAY_ICON}
                 description="Keep a tray icon with quick controls"
               >
                 <Toggle
                   checked={settings.trayEnabled}
-                  label="Menu bar icon"
+                  label={TRAY_ICON}
                   onChange={(trayEnabled) => update({ trayEnabled })}
                 />
               </SettingRow>
@@ -1110,7 +1121,7 @@ export function Settings({
                 title="When I close the window"
                 description={
                   trayOff
-                    ? "Menu bar icon is off, so closing always quits"
+                    ? `${TRAY_ICON} is off, so closing always quits`
                     : "What the close button does while OpenRize keeps tracking"
                 }
               >
@@ -1250,7 +1261,7 @@ export function Settings({
                       onClick={openStorage}
                       className="self-start rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] text-fg-muted hover:bg-surface-strong"
                     >
-                      Open folder in Finder
+                      Open folder in {FILE_MANAGER}
                     </button>
                   </div>
                 )}
@@ -1310,7 +1321,9 @@ export function Settings({
                       : `learning · ${aiStatus.outcomes}/50 reviewed`}
                 </span>
               </SettingRow>
-              <AppleIntelligenceRow status={aiStatus} onError={setAiError} />
+              {PLATFORM === "macos" && (
+                <AppleIntelligenceRow status={aiStatus} onError={setAiError} />
+              )}
             </SettingGroup>
 
             <SettingGroup title="AI effectiveness">
@@ -1320,7 +1333,7 @@ export function Settings({
                     How suggestions are doing
                   </div>
                   <div className="text-[12px] leading-relaxed text-fg-muted">
-                    Measured on your own reviews, on this Mac
+                    Measured on your own reviews, on {THIS_COMPUTER}
                   </div>
                 </div>
                 <SegmentedControl

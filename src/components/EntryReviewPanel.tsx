@@ -8,6 +8,7 @@ import {
   METER_SEGMENTS,
   percent,
 } from "../lib/confidence";
+import { shortcutLabel } from "../lib/platform";
 import type {
   Category,
   EntryDetail,
@@ -481,7 +482,7 @@ export function EntryReviewPanel({
               approved
                 ? "Already approved"
                 : entry.categoryId
-                  ? "Accept (⌘↵)"
+                  ? `Accept (${shortcutLabel("Enter")})`
                   : "Pick a category first (1–9)"
             }
             wrapperClassName="flex min-w-0 flex-1"
@@ -493,7 +494,11 @@ export function EntryReviewPanel({
               className="whitespace-nowrap flex-1 rounded-md bg-accent px-3 py-1.5 font-semibold text-[12px] text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {approved ? "Approved ✓" : "Accept"}{" "}
-              {!approved && <span className="text-[10px] opacity-70">⌘↵</span>}
+              {!approved && (
+                <span className="text-[10px] opacity-70">
+                  {shortcutLabel("Enter")}
+                </span>
+              )}
             </button>
           </Tooltip>
           {approved ? (
@@ -520,7 +525,10 @@ export function EntryReviewPanel({
               onClick={onReject}
               className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
             >
-              Reject <span className="text-[10px] opacity-70">⌘⌫</span>
+              Reject{" "}
+              <span className="text-[10px] opacity-70">
+                {shortcutLabel("Backspace")}
+              </span>
             </button>
           )}
           <Tooltip content="Split at the main app switch (S)">

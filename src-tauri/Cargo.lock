@@ -3028,7 +3028,7 @@ dependencies = [
 
 [[package]]
 name = "openrize"
-version = "0.8.7"
+version = "0.8.8"
 dependencies = [
  "block2",
  "chrono",
@@ -3056,6 +3056,8 @@ dependencies = [
  "url",
  "user-idle3",
  "uuid",
+ "windows",
+ "windows-registry",
 ]
 
 [[package]]

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { PLATFORM } from "../lib/platform";
 import { Tooltip } from "./Tooltip";
 
 interface TopBarProps {
@@ -9,8 +10,6 @@ interface TopBarProps {
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
 }
-
-const isMac = navigator.userAgent.includes("Mac");
 
 /**
  * The app's own bar. On macOS `titleBarStyle: "Overlay"` (tauri.conf.json)
@@ -30,7 +29,7 @@ export function TopBar({
     <header
       data-tauri-drag-region="deep"
       className={`flex h-11 shrink-0 items-center gap-2 border-b border-line bg-bar pr-3 ${
-        isMac ? "pl-[84px]" : "pl-3"
+        PLATFORM === "macos" ? "pl-[84px]" : "pl-3"
       }`}
     >
       <div className="flex flex-1 items-center gap-2">

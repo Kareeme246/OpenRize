@@ -4,6 +4,7 @@ import { Picker } from "../../components/Picker";
 import { Field, Sheet } from "../../components/Sheet";
 import * as api from "../../lib/api";
 import { TERMS_OPTIONS } from "../../lib/invoices";
+import { THIS_COMPUTER } from "../../lib/platform";
 import type { InvoiceProfile } from "../../lib/types";
 
 const MAX_LOGO_BYTES = 5 * 1024 * 1024;
@@ -182,7 +183,7 @@ export function ProfileSheet({ onClose, onSaved }: ProfileSheetProps) {
       </div>
       <Field
         label="Logo"
-        hint="PNG or JPEG. It is resized and stored on this Mac."
+        hint={`PNG or JPEG. It is resized and stored on ${THIS_COMPUTER}.`}
       >
         <div className="flex items-center gap-3">
           <div className="flex h-14 w-40 items-center justify-center overflow-hidden rounded-md border border-line bg-white">

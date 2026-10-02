@@ -41,20 +41,20 @@ into reviewable time entries, suggests a category and project for each one with 
 and learns from what you accept and correct. You can review your day on a calendar, approve a whole
 timesheet, slice your time in reports, manage projects and clients, and even automatically generate invoices.
 
-It is still early and it only runs on macOS for now.
+It is still early. It runs on macOS, and there is an experimental Windows build you can compile yourself.
 
 ## Where it stands
 
-**Platforms** - built and tested on macOS. Tauri itself compiles for all three, but window capture
-uses the macOS Accessibility API and the AI runs in a macOS-only Swift sidecar, so nothing outside
-macOS has been verified.
+**Platforms** - built and tested on macOS. Windows is experimental and not yet tested on real
+hardware. There are no Windows releases, and the AI runs your rules only, because the personal model
+and Foundation Model live in a macOS-only Swift sidecar.
 
 | Platform | Supported | Planned |
 | --- | --- | --- |
 | 🍎 macOS (Apple Silicon) | ✅ Built and tested | Completed |
 | 🍎 macOS (Intel) | 🔶 Untested - no Foundation Model on Intel, so AI would run rules + personal model only | Not Planned |
-| 🪟 Windows | ❌ Untested - capture and the AI sidecar are macOS-specific | Future- on demand |
-| 🐧 Linux | ❌ Untested - capture and the AI sidecar are macOS-specific | Future- on demand |
+| 🪟 Windows | 🧪 Experimental - build from source, AI runs rules only | In progress |
+| 🐧 Linux | ❌ Not supported - capture is not implemented | Future- on demand |
 
 The full AI tier needs macOS 26+ with Apple Intelligence turned on. Without it, OpenRize falls back
 to your rules and a personal model it trains on your own reviews and keeps categorizing.
@@ -184,6 +184,21 @@ pnpm tauri build        # produce a release bundle
 
 On first run, grant OpenRize **Accessibility** permission in System Settings so it can read window
 titles.
+
+### Windows (experimental)
+
+Install the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for Windows, plus Node and
+pnpm, then:
+
+```sh
+git clone https://github.com/Kareeme246/OpenRize.git
+cd OpenRize
+pnpm install
+pnpm tauri build
+```
+
+The installer is in `src-tauri\target\release\bundle\nsis\`. It is not signed, so SmartScreen warns
+the first time you run it. Source builds don't update themselves - pull and rebuild to update.
 
 ## Contributing
 

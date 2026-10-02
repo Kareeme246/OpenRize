@@ -1,4 +1,4 @@
-//! The macOS menu-bar icon. Icon only, no text (decision T1): the glyph shape
+//! The menu-bar (macOS) or notification-area (Windows) icon. Icon only, no text (decision T1): the glyph shape
 //! carries idle vs active. Left click opens the Pulse panel (pulse.rs); right
 //! click opens the native menu with the running timers, Open, and Quit.
 
@@ -35,11 +35,38 @@ const MAX_LABEL_CHARS: usize = 32;
 /// 44px is deliberate: macOS draws the tray glyph at 18pt, so a 44px bitmap
 /// stays crisp on retina where the old 22px one was blurry.
 fn glyph(active: bool) -> Image<'static> {
-    if active {
+    let template = if active {
         tauri::include_image!("icons/tray-active.png")
     } else {
         tauri::include_image!("icons/tray-idle.png")
+    };
+    #[cfg(windows)]
+    if !taskbar_is_light() {
+        return whitened(&template);
     }
+    template
+}
+
+/// Windows draws tray icons as they are, so the black template is painted
+/// white on a dark taskbar.
+#[cfg(windows)]
+fn whitened(template: &Image<'_>) -> Image<'static> {
+    let mut rgba = template.rgba().to_vec();
+    for pixel in rgba.as_chunks_mut::<4>().0 {
+        pixel[..3].fill(u8::MAX);
+    }
+    Image::new_owned(rgba, template.width(), template.height())
+}
+
+/// The taskbar follows the "default Windows mode", which is dark unless the
+/// user picked light; read on every icon change, so a switch shows up the
+/// next time the icon changes state.
+#[cfg(windows)]
+fn taskbar_is_light() -> bool {
+    windows_registry::CURRENT_USER
+        .open(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        .and_then(|key| key.get_u32("SystemUsesLightTheme"))
+        .is_ok_and(|light| light == 1)
 }
 
 pub fn init(app: &AppHandle, timers: &[Timer]) -> tauri::Result<()> {

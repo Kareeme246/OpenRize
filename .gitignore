@@ -27,3 +27,6 @@ dist-ssr
 # Swift sidecar build output (built by src-tauri/build.rs)
 src-tauri/swift/.build
 src-tauri/binaries
+
+# Agent worktrees
+.claude/worktrees/

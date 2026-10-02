@@ -40,21 +40,42 @@ is a decision, not an oversight.
 
 ## CI and releases
 
-`.github/workflows/verify.yml` runs `pnpm verify` (check only) on pull requests, on a
-`macos-26` runner - `cargo clippy` compiles the Swift sidecar below, which needs Xcode 26+;
-verify that GitHub-hosted image still provides it before changing the runner label.
-`.github/workflows/release.yml` builds a signed, notarized macOS `.dmg`/`.app` on `v*` tags
-and publishes it to a GitHub Release, along with the `latest.json` manifest the in-app
-updater (`src-tauri/src/updater.rs`) reads - publishing a release ships it to every user.
+`.github/workflows/verify.yml` runs `pnpm verify` (check only) on pull requests, on
+`macos-26` and `windows-latest` runners - on macOS `cargo clippy` compiles the Swift sidecar
+below, which needs Xcode 26+; verify that GitHub-hosted image still provides it before changing
+the runner label. `.github/workflows/release.yml` builds a signed, notarized macOS `.dmg`/`.app`
+on `v*` tags and publishes it to a GitHub Release, along with the `latest.json` manifest the
+in-app updater (`src-tauri/src/updater.rs`) reads - publishing a release ships it to every user.
+Windows is deliberately not released: it is built from source only, and its updater stays off.
 Every user-facing change bumps the patch version in the same PR and uses a Conventional
 Commit subject; see `RELEASING.md` for the release and changelog procedure.
+
+## Platforms
+
+macOS is supported; Windows is experimental (CI-checked, built from source, never released);
+Linux is not yet. A module with substantial OS-specific code keeps its shared types in the parent
+file and selects one implementation file per platform, all exposing the same items:
+
+```rust
+#[cfg_attr(target_os = "macos", path = "capture/macos.rs")]
+#[cfg_attr(windows, path = "capture/windows.rs")]
+#[cfg_attr(not(any(target_os = "macos", windows)), path = "capture/unsupported.rs")]
+mod platform;
+```
+
+See `capture`, `login_item`, and `energy`. A few lines of OS code stay inline under explicit
+`#[cfg(target_os = "macos")]` / `#[cfg(windows)]`. The frontend reads platform conventions from
+`src/lib/platform.ts` (a `Record<Platform, T>` per value), never a bare "is Mac" boolean. Windows
+code can be checked from a Mac with the `x86_64-pc-windows-gnu` rustup target and Homebrew's
+`mingw-w64`: in `src-tauri`, set `CC_x86_64_pc_windows_gnu=x86_64-w64-mingw32-gcc` and run
+`cargo clippy --target x86_64-pc-windows-gnu --all-targets -- -D warnings`.
 
 ## On-device AI sidecar
 
 AI categorization lives in `src-tauri/src/ai/` (module docs in `ai/mod.rs`
 explain the tiers). The ML calls go to a Swift sidecar in `src-tauri/swift/`
 that `src-tauri/build.rs` compiles with `swift build` on macOS and ships as a
-Tauri `externalBin` (`tauri.macos.conf.json`), so every Rust build needs
+Tauri `externalBin` (`tauri.macos.conf.json`), so every macOS Rust build needs
 Xcode 26+ command line tools. Bump `protocolVersion` in `Entry.swift` and
 `PROTOCOL_VERSION` in `ai/sidecar.rs` together when the wire format changes.
 

@@ -1,75 +1,23 @@
-//! What `rize` asks of OpenRize (`openrize_core::protocol`), answered by the
-//! same stores and commands the window uses, in one of two places:
-//!
-//! - **The running app** serves the request on its local endpoint
-//!   (`openrize_core::ipc`) and then emits the same events a window command
-//!   would, so open windows and the tray update at once.
-//! - **A headless run of this binary** (`openrize __rize`) answers when the
-//!   app is closed. It opens the stores without Tauri, answers one request on
-//!   stdin/stdout and exits. Nothing is tracked; edits are picked up by the app
-//!   at its next launch, exactly as if they were made before it quit.
-//!
-//! The stores' lock file (`paths::LOCK_FILE`) keeps the two apart: the app
-//! holds it for its whole life, and a headless run that cannot take it hands
-//! the request back to `rize` to send to the app instead.
+//! Serves `rize` while the app runs. The answers come from
+//! `openrize_core::rpc`, the same code `rize` runs itself when the app is
+//! closed; the app adds what only it can do (`Live`) and emits the events a
+//! window command would, so open windows and the tray update at once.
 
-use std::collections::BTreeMap;
-use std::fs::{File, OpenOptions, TryLockError};
-use std::io;
-use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use openrize_core::ipc::{self, Endpoint};
-use openrize_core::models::UpdateTimeEntry;
-use openrize_core::paths;
-use openrize_core::protocol::{
-    code, read_frame, write_frame, ApiError, Hello, Operation, Request, Response, MAX_REQUEST,
-    MAX_RESPONSE, PROTOCOL_VERSION,
-};
-use openrize_core::{EntryFilter, NONE};
-use serde::Serialize;
-use serde_json::{json, Value};
+use openrize_core::protocol::Operation;
+use openrize_core::rpc::{self, Live};
+use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
-use crate::reports::{self, ExportFormat, GroupBy};
-use crate::timers::{now_epoch_ms, Timer};
+use crate::settings::Settings;
 use crate::{activity, commands, AppState};
 
-/// The first argument that makes this binary a headless `rize` runner.
-pub const HEADLESS_ARG: &str = "__rize";
-
-/// Most entries one list returns; a bigger range is a report or an export.
-const MAX_LIST: u32 = 5_000;
-/// Most buckets one report returns (a year of days).
-const MAX_BUCKETS: usize = 400;
-
-type Outcome = Result<Value, ApiError>;
-
-/// Holds the stores for this process. `wait` blocks until a headless run
-/// finishes (the app at launch); otherwise `None` means another process has
-/// them (a headless run finding the app open).
-pub fn lock_stores(data_dir: &Path, wait: bool) -> io::Result<Option<File>> {
-    std::fs::create_dir_all(data_dir)?;
-    let file = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(data_dir.join(paths::LOCK_FILE))?;
-    if wait {
-        file.lock()?;
-        return Ok(Some(file));
-    }
-    match file.try_lock() {
-        Ok(()) => Ok(Some(file)),
-        Err(TryLockError::WouldBlock) => Ok(None),
-        Err(TryLockError::Error(error)) => Err(error),
-    }
-}
-
-/// Keeps the stores' lock for the app's lifetime.
-pub struct StoresLock(#[allow(dead_code)] pub File);
+/// Keeps the stores' lock (`openrize_core::state::lock_stores`) for the app's
+/// lifetime.
+pub struct StoresLock(#[allow(dead_code)] pub std::fs::File);
 
 /// Serves `rize` on this data directory's endpoint until the app exits.
 pub fn serve(app: AppHandle, data_dir: PathBuf) {
@@ -86,7 +34,10 @@ pub fn serve(app: AppHandle, data_dir: PathBuf) {
                 let app = app.clone();
                 let data_dir = data_dir.clone();
                 std::thread::spawn(move || {
-                    ipc::respond(stream, |request| answer(Some(&app), &data_dir, request));
+                    ipc::respond(stream, |request| {
+                        let state = app.state::<AppState>();
+                        rpc::answer(&state, Some(&App(&app)), &data_dir, request)
+                    });
                 });
             }
             Err(error) => {
@@ -97,745 +48,69 @@ pub fn serve(app: AppHandle, data_dir: PathBuf) {
     });
 }
 
-/// `openrize __rize [--data-dir <dir>]`: one request on stdin, its answer on
-/// stdout. Returns the process exit code.
-pub fn headless(args: &[String]) -> i32 {
-    let response = run_headless(args);
-    match write_frame(&mut io::stdout().lock(), &response, MAX_RESPONSE) {
-        Ok(()) => 0,
-        Err(_) => 1,
-    }
-}
+/// The running app, as `openrize_core::rpc` sees it.
+struct App<'a>(&'a AppHandle);
 
-fn run_headless(args: &[String]) -> Response {
-    let data_dir = match args {
-        [] => match paths::app_data_dir() {
-            Some(dir) => dir,
-            None => return Response::error(code::FAILED, "no home directory"),
-        },
-        [flag, dir] if flag == "--data-dir" => PathBuf::from(dir),
-        _ => return Response::error(code::INVALID_ARGUMENT, "usage: __rize [--data-dir <dir>]"),
-    };
-    let request = match read_frame::<Request>(&mut io::stdin().lock(), MAX_REQUEST) {
-        Ok(request) => request,
-        Err(error) => return Response::error(code::INVALID_ARGUMENT, error),
-    };
-    if !data_dir.join(paths::DATABASE_FILE).is_file() {
-        return Response::error(
-            code::NO_DATA,
-            format!(
-                "This laptop doesn't have any rize data (looked in {}). Are you sure you've installed the app before?",
-                data_dir.display()
-            ),
-        );
+impl Live for App<'_> {
+    fn open_window(&self, review: bool) {
+        commands::open_main_window(self.0.clone(), review);
     }
-    let _lock = match lock_stores(&data_dir, false) {
-        Ok(Some(lock)) => lock,
-        Ok(None) => return Response::error(code::APP_RUNNING, "the app holds the stores"),
-        Err(error) => return Response::error(code::FAILED, error.to_string()),
-    };
-    // Checked once the lock shows the app is not just starting.
-    if request.operation.needs_app() {
-        return Response::error(
-            code::APP_NOT_RUNNING,
-            "OpenRize is not running. Start it with `rize app start`.",
-        );
+
+    fn quit(&self) {
+        let app = self.0.clone();
+        // Answer first; `exit` runs the same shutdown as the tray's Quit.
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            app.exit(0);
+        });
     }
-    let state = match AppState::load(&data_dir) {
-        Ok(state) => state,
-        Err(error) => return Response::error(code::FAILED, error),
-    };
-    answer_with(&state, None, &data_dir, request)
-}
 
-fn answer(app: Option<&AppHandle>, data_dir: &Path, request: Request) -> Response {
-    let Some(app) = app else {
-        return Response::error(code::FAILED, "no app");
-    };
-    let state = app.state::<AppState>();
-    answer_with(&state, Some(app), data_dir, request)
-}
-
-fn answer_with(
-    state: &AppState,
-    app: Option<&AppHandle>,
-    data_dir: &Path,
-    request: Request,
-) -> Response {
-    if request.protocol_version != PROTOCOL_VERSION {
-        return Response::error(
-            code::INCOMPATIBLE,
-            format!(
-                "This OpenRize ({}) speaks rize protocol {PROTOCOL_VERSION}, not {}. Restart or update the app so it matches rize.",
-                env!("CARGO_PKG_VERSION"),
-                request.protocol_version
-            ),
-        );
+    fn start_focus(&self, label: Option<String>) -> Result<(), String> {
+        commands::start_session(self.0.clone(), "focus".into(), label)
     }
-    let context = Context {
-        state,
-        app,
-        data_dir,
-    };
-    match context.dispatch(&request.operation) {
-        Ok(data) => {
-            if let Some(app) = app {
-                after(app, state, &request.operation);
-            }
-            Response::success(data)
-        }
-        Err(error) => Response::failure(error),
+
+    fn stop_focus(&self) -> Result<(), String> {
+        commands::stop_session(self.0.clone())
     }
-}
 
-/// What a window command would emit after the same change.
-fn after(app: &AppHandle, state: &AppState, operation: &Operation) {
-    use Operation as O;
-    match operation {
-        O::TrackSet { .. } | O::TrackIdle { .. } => activity::emit_full(app),
-        O::TimerCreate { .. }
-        | O::TimerStart { .. }
-        | O::TimerPause { .. }
-        | O::TimerReset { .. }
-        | O::TimerRename { .. }
-        | O::TimerDelete { .. } => {
-            let timers = state
-                .store
-                .lock()
-                .ok()
-                .and_then(|store| store.snapshot().ok());
-            if let Some(timers) = timers {
-                commands::refresh_tray(app, &timers);
-            }
-        }
-        O::EntryCreate { .. }
-        | O::EntriesEdit { .. }
-        | O::EntriesApprove { .. }
-        | O::EntriesUnapprove { .. }
-        | O::EntryReject { .. }
-        | O::EntrySplit { .. }
-        | O::EntriesDelete { .. }
-        | O::EntriesRebuild { .. } => commands::entries_changed(app),
-        _ => {}
+    fn breaks(&self) -> Option<Value> {
+        commands::break_state(self.0.clone())
+            .ok()
+            .and_then(|state| serde_json::to_value(state).ok())
     }
-}
 
-struct Context<'a> {
-    state: &'a AppState,
-    app: Option<&'a AppHandle>,
-    data_dir: &'a Path,
-}
+    fn settings_changed(&self, previous: &Settings, next: &Settings) {
+        commands::apply_settings_change(self.0, previous, next);
+    }
 
-impl Context<'_> {
-    fn dispatch(&self, operation: &Operation) -> Outcome {
+    fn changed(&self, state: &AppState, operation: &Operation) {
         use Operation as O;
-        let now = now_epoch_ms();
-        match operation.clone() {
-            O::Hello {} => to_value(Hello {
-                app_version: env!("CARGO_PKG_VERSION").into(),
-                protocol_version: PROTOCOL_VERSION,
-                running: self.app.is_some(),
-                data_dir: self.data_dir.display().to_string(),
-            }),
-            O::Status { day_start } => self.status(day_start, now),
-            O::AppOpen { review } => {
-                commands::open_main_window(self.live()?.clone(), review);
-                Ok(json!({}))
-            }
-            O::AppQuit {} => {
-                let app = self.live()?.clone();
-                // Answer first; `exit` runs the same shutdown as the tray's Quit.
-                std::thread::spawn(move || {
-                    std::thread::sleep(Duration::from_millis(200));
-                    app.exit(0);
-                });
-                Ok(json!({}))
-            }
-            O::TrackSet { enabled } => {
-                lock(&self.state.activity)?
-                    .set_capture_enabled(enabled, now)
-                    .map_err(fail)?;
-                Ok(json!({ "captureEnabled": enabled }))
-            }
-            O::TrackIdle { minutes } => {
-                if !(1..=24 * 60).contains(&minutes) {
-                    return Err(invalid("the idle threshold must be 1 to 1440 minutes"));
+        match operation {
+            O::TrackSet { .. } | O::TrackIdle { .. } => activity::emit_full(self.0),
+            O::TimerCreate { .. }
+            | O::TimerStart { .. }
+            | O::TimerPause { .. }
+            | O::TimerReset { .. }
+            | O::TimerRename { .. }
+            | O::TimerDelete { .. } => {
+                let timers = state
+                    .store
+                    .lock()
+                    .ok()
+                    .and_then(|store| store.snapshot().ok());
+                if let Some(timers) = timers {
+                    commands::refresh_tray(self.0, &timers);
                 }
-                lock(&self.state.activity)?
-                    .set_idle_threshold_ms(minutes * 60_000)
-                    .map_err(fail)?;
-                Ok(json!({ "idleThresholdMinutes": minutes }))
             }
-            O::FocusStart { label } => {
-                commands::start_session(self.live()?.clone(), "focus".into(), label)
-                    .map_err(fail)?;
-                self.status(day_start(now), now)
-            }
-            O::FocusStop {} => {
-                commands::stop_session(self.live()?.clone()).map_err(fail)?;
-                self.status(day_start(now), now)
-            }
-            O::TimersList {} => to_value(self.timers()?),
-            O::TimerCreate { label } => {
-                let label = label.trim();
-                if label.is_empty() {
-                    return Err(invalid("a timer needs a label"));
-                }
-                to_value(lock(&self.state.store)?.create(label).map_err(fail)?)
-            }
-            O::TimerStart { timer } => {
-                let id = self.timer(&timer)?;
-                to_value(lock(&self.state.store)?.start(&id).map_err(fail)?)
-            }
-            O::TimerPause { timer } => {
-                let id = self.timer(&timer)?;
-                to_value(lock(&self.state.store)?.pause(&id).map_err(fail)?)
-            }
-            O::TimerReset { timer } => {
-                let id = self.timer(&timer)?;
-                to_value(lock(&self.state.store)?.reset(&id).map_err(fail)?)
-            }
-            O::TimerRename { timer, label } => {
-                let id = self.timer(&timer)?;
-                to_value(
-                    lock(&self.state.store)?
-                        .rename(&id, label.trim())
-                        .map_err(fail)?,
-                )
-            }
-            O::TimerDelete { timer } => {
-                let id = self.timer(&timer)?;
-                to_value(lock(&self.state.store)?.delete(&id).map_err(fail)?)
-            }
-            O::EntriesList { filter, limit } => {
-                if !(1..=MAX_LIST).contains(&limit) {
-                    return Err(invalid(format!("--limit must be 1 to {MAX_LIST}")));
-                }
-                let filter = self.filter(filter)?;
-                let mut entries =
-                    self.read(|conn| reports::query_entries(conn, &filter, limit + 1))?;
-                let truncated = entries.len() > limit as usize;
-                entries.truncate(limit as usize);
-                Ok(json!({
-                    "entries": entries,
-                    "truncated": truncated,
-                    "names": self.names()?,
-                }))
-            }
-            O::EntryShow { entry } => {
-                let id = self.entry(&entry)?;
-                let detail = lock(&self.state.activity)?
-                    .get_entry_detail(&id)
-                    .map_err(fail)?;
-                Ok(json!({ "detail": detail, "names": self.names()? }))
-            }
-            O::EntryCreate { mut entry } => {
-                if entry.ended_at <= entry.started_at {
-                    return Err(invalid("--to must be after --from"));
-                }
-                entry.category_id = self.optional_category(entry.category_id)?;
-                entry.project_id = self.optional_project(entry.project_id)?;
-                let created = lock(&self.state.activity)?
-                    .create_manual_entry(entry, now)
-                    .map_err(fail)?;
-                to_value(created)
-            }
-            O::EntriesEdit { entries, patch } => {
-                let ids = self.entries(&entries)?;
-                let patch = self.entry_patch(patch)?;
-                let mut store = lock(&self.state.activity)?;
-                let mut updated = Vec::with_capacity(ids.len());
-                for id in &ids {
-                    updated.push(
-                        store
-                            .update_time_entry(id, patch.clone(), now)
-                            .map_err(fail)?,
-                    );
-                }
-                to_value(updated)
-            }
-            O::EntriesApprove { entries } => {
-                let ids = self.entries(&entries)?;
-                let mut store = lock(&self.state.activity)?;
-                store
-                    .approve_time_entries(&ids, "user", now)
-                    .map_err(fail)?;
-                to_value(store.time_entries(&ids).map_err(fail)?)
-            }
-            O::EntriesUnapprove { entries } => {
-                let ids = self.entries(&entries)?;
-                let mut store = lock(&self.state.activity)?;
-                store.unapprove_time_entries(&ids, now).map_err(fail)?;
-                to_value(store.time_entries(&ids).map_err(fail)?)
-            }
-            O::EntryReject { entry } => {
-                let id = self.entry(&entry)?;
-                lock(&self.state.activity)?
-                    .reject_time_entry(&id, now)
-                    .map_err(fail)?;
-                Ok(json!({ "id": id }))
-            }
-            O::EntrySplit { entry, at } => {
-                let id = self.entry(&entry)?;
-                let (first, second) = lock(&self.state.activity)?
-                    .split_time_entry(&id, at, now)
-                    .map_err(fail)?;
-                to_value([first, second])
-            }
-            O::EntriesDelete { entries } => {
-                let ids = self.entries(&entries)?;
-                lock(&self.state.activity)?
-                    .delete_time_entries(&ids, now)
-                    .map_err(fail)?;
-                Ok(json!({ "deleted": ids }))
-            }
-            O::EntriesRebuild { from, to } => {
-                if to <= from {
-                    return Err(invalid("--to must be after --from"));
-                }
-                let entries = lock(&self.state.activity)?
-                    .rebuild_time_entries_in_range(from, to, now)
-                    .map_err(fail)?;
-                commands::refresh_agent_days(self.state, from, to, now);
-                to_value(entries)
-            }
-            O::EntriesExport { filter, format } => {
-                let parsed = ExportFormat::parse(&format).map_err(invalid)?;
-                let filter = self.filter(filter)?;
-                let (content, count) =
-                    self.read(|conn| reports::export_body(conn, &filter, parsed))?;
-                Ok(json!({ "format": format, "count": count, "content": content }))
-            }
-            O::Report {
-                filter,
-                boundaries,
-                group_by,
-            } => {
-                if boundaries.len() < 2
-                    || boundaries.len() > MAX_BUCKETS + 1
-                    || boundaries.windows(2).any(|pair| pair[1] <= pair[0])
-                {
-                    return Err(invalid(format!(
-                        "a report needs 1 to {MAX_BUCKETS} increasing periods"
-                    )));
-                }
-                let group = GroupBy::parse(&group_by).map_err(invalid)?;
-                let filter = self.filter(filter)?;
-                let cells = self.read(|conn| reports::rollup(conn, &filter, &boundaries, group))?;
-                Ok(json!({ "cells": cells, "boundaries": boundaries, "names": self.names()? }))
-            }
-            O::ProjectsList {} => {
-                let projects = lock(&self.state.activity)?.list_projects().map_err(fail)?;
-                Ok(json!({ "projects": projects, "names": self.names()? }))
-            }
-            O::ProjectShow {
-                project,
-                range_start,
-                range_end,
-                month_start,
-            } => {
-                let id = self.project(&project)?;
-                let project = lock(&self.state.activity)?
-                    .list_projects()
-                    .map_err(fail)?
-                    .into_iter()
-                    .find(|project| project.id == id)
-                    .ok_or_else(|| not_found("project", &project))?;
-                let stats = self
-                    .read(|conn| {
-                        crate::projects::project_stats(conn, range_start, range_end, month_start)
-                    })?
-                    .into_iter()
-                    .find(|stats| stats.project_id == id);
-                let rules = self.read(|conn| crate::projects::project_rules(conn, &id))?;
-                Ok(json!({
-                    "project": project,
-                    "stats": stats,
-                    "rules": rules,
-                    "names": self.names()?,
-                }))
-            }
-            O::ProjectCreate { mut project } => {
-                project.client_id = self.optional_client(project.client_id)?;
-                to_value(
-                    lock(&self.state.activity)?
-                        .create_project(project, now)
-                        .map_err(fail)?,
-                )
-            }
-            O::ProjectEdit { project, mut patch } => {
-                let id = self.project(&project)?;
-                if let Some(Some(client)) = patch.client_id {
-                    patch.client_id = Some(self.optional_client(Some(client))?);
-                }
-                to_value(
-                    lock(&self.state.activity)?
-                        .update_project(&id, patch, now)
-                        .map_err(fail)?,
-                )
-            }
-            O::ProjectDelete { project } => {
-                let id = self.project(&project)?;
-                lock(&self.state.activity)?
-                    .delete_project(&id, now)
-                    .map_err(fail)?;
-                Ok(json!({ "id": id }))
-            }
-            O::ClientsList {} => {
-                to_value(lock(&self.state.activity)?.list_clients().map_err(fail)?)
-            }
-            O::ClientShow { client } => {
-                let id = self.client(&client)?;
-                let store = lock(&self.state.activity)?;
-                let client = store
-                    .list_clients()
-                    .map_err(fail)?
-                    .into_iter()
-                    .find(|client| client.id == id);
-                let projects: Vec<_> = store
-                    .list_projects()
-                    .map_err(fail)?
-                    .into_iter()
-                    .filter(|project| project.client_id.as_deref() == Some(id.as_str()))
-                    .collect();
-                drop(store);
-                Ok(json!({ "client": client, "projects": projects, "names": self.names()? }))
-            }
-            O::ClientCreate { client } => to_value(
-                lock(&self.state.activity)?
-                    .create_client(client, now)
-                    .map_err(fail)?,
-            ),
-            O::ClientEdit { client, patch } => {
-                let id = self.client(&client)?;
-                to_value(
-                    lock(&self.state.activity)?
-                        .update_client(&id, patch, now)
-                        .map_err(fail)?,
-                )
-            }
-            O::ClientDelete { client } => {
-                let id = self.client(&client)?;
-                lock(&self.state.activity)?
-                    .delete_client(&id, now)
-                    .map_err(fail)?;
-                Ok(json!({ "id": id }))
-            }
-            O::CategoriesList {} => to_value(
-                lock(&self.state.activity)?
-                    .list_categories()
-                    .map_err(fail)?,
-            ),
-            O::CategoryCreate { category } => to_value(
-                lock(&self.state.activity)?
-                    .create_category(category, now)
-                    .map_err(fail)?,
-            ),
-            O::CategoryEdit { category, patch } => {
-                let id = self.category(&category)?;
-                to_value(
-                    lock(&self.state.activity)?
-                        .update_category(&id, patch, now)
-                        .map_err(fail)?,
-                )
-            }
-            O::CategoryDelete { category } => {
-                let id = self.category(&category)?;
-                lock(&self.state.activity)?
-                    .delete_category(&id, now)
-                    .map_err(fail)?;
-                Ok(json!({ "id": id }))
-            }
-            O::SettingsGet {} => to_value(self.state.settings_snapshot()),
-            O::SettingsSet { key, value } => {
-                let (previous, next) = {
-                    let mut store = lock(&self.state.settings)?;
-                    let previous = store.snapshot();
-                    (previous, store.patch(&key, value).map_err(invalid)?)
-                };
-                if let Some(app) = self.app {
-                    commands::apply_settings_change(app, &previous, &next);
-                }
-                to_value(next)
-            }
-            O::Paths {} => to_value(commands::StoragePaths::new(self.data_dir)),
+            O::EntryCreate { .. }
+            | O::EntriesEdit { .. }
+            | O::EntriesApprove { .. }
+            | O::EntriesUnapprove { .. }
+            | O::EntryReject { .. }
+            | O::EntrySplit { .. }
+            | O::EntriesDelete { .. }
+            | O::EntriesRebuild { .. } => commands::entries_changed(self.0),
+            _ => {}
         }
-    }
-
-    fn live(&self) -> Result<&AppHandle, ApiError> {
-        self.app.ok_or_else(|| {
-            error(
-                code::APP_NOT_RUNNING,
-                "OpenRize is not running. Start it with `rize app start`.",
-            )
-        })
-    }
-
-    fn status(&self, day_start: u64, now: u64) -> Outcome {
-        let mut activity = to_value(
-            lock(&self.state.activity)?
-                .snapshot(day_start, now)
-                .map_err(fail)?,
-        )?;
-        // The segment list is the timeline's; status needs only the totals.
-        if let Some(fields) = activity.as_object_mut() {
-            fields.remove("segments");
-        }
-        let pending = self.read(|conn| {
-            let filter = EntryFilter {
-                start_ms: day_start,
-                end_ms: now + 1,
-                status: Some("pending".into()),
-                ..Default::default()
-            };
-            Ok(reports::query_entries(conn, &filter, MAX_LIST)?.len())
-        })?;
-        let breaks = self
-            .app
-            .and_then(|app| commands::break_state(app.clone()).ok());
-        Ok(json!({
-            "running": self.app.is_some(),
-            "appVersion": env!("CARGO_PKG_VERSION"),
-            "activity": activity,
-            "pendingEntries": pending,
-            "timers": self.timers()?,
-            "breaks": breaks,
-        }))
-    }
-
-    fn timers(&self) -> Result<Vec<Timer>, ApiError> {
-        lock(&self.state.store)?.snapshot().map_err(fail)
-    }
-
-    fn read<T>(
-        &self,
-        read: impl FnOnce(&rusqlite::Connection) -> Result<T, String>,
-    ) -> Result<T, ApiError> {
-        read(&*lock(&self.state.activity_reader)?).map_err(fail)
-    }
-
-    /// Every category, project and client id with its name, so a client can
-    /// show names without a second request.
-    fn names(&self) -> Result<BTreeMap<String, String>, ApiError> {
-        let store = lock(&self.state.activity)?;
-        let mut names = BTreeMap::new();
-        for category in store.list_categories().map_err(fail)? {
-            names.insert(category.id, category.name);
-        }
-        for project in store.list_projects().map_err(fail)? {
-            names.insert(project.id, project.name);
-        }
-        for client in store.list_clients().map_err(fail)? {
-            names.insert(client.id, client.name);
-        }
-        Ok(names)
-    }
-
-    fn timer(&self, reference: &str) -> Result<String, ApiError> {
-        let timers = self.timers()?;
-        pick(&timers, reference, "timer", |t| &t.id, |t| &t.label)
-    }
-
-    fn category(&self, reference: &str) -> Result<String, ApiError> {
-        let items = lock(&self.state.activity)?
-            .list_categories()
-            .map_err(fail)?;
-        pick(&items, reference, "category", |c| &c.id, |c| &c.name)
-    }
-
-    fn project(&self, reference: &str) -> Result<String, ApiError> {
-        let items = lock(&self.state.activity)?.list_projects().map_err(fail)?;
-        pick(&items, reference, "project", |p| &p.id, |p| &p.name)
-    }
-
-    fn client(&self, reference: &str) -> Result<String, ApiError> {
-        let items = lock(&self.state.activity)?.list_clients().map_err(fail)?;
-        pick(&items, reference, "client", |c| &c.id, |c| &c.name)
-    }
-
-    fn optional_category(&self, reference: Option<String>) -> Result<Option<String>, ApiError> {
-        reference.map(|r| self.category(&r)).transpose()
-    }
-
-    fn optional_project(&self, reference: Option<String>) -> Result<Option<String>, ApiError> {
-        reference.map(|r| self.project(&r)).transpose()
-    }
-
-    fn optional_client(&self, reference: Option<String>) -> Result<Option<String>, ApiError> {
-        reference.map(|r| self.client(&r)).transpose()
-    }
-
-    /// `none` keeps meaning "no category / project / client" in a filter.
-    fn filter(&self, mut filter: EntryFilter) -> Result<EntryFilter, ApiError> {
-        let keep_none = |value: &Option<String>| value.as_deref() == Some(NONE);
-        if !keep_none(&filter.category_id) {
-            filter.category_id = self.optional_category(filter.category_id)?;
-        }
-        if !keep_none(&filter.project_id) {
-            filter.project_id = self.optional_project(filter.project_id)?;
-        }
-        if !keep_none(&filter.client_id) {
-            filter.client_id = self.optional_client(filter.client_id)?;
-        }
-        if filter.end_ms <= filter.start_ms {
-            return Err(invalid("--to must be after --from"));
-        }
-        Ok(filter)
-    }
-
-    /// `none` (or an empty value) clears an entry's category or project,
-    /// which the store spells as an empty string.
-    fn entry_patch(&self, mut patch: UpdateTimeEntry) -> Result<UpdateTimeEntry, ApiError> {
-        let clear = |value: &str| value.is_empty() || value == NONE;
-        if let Some(category) = patch.category_id.take() {
-            patch.category_id = Some(if clear(&category) {
-                String::new()
-            } else {
-                self.category(&category)?
-            });
-        }
-        if let Some(project) = patch.project_id.take() {
-            patch.project_id = Some(if clear(&project) {
-                String::new()
-            } else {
-                self.project(&project)?
-            });
-        }
-        if let (Some(start), Some(end)) = (patch.started_at, patch.ended_at) {
-            if end <= start {
-                return Err(invalid("--to must be after --from"));
-            }
-        }
-        Ok(patch)
-    }
-
-    fn entries(&self, references: &[String]) -> Result<Vec<String>, ApiError> {
-        if references.is_empty() {
-            return Err(invalid("name at least one entry"));
-        }
-        let mut ids = Vec::with_capacity(references.len());
-        for reference in references {
-            let id = self.entry(reference)?;
-            if !ids.contains(&id) {
-                ids.push(id);
-            }
-        }
-        Ok(ids)
-    }
-
-    /// A full entry id, or the end of one (`rize entries list` shows the last
-    /// eight characters, the random part of a v7 UUID).
-    fn entry(&self, reference: &str) -> Result<String, ApiError> {
-        let reference = reference.trim().to_ascii_lowercase();
-        if reference.len() < 4 || !reference.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
-            return Err(not_found("entry", &reference));
-        }
-        let matches: Vec<String> = self.read(|conn| {
-            let mut statement = conn
-                .prepare(
-                    "SELECT id FROM time_entries
-                     WHERE deleted_at IS NULL AND (id = ?1 OR id LIKE '%' || ?1)
-                     LIMIT 6",
-                )
-                .map_err(|e| e.to_string())?;
-            let ids = statement
-                .query_map([&reference], |row| row.get::<_, String>(0))
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string());
-            ids
-        })?;
-        if matches.contains(&reference) {
-            return Ok(reference);
-        }
-        match matches.as_slice() {
-            [] => Err(not_found("entry", &reference)),
-            [only] => Ok(only.clone()),
-            many => Err(ambiguous("entry", &reference, many.to_vec())),
-        }
-    }
-}
-
-/// Resolves what someone typed: an id, a whole name (any case), or the start
-/// of exactly one name.
-fn pick<T>(
-    items: &[T],
-    reference: &str,
-    kind: &str,
-    id: impl Fn(&T) -> &String,
-    name: impl Fn(&T) -> &String,
-) -> Result<String, ApiError> {
-    let wanted = reference.trim().to_lowercase();
-    if wanted.is_empty() {
-        return Err(invalid(format!("name a {kind}")));
-    }
-    if let Some(item) = items.iter().find(|item| *id(item) == reference.trim()) {
-        return Ok(id(item).clone());
-    }
-    let candidates = |test: &dyn Fn(&str) -> bool| -> Vec<&T> {
-        items
-            .iter()
-            .filter(|item| test(&name(item).to_lowercase()))
-            .collect()
-    };
-    let exact = candidates(&|name| name == wanted);
-    let matches = if exact.is_empty() {
-        candidates(&|name| name.starts_with(&wanted))
-    } else {
-        exact
-    };
-    match matches.as_slice() {
-        [] => Err(not_found(kind, reference)),
-        [only] => Ok(id(only).clone()),
-        many => Err(ambiguous(
-            kind,
-            reference,
-            many.iter()
-                .map(|item| format!("{} ({})", name(item), id(item)))
-                .collect(),
-        )),
-    }
-}
-
-fn day_start(now: u64) -> u64 {
-    crate::agents::ledger::calendar_day(now).0
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, ApiError> {
-    mutex.lock().map_err(|_| fail("a store lock was poisoned"))
-}
-
-fn to_value(value: impl Serialize) -> Outcome {
-    serde_json::to_value(value).map_err(|e| fail(e.to_string()))
-}
-
-fn error(code: &str, message: impl Into<String>) -> ApiError {
-    ApiError {
-        code: code.into(),
-        message: message.into(),
-        candidates: Vec::new(),
-    }
-}
-
-fn fail(message: impl Into<String>) -> ApiError {
-    error(code::FAILED, message)
-}
-
-fn invalid(message: impl Into<String>) -> ApiError {
-    error(code::INVALID_ARGUMENT, message)
-}
-
-fn not_found(kind: &str, reference: &str) -> ApiError {
-    error(
-        code::NOT_FOUND,
-        format!("no {kind} matches \"{reference}\""),
-    )
-}
-
-fn ambiguous(kind: &str, reference: &str, candidates: Vec<String>) -> ApiError {
-    ApiError {
-        code: code::AMBIGUOUS.into(),
-        message: format!("\"{reference}\" matches more than one {kind}; be more specific"),
-        candidates,
     }
 }

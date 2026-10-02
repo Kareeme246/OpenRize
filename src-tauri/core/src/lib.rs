@@ -1,11 +1,25 @@
-//! What the desktop app and `rize` share without Tauri: the domain models,
-//! entry queries, where the app keeps its files, and the protocol and local
-//! endpoint `rize` reaches the app through.
+//! Everything about OpenRize's data that needs no Tauri: the stores, their
+//! schema, entry queries and reports, settings, where the app keeps its
+//! files, and the protocol and local endpoint `rize` uses. The app links it
+//! for its windows and tracker; `rize` links it to read and edit the same data
+//! while the app is closed.
 
+pub mod activity;
+pub mod agents;
+pub mod ai;
+pub mod capture;
+pub mod entry_builder;
 pub mod ipc;
+pub mod migrations;
 pub mod models;
 pub mod paths;
+pub mod projects;
 pub mod protocol;
+pub mod reports;
+pub mod rpc;
+pub mod settings;
+pub mod state;
+pub mod timers;
 
 /// Canonical installed app identity, also used by independent clients.
 pub const APP_IDENTIFIER: &str = "com.offlinestudios.openrize";

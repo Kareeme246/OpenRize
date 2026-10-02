@@ -46,8 +46,9 @@ below, which needs Xcode 26+; verify that GitHub-hosted image still provides it 
 the runner label. `.github/workflows/release.yml` builds a signed, notarized macOS `.dmg`/`.app`
 on `v*` tags and publishes it to a GitHub Release, along with the `latest.json` manifest the
 in-app updater (`src-tauri/src/updater.rs`) reads - publishing a release ships it to every user.
-The `rize` CLI (`src-tauri/cli`) ships inside the app (macOS and Windows) and reaches the app
-through `src-tauri/src/rpc.rs`, live or headless. It is also installable on its own:
+The `rize` CLI (`src-tauri/cli`) ships inside the app (macOS and Windows). It asks the running app
+over `src-tauri/src/rpc.rs`, and otherwise opens the data itself through `openrize-core`
+(`src-tauri/core`, the Tauri-free stores both link), never creating it. It is also installable on its own:
 `install.sh` extracts it from the updater's `openrize.app.tar.gz`, so there is no separate
 CLI asset. `src-tauri/cli/COMMANDS.md`
 lists every current and planned CLI command and the Tauri command behind it; a PR that adds,

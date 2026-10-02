@@ -3217,12 +3217,15 @@ dependencies = [
 name = "openrize-core"
 version = "0.8.10"
 dependencies = [
+ "chrono",
  "dirs",
  "interprocess",
  "libc",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",
+ "uuid",
  "widestring",
  "windows",
 ]

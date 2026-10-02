@@ -1,6 +1,6 @@
 //! What `rize` asks the app, and the envelope every answer comes back in.
-//! The same request runs in the app over IPC or, with the app closed, in a
-//! headless run of the app binary, so both sides share these types.
+//! The same request runs in the app over IPC or, with the app closed, in
+//! `rize` itself (`crate::rpc`), so both sides share these types.
 //!
 //! References to projects, clients, categories, timers and entries are what
 //! the person typed (an id, a name or a short id); the app resolves them.
@@ -30,8 +30,6 @@ pub mod code {
     pub const AMBIGUOUS: &str = "AMBIGUOUS";
     pub const NO_DATA: &str = "NO_DATA";
     pub const APP_NOT_RUNNING: &str = "APP_NOT_RUNNING";
-    /// The headless runner found the app holding the stores; ask it instead.
-    pub const APP_RUNNING: &str = "APP_RUNNING";
     pub const INCOMPATIBLE: &str = "INCOMPATIBLE";
     pub const FAILED: &str = "FAILED";
 }
@@ -210,7 +208,7 @@ impl Operation {
 pub struct Hello {
     pub app_version: String,
     pub protocol_version: u32,
-    /// The answer came from the running app, not a headless run.
+    /// The answer came from the running app, not from rize on its own.
     pub running: bool,
     pub data_dir: String,
 }
@@ -236,6 +234,16 @@ pub struct ApiError {
     pub candidates: Vec<String>,
 }
 
+impl ApiError {
+    pub fn new(code: &str, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+            candidates: Vec::new(),
+        }
+    }
+}
+
 impl Response {
     pub fn success(data: impl Serialize) -> Self {
         match serde_json::to_value(data) {
@@ -250,11 +258,7 @@ impl Response {
     }
 
     pub fn error(code: &str, message: impl Into<String>) -> Self {
-        Self::failure(ApiError {
-            code: code.into(),
-            message: message.into(),
-            candidates: Vec::new(),
-        })
+        Self::failure(ApiError::new(code, message))
     }
 
     pub fn failure(error: ApiError) -> Self {

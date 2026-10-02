@@ -18,15 +18,17 @@
 //!   (`source = 'agent'`) under the guardrails in `accounting`.
 //! - this module: the supervising thread, extension status and the events the
 //!   frontend consumes.
+//!
+//! `ledger`, `accounting`, `spans` and `store` live in `openrize_core::agents`
+//! (re-exported here), so `rize entries rebuild` can refresh the ledger with
+//! the app closed.
 
-pub mod accounting;
 pub mod detect;
 pub mod herdr;
-pub mod ledger;
-pub mod spans;
-pub mod store;
 pub mod tmux;
 pub mod tracker;
+
+pub use openrize_core::agents::{accounting, ledger, store};
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;

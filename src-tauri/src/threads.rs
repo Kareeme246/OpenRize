@@ -529,7 +529,7 @@ mod tests {
 
     fn db() -> Connection {
         let mut conn = Connection::open_in_memory().unwrap();
-        crate::migrations::run_migrations(&mut conn).unwrap();
+        openrize_core::migrations::run_migrations(&mut conn).unwrap();
         conn.execute_batch(
             "INSERT INTO projects (id, client_id, name, color, created_at, updated_at)
                VALUES ('a', NULL, 'Alpha', '#fff', 0, 0), ('b', NULL, 'Beta', '#fff', 0, 0);

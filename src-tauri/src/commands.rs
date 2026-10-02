@@ -1,6 +1,5 @@
 //! IPC surface.
 
-use serde::Serialize;
 use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
@@ -635,31 +634,10 @@ pub fn rebuild_time_entries(
     };
     // A past day may never have had its agent time written: recompute the
     // days the range touches (the sessions it just rebuilt are its basis).
-    refresh_agent_days(&app.state::<AppState>(), start_ms, end_ms, now);
+    app.state::<AppState>()
+        .refresh_agent_days(start_ms, end_ms, now);
     entries_changed(&app);
     Ok(entries)
-}
-
-/// Recomputes the agent ledger of every calendar day in `[start, end]`.
-pub(crate) fn refresh_agent_days(state: &AppState, start_ms: u64, end_ms: u64, now: u64) {
-    let auto_accept = state.settings_snapshot().auto_accept;
-    let Ok(mut store) = state.activity.lock() else {
-        return;
-    };
-    let mut cursor = start_ms;
-    // At most two weeks, so a stray wide range cannot stall the store.
-    for _ in 0..16 {
-        let (day_start, day_end) = crate::agents::ledger::calendar_day(cursor);
-        if let Err(error) =
-            crate::agents::ledger::refresh(store.conn_mut(), day_start, day_end, now, auto_accept)
-        {
-            eprintln!("agent ledger: {error}");
-        }
-        if day_end > end_ms {
-            break;
-        }
-        cursor = day_end;
-    }
 }
 
 // --- Agents -------------------------------------------------------------
@@ -1062,29 +1040,7 @@ pub fn sweep_retention(app: &AppHandle) -> Result<u64, String> {
     Ok(removed)
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StoragePaths {
-    pub config_file: String,
-    pub data_dir: String,
-    pub database_file: String,
-}
-
-impl StoragePaths {
-    pub fn new(data_dir: &std::path::Path) -> Self {
-        Self {
-            config_file: crate::settings::config_dir()
-                .join("settings.json")
-                .display()
-                .to_string(),
-            data_dir: data_dir.display().to_string(),
-            database_file: data_dir
-                .join(crate::activity::DB_FILE)
-                .display()
-                .to_string(),
-        }
-    }
-}
+pub use openrize_core::state::StoragePaths;
 
 /// Whether macOS will launch OpenRize at login (see login_item.rs).
 #[tauri::command]

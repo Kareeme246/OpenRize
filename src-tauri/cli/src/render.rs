@@ -284,10 +284,10 @@ fn status(data: &Value) {
         println!("        Start it with `rize app start`.");
     }
     let mut today = vec![format!("{} tracked", duration(ms(&activity["trackedMs"])))];
-    if ms(&activity["focusMs"]) > 0 {
+    if ms(&activity["focusMs"]) >= 1000 {
         today.push(format!("{} focus", duration(ms(&activity["focusMs"]))));
     }
-    if ms(&activity["breakMs"]) > 0 {
+    if ms(&activity["breakMs"]) >= 1000 {
         today.push(format!("{} on breaks", duration(ms(&activity["breakMs"]))));
     }
     match data["pendingEntries"].as_u64().unwrap_or(0) {
@@ -517,7 +517,10 @@ fn report(data: &Value, per: Per, by: Group) {
                     name.clone(),
                     duration(times.iter().sum()),
                     entries.to_string(),
-                    duration(*billable),
+                    match billable {
+                        0 => "-".into(),
+                        billable => duration(*billable),
+                    },
                 ]
             })
             .collect();

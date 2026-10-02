@@ -1,9 +1,8 @@
-//! Reaching OpenRize: the running app over its local endpoint, or, with the
-//! app closed, a headless run of the app binary (`openrize __rize`) that
-//! answers one request from the stored data. rize itself never opens the
-//! database, so there is one implementation of every operation: the app's.
+//! Reaching OpenRize's data: through the running app over its local
+//! endpoint, or, with the app closed, straight from the stores the app made
+//! (`openrize_core::rpc`, the same code the app answers with). rize never
+//! creates the data: without the app's database there is nothing to work on.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -11,17 +10,16 @@ use std::time::{Duration, Instant};
 
 use openrize_core::ipc::{self, Endpoint};
 use openrize_core::paths;
-use openrize_core::protocol::{
-    self, code, Hello, Operation, Request, Response, MAX_REQUEST, MAX_RESPONSE,
-};
+use openrize_core::protocol::{code, Hello, Operation, Request, Response};
+use openrize_core::rpc;
+use openrize_core::state::{self, AppState, NO_DATA};
 
 /// How long a freshly launched app may take to answer.
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long a quitting app may take to close its stores.
+const QUIT_TIMEOUT: Duration = Duration::from_secs(30);
 /// Lets a dev or test build point rize at a specific app binary.
 const APP_ENV: &str = "RIZE_APP";
-const HEADLESS_ARG: &str = "__rize";
-pub const NO_DATA: &str =
-    "This laptop doesn't have any rize data. Are you sure you've installed the app before?";
 
 pub struct Client {
     data_dir: PathBuf,
@@ -59,21 +57,25 @@ impl Client {
         if !self.data_dir.join(paths::DATABASE_FILE).is_file() {
             return Response::error(code::NO_DATA, NO_DATA);
         }
-        let response = match self.headless(&request) {
-            Ok(response) => response,
-            Err(error) => return Response::error(code::FAILED, error),
-        };
-        // The app was starting while we looked; it has the stores now.
-        if response.code() == Some(code::APP_RUNNING) {
-            return match self.wait_for_app(LAUNCH_TIMEOUT) {
+        match state::lock_stores(&self.data_dir, false) {
+            Ok(Some(lock)) => {
+                let response = match AppState::open_existing(&self.data_dir) {
+                    Ok(state) => rpc::answer(&state, None, &self.data_dir, request),
+                    Err(error) => Response::failure(error),
+                };
+                drop(lock);
+                response
+            }
+            // The app was starting while we looked; it has the stores now.
+            Ok(None) => match self.wait_for_app(LAUNCH_TIMEOUT) {
                 Ok(()) => self
                     .endpoint
                     .call(&request)
                     .unwrap_or_else(|error| Response::error(code::FAILED, error)),
                 Err(error) => Response::error(code::FAILED, error),
-            };
+            },
+            Err(error) => Response::error(code::FAILED, error.to_string()),
         }
-        response
     }
 
     /// Starts the app in the background (or with its window, `show`) unless
@@ -96,6 +98,23 @@ impl Client {
         Ok(true)
     }
 
+    /// Asks the running app to quit, and returns once it has let go of the
+    /// data, so the next command already finds it closed.
+    pub fn quit_app(&self) -> Response {
+        let response = self.request(Operation::AppQuit {});
+        if !response.ok {
+            return response;
+        }
+        let deadline = Instant::now() + QUIT_TIMEOUT;
+        while Instant::now() < deadline {
+            if !self.running() && matches!(state::lock_stores(&self.data_dir, false), Ok(Some(_))) {
+                return response;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        Response::error(code::FAILED, "OpenRize did not quit in time")
+    }
+
     pub fn hello(&self) -> Result<Hello, String> {
         let response = self.request(Operation::Hello {});
         match (response.data, response.error) {
@@ -114,29 +133,6 @@ impl Client {
             thread::sleep(Duration::from_millis(100));
         }
         Err("OpenRize did not start answering in time".into())
-    }
-
-    fn headless(&self, request: &Request) -> Result<Response, String> {
-        let executable = app_executable()?;
-        check_version(&executable)?;
-        let mut child = Command::new(&executable)
-            .arg(HEADLESS_ARG)
-            .arg("--data-dir")
-            .arg(&self.data_dir)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|e| format!("could not run {}: {e}", executable.display()))?;
-        {
-            let mut stdin = child.stdin.take().ok_or("no stdin")?;
-            protocol::write_frame(&mut stdin, request, MAX_REQUEST)?;
-            stdin.flush().map_err(|e| e.to_string())?;
-        }
-        let mut stdout = child.stdout.take().ok_or("no stdout")?;
-        let response = protocol::read_frame(&mut stdout, MAX_RESPONSE);
-        let status = child.wait().map_err(|e| e.to_string())?;
-        response.map_err(|error| format!("{} failed ({status}): {error}", executable.display()))
     }
 }
 
@@ -203,11 +199,11 @@ fn installed_apps() -> Vec<PathBuf> {
     Vec::new()
 }
 
-/// The first app version that answers rize (`openrize __rize`). An older
-/// app would just open its window, so rize never runs one.
+/// The first app version that serves rize and starts in the background. An
+/// older app would only open its window, so rize never launches one.
 const FIRST_RIZE_VERSION: (u64, u64, u64) = (0, 8, 10);
 
-/// Refuses an installed app too old to answer rize. Only a macOS bundle
+/// Refuses an installed app too old for rize to launch. Only a macOS bundle
 /// records its version; elsewhere rize is built with its app.
 fn check_version(executable: &Path) -> Result<(), String> {
     let Some(bundle) = bundle(executable).filter(|_| cfg!(target_os = "macos")) else {

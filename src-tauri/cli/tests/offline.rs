@@ -1,14 +1,14 @@
-//! `rize` end to end with the app closed: the real CLI (the sidecar build.rs
-//! stages) runs the real app binary headless against a fresh data directory.
-//! The running-app path shares every operation with it; only the transport
-//! differs.
-#![cfg(any(target_os = "macos", windows))]
+//! rize end to end with the app closed and not even installed: it reads and
+//! edits the data the app left, and never makes that data itself. The
+//! running app answers with the same code (`openrize_core::rpc`); only the
+//! transport differs.
 
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use openrize_core::activity::ActivityStore;
 use serde_json::Value;
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -26,17 +26,18 @@ impl Store {
         ));
         fs::create_dir_all(root.join("data")).unwrap();
         fs::create_dir_all(root.join("config")).unwrap();
-        // What a first launch leaves behind; the headless run migrates it.
-        fs::write(root.join("data/activity.db"), b"").unwrap();
+        // What the app's first launch leaves behind.
+        ActivityStore::load(&root.join("data")).unwrap();
         Self { root }
     }
 
     fn rize(&self, args: &[&str]) -> Output {
-        Command::new(env!("RIZE_SIDECAR"))
+        Command::new(env!("CARGO_BIN_EXE_rize"))
             .arg("--data-dir")
             .arg(self.root.join("data"))
             .args(args)
-            .env("RIZE_APP", env!("CARGO_BIN_EXE_openrize"))
+            // No app anywhere rize could find one.
+            .env("RIZE_APP", self.root.join("missing-openrize"))
             .env("XDG_CONFIG_HOME", self.root.join("config"))
             .output()
             .unwrap()
@@ -207,10 +208,30 @@ fn settings_timers_and_what_needs_the_app() {
 #[test]
 fn no_data_means_the_app_was_never_installed() {
     let store = Store::new();
-    fs::remove_file(store.root.join("data/activity.db")).unwrap();
-    let output = store.rize(&["entries", "list"]);
-    assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains(
-        "This laptop doesn't have any rize data. Are you sure you've installed the app before?"
-    ));
+    let database = store.root.join("data/activity.db");
+    fs::remove_file(&database).unwrap();
+    for args in [&["entries", "list"][..], &["clients", "add", "Acme"]] {
+        let output = store.rize(args);
+        assert_eq!(output.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&output.stderr).contains(
+            "This laptop doesn't have any rize data. Are you sure you've installed the app before?"
+        ));
+    }
+    assert!(!database.exists(), "rize must never create the database");
+}
+
+#[test]
+fn data_from_another_app_version_is_left_alone() {
+    let store = Store::new();
+    let database = store.root.join("data/activity.db");
+    rusqlite::Connection::open(&database)
+        .unwrap()
+        .execute_batch("PRAGMA user_version = 999;")
+        .unwrap();
+    assert_eq!(store.err(&["entries", "list"]), ("INCOMPATIBLE".into(), 4));
+    let version: i32 = rusqlite::Connection::open(&database)
+        .unwrap()
+        .query_row("PRAGMA user_version;", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 999);
 }

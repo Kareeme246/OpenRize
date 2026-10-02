@@ -154,35 +154,28 @@ enum TrackCommand {
 
 #[derive(Subcommand, Debug)]
 enum FocusCommand {
+    /// Start a focus session
     Start { label: Option<String> },
+    /// End the focus session
     Stop,
 }
 
 #[derive(Subcommand, Debug)]
 enum TimersCommand {
+    /// Every timer with its elapsed time
     List,
     /// Create a timer
-    New {
-        label: String,
-    },
-    Start {
-        timer: String,
-    },
-    Pause {
-        timer: String,
-    },
+    New { label: String },
+    /// Start or resume a timer
+    Start { timer: String },
+    /// Pause a running timer
+    Pause { timer: String },
     /// Set a timer back to zero (asks first)
-    Reset {
-        timer: String,
-    },
-    Rename {
-        timer: String,
-        label: String,
-    },
+    Reset { timer: String },
+    /// Rename a timer
+    Rename { timer: String, label: String },
     /// Delete a timer (asks first)
-    Rm {
-        timer: String,
-    },
+    Rm { timer: String },
 }
 
 #[derive(ClapArgs, Debug, Default)]
@@ -407,11 +400,11 @@ struct ProjectFields {
 
 #[derive(Subcommand, Debug)]
 enum ProjectsCommand {
+    /// Every project with its client and rate
     List,
     /// A project with this month's time, budget and matching rules
-    Show {
-        project: String,
-    },
+    Show { project: String },
+    /// Create a project
     Add {
         name: String,
         #[command(flatten)]
@@ -426,9 +419,7 @@ enum ProjectsCommand {
         fields: ProjectFields,
     },
     /// Delete a project (asks first)
-    Rm {
-        project: String,
-    },
+    Rm { project: String },
 }
 
 #[derive(ClapArgs, Debug, Default)]
@@ -449,16 +440,17 @@ struct ClientFields {
 
 #[derive(Subcommand, Debug)]
 enum ClientsCommand {
+    /// Every client
     List,
     /// A client and its projects
-    Show {
-        client: String,
-    },
+    Show { client: String },
+    /// Create a client
     Add {
         name: String,
         #[command(flatten)]
         fields: ClientFields,
     },
+    /// Change a client
     Edit {
         client: String,
         #[arg(long)]
@@ -469,9 +461,7 @@ enum ClientsCommand {
         fields: ClientFields,
     },
     /// Delete a client (asks first)
-    Rm {
-        client: String,
-    },
+    Rm { client: String },
 }
 
 #[derive(ClapArgs, Debug, Default)]
@@ -491,12 +481,15 @@ struct CategoryFields {
 
 #[derive(Subcommand, Debug)]
 enum CategoriesCommand {
+    /// Every category
     List,
+    /// Create a category
     Add {
         name: String,
         #[command(flatten)]
         fields: CategoryFields,
     },
+    /// Change a category
     Edit {
         category: String,
         #[arg(long)]
@@ -507,23 +500,17 @@ enum CategoriesCommand {
         fields: CategoryFields,
     },
     /// Delete a category (asks first)
-    Rm {
-        category: String,
-    },
+    Rm { category: String },
 }
 
 #[derive(Subcommand, Debug)]
 enum SettingsCommand {
     /// Every preference with its value
     List,
-    Get {
-        key: String,
-    },
+    /// One preference, by dotted key
+    Get { key: String },
     /// Change one preference; the value is JSON (true, 40, "dark") or plain text
-    Set {
-        key: String,
-        value: String,
-    },
+    Set { key: String, value: String },
 }
 
 /// What a command prints, and how.
@@ -670,7 +657,7 @@ fn run(args: &Args) -> Result<Outcome, Response> {
                         json!({ "alreadyClosed": true }),
                     )));
                 }
-                ask(Operation::AppQuit {})
+                Ok(Outcome::Answer(client.quit_app()))
             }
         },
         Command::Track { command } => match command {

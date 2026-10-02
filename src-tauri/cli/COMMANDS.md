@@ -7,19 +7,19 @@ command, or changes the app command behind one, updates its row here.
 ## How rize reaches the data
 
 - **App running:** rize sends the request to the app's local endpoint (a Unix socket on macOS,
-  a named pipe on Windows), and the app runs the same command function its window uses. The app
-  stays the only writer while it runs, and open windows and the tray update at once.
-- **App closed:** rize runs the app binary headless (`openrize __rize`, see
-  `src-tauri/src/rpc.rs`), which answers the one request from the stored data with the same code
-  and exits. Everything that reads or edits stored data still works; nothing new is tracked until
-  the app runs again, and it picks the edits up at launch. A lock file keeps the app and a
-  headless run from ever holding the stores at once.
-- **No data at all:** rize exits with "This laptop doesn't have any rize data. Are you sure
-  you've installed the app before?"
+  a named pipe on Windows). The app stays the only writer while it runs, and open windows and the
+  tray update at once.
+- **App closed, or not installed at all:** rize opens the stored data itself and answers with
+  the same code the app uses (`openrize_core::rpc`). Everything that reads or edits stored data
+  works; nothing new is tracked until the app runs again, and it picks the edits up at launch. A
+  lock file keeps the app and rize from ever holding the stores at once.
+- **rize never creates the data.** Only the app makes and migrates the database. Without one,
+  rize exits with "This laptop doesn't have any rize data. Are you sure you've installed the app
+  before?"; with one from another app version, it fails with `INCOMPATIBLE` and leaves it alone.
 
 There are two ways to get rize: it comes bundled with the app (`rize install-path` puts it on
 PATH), or the curl installer (`install.sh`) installs it on its own. A standalone rize finds the
-installed app when it needs it.
+installed app only to launch it (`rize app start`, `rize track start`).
 
 `rize app start` only launches the app (in the background, no window). Tracking is its own
 command: `rize track start`, or `rize app start --track` to do both.
@@ -119,4 +119,4 @@ stay reachable through `rize settings set`.
 | Confirmation | Deleting, voiding, finalizing, resetting and rebuilding prompt on a terminal and need `--yes` otherwise. |
 | Paging | `entries list` takes `--limit` (default 50) and reports `truncated` when more match. |
 | Privacy | Window titles and URLs only with `--full`. |
-| Global flags | `--json`, `--full`, `--yes` (`-y`), `--data-dir` (another app data directory, such as a dev build's). `RIZE_APP` points rize at a specific app binary for dev builds. |
+| Global flags | `--json`, `--full`, `--yes` (`-y`), `--data-dir` (another app data directory, such as a dev build's). `RIZE_APP` points rize at a specific app binary to launch, for dev builds. |

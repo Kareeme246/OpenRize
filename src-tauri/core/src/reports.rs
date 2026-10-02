@@ -16,7 +16,7 @@ use rusqlite::{params, params_from_iter, types::Value, Connection};
 use serde::Serialize;
 
 use crate::models::TimeEntry;
-pub use openrize_core::{EntryFilter, MAX_QUERY_ROWS};
+pub use crate::{EntryFilter, MAX_QUERY_ROWS};
 
 /// Enough for a year by day, plus the closing boundary.
 pub const MAX_BUCKETS: usize = 400;
@@ -40,7 +40,7 @@ pub fn query_entries(
     filter: &EntryFilter,
     limit: u32,
 ) -> Result<Vec<TimeEntry>, String> {
-    let mut entries = openrize_core::query_entries(conn, filter, limit)?;
+    let mut entries = crate::query_entries(conn, filter, limit)?;
 
     let mut ai = crate::ai::store::summaries(conn, filter.start_ms, filter.end_ms)?;
     let mut apps = dominant_apps(conn, filter.start_ms, filter.end_ms)?;
@@ -421,7 +421,7 @@ pub fn export_body(
 mod tests {
     use super::*;
     use crate::activity::ActivityStore;
-    use openrize_core::NONE;
+    use crate::NONE;
 
     const MIN: u64 = 60_000;
     const HOUR: u64 = 60 * MIN;

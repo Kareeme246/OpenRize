@@ -186,8 +186,9 @@ There are two ways to get it, both from **v0.8.10** on:
   signature and Apple notarization, and installs into `~/.local/bin` (add that to PATH if
   needed). It never replaces existing files or edits shell profiles.
 
-rize works on the data the app records, so without the app it reports that this machine has no
-rize data. On Windows, build from source: the app bundles `rize.exe`, or
+rize reads and edits the data the app records, with or without the app installed, but only the
+app tracks and only the app creates that data: on a machine where it never ran, rize reports that
+there is no rize data. On Windows, build from source: the app bundles `rize.exe`, or
 `./scripts/install-cli.sh` builds just the CLI.
 
 ## Building from source

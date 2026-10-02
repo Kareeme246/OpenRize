@@ -1,5 +1,5 @@
-//! What rize decides on its own, before or without reaching the app. The
-//! app's answers are covered end to end in `src-tauri/tests/rize.rs`.
+//! What rize decides before it reaches any data. Its answers from the data
+//! are covered end to end in `offline.rs`.
 
 use std::fs;
 use std::path::PathBuf;
@@ -116,21 +116,9 @@ fn destructive_commands_need_yes_outside_a_terminal() {
             .unwrap()
             .contains("--yes"));
     }
-    // With --yes it goes on to the app, which is missing here.
+    // With --yes it goes on to the data, which is missing here.
     let (envelope, _) = fixture.json(&["entries", "rm", "abcd1234", "--yes"]);
     assert_eq!(code(&envelope), "NO_DATA");
-}
-
-#[test]
-fn a_store_without_its_app_binary_fails_clearly() {
-    let fixture = Fixture::new();
-    fs::write(fixture.root.join("data/activity.db"), b"").unwrap();
-    let (envelope, exit) = fixture.json(&["timers", "list"]);
-    assert_eq!(exit, 1);
-    assert!(envelope["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("missing-openrize"));
 }
 
 #[test]

@@ -5,31 +5,22 @@ mod breaks;
 mod capture;
 mod commands;
 mod energy;
-mod entry_builder;
 mod invoices;
 mod login_item;
-mod migrations;
-use openrize_core::models;
-mod projects;
 mod pulse;
-mod reports;
 mod rpc;
-mod settings;
 mod threads;
-mod timers;
 mod tray;
 mod updater;
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use openrize_core::{entry_builder, models, projects, reports, settings, timers};
+
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use rusqlite::Connection;
 use tauri::{Manager, RunEvent, WindowEvent};
 
-use activity::ActivityStore;
-use settings::{CloseBehavior, Settings, SettingsStore};
-use timers::TimerStore;
+use settings::CloseBehavior;
 
 /// Emitted after every timer mutation so the frontend can adopt the snapshot
 /// Rust already has — the tray can change state without the window asking.
@@ -58,59 +49,11 @@ pub const EVENT_OPEN_BREAK_SETTINGS: &str = "open-break-settings";
 /// open today's review queue.
 pub const EVENT_OPEN_REVIEW: &str = "open-review";
 
-/// Shared application state.
-pub struct AppState {
-    pub store: Mutex<TimerStore>,
-    pub activity: Mutex<ActivityStore>,
-    /// Read-only-by-convention connection to the same database, kept off the
-    /// writer's mutex so a query never blocks behind (or blocks) the
-    /// sampler's tick — see activity.rs's module doc, decision A6.
-    pub activity_reader: Mutex<Connection>,
-    /// Whether an OpenRize window (main or the Pulse panel) is focused.
-    /// Drives the push cadence to the frontend; the underlying sampling rate
-    /// is unaffected.
-    pub foreground: AtomicBool,
-    pub settings: Mutex<SettingsStore>,
-}
-
-impl AppState {
-    /// Opens every store in `dir`. The caller must hold the stores' lock
-    /// (`rpc::lock_stores`): loading closes any segment left open.
-    pub fn load(dir: &std::path::Path) -> Result<Self, String> {
-        let store = TimerStore::load(dir)?;
-        let mut activity = ActivityStore::load(dir)?;
-        let activity_reader = ActivityStore::open_reader(dir)?;
-        let settings = SettingsStore::load(&settings::config_dir())?;
-        activity.set_tracking_hours(settings.snapshot().tracking_hours.clone());
-        Ok(Self {
-            store: Mutex::new(store),
-            activity: Mutex::new(activity),
-            activity_reader: Mutex::new(activity_reader),
-            foreground: AtomicBool::new(true),
-            settings: Mutex::new(settings),
-        })
-    }
-
-    pub fn settings_snapshot(&self) -> Settings {
-        self.settings
-            .lock()
-            .map(|store| store.snapshot())
-            .unwrap_or_default()
-    }
-}
+pub use openrize_core::state::AppState;
 
 /// Launched by `rize app start`: run in the menu bar with no window until
 /// one is asked for.
 const BACKGROUND_ARG: &str = "--background";
-
-/// `openrize __rize ...` answers one `rize` request without the GUI; see
-/// `rpc`. Returns `None` for an ordinary launch.
-pub fn rize_headless(args: &[String]) -> Option<i32> {
-    match args {
-        [first, rest @ ..] if first == rpc::HEADLESS_ARG => Some(rpc::headless(rest)),
-        _ => None,
-    }
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -137,7 +80,8 @@ pub fn run() {
             let dir = app.path().app_data_dir()?;
             // Waits out a `rize` edit made while the app was closed, then
             // keeps the stores for as long as the app runs.
-            let lock = rpc::lock_stores(&dir, true)?.expect("a blocking lock");
+            std::fs::create_dir_all(&dir)?;
+            let lock = openrize_core::state::lock_stores(&dir, true)?.expect("a blocking lock");
             app.manage(rpc::StoresLock(lock));
 
             let state = AppState::load(&dir)

@@ -20,8 +20,7 @@ fn main() {
 }
 
 /// Builds the CLI package, not the Tauri application. A separate target
-/// directory avoids a nested Cargo lock on the app build. Its path is exposed
-/// as `RIZE_SIDECAR` for the app's end-to-end tests.
+/// directory avoids a nested Cargo lock on the app build.
 fn build_cli_sidecar() {
     println!("cargo:rerun-if-changed=cli/Cargo.toml");
     println!("cargo:rerun-if-changed=cli/src");
@@ -61,7 +60,6 @@ fn build_cli_sidecar() {
         fs::create_dir_all(staged.parent().expect("binaries dir")).expect("binaries dir");
         fs::copy(built, &staged).expect("could not stage the CLI sidecar");
     }
-    println!("cargo:rustc-env=RIZE_SIDECAR={}", staged.display());
 }
 
 /// Builds `swift/` (the `openrize-ml` executable) and stages it as

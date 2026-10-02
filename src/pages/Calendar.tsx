@@ -557,6 +557,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
           {scale === "day" && !threadsShown && (
             <DayView
               dayStart={startMs}
+              showAgents={agentsOn}
               rails={rails}
               entries={visible}
               segments={segments}

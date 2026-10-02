@@ -3,14 +3,18 @@ import { type Board, EMPTY_BOARD, type ExtensionStatus } from "../lib/agents";
 import * as api from "../lib/api";
 import { useTauriEvent } from "./useTauriEvent";
 
-/** The live flight board, adopted from `agents-changed`. */
-export function useAgentBoard(): Board {
+/**
+ * The live flight board, adopted from `agents-changed`. Always the empty board
+ * while advanced workflow tracking is off.
+ */
+export function useAgentBoard(enabled: boolean): Board {
   const [board, setBoard] = useState<Board>(EMPTY_BOARD);
   useEffect(() => {
+    if (!enabled) return;
     api.agentBoard().then(setBoard, () => undefined);
-  }, []);
+  }, [enabled]);
   useTauriEvent<Board>(api.AGENTS_CHANGED, setBoard);
-  return board;
+  return enabled ? board : EMPTY_BOARD;
 }
 
 /** The extensions Settings lists, refreshed when one connects or drops. */

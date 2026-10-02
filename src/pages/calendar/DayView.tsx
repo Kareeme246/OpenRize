@@ -250,7 +250,7 @@ export function DayView({
             Agents
           </span>
           <span className="w-[114px] shrink-0 truncate border-line border-l px-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
-            Labels
+            Category
           </span>
           <span className="w-[114px] shrink-0 truncate border-line border-l px-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
             Projects
@@ -332,7 +332,7 @@ export function DayView({
             })}
           </div>
 
-          {/* Time Entries / Labels / Projects / Productivity lanes, sharing one
+          {/* Time Entries / Category / Projects / Productivity lanes, sharing one
               continuous set of hour lines and one now line across the whole
               width instead of a copy per lane. */}
           <div className="relative min-w-0 flex-1">
@@ -423,7 +423,6 @@ export function DayView({
                       top={top}
                       height={bandHeight}
                       now={now}
-                      labelled
                     />
                   );
                 })}
@@ -584,8 +583,6 @@ interface BreakBandProps {
   top: number;
   height: number;
   now: number;
-  /** Name the break inside the band when it is tall enough to hold a line. */
-  labelled?: boolean;
 }
 
 /** Shortest block that can hold one line of text without clipping it. */
@@ -593,15 +590,10 @@ const TEXT_MIN_HEIGHT = 12;
 
 /**
  * A taken break: a neutral gray block in the gap the segment leaves behind.
- * It carries no label or project, only its time and length.
+ * It carries no category or project, only "Break" and its length when tall
+ * enough to hold a line.
  */
-export function BreakBand({
-  entry,
-  top,
-  height,
-  now,
-  labelled = false,
-}: BreakBandProps) {
+export function BreakBand({ entry, top, height, now }: BreakBandProps) {
   const start = entry.startedAt ?? now;
   const length = formatDuration(Math.max(0, breakEnd(entry, now) - start));
   return (
@@ -612,9 +604,9 @@ export function BreakBand({
         role="img"
         aria-label={`Break, ${length}`}
       >
-        {labelled && height >= TEXT_MIN_HEIGHT && (
+        {height >= TEXT_MIN_HEIGHT && (
           <div className="flex h-full items-center gap-1.5 px-2 font-medium text-[10.5px] text-fg-soft leading-none">
-            <span>Break</span>
+            <span className="shrink-0">Break</span>
             <span className="truncate tabular-nums">{length}</span>
           </div>
         )}
@@ -704,7 +696,7 @@ interface LaneBlockProps {
 }
 
 /**
- * A time entry's colour and name in the Labels or Projects lane, aligned to
+ * A time entry's colour and name in the Category or Projects lane, aligned to
  * the same top/height as its block in the Time Entries lane.
  */
 function LaneBlock({

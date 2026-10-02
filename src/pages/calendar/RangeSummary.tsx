@@ -1,5 +1,6 @@
 import { BarRow, Donut, type Slice } from "../../components/Charts";
 import { Progress, StatCard } from "../../components/Page";
+import { Tooltip } from "../../components/Tooltip";
 import type { Focus } from "../../lib/agents";
 import { formatDuration, plural } from "../../lib/format";
 
@@ -19,6 +20,9 @@ interface RangeSummaryProps {
   topApps?: { app: string; ms: number }[];
 }
 
+/** Apps listed on their own; the rest fold into one "Other" row. */
+const TOP_APPS = 4;
+
 /**
  * The Calendar's right panel when no entry is open: work hours against the
  * target, time by category, and (for a day) top apps.
@@ -37,7 +41,12 @@ export function RangeSummary({
 }: RangeSummaryProps) {
   const progress = targetMs > 0 ? workMs / targetMs : 0;
   // Under a minute reads as "0m", which only adds noise to a ranked list.
-  const apps = (topApps ?? []).filter((app) => app.ms >= 60_000).slice(0, 5);
+  const ranked = (topApps ?? []).filter((app) => app.ms >= 60_000);
+  // Folding a single app into "Other" would only hide its name.
+  const keep = ranked.length > TOP_APPS + 1 ? TOP_APPS : ranked.length;
+  const apps = ranked.slice(0, keep);
+  const rest = ranked.slice(keep);
+  const restMs = rest.reduce((sum, app) => sum + app.ms, 0);
   const maxApp = apps[0]?.ms ?? 0;
   const statusLabel =
     processing > 0
@@ -113,6 +122,33 @@ export function RangeSummary({
               large
             />
           ))}
+          {rest.length > 0 && (
+            <Tooltip
+              placement="left"
+              content={
+                <div className="space-y-0.5">
+                  {rest.map((app) => (
+                    <div key={app.app} className="flex justify-between gap-4">
+                      <span className="truncate">{app.app}</span>
+                      <span className="tabular-nums">
+                        {formatDuration(app.ms)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              }
+            >
+              <div>
+                <BarRow
+                  label={`Other (${rest.length})`}
+                  ms={restMs}
+                  maxMs={Math.max(maxApp, restMs)}
+                  color="var(--fg-ghost)"
+                  large
+                />
+              </div>
+            </Tooltip>
+          )}
         </div>
       )}
     </div>

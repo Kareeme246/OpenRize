@@ -248,7 +248,7 @@ export function BreakSettingsGroups() {
       <SettingGroup title="Break reminders">
         <SettingRow
           title="Remind me to take breaks"
-          description="A reminder appears in the top-right corner of your screen after a stretch of work, during your tracking hours"
+          description="A reminder appears at your notification position after a stretch of work, during your tracking hours"
         >
           <Toggle
             checked={breaks.enabled}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
 import type { Category, Client, Project } from "../lib/types";
+import { useTauriEvent } from "./useTauriEvent";
 
 export interface Catalog {
   categories: Category[];
@@ -40,6 +41,8 @@ export function useCatalog(): Catalog {
   useEffect(() => {
     reload();
   }, [reload]);
+
+  useTauriEvent(api.ENTRIES_CHANGED, () => void reload());
 
   const categoryById = useMemo(
     () => new Map(categories.map((category) => [category.id, category])),

@@ -32,6 +32,7 @@ export interface EntryReview {
   /** Splits the open entry and opens its first half. */
   split: () => Promise<void>;
   remove: () => Promise<void>;
+  removeField: (field: SuggestionField, id: string) => Promise<void>;
   retry: () => Promise<void>;
   resolveRule: (suggestion: RuleSuggestion, accept: boolean) => Promise<void>;
 }
@@ -111,9 +112,24 @@ export function useEntryReview(initialId?: string): EntryReview {
         api.updateTimeEntry(
           id,
           field === "category"
-            ? { categoryId: valueId ?? "" }
-            : { projectId: valueId ?? "" },
+            ? {
+                categoryId:
+                  valueId === detail?.entry.categoryId ? "" : (valueId ?? ""),
+              }
+            : {
+                projectId:
+                  valueId === detail?.entry.projectId ? "" : (valueId ?? ""),
+              },
         ),
+      );
+    },
+    [run, detail],
+  );
+
+  const removeField = useCallback(
+    async (field: SuggestionField, id: string): Promise<void> => {
+      await run(() =>
+        field === "category" ? api.deleteCategory(id) : api.deleteProject(id),
       );
     },
     [run],
@@ -196,6 +212,7 @@ export function useEntryReview(initialId?: string): EntryReview {
     setTimes,
     split,
     remove,
+    removeField,
     retry,
     resolveRule,
   };

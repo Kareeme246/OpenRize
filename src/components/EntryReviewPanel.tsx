@@ -48,7 +48,6 @@ interface FieldModel {
 const KEYED_OPTIONS = 3;
 /** Options shown as full rows (with their confidence) before the chips. */
 const ROW_OPTIONS = 4;
-const NO_PROJECT_COLOR = "var(--fg-faint)";
 
 const EVENT_LABELS: Record<string, string> = {
   created: "Created",
@@ -85,6 +84,7 @@ export interface EntryReviewPanelProps {
   onUnapprove: () => void;
   onSplit: () => void;
   onDelete: () => void;
+  onDeleteField: (field: SuggestionField, id: string) => void;
   onRetry: () => void;
   onSetField: (field: SuggestionField, valueId: string | null) => void;
   onToggleBillable: () => void;
@@ -138,14 +138,11 @@ function buildOptions(
     return [];
   }
 
-  const choices: PickOption[] = [
-    { valueId: null, name: "No project", color: NO_PROJECT_COLOR },
-    ...activeProjects.map((project) => ({
-      valueId: project.id,
-      name: project.name,
-      color: project.color,
-    })),
-  ];
+  const choices: PickOption[] = activeProjects.map((project) => ({
+    valueId: project.id,
+    name: project.name,
+    color: project.color,
+  }));
 
   const ranked: PickOption[] = [];
   const take = (valueId: string | null, confidence: number): void => {
@@ -190,6 +187,7 @@ export function EntryReviewPanel({
   onUnapprove,
   onSplit,
   onDelete,
+  onDeleteField,
   onRetry,
   onSetField,
   onToggleBillable,
@@ -460,6 +458,9 @@ export function EntryReviewPanel({
               )
             }
             onPick={(valueId) => onSetField(model.field, valueId)}
+            onDelete={() => {
+              if (model.value) onDeleteField(model.field, model.value);
+            }}
             nameOf={(valueId) => nameOf(model.field, valueId)}
           />
         ))}
@@ -560,6 +561,7 @@ export function EntryReviewPanel({
             <button
               type="button"
               onClick={onDelete}
+              aria-label="Delete time entry"
               className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-danger transition-colors hover:bg-danger/10"
             >
               ✕
@@ -750,6 +752,7 @@ function FieldSection({
   locked,
   onActivate,
   onPick,
+  onDelete,
   nameOf,
 }: {
   model: FieldModel;
@@ -758,6 +761,7 @@ function FieldSection({
   locked: boolean;
   onActivate: () => void;
   onPick: (valueId: string | null) => void;
+  onDelete: () => void;
   nameOf: (valueId?: string) => string;
 }) {
   const { field, suggestion, value, options } = model;
@@ -805,9 +809,25 @@ function FieldSection({
         </span>
       </button>
 
+      {value && (
+        <button
+          type="button"
+          onClick={onDelete}
+          aria-label={`Delete ${label.toLowerCase()}`}
+          className="mt-1 float-right rounded px-1.5 text-[12px] text-fg-faint hover:bg-danger/10 hover:text-danger"
+        >
+          ×
+        </button>
+      )}
       <button
         type="button"
-        onClick={onActivate}
+        onClick={() => {
+          if (!locked && current) onPick(current.valueId);
+          else onActivate();
+        }}
+        title={
+          current && !locked ? `Deselect ${label.toLowerCase()}` : undefined
+        }
         className="mt-1.5 flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-left"
       >
         {current ? (

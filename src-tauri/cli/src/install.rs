@@ -68,8 +68,6 @@ pub fn install(dir: Option<PathBuf>) -> Result<Installation, String> {
     })
 }
 
-/// Removes the standalone command at `~/.local/bin/rize`, even if OpenRize
-/// itself has already been deleted.
 #[cfg(unix)]
 pub fn uninstall() -> Result<String, String> {
     let home = std::env::var_os("HOME").ok_or("HOME is not set")?;

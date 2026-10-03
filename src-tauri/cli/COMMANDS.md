@@ -73,6 +73,7 @@ installed.
 | `rize settings list` / `get <key>` / `set <key> <value>` | Every preference by dotted key, such as `tracking-hours.start` or `breaks.enabled`. Writes one field at a time. | `get_settings`, `SettingsStore::patch` | Yes (applies on next launch) | Shipped |
 | `rize paths` | Settings file, data directory and database path. | `storage_paths` | Yes | Shipped |
 | `rize install-path` | Put `rize` on PATH: a symlink on macOS, the user PATH on Windows. | client only | Yes | Shipped |
+| `rize uninstall-path` | Remove the installed command from `~/.local/bin`, even if the app is gone. | client only | Yes | Shipped |
 | `rize completions bash\|zsh\|fish\|powershell\|elvish` | Print a shell completion script. | client only | Yes | Shipped |
 | `rize projects discover` / `dismiss <key>` | Suggested projects from recent activity. | `discover_projects`, `dismiss_project_suggestion` | Yes | M2 |
 | `rize projects import <file.csv>` | Bulk import projects. | `import_projects_csv` | Yes | M2 |

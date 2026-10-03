@@ -51,8 +51,6 @@ pub const EVENT_OPEN_REVIEW: &str = "open-review";
 
 pub use openrize_core::state::AppState;
 
-/// Keep the standalone command in sync with the app release. `rize` ships
-/// beside the app executable and the replacement is atomic for running shells.
 #[cfg(target_os = "macos")]
 fn install_bundled_cli() {
     let result = (|| -> Result<(), Box<dyn std::error::Error>> {

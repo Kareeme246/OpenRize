@@ -144,8 +144,15 @@ export async function hidePulsePanel(): Promise<void> {
 }
 
 /** Closes the panel and brings the main window forward. */
-export async function openMainWindow(review: boolean): Promise<void> {
-  await invoke("open_main_window", { review });
+export async function openMainWindow(
+  review: boolean,
+  timerId?: string,
+): Promise<void> {
+  await invoke("open_main_window", { review, timerId });
+}
+
+export async function undoDeletion(redo = false): Promise<boolean> {
+  return await invoke<boolean>("undo_deletion", { redo });
 }
 
 // --- Break reminders ---

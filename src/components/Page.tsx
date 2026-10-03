@@ -66,15 +66,13 @@ export function DateStepper({
           type="button"
           onClick={onToday}
           aria-label={isToday ? "Today" : "Jump to today"}
-          className={`flex h-7 items-center gap-1.5 rounded-md border border-line bg-panel px-2.5 font-medium text-[12px] transition-colors hover:bg-surface hover:text-fg ${
-            isToday
-              ? "text-fg-soft"
-              : "border-line-strong font-semibold text-fg-strong"
+          className={`relative flex h-7 items-center justify-center rounded-md border border-line bg-panel px-2.5 font-medium text-[12px] transition-colors hover:bg-surface hover:text-fg ${
+            isToday ? "text-fg-soft" : "border-line-strong text-fg-strong"
           }`}
         >
           {!isToday && (
             <span
-              className="size-1.5 shrink-0 rounded-full bg-accent"
+              className="absolute top-1 right-1 size-1.5 rounded-full bg-accent"
               aria-hidden="true"
             />
           )}

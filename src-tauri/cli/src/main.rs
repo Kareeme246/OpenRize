@@ -115,6 +115,8 @@ enum Command {
         #[arg(long)]
         dir: Option<PathBuf>,
     },
+    /// Remove the installed rize command from ~/.local/bin
+    UninstallPath,
     /// Print a shell completion script
     Completions { shell: clap_complete::Shell },
 }
@@ -596,6 +598,11 @@ fn run(args: &Args) -> Result<Outcome, Response> {
                 .map(|installation| Outcome::Answer(Response::success(installation)))
                 .map_err(|error| Response::error(code::FAILED, error));
         }
+        Some(Command::UninstallPath) => {
+            return install::uninstall()
+                .map(Outcome::Raw)
+                .map_err(|error| Response::error(code::FAILED, error));
+        }
         command => command,
     };
     let client = Client::new(args.data_dir.as_deref()).map_err(invalid)?;
@@ -1067,7 +1074,9 @@ fn run(args: &Args) -> Result<Outcome, Response> {
             }),
         },
         Command::Paths => ask(Operation::Paths {}),
-        Command::InstallPath { .. } | Command::Completions { .. } => unreachable!(),
+        Command::InstallPath { .. } | Command::UninstallPath | Command::Completions { .. } => {
+            unreachable!()
+        }
     }
 }
 

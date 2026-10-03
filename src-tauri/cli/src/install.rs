@@ -87,8 +87,7 @@ pub fn uninstall() -> Result<String, String> {
     Err("rize uninstall-path is only available on macOS and Linux".into())
 }
 
-/// Adds this executable's folder to the user's PATH. New terminals pick it
-/// up; ones already open keep their old PATH.
+/// Adds this executable's folder to the user's PATH.
 #[cfg(windows)]
 pub fn install(dir: Option<PathBuf>) -> Result<Installation, String> {
     use windows::core::w;

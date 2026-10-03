@@ -53,7 +53,7 @@ struct App<'a>(&'a AppHandle);
 
 impl Live for App<'_> {
     fn open_window(&self, review: bool) {
-        commands::open_main_window(self.0.clone(), review);
+        commands::open_main_window(self.0.clone(), review, None);
     }
 
     fn quit(&self) {

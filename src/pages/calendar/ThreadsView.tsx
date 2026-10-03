@@ -5,6 +5,7 @@ import type { DayThreads, Rail, Thread } from "../../lib/agents";
 import { formatDuration, formatTime } from "../../lib/format";
 import type { Project } from "../../lib/types";
 import { dayLength, gutterLabel, hourOffset, timelineFor } from "./timeline";
+import { useRememberedScroll } from "./useRememberedScroll";
 
 export type ThreadsLayout = "lanes" | "timeline";
 
@@ -20,6 +21,7 @@ interface ThreadsViewProps {
   loading: boolean;
   onSelect: (id: string) => void;
   now: number;
+  viewportKey?: string;
 }
 
 function colorOf(
@@ -308,7 +310,9 @@ function ThreadTimeline({
   selectedId,
   onSelect,
   now,
+  viewportKey = `calendar:timeline:${dayStart}`,
 }: ThreadsViewProps & { day: DayThreads }) {
+  const { viewport, onScroll } = useRememberedScroll(viewportKey);
   const timeline = useExtent(day, dayStart, TIMELINE_HOUR);
   const left = (ms: number): number =>
     (hourOffset(ms, dayStart, "elapsed") - timeline.startHour) * TIMELINE_HOUR +
@@ -316,7 +320,11 @@ function ThreadTimeline({
   const width = timeline.height + TIMELINE_PAD;
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
+    <div
+      ref={viewport}
+      onScroll={onScroll}
+      className="min-h-0 flex-1 overflow-auto"
+    >
       <div className="flex" style={{ minWidth: width + 160 }}>
         <div className="sticky left-0 z-30 w-40 shrink-0 border-line border-r bg-panel">
           <div className="h-7 border-line border-b" />

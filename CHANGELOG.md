@@ -69,6 +69,7 @@ All notable changes are documented here. Entries are generated from commit histo
 - **calendar:** Draw only official breaks (#71)
 - **calendar:** Stop clipped lane chips and label the break band in the day view (#77)
 - **calendar:** Expand review widget hit targets (#82)
+- **calendar:** Restore review save action (#84)
 
 ### Documentation
 - Rewrite README for the shipped P0-P4 core (#16)
@@ -83,6 +84,7 @@ All notable changes are documented here. Entries are generated from commit histo
 - Update changelog for v0.8.3 (#70)
 - Update changelog for v0.8.5
 - **cli:** Add rize man page (#79)
+- Update changelog for v0.8.13
 
 ### Maintenance
 - Add generated changelog and release version guard (#26)

@@ -1082,7 +1082,7 @@ mod tests {
     }
 
     #[test]
-    fn deleting_a_project_unlinks_its_entries_and_rules() {
+    fn deleting_a_project_with_invoiced_time_is_atomic() {
         let mut store = store();
         let project = store
             .create_project(new_project("OpenRize", Some("figma.com")), 1)
@@ -1110,7 +1110,7 @@ mod tests {
                 [],
             )
             .is_err());
-        store.delete_project(&project.id, 2).unwrap();
+        assert!(store.delete_project(&project.id, 2).is_err());
         let linked_count: i64 = store
             .conn()
             .query_row(
@@ -1119,7 +1119,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(linked_count, 0);
+        assert_eq!(linked_count, 2);
         let preserved_invoice: Option<String> = store
             .conn()
             .query_row(
@@ -1129,7 +1129,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(preserved_invoice.as_deref(), Some("inv"));
-        assert!(hint_rules(store.conn(), &project.id).is_empty());
+        assert!(!hint_rules(store.conn(), &project.id).is_empty());
         let deleted_at: Option<i64> = store
             .conn()
             .query_row(
@@ -1138,7 +1138,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(deleted_at, Some(2));
+        assert_eq!(deleted_at, None);
     }
 
     #[test]

@@ -1,9 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { EntryReview } from "../hooks/useEntryReview";
 import { useSettings } from "../hooks/useSettings";
 import { isTyping } from "../lib/entries";
 import { formatDuration, formatTime } from "../lib/format";
-import type { Category, Project } from "../lib/types";
+import { shortcutLabel } from "../lib/platform";
+import type { Category, Project, SuggestionField } from "../lib/types";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { EntryReviewPanel } from "./EntryReviewPanel";
 
 interface EntryReviewSheetProps {
@@ -34,6 +36,9 @@ export function EntryReviewSheet({
 }: EntryReviewSheetProps) {
   const { settings } = useSettings();
   const { detail } = review;
+  const [deleting, setDeleting] = useState<
+    "entry" | { field: SuggestionField; id: string } | null
+  >(null);
   const accept = onAccept ?? ((id: string) => void review.accept(id));
   const reject = onReject ?? ((id: string) => void review.reject(id));
   const close = onClose ?? (() => review.select(undefined));
@@ -84,7 +89,8 @@ export function EntryReviewSheet({
           onReject={() => reject(detail.entry.id)}
           onUnapprove={() => void review.unapprove()}
           onSplit={() => void review.split()}
-          onDelete={() => void review.remove()}
+          onDelete={() => setDeleting("entry")}
+          onDeleteField={(field, id) => setDeleting({ field, id })}
           onRetry={() => void review.retry()}
           onSetField={(field, valueId) => void review.setField(field, valueId)}
           onToggleBillable={() => void review.toggleBillable()}
@@ -99,6 +105,23 @@ export function EntryReviewSheet({
           formatDuration={formatDuration}
         />
       </div>
+      {deleting && (
+        <ConfirmDialog
+          title={`Delete ${deleting === "entry" ? "time entry" : deleting.field}?`}
+          body={
+            deleting === "entry"
+              ? `This entry, its captured activity, and its assigned category and project will be removed together. Other entries keep their time but lose these links. Undo with ${shortcutLabel("Z")}.`
+              : `This ${deleting.field} and its rules will be removed. Other entries keep their time but lose this link. Undo with ${shortcutLabel("Z")}.`
+          }
+          confirmLabel="Delete"
+          onCancel={() => setDeleting(null)}
+          onConfirm={() => {
+            if (deleting === "entry") void review.remove();
+            else void review.removeField(deleting.field, deleting.id);
+            setDeleting(null);
+          }}
+        />
+      )}
     </div>
   );
 }

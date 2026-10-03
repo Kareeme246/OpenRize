@@ -16,6 +16,8 @@
 
 use std::sync::Mutex;
 
+use crate::settings::NotificationPlacement;
+
 use tauri::{
     AppHandle, LogicalSize, Manager, PhysicalPosition, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder,
@@ -23,10 +25,8 @@ use tauri::{
 
 pub const LABEL: &str = "reminder";
 
-/// Space between the screen's usable right edge and the panel.
-const RIGHT_INSET: f64 = 12.0;
-/// Space between the menu bar and the panel's top edge.
-const TOP_GAP: f64 = 8.0;
+/// Space between a screen's usable edge and a notification panel.
+const EDGE: f64 = 12.0;
 /// A placeholder until the page reports its real size.
 const INITIAL_SIZE: (f64, f64) = (360.0, 120.0);
 
@@ -118,13 +118,51 @@ fn place(app: &AppHandle, window: &WebviewWindow, (width, height): (f64, f64)) {
     };
     let scale = monitor.scale_factor();
     let area = monitor.work_area();
-    let right = f64::from(area.position.x) + f64::from(area.size.width);
-    let x = right - (width + RIGHT_INSET) * scale;
-    let y = f64::from(area.position.y) + TOP_GAP * scale;
+    let preference = app
+        .state::<crate::AppState>()
+        .settings_snapshot()
+        .notification_placement;
+    let (x, y) = notification_origin(
+        preference,
+        (f64::from(area.position.x), f64::from(area.position.y)),
+        (f64::from(area.size.width), f64::from(area.size.height)),
+        (width * scale, height * scale),
+        EDGE * scale,
+    );
     // Order matters on macOS: a resize keeps the bottom-left corner fixed, so
     // the position is set after it to pin the top edge.
     let _ = window.set_size(LogicalSize::new(width, height));
     let _ = window.set_position(PhysicalPosition::new(x.round(), y.round()));
+}
+
+/// Re-anchor an already visible notification immediately after a preference change.
+pub fn reposition(app: &AppHandle) {
+    let size = remember(app, |placement| placement.size).flatten();
+    if let (Some(window), Some(size)) = (app.get_webview_window(LABEL), size) {
+        place(app, &window, size);
+    }
+}
+
+fn notification_origin(
+    placement: NotificationPlacement,
+    (left, top): (f64, f64),
+    (area_width, area_height): (f64, f64),
+    (width, height): (f64, f64),
+    edge: f64,
+) -> (f64, f64) {
+    let right = left + (area_width - width - edge).max(0.0);
+    let bottom = top + (area_height - height - edge).max(0.0);
+    let left_edge = left + edge.min((area_width - width).max(0.0));
+    let top_edge = top + edge.min((area_height - height).max(0.0));
+    match placement {
+        NotificationPlacement::TopLeft => (left_edge, top_edge),
+        NotificationPlacement::CenterMiddle => (
+            left + ((area_width - width) / 2.0).max(0.0),
+            top + ((area_height - height) / 2.0).max(0.0),
+        ),
+        NotificationPlacement::BottomLeft => (left_edge, bottom),
+        NotificationPlacement::BottomRight => (right, bottom),
+    }
 }
 
 /// Runs `update` under the placement lock; `None` if the lock is poisoned.
@@ -244,6 +282,40 @@ fn make_non_activating(window: &WebviewWindow) {
                 | NSWindowCollectionBehavior::IgnoresCycle,
         );
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn placement_uses_work_area_and_survives_negative_monitor_coordinates() {
+        let origin = (-1920.0, 30.0);
+        let area = (1920.0, 1050.0);
+        let size = (360.0, 120.0);
+        assert_eq!(
+            notification_origin(NotificationPlacement::TopLeft, origin, area, size, 12.0),
+            (-1908.0, 42.0)
+        );
+        assert_eq!(
+            notification_origin(
+                NotificationPlacement::CenterMiddle,
+                origin,
+                area,
+                size,
+                12.0
+            ),
+            (-1140.0, 495.0)
+        );
+        assert_eq!(
+            notification_origin(NotificationPlacement::BottomLeft, origin, area, size, 12.0),
+            (-1908.0, 948.0)
+        );
+        assert_eq!(
+            notification_origin(NotificationPlacement::BottomRight, origin, area, size, 12.0),
+            (-372.0, 948.0)
+        );
+    }
 }
 
 #[cfg(not(target_os = "macos"))]

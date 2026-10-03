@@ -254,6 +254,7 @@ pub fn run() {
             commands::split_time_entry,
             commands::delete_time_entry,
             commands::delete_time_entries,
+            commands::undo_deletion,
             commands::create_time_entry,
             commands::rebuild_time_entries,
             commands::list_apps,

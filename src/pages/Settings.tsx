@@ -7,6 +7,7 @@ import {
 } from "../components/AiLearning";
 import { BatteryEnergyMonitor } from "../components/BatteryEnergyMonitor";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { Picker } from "../components/Picker";
 import {
   SegmentedControl,
   type SegmentedOption,
@@ -1341,8 +1342,28 @@ export function Settings({
           >
             <SettingsSectionHeading
               title="Notifications"
-              description="Break reminders appear in the top-right corner of your screen, whichever app is in front."
+              description="Choose where app notifications appear, whichever app is in front. System notifications follow your OS settings."
             />
+            <SettingGroup title="Placement">
+              <SettingRow
+                title="Notification position"
+                description="Applies to break reminders, the live break tile, and welcome-back notifications."
+              >
+                <Picker
+                  ariaLabel="Notification position"
+                  value={settings.notificationPlacement}
+                  onChange={(notificationPlacement) =>
+                    update({ notificationPlacement })
+                  }
+                  options={[
+                    { value: "topLeft", label: "Top left" },
+                    { value: "centerMiddle", label: "Center middle" },
+                    { value: "bottomLeft", label: "Bottom left" },
+                    { value: "bottomRight", label: "Bottom right" },
+                  ]}
+                />
+              </SettingRow>
+            </SettingGroup>
             <BreakSettingsGroups />
             <SettingGroup title="Stopwatch reminders">
               <SettingRow

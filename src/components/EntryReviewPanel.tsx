@@ -11,7 +11,6 @@ import {
   BAND_LABEL,
   BAND_TONE,
   band,
-  HIGH,
   METER_SEGMENTS,
   percent,
 } from "../lib/confidence";
@@ -49,7 +48,6 @@ interface FieldModel {
 const KEYED_OPTIONS = 3;
 /** Options shown as full rows (with their confidence) before the chips. */
 const ROW_OPTIONS = 4;
-const NO_PROJECT_COLOR = "var(--fg-faint)";
 
 const EVENT_LABELS: Record<string, string> = {
   created: "Created",
@@ -86,6 +84,7 @@ export interface EntryReviewPanelProps {
   onUnapprove: () => void;
   onSplit: () => void;
   onDelete: () => void;
+  onDeleteField: (field: SuggestionField, id: string) => void;
   onRetry: () => void;
   onSetField: (field: SuggestionField, valueId: string | null) => void;
   onToggleBillable: () => void;
@@ -139,14 +138,11 @@ function buildOptions(
     return [];
   }
 
-  const choices: PickOption[] = [
-    { valueId: null, name: "No project", color: NO_PROJECT_COLOR },
-    ...activeProjects.map((project) => ({
-      valueId: project.id,
-      name: project.name,
-      color: project.color,
-    })),
-  ];
+  const choices: PickOption[] = activeProjects.map((project) => ({
+    valueId: project.id,
+    name: project.name,
+    color: project.color,
+  }));
 
   const ranked: PickOption[] = [];
   const take = (valueId: string | null, confidence: number): void => {
@@ -167,25 +163,6 @@ function buildOptions(
     }
   }
   return ranked;
-}
-
-/** A field is settled when it has a value nobody needs to double-check. */
-function settled(model: FieldModel): boolean {
-  if (model.value === null && model.field === "category") return false;
-  if (
-    model.value === null &&
-    model.field === "project" &&
-    model.options.length === 0
-  ) {
-    return true;
-  }
-  const suggestion = model.suggestion;
-  if (!suggestion) return model.value !== null;
-  if (suggestion.outcome !== undefined) return true;
-  const matches = (suggestion.valueId ?? null) === model.value;
-  return (
-    matches && (suggestion.engine === "rules" || suggestion.confidence >= HIGH)
-  );
 }
 
 function isTyping(target: EventTarget | null): boolean {
@@ -210,6 +187,7 @@ export function EntryReviewPanel({
   onUnapprove,
   onSplit,
   onDelete,
+  onDeleteField,
   onRetry,
   onSetField,
   onToggleBillable,
@@ -247,15 +225,11 @@ export function EntryReviewPanel({
     });
   }, [detail, entry, categories, projects, suggestProjects]);
 
-  // The panel pre-fills the confident field and asks about the other: start
-  // on the first field that still needs a decision.
-  const firstOpenField =
-    models.find((model) => !settled(model))?.field ?? "category";
-  const [activeField, setActiveField] =
-    useState<SuggestionField>(firstOpenField);
+  // Keep both pickers collapsed until the user opens one.
+  const [activeField, setActiveField] = useState<SuggestionField | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-aim only when a different entry opens, not on every edit.
   useEffect(() => {
-    setActiveField(firstOpenField);
+    setActiveField(null);
     setEditing(false);
     setDraft(entry.description);
   }, [entry.id]);
@@ -283,10 +257,10 @@ export function EntryReviewPanel({
         }
       } else if (key === "c") {
         event.preventDefault();
-        setActiveField("category");
+        setActiveField((field) => (field === "category" ? null : "category"));
       } else if (key === "p" && suggestProjects) {
         event.preventDefault();
-        setActiveField("project");
+        setActiveField((field) => (field === "project" ? null : "project"));
       } else if (key === "e") {
         event.preventDefault();
         editFinished.current = false;
@@ -412,7 +386,7 @@ export function EntryReviewPanel({
                 rows={2}
               />
               <div className="flex justify-end gap-1.5">
-                {/* Pressing it must not blur the field first: blur saves. */}
+                {/* Keep focus while clicking so blur cannot preempt the explicit action. */}
                 <button
                   type="button"
                   onMouseDown={(event) => event.preventDefault()}
@@ -420,6 +394,14 @@ export function EntryReviewPanel({
                   className="rounded px-2 py-0.5 text-[11px] text-fg-soft hover:text-fg"
                 >
                   Cancel
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={saveDescription}
+                  className="rounded bg-accent px-2.5 py-0.5 font-semibold text-[11px] text-accent-fg"
+                >
+                  Save
                 </button>
               </div>
             </div>
@@ -470,8 +452,15 @@ export function EntryReviewPanel({
             active={model.field === activeField && !editing}
             processing={processing}
             locked={locked}
-            onActivate={() => setActiveField(model.field)}
+            onActivate={() =>
+              setActiveField((field) =>
+                field === model.field ? null : model.field,
+              )
+            }
             onPick={(valueId) => onSetField(model.field, valueId)}
+            onDelete={() => {
+              if (model.value) onDeleteField(model.field, model.value);
+            }}
             nameOf={(valueId) => nameOf(model.field, valueId)}
           />
         ))}
@@ -485,7 +474,7 @@ export function EntryReviewPanel({
               type="checkbox"
               checked={entry.billable}
               onChange={onToggleBillable}
-              className="ml-auto accent-(--accent)"
+              className="accent-(--accent)"
             />
           </label>
         </Tooltip>
@@ -572,6 +561,7 @@ export function EntryReviewPanel({
             <button
               type="button"
               onClick={onDelete}
+              aria-label="Delete time entry"
               className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-danger transition-colors hover:bg-danger/10"
             >
               ✕
@@ -762,6 +752,7 @@ function FieldSection({
   locked,
   onActivate,
   onPick,
+  onDelete,
   nameOf,
 }: {
   model: FieldModel;
@@ -770,6 +761,7 @@ function FieldSection({
   locked: boolean;
   onActivate: () => void;
   onPick: (valueId: string | null) => void;
+  onDelete: () => void;
   nameOf: (valueId?: string) => string;
 }) {
   const { field, suggestion, value, options } = model;
@@ -790,7 +782,9 @@ function FieldSection({
   const section = (
     <section
       className={`rounded-lg border p-2.5 transition-colors ${
-        active && !locked ? "border-accent/50 bg-accent/5" : "border-line"
+        active && !locked
+          ? "border-accent/50 bg-accent/5"
+          : `border-line ${!locked ? "hover:border-accent/40" : ""}`
       }`}
     >
       <button
@@ -815,9 +809,25 @@ function FieldSection({
         </span>
       </button>
 
+      {value && (
+        <button
+          type="button"
+          onClick={onDelete}
+          aria-label={`Delete ${label.toLowerCase()}`}
+          className="mt-1 float-right rounded px-1.5 text-[12px] text-fg-faint hover:bg-danger/10 hover:text-danger"
+        >
+          ×
+        </button>
+      )}
       <button
         type="button"
-        onClick={onActivate}
+        onClick={() => {
+          if (!locked && current) onPick(current.valueId);
+          else onActivate();
+        }}
+        title={
+          current && !locked ? `Deselect ${label.toLowerCase()}` : undefined
+        }
         className="mt-1.5 flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-left"
       >
         {current ? (

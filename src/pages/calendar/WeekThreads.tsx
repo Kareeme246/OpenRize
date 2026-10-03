@@ -9,6 +9,7 @@ import {
 } from "../../lib/dates";
 import { formatDuration as spaced } from "../../lib/format";
 import type { Project } from "../../lib/types";
+import { useRememberedScroll } from "./useRememberedScroll";
 
 /** `1h40m`: the cells are narrow, so the space goes. */
 function formatDuration(ms: number): string {
@@ -43,7 +44,10 @@ export function WeekThreads({
   onOpenDay,
   now,
 }: WeekThreadsProps) {
-  const columns = Array.from({ length: 7 }, (_, index) =>
+  const { viewport, onScroll } = useRememberedScroll(
+    `calendar:week-timeline:${weekStart.getTime()}`,
+  );
+  const columns = Array.from({ length: Math.max(7, days.length) }, (_, index) =>
     addDays(weekStart, index),
   );
   const today = currentCalendarDay(new Date(now));
@@ -75,7 +79,7 @@ export function WeekThreads({
       <div className="min-h-0 flex-1 overflow-y-auto">
         {!loading && (
           <EmptyState
-            title="No threads this week"
+            title="No project activity in this range"
             hint="Projects you work on show up here, one row each."
           />
         )}
@@ -87,11 +91,15 @@ export function WeekThreads({
     days[dayIndex]?.threads.find((t) => (t.projectId ?? "none") === key);
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
+    <div
+      ref={viewport}
+      onScroll={onScroll}
+      className="min-h-0 flex-1 overflow-auto"
+    >
       <div
         className="grid px-4 py-2 text-[12px]"
         style={{
-          gridTemplateColumns: "96px repeat(7, minmax(0, 1fr)) 64px",
+          gridTemplateColumns: `96px repeat(${columns.length}, minmax(64px, 1fr)) 64px`,
         }}
       >
         <div />

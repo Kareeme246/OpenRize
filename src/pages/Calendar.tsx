@@ -8,7 +8,6 @@ import {
   PageHeader,
   ScaleControl,
 } from "../components/Page";
-import { SegmentedControl } from "../components/SegmentedControl";
 import { useAiStatus } from "../hooks/useAiStatus";
 import { useCatalog } from "../hooks/useCatalog";
 import { useEntryReview } from "../hooks/useEntryReview";
@@ -52,25 +51,17 @@ import type {
 import { DayView, type ProjectRail } from "./calendar/DayView";
 import { MonthView } from "./calendar/MonthView";
 import { RangeSummary } from "./calendar/RangeSummary";
-import { type ThreadsLayout, ThreadsView } from "./calendar/ThreadsView";
+import { ThreadsView } from "./calendar/ThreadsView";
 import { WeekThreads } from "./calendar/WeekThreads";
 import { WeekView } from "./calendar/WeekView";
+import {
+  useWorkflowLayout,
+  WorkflowLayoutControl,
+} from "./calendar/WorkflowLayoutControl";
 
 type CalendarRoute = Extract<Route, { name: "calendar" }>;
 
-type CalendarView = "entries" | "threads";
-
 const NO_THREADS: DayThreads[] = [];
-
-const VIEW_OPTIONS = [
-  { value: "entries", label: "Entries" },
-  { value: "threads", label: "Threads" },
-] satisfies { value: CalendarView; label: string }[];
-
-const LAYOUT_OPTIONS = [
-  { value: "lanes", label: "Lanes" },
-  { value: "timeline", label: "Timeline" },
-] satisfies { value: ThreadsLayout; label: string }[];
 
 interface CalendarProps {
   route: CalendarRoute;
@@ -139,14 +130,14 @@ export function Calendar({ route, navigate }: CalendarProps) {
   );
 
   const [entries, setEntries] = useState<TimeEntry[]>([]);
+  const [agentEntries, setAgentEntries] = useState<TimeEntry[]>([]);
   const [segments, setSegments] = useState<ActivitySegment[]>([]);
   const [cells, setCells] = useState<RollupCell[]>([]);
   const [breakEntries, setBreakEntries] = useState<BreakEntry[]>([]);
   const [loadedThreads, setThreadDays] = useState<DayThreads[]>([]);
   // Threads loaded before advanced workflow tracking went off must not show.
   const threadDays = agentsOn ? loadedThreads : NO_THREADS;
-  const [view, setView] = useState<CalendarView>("entries");
-  const [layout, setLayout] = useState<ThreadsLayout>("lanes");
+  const { layout, choose } = useWorkflowLayout();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
@@ -174,14 +165,17 @@ export function Calendar({ route, navigate }: CalendarProps) {
           setBreakEntries(breakList);
         }
       } else {
-        const [list, snapshot, breakList, threads] = await Promise.all([
-          api.listTimeEntries(startMs, endMs - 1),
-          scale === "day" ? api.fetchActivitySnapshot(startMs) : null,
-          api.listBreaks(startMs, endMs),
-          agentsOn ? api.threadDays(threadEdges) : [],
-        ]);
+        const [list, snapshot, breakList, threads, agentList] =
+          await Promise.all([
+            api.listTimeEntries(startMs, endMs - 1),
+            scale === "day" ? api.fetchActivitySnapshot(startMs) : null,
+            api.listBreaks(startMs, endMs),
+            agentsOn ? api.threadDays(threadEdges) : [],
+            agentsOn ? api.listAgentEntries(startMs, endMs - 1) : [],
+          ]);
         if (shownKey.current === key) {
           setEntries(list);
+          setAgentEntries(agentList);
           setBreakEntries(breakList);
           setThreadDays(threads);
           if (snapshot) {
@@ -224,6 +218,12 @@ export function Calendar({ route, navigate }: CalendarProps) {
         setEntries(list);
         setError(null);
       }
+      const agentList =
+        agentsOn && scale !== "month"
+          ? await api.listAgentEntries(startMs, endMs - 1)
+          : [];
+      if (shownKey.current !== key) return;
+      setAgentEntries(agentList);
       // The snapshot runs to now; keep only this day's segments.
       setSegments(
         snapshot?.segments.filter(
@@ -475,7 +475,8 @@ export function Calendar({ route, navigate }: CalendarProps) {
     [threadDays],
   );
   const agentsMs = threadDays.reduce((sum, day) => sum + day.agentsMs, 0);
-  const threadsShown = agentsOn && view === "threads" && scale !== "month";
+  const threadsShown = agentsOn && layout === "timeline" && scale !== "month";
+  const workflowEntries = agentsOn ? [...visible, ...agentEntries] : visible;
   const title =
     scale === "day"
       ? date.toLocaleDateString(undefined, {
@@ -511,19 +512,10 @@ export function Calendar({ route, navigate }: CalendarProps) {
           isToday={now >= startMs && now < endMs}
         />
         {agentsOn && scale !== "month" && (
-          <SegmentedControl
-            name="calendar-view"
-            value={view}
-            options={VIEW_OPTIONS}
-            onChange={setView}
-          />
-        )}
-        {threadsShown && scale === "day" && (
-          <SegmentedControl
-            name="calendar-threads-layout"
-            value={layout}
-            options={LAYOUT_OPTIONS}
-            onChange={setLayout}
+          <WorkflowLayoutControl
+            name="calendar-workflow-layout"
+            layout={layout}
+            onChange={choose}
           />
         )}
         <ScaleControl
@@ -556,10 +548,11 @@ export function Calendar({ route, navigate }: CalendarProps) {
           )}
           {scale === "day" && !threadsShown && (
             <DayView
+              key={startMs}
               dayStart={startMs}
               showAgents={agentsOn}
               rails={rails}
-              entries={visible}
+              entries={workflowEntries}
               segments={segments}
               breaks={breakEntries}
               loading={loading}
@@ -601,7 +594,8 @@ export function Calendar({ route, navigate }: CalendarProps) {
             <WeekView
               agentMsByDay={threadDays.map((day) => day.agentsMs)}
               weekStart={range.start}
-              entries={visible}
+              entries={workflowEntries}
+              parallel={agentsOn}
               breaks={breakEntries}
               loading={loading}
               selectedId={review.selectedId}

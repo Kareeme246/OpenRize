@@ -17,7 +17,10 @@ import { formatDuration } from "../../lib/format";
 import type { Category, Project, TimeEntry } from "../../lib/types";
 import { BreakBand, NowLine, useMinuteClock } from "./DayView";
 import { EntryBlock } from "./EntryBlock";
+import { packOverlaps } from "./overlap";
 import { gutterLabel, hourOffset, place, timelineFor } from "./timeline";
+import { useRememberedScroll } from "./useRememberedScroll";
+import { readViewport } from "./viewport";
 
 const HOUR_HEIGHT_PX = 56;
 
@@ -34,6 +37,8 @@ interface WeekViewProps {
   /** Counted agent time per day (Monday first): a ghost beside the total. */
   agentMsByDay?: number[];
   now?: number;
+  parallel?: boolean;
+  viewportKey?: string;
 }
 
 /**
@@ -52,6 +57,8 @@ export function WeekView({
   onOpenDay,
   agentMsByDay,
   now: propsNow,
+  parallel = false,
+  viewportKey = `calendar:week:${weekStart.getTime()}`,
 }: WeekViewProps) {
   const clockNow = useMinuteClock();
   const now = propsNow ?? clockNow;
@@ -68,7 +75,9 @@ export function WeekView({
       day,
       start,
       entries: list,
-      totalMs: list.reduce((sum, entry) => sum + durationOf(entry, now), 0),
+      totalMs: list
+        .filter((entry) => entry.source !== "agent")
+        .reduce((sum, entry) => sum + durationOf(entry, now), 0),
       pending: list.filter(isReviewable).length,
     };
   });
@@ -93,7 +102,7 @@ export function WeekView({
   const weekStartMs = weekStart.getTime();
 
   // The current week opens with today's now line in the middle of the view.
-  const viewport = useRef<HTMLDivElement>(null);
+  const { viewport, onScroll } = useRememberedScroll(viewportKey);
   const nowTopRef = useRef(0);
   nowTopRef.current =
     (hourOffset(now, currentCalendarDay(new Date(now)).getTime(), "wall") -
@@ -103,12 +112,18 @@ export function WeekView({
     const element = viewport.current;
     const current = Date.now();
     const weekEnd = addDays(new Date(weekStartMs), 7).getTime();
-    if (!element || current < weekStartMs || current >= weekEnd) return;
+    if (
+      !element ||
+      readViewport(viewportKey) ||
+      current < weekStartMs ||
+      current >= weekEnd
+    )
+      return;
     element.scrollTop = Math.max(
       0,
       nowTopRef.current - element.clientHeight / 2,
     );
-  }, [weekStartMs]);
+  }, [weekStartMs, viewportKey, viewport]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -163,6 +178,7 @@ export function WeekView({
 
       <div
         ref={viewport}
+        onScroll={onScroll}
         className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-3"
       >
         <div
@@ -246,40 +262,63 @@ export function WeekView({
                       />
                     );
                   })}
-                {column.entries.map((entry) => {
-                  const end = entryEnd(entry, now);
-                  const { top, height } = place(
-                    timeline,
-                    entry.startedAt,
-                    end,
-                    column.start,
-                    "wall",
-                    3,
-                  );
-                  return (
-                    <EntryBlock
-                      key={entry.id}
-                      entry={entry}
-                      top={top}
-                      height={height}
-                      narrow
-                      selected={entry.id === selectedId}
-                      category={
-                        entry.categoryId
-                          ? categoryById.get(entry.categoryId)
-                          : undefined
-                      }
-                      project={
-                        entry.projectId
-                          ? projectById.get(entry.projectId)
-                          : undefined
-                      }
-                      onSelect={onSelect}
-                      now={now}
-                      recording={entry.id === recording?.id}
-                    />
-                  );
-                })}
+                {(parallel
+                  ? packOverlaps(
+                      column.entries.map((entry) => ({
+                        ...entry,
+                        endedAt: entryEnd(entry, now),
+                      })),
+                    )
+                  : column.entries.map((item) => ({
+                      item,
+                      column: 0,
+                      columns: 1,
+                    }))
+                ).map(
+                  ({
+                    item: entry,
+                    column: entryColumn,
+                    columns: entryColumns,
+                  }) => {
+                    const end = entryEnd(entry, now);
+                    const { top, height } = place(
+                      timeline,
+                      entry.startedAt,
+                      end,
+                      column.start,
+                      "wall",
+                      3,
+                    );
+                    return (
+                      <EntryBlock
+                        key={entry.id}
+                        entry={entry}
+                        top={top}
+                        height={height}
+                        narrow
+                        selected={entry.id === selectedId}
+                        category={
+                          entry.categoryId
+                            ? categoryById.get(entry.categoryId)
+                            : undefined
+                        }
+                        project={
+                          entry.projectId
+                            ? projectById.get(entry.projectId)
+                            : undefined
+                        }
+                        onSelect={onSelect}
+                        now={now}
+                        recording={entry.id === recording?.id}
+                        column={
+                          parallel
+                            ? { index: entryColumn, count: entryColumns }
+                            : undefined
+                        }
+                      />
+                    );
+                  },
+                )}
                 {isToday &&
                   nowOffset >= timeline.startHour &&
                   nowOffset <= timeline.endHour && (

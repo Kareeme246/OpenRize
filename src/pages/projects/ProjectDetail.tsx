@@ -505,7 +505,7 @@ export function ProjectDetail({
       {confirmDelete && (
         <ConfirmDialog
           title={`Delete ${project.name}?`}
-          body="All time entries will remain in your timesheet but will no longer be linked to this project. The project and its rules will be removed. This cannot be undone."
+          body="Time entries keep their time but lose this project's link. The project and its rules are removed together. Undo with Command-Z (Ctrl-Z on Windows) during this app session."
           confirmLabel="Delete"
           onCancel={() => setConfirmDelete(false)}
           onConfirm={() => void remove()}

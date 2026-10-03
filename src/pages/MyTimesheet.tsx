@@ -27,6 +27,8 @@ import * as api from "../lib/api";
 import { describeError } from "../lib/api";
 import { BAND_TONE, band, percent } from "../lib/confidence";
 import {
+  calendarRange,
+  currentCalendarDay,
   localDateString,
   parseLocalDate,
   rangeFor,
@@ -55,6 +57,8 @@ import type {
   TimesheetGroup,
   TimesheetTab,
 } from "../lib/types";
+
+import { TimesheetWorkflow } from "./calendar/TimesheetWorkflow";
 
 type TimesheetRoute = Extract<Route, { name: "timesheet" }>;
 
@@ -216,8 +220,22 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
   const scale: CalendarScale = route.scale ?? "day";
   const tab: TimesheetTab = route.tab ?? "review";
   const groupBy: TimesheetGroup = route.groupBy ?? "project";
-  const date = useMemo(() => parseLocalDate(route.date), [route.date]);
-  const range = useMemo(() => rangeFor(scale, date), [scale, date]);
+  const date = useMemo(
+    () =>
+      route.date
+        ? parseLocalDate(route.date)
+        : settings.advancedWorkflowTracking
+          ? currentCalendarDay(new Date())
+          : parseLocalDate(),
+    [route.date, settings.advancedWorkflowTracking],
+  );
+  const range = useMemo(
+    () =>
+      settings.advancedWorkflowTracking
+        ? calendarRange(scale, date)
+        : rangeFor(scale, date),
+    [scale, date, settings.advancedWorkflowTracking],
+  );
   const startMs = range.start.getTime();
   const endMs = range.end.getTime();
 
@@ -447,6 +465,20 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-4">
+          {settings.advancedWorkflowTracking && (
+            <TimesheetWorkflow
+              scale={scale}
+              start={range.start}
+              end={range.end}
+              entries={inRange}
+              categoryById={categoryById}
+              projectById={projectById}
+              selectedId={review.selectedId}
+              onSelect={review.select}
+              onCreated={refresh}
+              onOpenDay={(date) => go({ date, scale: "day" })}
+            />
+          )}
           <div className="shape-strip shape-top grid grid-cols-3 gap-3">
             <StatCard
               label="Pending review"
@@ -764,7 +796,7 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
       {confirmDelete && (
         <ConfirmDialog
           title={`Delete ${plural(confirmDelete.length, "entry", "entries")}?`}
-          body={`${plural(confirmDelete.length, "entry", "entries")} and their captured activity will be permanently removed. This cannot be undone.`}
+          body={`${plural(confirmDelete.length, "entry", "entries")}, their captured activity, and their assigned categories and projects will be removed together. Other entries keep their time but lose these links. Undo with ${shortcutLabel("Z")}.`}
           confirmLabel="Delete"
           onCancel={() => setConfirmDelete(null)}
           onConfirm={() => {
@@ -1015,7 +1047,7 @@ function ChipSelect({
         ariaLabel={label}
         value={value}
         disabled={disabled}
-        onChange={onChange}
+        onChange={(next) => onChange(next === value ? "" : next)}
         placeholder={placeholder}
         displayColor={color}
         options={allOptions}
@@ -1071,10 +1103,10 @@ function TimesheetRow({
     (p) => p.status === "active" || p.id === entry.projectId,
   );
   const hasProjects = activeProjects.length > 0;
-  const projectOptions = [
-    { value: "", label: "No project" },
-    ...activeProjects.map((p) => ({ value: p.id, label: p.name })),
-  ];
+  const projectOptions = activeProjects.map((p) => ({
+    value: p.id,
+    label: p.name,
+  }));
 
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: the row's controls are all keyboard reachable; clicking empty row space is a mouse shortcut for opening the panel, which J/K and the ⋯ menu also reach.

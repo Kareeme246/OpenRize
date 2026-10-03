@@ -69,6 +69,17 @@ pub enum CloseBehavior {
     Hide,
 }
 
+/// Placement of app-owned reminder, live-break, and welcome-back panels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum NotificationPlacement {
+    TopLeft,
+    CenterMiddle,
+    BottomLeft,
+    #[default]
+    BottomRight,
+}
+
 /// What the AI suggests for each entry (Rize's "Suggestion level").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -448,6 +459,7 @@ pub struct Settings {
     pub weekly_target_hours: u16,
     pub tracking_hours: TrackingHours,
     pub breaks: BreakSettings,
+    pub notification_placement: NotificationPlacement,
     /// Extensions (agent bridges) the person switched on or off by hand,
     /// keyed by extension id. An id with no entry follows auto-detection: on
     /// when the tool is installed. An explicit value, on or off, persists and
@@ -477,6 +489,7 @@ impl Default for Settings {
             weekly_target_hours: DEFAULT_WEEKLY_TARGET_HOURS,
             tracking_hours: TrackingHours::default(),
             breaks: BreakSettings::default(),
+            notification_placement: NotificationPlacement::default(),
             extensions: BTreeMap::new(),
             advanced_workflow_tracking: false,
         }
@@ -742,6 +755,7 @@ mod tests {
                         sunday: DaySchedule::default(),
                     },
                     breaks: BreakSettings::default(),
+                    notification_placement: NotificationPlacement::TopLeft,
                     extensions: BTreeMap::new(),
                     advanced_workflow_tracking: true,
                 })
@@ -761,6 +775,10 @@ mod tests {
         assert_eq!(reloaded.ai_custom_prompt, "OpenRize is Coding");
         assert_eq!(reloaded.weekly_target_hours, 32);
         assert!(reloaded.advanced_workflow_tracking);
+        assert_eq!(
+            reloaded.notification_placement,
+            NotificationPlacement::TopLeft
+        );
         assert!(reloaded.tracking_hours.per_day);
         assert_eq!(reloaded.tracking_hours.monday.start, "09:00");
         assert!(!reloaded.tracking_hours.tuesday.enabled);

@@ -226,7 +226,10 @@ pub fn delete_category(app: AppHandle, id: String) -> Result<(), String> {
     let now = now_epoch_ms();
     let state = app.state::<AppState>();
     let mut store = state.activity.lock().map_err(|e| e.to_string())?;
-    store.delete_category(&id, now)
+    store.delete_category(&id, now)?;
+    drop(store);
+    entries_changed(&app);
+    Ok(())
 }
 
 // --- P1: Projects -------------------------------------------------------
@@ -259,7 +262,10 @@ pub fn delete_project(app: AppHandle, id: String) -> Result<(), String> {
     let now = now_epoch_ms();
     let state = app.state::<AppState>();
     let mut store = state.activity.lock().map_err(|e| e.to_string())?;
-    store.delete_project(&id, now)
+    store.delete_project(&id, now)?;
+    drop(store);
+    entries_changed(&app);
+    Ok(())
 }
 
 // --- P1: Clients --------------------------------------------------------
@@ -614,6 +620,23 @@ pub fn delete_time_entries(app: AppHandle, ids: Vec<String>) -> Result<(), Strin
     }
     entries_changed(&app);
     Ok(())
+}
+
+#[tauri::command]
+pub fn undo_deletion(app: AppHandle, redo: bool) -> Result<bool, String> {
+    let changed = {
+        let state = app.state::<AppState>();
+        let mut store = state.activity.lock().map_err(|error| error.to_string())?;
+        if redo {
+            store.redo_deletion(now_epoch_ms())?
+        } else {
+            store.undo_deletion(now_epoch_ms())?
+        }
+    };
+    if changed {
+        entries_changed(&app);
+    }
+    Ok(changed)
 }
 
 #[tauri::command]
@@ -994,11 +1017,14 @@ pub fn hide_pulse_panel(app: AppHandle) {
 /// The panel's doors into the app: closes the panel and brings the main
 /// window forward, on today's review queue when `review` is set.
 #[tauri::command]
-pub fn open_main_window(app: AppHandle, review: bool) {
+pub fn open_main_window(app: AppHandle, review: bool, timer_id: Option<String>) {
     crate::pulse::hide(&app);
     tray::show_main_window(&app);
     if review {
         let _ = app.emit_to("main", crate::EVENT_OPEN_REVIEW, ());
+    }
+    if let Some(id) = timer_id {
+        let _ = app.emit_to("main", "open-timer", id);
     }
 }
 
@@ -1068,6 +1094,9 @@ pub(crate) fn apply_settings_change(app: &AppHandle, previous: &Settings, next: 
         activity::emit_full(app);
     }
 
+    if next.notification_placement != previous.notification_placement {
+        breaks::surface::reposition(app);
+    }
     let _ = app.emit(crate::EVENT_SETTINGS_CHANGED, next);
 }
 

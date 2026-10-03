@@ -1,4 +1,10 @@
-import { type ReactElement, useCallback, useEffect, useState } from "react";
+import {
+  type ReactElement,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { NotImplementedProvider } from "./components/NotImplemented";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
@@ -9,6 +15,7 @@ import { useTauriEvent } from "./hooks/useTauriEvent";
 import { useUpdates } from "./hooks/useUpdates";
 import * as api from "./lib/api";
 import { currentCalendarDay, localDateString } from "./lib/dates";
+import { isTyping } from "./lib/entries";
 import { hasPrimaryModifier } from "./lib/platform";
 import type { ActivitySnapshot, ActivityTick, Route } from "./lib/types";
 import { Apps } from "./pages/Apps";
@@ -52,6 +59,20 @@ export default function App() {
     cursor: 0,
   });
   const currentRoute = nav.entries[nav.cursor] || { name: "calendar" };
+  const lastCalendar = useRef<Extract<Route, { name: "calendar" }>>({
+    name: "calendar",
+  });
+  if (currentRoute.name === "calendar") {
+    lastCalendar.current = {
+      name: "calendar",
+      scale: currentRoute.scale ?? "day",
+      date:
+        currentRoute.date ?? localDateString(currentCalendarDay(new Date())),
+    };
+  }
+  const [revealTimer, setRevealTimer] = useState<{ id: string }>();
+  const [deletionError, setDeletionError] = useState<string | null>(null);
+  const deletionBusy = useRef(false);
 
   const [captureEnabled, setCaptureEnabledState] = useState(true);
   const [trackingActive, setTrackingActive] = useState(true);
@@ -80,12 +101,19 @@ export default function App() {
   }, [sidebarCollapsed]);
 
   const navigate = useCallback((next: Route): void => {
+    const destination =
+      next.name === "calendar" && Object.keys(next).length === 1
+        ? lastCalendar.current
+        : next;
     setNav((previous) => {
       const current = previous.entries[previous.cursor];
-      if (current && JSON.stringify(current) === JSON.stringify(next)) {
+      if (current && JSON.stringify(current) === JSON.stringify(destination)) {
         return previous;
       }
-      const entries = [...previous.entries.slice(0, previous.cursor + 1), next];
+      const entries = [
+        ...previous.entries.slice(0, previous.cursor + 1),
+        destination,
+      ];
       return { entries, cursor: entries.length - 1 };
     });
   }, []);
@@ -125,6 +153,37 @@ export default function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [navigate]);
+
+  // Leave native text undo alone. Deletion history belongs to the app, so it
+  // remains available after navigating away from the page that deleted it.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (
+        !hasPrimaryModifier(event) ||
+        event.altKey ||
+        event.key.toLowerCase() !== "z" ||
+        isTyping(event.target)
+      )
+        return;
+      event.preventDefault();
+      if (deletionBusy.current) return;
+      deletionBusy.current = true;
+      void api
+        .undoDeletion(event.shiftKey)
+        .then(() => setDeletionError(null))
+        .catch((cause: unknown) => setDeletionError(api.describeError(cause)))
+        .finally(() => {
+          deletionBusy.current = false;
+        });
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  useTauriEvent<string>("open-timer", (id) => {
+    setRevealTimer({ id });
+    navigate({ name: "timers" });
+  });
 
   // Initial load & capture events
   useEffect(() => {
@@ -229,7 +288,7 @@ export default function App() {
           />
         );
       case "timers":
-        return <Timers />;
+        return <Timers revealTimer={revealTimer} />;
       case "apps":
         return <Apps />;
       case "entries":
@@ -290,7 +349,19 @@ export default function App() {
             onForward={forward}
             sidebarCollapsed={sidebarCollapsed}
             onToggleSidebar={toggleSidebar}
+            workflowPage={
+              currentRoute.name === "calendar" ||
+              currentRoute.name === "timesheet"
+            }
           />
+          {deletionError && (
+            <div
+              role="alert"
+              className="bg-danger-soft px-4 py-2 text-[12px] text-danger"
+            >
+              {deletionError}
+            </div>
+          )}
           <div
             className={`grid min-h-0 flex-1 overflow-hidden transition-[grid-template-columns] duration-150 ${
               sidebarCollapsed

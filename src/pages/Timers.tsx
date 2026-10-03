@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   EmptyState,
   InlineError,
@@ -11,13 +11,22 @@ import { elapsedMs, formatDuration } from "../lib/timers";
 
 interface TimersProps {
   api?: TimersApi;
+  revealTimer?: { id: string };
 }
 
-export function Timers({ api: propApi }: TimersProps = {}) {
+export function Timers({ api: propApi, revealTimer }: TimersProps = {}) {
   const defaultApi = useTimers();
   const api = propApi ?? defaultApi;
   const [label, setLabel] = useState("");
   const trimmed = label.trim();
+
+  // Wait for the timer list before revealing a request from the hidden app.
+  useEffect(() => {
+    if (!revealTimer || api.loading) return;
+    const element = document.getElementById(`timer-${revealTimer.id}`);
+    element?.scrollIntoView({ block: "center" });
+    element?.focus({ preventScroll: true });
+  }, [revealTimer, api.loading]);
 
   const submit = (): void => {
     if (trimmed.length === 0) return;
@@ -68,7 +77,7 @@ export function Timers({ api: propApi }: TimersProps = {}) {
           <button
             type="submit"
             disabled={trimmed.length === 0}
-            className="shrink-0 rounded-lg border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-4 py-2 text-[13px] font-semibold text-accent-fg transition-opacity hover:opacity-90 disabled:opacity-40"
+            className="shrink-0 rounded-lg bg-accent px-4 py-2 text-[13px] font-semibold text-accent-fg transition-opacity hover:opacity-90 disabled:opacity-40"
           >
             New tracker
           </button>

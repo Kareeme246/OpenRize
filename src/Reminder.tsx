@@ -22,7 +22,7 @@ import {
 const HOUR_MS = 3_600_000;
 
 /**
- * The top-right break panel: the reminder, the countdown capsule, and the
+ * The positioned break panel: the reminder, the elapsed-time capsule, and the
  * welcome-back card. Rust decides when it is on screen; this only draws the
  * state and reports its own size so the window can be fitted to it.
  */
@@ -37,8 +37,15 @@ export default function Reminder() {
 function ReminderPanel() {
   const { state, now } = useBreaks();
   const [menu, setMenu] = useState<"snooze" | "more" | null>(null);
-  const [hovered, setHovered] = useState(false);
-  const leave = useRef<number | undefined>(undefined);
+  const [collapsed, setCollapsed] = useState<{
+    id: string | null;
+    value: boolean;
+  }>({ id: null, value: false });
+  const currentId = state.current?.id ?? null;
+  const compact =
+    state.current?.endedAt === null &&
+    collapsed.id === currentId &&
+    collapsed.value;
 
   // A menu belongs to the reminder that opened it.
   useEffect(() => {
@@ -50,7 +57,7 @@ function ReminderPanel() {
   const reported = useRef("");
   // Report the card and any overhanging menu's bounds after every state
   // change: the window waits for a measurement before it shows.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: state, menu and hover are what change the layout
+  // biome-ignore lint/correctness/useExhaustiveDependencies: state, menu and compact are what change the layout
   useLayoutEffect(() => {
     const element = card.current;
     // Nothing is drawn while idle, so there is nothing to size a window to.
@@ -82,34 +89,13 @@ function ReminderPanel() {
     observer.observe(element);
     if (menuRef.current) observer.observe(menuRef.current);
     return () => observer.disconnect();
-  }, [state, menu, hovered]);
-
-  // Hover opens the break controls. Listening on the element keeps the
-  // card a plain container for the linter and screen readers.
-  useEffect(() => {
-    const element = card.current;
-    if (!element) return;
-    const enter = (): void => {
-      window.clearTimeout(leave.current);
-      setHovered(true);
-    };
-    const exit = (): void => {
-      leave.current = window.setTimeout(() => setHovered(false), 250);
-    };
-    element.addEventListener("mouseenter", enter);
-    element.addEventListener("mouseleave", exit);
-    return () => {
-      window.clearTimeout(leave.current);
-      element.removeEventListener("mouseenter", enter);
-      element.removeEventListener("mouseleave", exit);
-    };
-  }, []);
+  }, [state, menu, compact]);
 
   return (
     <div className="fixed top-0 right-0">
       <div
         ref={card}
-        className="w-max select-none rounded-[14px] border border-line-strong bg-panel text-[12px] text-fg"
+        className={`w-max select-none border border-line-strong bg-panel text-[12px] text-fg ${compact ? "rounded-full" : "rounded-[14px]"}`}
       >
         <PanelBody
           state={state}
@@ -117,7 +103,8 @@ function ReminderPanel() {
           menu={menu}
           menuRef={menuRef}
           onMenu={setMenu}
-          expanded={hovered}
+          expanded={!compact}
+          onToggle={() => setCollapsed({ id: currentId, value: !compact })}
         />
       </div>
     </div>
@@ -131,6 +118,7 @@ function PanelBody({
   menuRef,
   onMenu,
   expanded,
+  onToggle,
 }: {
   state: BreakState;
   now: number;
@@ -138,6 +126,7 @@ function PanelBody({
   menuRef: RefObject<HTMLDivElement | null>;
   onMenu: (menu: "snooze" | "more" | null) => void;
   expanded: boolean;
+  onToggle: () => void;
 }) {
   switch (state.phase) {
     case "due":
@@ -157,7 +146,12 @@ function PanelBody({
         state.current.endedAt !== null ? (
           <WelcomeCard current={state.current} />
         ) : (
-          <BreakCard current={state.current} now={now} expanded={expanded} />
+          <BreakCard
+            current={state.current}
+            now={now}
+            expanded={expanded}
+            onToggle={onToggle}
+          />
         )
       ) : null;
     default:
@@ -407,26 +401,33 @@ function NudgeCapsule({ reminder }: { reminder: ReminderView }) {
   );
 }
 
-/** The countdown capsule; hovering opens the controls. */
+/** Click the live line to collapse or expand without changing the break. */
 function BreakCard({
   current,
   now,
   expanded,
+  onToggle,
 }: {
   current: BreakView;
   now: number;
   expanded: boolean;
+  onToggle: () => void;
 }) {
   const end = current.startedAt + current.plannedMs;
-  const remaining = end - now;
-  const over = remaining <= 0;
+  const over = now >= end;
   const progress = Math.min(
     1,
     Math.max(0, (now - current.startedAt) / current.plannedMs),
   );
   return (
-    <div className={expanded ? "w-[260px]" : "w-[190px]"}>
-      <div className="flex h-[34px] items-center gap-2 px-3.5">
+    <div className={expanded ? "w-[280px]" : "max-w-[220px]"}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        aria-label={expanded ? "Collapse break tile" : "Expand break tile"}
+        className="flex min-h-[38px] w-full items-center gap-2 rounded-full px-4 py-2 text-left hover:bg-surface"
+      >
         <span
           className={`size-2 shrink-0 rounded-full bg-break ${over ? "" : "animate-pulse"}`}
         />
@@ -434,17 +435,19 @@ function BreakCard({
           {over ? `${current.label} over` : current.label}
         </span>
         <span className="font-semibold text-[12px] text-break tabular-nums">
-          {over ? "0:00" : formatCountdown(remaining)}
+          {formatCountdown(now - current.startedAt)}
         </span>
-      </div>
-      <div className="h-[2px] bg-line">
-        <div
-          className="h-full bg-break transition-[width] duration-1000 ease-linear"
-          style={{ width: `${progress * 100}%` }}
-        />
-      </div>
+      </button>
       {expanded && (
-        <div className="px-3.5 py-2.5">
+        <div className="mx-4 h-[2px] overflow-hidden rounded-full bg-line">
+          <div
+            className="h-full bg-break transition-[width] duration-1000 ease-linear"
+            style={{ width: `${progress * 100}%` }}
+          />
+        </div>
+      )}
+      {expanded && (
+        <div className="px-4 py-2.5">
           {over && (
             <div className="mb-2 text-[11.5px] text-fg-muted">
               Welcome back when you're ready.

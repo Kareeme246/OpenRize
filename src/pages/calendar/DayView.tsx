@@ -12,6 +12,7 @@ import type {
   TimeEntry,
 } from "../../lib/types";
 import { clampStyle, EntryBlock } from "./EntryBlock";
+import { packOverlaps } from "./overlap";
 import {
   dayLength,
   gutterLabel,
@@ -19,6 +20,7 @@ import {
   place,
   timelineFor,
 } from "./timeline";
+import { readViewport, rememberViewport } from "./viewport";
 
 const SNAP_MS = 300_000;
 
@@ -44,6 +46,7 @@ interface DayViewProps {
   onEmpty: () => void;
   onCreate: (startMs: number, endMs: number) => void;
   now: number;
+  viewportKey?: string;
 }
 
 /** The week view's now line, updated only while the app is visible. */
@@ -83,11 +86,14 @@ export function DayView({
   onEmpty,
   onCreate,
   now,
+  viewportKey = `calendar:day:${dayStart}`,
 }: DayViewProps) {
   const viewport = useRef<HTMLDivElement>(null);
   const header = useRef<HTMLDivElement>(null);
   const column = useRef<HTMLButtonElement>(null);
-  const [height, setHeight] = useState(600);
+  const savedViewport = useRef(readViewport(viewportKey));
+  const initialized = useRef(false);
+  const [height, setHeight] = useState(0);
   const [hourHeight, setHourHeight] = useState(120);
   const [draft, setDraft] = useState<{ start: number; end: number } | null>(
     null,
@@ -101,11 +107,21 @@ export function DayView({
   const entryById = new Map(entries.map((entry) => [entry.id, entry]));
   const nowOffset = hourOffset(now, dayStart, "elapsed");
   const showNow = now >= dayStart && now < dayEnd;
-  const recording = showNow ? recordingEntry(entries, now) : undefined;
+  const recording = showNow
+    ? recordingEntry(
+        entries.filter((entry) => entry.source !== "agent"),
+        now,
+      )
+    : undefined;
   const liveEnd = (entry: TimeEntry): number =>
     entry.status === "building"
       ? Math.min(Math.max(entry.startedAt, now), dayEnd)
       : entry.endedAt;
+  const packed = showAgents
+    ? packOverlaps(
+        entries.map((entry) => ({ ...entry, endedAt: liveEnd(entry) })),
+      )
+    : entries.map((item) => ({ item, column: 0, columns: 1 }));
   // While a session records, the now line rides its live bottom edge (the
   // middle of the hairline gap under the block) instead of floating a few
   // pixels off it.
@@ -141,8 +157,8 @@ export function DayView({
   nowHours.current = showNow ? nowOffset : null;
   useLayoutEffect(() => {
     const element = viewport.current;
-    if (!element || height <= 0) return;
-    const size = height / 8;
+    if (!element || height <= 0 || initialized.current) return;
+    const size = savedViewport.current?.hourHeight ?? height / 8;
     setHourHeight(size);
     const nine = hourOffset(
       new Date(dayStart).setHours(9),
@@ -150,10 +166,16 @@ export function DayView({
       "elapsed",
     );
     const current = nowHours.current;
-    element.scrollTop =
-      current !== null && (current < nine || current > nine + 8)
+    const initialTop =
+      savedViewport.current?.top ??
+      (current !== null && (current < nine || current > nine + 8)
         ? Math.max(0, current * size - height / 2)
-        : nine * size;
+        : nine * size);
+    const frame = window.requestAnimationFrame(() => {
+      initialized.current = true;
+      element.scrollTop = initialTop;
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [dayStart, height]);
 
   useEffect(() => {
@@ -233,6 +255,14 @@ export function DayView({
   return (
     <div
       ref={viewport}
+      onScroll={(event) => {
+        if (initialized.current)
+          rememberViewport(viewportKey, {
+            top: event.currentTarget.scrollTop,
+            left: 0,
+            hourHeight: hourHeightRef.current,
+          });
+      }}
       onPointerDown={(event) => {
         if (!(event.target as HTMLElement).closest(".calendar-entry"))
           onEmpty();
@@ -247,38 +277,18 @@ export function DayView({
         <div className="w-4 shrink-0" />
         <div className="flex min-w-0 flex-1">
           <span className="min-w-0 flex-1 truncate font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
-            Time Entries
+            {showAgents ? "Time" : "Time Entries"}
           </span>
-          {showAgents && (
-            <span className="w-[72px] shrink-0 truncate border-line border-l px-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
-              Agents
-            </span>
+          {!showAgents && (
+            <>
+              <span className="w-[114px] shrink-0 truncate border-line border-l px-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
+                Category
+              </span>
+              <span className="w-[114px] shrink-0 truncate border-line border-l px-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
+                Projects
+              </span>
+            </>
           )}
-          <span className="w-[114px] shrink-0 truncate border-line border-l px-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
-            Category
-          </span>
-          <span className="w-[114px] shrink-0 truncate border-line border-l px-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
-            Projects
-          </span>
-          <Tooltip content="Productivity metrics">
-            <span className="flex w-[30px] shrink-0 items-center justify-center border-line border-l">
-              <svg
-                viewBox="0 0 24 24"
-                className="size-3.5 text-fg-faint"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.8}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-label="Productivity metrics"
-              >
-                <path d="M3 3v16a2 2 0 0 0 2 2h16" />
-                <path d="M18 17V9" />
-                <path d="M13 17V5" />
-                <path d="M8 17v-3" />
-              </svg>
-            </span>
-          </Tooltip>
         </div>
       </div>
 
@@ -431,7 +441,7 @@ export function DayView({
                     />
                   );
                 })}
-                {entries.map((entry) => {
+                {packed.map(({ item: entry, column, columns }) => {
                   const { top, height: entryHeight } = place(
                     timeline,
                     entry.startedAt,
@@ -459,6 +469,11 @@ export function DayView({
                       onSelect={onSelect}
                       now={now}
                       recording={entry.id === recording?.id}
+                      column={
+                        showAgents
+                          ? { index: column, count: columns }
+                          : undefined
+                      }
                     />
                   );
                 })}
@@ -489,9 +504,9 @@ export function DayView({
                 )}
               </div>
 
-              {showAgents && (
+              {showAgents && rails.length > 0 && (
                 <div
-                  className="relative w-[72px] shrink-0 border-line border-l"
+                  className="relative w-8 shrink-0"
                   role="img"
                   aria-label="Agent rails"
                 >
@@ -523,60 +538,72 @@ export function DayView({
                 </div>
               )}
 
-              <div className="relative w-[114px] shrink-0 border-line border-l">
-                {entries.map((entry) => {
-                  const { top, height: entryHeight } = place(
-                    timeline,
-                    entry.startedAt,
-                    liveEnd(entry),
-                    dayStart,
-                    "elapsed",
-                  );
-                  const category = entry.categoryId
-                    ? categoryById.get(entry.categoryId)
-                    : undefined;
-                  return (
-                    <LaneBlock
-                      key={entry.id}
-                      entryId={entry.id}
-                      top={top}
-                      height={entryHeight}
-                      selected={entry.id === selectedId}
-                      color={category?.color}
-                      label={category?.name ?? "Uncategorized"}
-                      onSelect={onSelect}
-                    />
-                  );
-                })}
-              </div>
+              {!showAgents && (
+                <>
+                  <div className="relative w-[114px] shrink-0 border-line border-l">
+                    {packed.map(({ item: entry, column, columns }) => {
+                      const { top, height: entryHeight } = place(
+                        timeline,
+                        entry.startedAt,
+                        liveEnd(entry),
+                        dayStart,
+                        "elapsed",
+                      );
+                      const category = entry.categoryId
+                        ? categoryById.get(entry.categoryId)
+                        : undefined;
+                      return (
+                        <LaneBlock
+                          key={entry.id}
+                          entryId={entry.id}
+                          top={top}
+                          height={entryHeight}
+                          selected={entry.id === selectedId}
+                          color={category?.color}
+                          label={category?.name ?? "Uncategorized"}
+                          column={
+                            showAgents
+                              ? { index: column, count: columns }
+                              : undefined
+                          }
+                          onSelect={onSelect}
+                        />
+                      );
+                    })}
+                  </div>
 
-              <div className="relative w-[114px] shrink-0 border-line border-l">
-                {entries.map((entry) => {
-                  if (!entry.projectId) return null;
-                  const { top, height: entryHeight } = place(
-                    timeline,
-                    entry.startedAt,
-                    liveEnd(entry),
-                    dayStart,
-                    "elapsed",
-                  );
-                  const project = projectById.get(entry.projectId);
-                  return (
-                    <LaneBlock
-                      key={entry.id}
-                      entryId={entry.id}
-                      top={top}
-                      height={entryHeight}
-                      selected={entry.id === selectedId}
-                      color={project?.color}
-                      label={project?.name ?? "Unknown project"}
-                      onSelect={onSelect}
-                    />
-                  );
-                })}
-              </div>
-
-              <div className="w-[30px] shrink-0 border-line border-l" />
+                  <div className="relative w-[114px] shrink-0 border-line border-l">
+                    {packed.map(({ item: entry, column, columns }) => {
+                      if (!entry.projectId) return null;
+                      const { top, height: entryHeight } = place(
+                        timeline,
+                        entry.startedAt,
+                        liveEnd(entry),
+                        dayStart,
+                        "elapsed",
+                      );
+                      const project = projectById.get(entry.projectId);
+                      return (
+                        <LaneBlock
+                          key={entry.id}
+                          entryId={entry.id}
+                          top={top}
+                          height={entryHeight}
+                          selected={entry.id === selectedId}
+                          color={project?.color}
+                          label={project?.name ?? "Unknown project"}
+                          column={
+                            showAgents
+                              ? { index: column, count: columns }
+                              : undefined
+                          }
+                          onSelect={onSelect}
+                        />
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -700,6 +727,7 @@ interface LaneBlockProps {
   color?: string;
   label: string;
   onSelect: (id: string) => void;
+  column?: { index: number; count: number };
 }
 
 /**
@@ -714,6 +742,7 @@ function LaneBlock({
   color,
   label,
   onSelect,
+  column,
 }: LaneBlockProps) {
   const tone = color ?? "var(--fg-faint)";
   return (
@@ -728,6 +757,11 @@ function LaneBlock({
         style={{
           top: `${top}px`,
           height: `${height}px`,
+          ...(column && {
+            left: `calc(2px + (100% - 6px) * ${column.index} / ${column.count})`,
+            width: `calc((100% - 6px) / ${column.count} - 2px)`,
+            right: "auto",
+          }),
           backgroundColor: `color-mix(in srgb, ${tone} 15%, var(--bg-panel))`,
           color: tone,
         }}

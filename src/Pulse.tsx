@@ -602,7 +602,14 @@ function TimerRows({
                 isRunning ? "bg-accent animate-pulse" : "bg-fg-ghost"
               }`}
             />
-            <span className="min-w-0 flex-1 truncate">{timer.label}</span>
+            <button
+              type="button"
+              onClick={() => void api.openMainWindow(false, timer.id)}
+              className="min-w-0 flex-1 truncate text-left hover:text-accent focus-visible:outline-accent"
+              aria-label={`Show ${timer.label} in Stopwatches`}
+            >
+              {timer.label}
+            </button>
             <span
               className={`tabular-nums ${
                 isRunning ? "font-semibold text-accent" : "text-fg-soft"

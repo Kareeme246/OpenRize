@@ -195,6 +195,12 @@ export const DEFAULT_BREAK_SETTINGS: BreakSettings = {
   schedules: [],
 };
 
+export type NotificationPlacement =
+  | "topLeft"
+  | "centerMiddle"
+  | "bottomLeft"
+  | "bottomRight";
+
 export interface Settings {
   theme: Theme;
   accent: Accent;
@@ -214,6 +220,7 @@ export interface Settings {
   weeklyTargetHours: number;
   trackingHours: TrackingHours;
   breaks: BreakSettings;
+  notificationPlacement: NotificationPlacement;
   /**
    * Extensions the person chose by hand, by id. An absent id follows
    * auto-detection: a tool found on this Mac is on until they turn it off.
@@ -242,6 +249,7 @@ export const DEFAULT_SETTINGS: Settings = {
   weeklyTargetHours: 40,
   trackingHours: DEFAULT_TRACKING_HOURS,
   breaks: DEFAULT_BREAK_SETTINGS,
+  notificationPlacement: "bottomRight",
   extensions: {},
   advancedWorkflowTracking: false,
 };

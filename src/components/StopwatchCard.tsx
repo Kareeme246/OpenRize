@@ -38,12 +38,11 @@ export function StopwatchCard({
   };
 
   return (
-    <div
-      className={`flex min-w-0 flex-col items-center gap-3 rounded-xl border p-4 ${
-        running
-          ? "border-accent/30 bg-linear-to-b from-accent/10 to-accent/2"
-          : "border-line bg-linear-to-b from-surface to-transparent"
-      }`}
+    <section
+      id={`timer-${timer.id}`}
+      tabIndex={-1}
+      aria-label={`Stopwatch ${timer.label}`}
+      className={`shape-bleed-table flex min-w-0 flex-col items-center gap-3 rounded-xl border border-settings-card-border bg-settings-card p-4 outline-hidden focus:ring-2 focus:ring-accent ${running ? "border-l-4 border-l-accent" : ""}`}
     >
       <div className="flex w-full min-w-0 items-center justify-center gap-1.5">
         {editing ? (
@@ -113,9 +112,7 @@ export function StopwatchCard({
 
       <div
         className={`font-mono text-[26px] font-semibold tabular-nums leading-none tracking-tight ${
-          running
-            ? "text-accent drop-shadow-[0_0_24px_rgba(var(--accent-rgb),0.35)]"
-            : "text-fg-soft"
+          running ? "text-accent" : "text-fg-soft"
         }`}
       >
         {formatDuration(elapsed)}
@@ -179,6 +176,6 @@ export function StopwatchCard({
           onCancel={() => setPending(null)}
         />
       )}
-    </div>
+    </section>
   );
 }

@@ -168,8 +168,14 @@ struct Totals {
     unreviewed: u64,
 }
 
+#[cfg(test)]
+mod break_regressions;
+mod deletions;
+
 pub struct ActivityStore {
     conn: Connection,
+    undo_deletions: Vec<deletions::Deletion>,
+    redo_deletions: Vec<deletions::Deletion>,
     current: Option<Current>,
     pending_switch: Option<PendingSwitch>,
     capture_enabled: bool,
@@ -211,6 +217,8 @@ impl ActivityStore {
 
         let mut store = Self {
             conn,
+            undo_deletions: Vec::new(),
+            redo_deletions: Vec::new(),
             current: None,
             pending_switch: None,
             capture_enabled: true,
@@ -339,6 +347,13 @@ impl ActivityStore {
 
         if !self.capture_enabled {
             self.pending_switch = None;
+            // Explicit breaks are a user action, not automatic capture. Keep
+            // their segment alive even when the tracker was paused at Start.
+            if self.current.as_ref().is_some_and(|current| {
+                current.kind == KIND_BREAK && current.label.as_deref() != Some(IDLE_LABEL)
+            }) {
+                return Ok(false);
+            }
             self.manual_tracking = false;
             return self.close_current(now);
         }
@@ -903,13 +918,7 @@ impl ActivityStore {
     }
 
     pub fn delete_category(&mut self, id: &str, now: u64) -> Result<(), String> {
-        self.conn
-            .execute(
-                "UPDATE categories SET deleted_at = ?1, archived = 1, updated_at = ?1 WHERE id = ?2;",
-                params![now as i64, id],
-            )
-            .map_err(|e| e.to_string())?;
-        Ok(())
+        self.delete_undoable(&[], Some(id), None, now)
     }
 
     fn get_category(&self, id: &str) -> Result<Category, String> {
@@ -1129,23 +1138,7 @@ impl ActivityStore {
     /// Soft-deletes a project and unlinks its time entries and rules.
     /// Historical time remains intact, but is no longer assigned to a project.
     pub fn delete_project(&mut self, id: &str, now: u64) -> Result<(), String> {
-        let tx = self.conn.transaction().map_err(|e| e.to_string())?;
-        tx.execute(
-            "UPDATE projects SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2;",
-            params![now as i64, id],
-        )
-        .map_err(|e| e.to_string())?;
-        tx.execute(
-            "UPDATE time_entries SET project_id = NULL, updated_at = ?1 WHERE project_id = ?2;",
-            params![now as i64, id],
-        )
-        .map_err(|e| e.to_string())?;
-        tx.execute(
-            "UPDATE rules SET deleted_at = ?1, updated_at = ?1 WHERE project_id = ?2 AND deleted_at IS NULL;",
-            params![now as i64, id],
-        )
-        .map_err(|e| e.to_string())?;
-        tx.commit().map_err(|e| e.to_string())
+        self.delete_undoable(&[], None, Some(id), now)
     }
 
     fn get_project(&self, id: &str) -> Result<Project, String> {
@@ -1813,24 +1806,7 @@ impl ActivityStore {
     }
 
     pub fn delete_time_entries(&mut self, ids: &[String], now: u64) -> Result<(), String> {
-        let tx = self.conn.transaction().map_err(|e| e.to_string())?;
-        {
-            let mut delete_entry = tx
-                .prepare("UPDATE time_entries SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2;")
-                .map_err(|e| e.to_string())?;
-            let mut delete_segments = tx
-                .prepare("DELETE FROM segments WHERE entry_id = ?1;")
-                .map_err(|e| e.to_string())?;
-            for id in ids {
-                delete_entry
-                    .execute(params![now as i64, id])
-                    .map_err(|e| e.to_string())?;
-                delete_segments
-                    .execute(params![id])
-                    .map_err(|e| e.to_string())?;
-            }
-        }
-        tx.commit().map_err(|e| e.to_string())
+        self.delete_undoable(ids, None, None, now)
     }
 
     pub fn create_manual_entry(

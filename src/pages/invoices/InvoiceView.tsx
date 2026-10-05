@@ -43,6 +43,7 @@ export function InvoiceView({
   );
   const [busy, setBusy] = useState(false);
   const [confirmVoid, setConfirmVoid] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -82,6 +83,19 @@ export function InvoiceView({
     } catch (cause) {
       setError(api.describeError(cause));
     } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteVoided = async (): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteVoidInvoice(invoiceId);
+      onChanged();
+      onBack();
+    } catch (cause) {
+      setError(api.describeError(cause));
       setBusy(false);
     }
   };
@@ -140,6 +154,16 @@ export function InvoiceView({
           {invoice.number ?? "Invoice"}
         </h2>
         <StatusPill status={shown} />
+        {invoice.status === "void" && (
+          <button
+            type="button"
+            className="ml-auto rounded-md border border-danger/40 px-3 py-1 font-medium text-[12px] text-danger hover:bg-danger-soft disabled:opacity-40"
+            disabled={busy}
+            onClick={() => setConfirmDelete(true)}
+          >
+            Delete invoice
+          </button>
+        )}
       </div>
       <div className="grid min-h-0 flex-1 grid-cols-[300px_1fr] max-[900px]:grid-cols-1">
         <aside className="min-h-0 space-y-4 overflow-y-auto border-line border-r p-4 text-[12px]">
@@ -247,6 +271,18 @@ export function InvoiceView({
             void act(() => api.voidInvoice(invoice.id));
           }}
           onCancel={() => setConfirmVoid(false)}
+        />
+      )}
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete this invoice?"
+          body={`${invoice.number ?? "This invoice"} will be permanently removed. This cannot be undone.`}
+          confirmLabel="Delete invoice"
+          onConfirm={() => {
+            setConfirmDelete(false);
+            void deleteVoided();
+          }}
+          onCancel={() => setConfirmDelete(false)}
         />
       )}
     </div>

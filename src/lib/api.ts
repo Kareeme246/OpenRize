@@ -422,6 +422,10 @@ export async function deleteDraftInvoice(id: string): Promise<void> {
   await invoke("delete_draft_invoice", { id });
 }
 
+export async function deleteVoidInvoice(id: string): Promise<void> {
+  await invoke("delete_void_invoice", { id });
+}
+
 /**
  * Asks where to save an invoice PDF. Pass `id` for a finalized invoice or
  * `draft` for a watermarked draft render. Resolves to the saved path, or null

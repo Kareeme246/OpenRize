@@ -998,5 +998,31 @@ pub fn delete_draft(conn: &mut Connection, id: &str) -> Result<(), String> {
     tx.commit().map_err(err)
 }
 
+/// Deletes a voided invoice permanently.
+pub fn delete_void(conn: &mut Connection, id: &str) -> Result<(), String> {
+    let tx = conn.transaction().map_err(err)?;
+    let status: Option<String> = tx
+        .query_row("SELECT status FROM invoices WHERE id = ?1", [id], |row| {
+            row.get(0)
+        })
+        .optional()
+        .map_err(err)?;
+    match status.as_deref() {
+        Some("void") => {}
+        Some(_) => return Err("Only void invoices can be deleted".into()),
+        None => return Err("Invoice not found".into()),
+    }
+    tx.execute(
+        "UPDATE time_entries SET invoice_id = NULL WHERE invoice_id = ?1",
+        [id],
+    )
+    .map_err(err)?;
+    tx.execute("DELETE FROM invoice_lines WHERE invoice_id = ?1", [id])
+        .map_err(err)?;
+    tx.execute("DELETE FROM invoices WHERE id = ?1", [id])
+        .map_err(err)?;
+    tx.commit().map_err(err)
+}
+
 #[cfg(test)]
 mod tests;

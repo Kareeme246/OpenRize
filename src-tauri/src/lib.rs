@@ -237,6 +237,7 @@ pub fn run() {
             commands::set_invoice_paid,
             commands::void_invoice,
             commands::delete_draft_invoice,
+            commands::delete_void_invoice,
             commands::export_invoice_pdf,
             commands::get_invoice_profile,
             commands::update_invoice_profile,

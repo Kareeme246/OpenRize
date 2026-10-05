@@ -14,7 +14,6 @@ import { useEntryReview } from "../hooks/useEntryReview";
 import { useSettings } from "../hooks/useSettings";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import { timeByApp } from "../lib/activity";
-import type { DayThreads } from "../lib/agents";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
 import type { BreakEntry } from "../lib/breaks";
@@ -48,20 +47,12 @@ import type {
   Route,
   TimeEntry,
 } from "../lib/types";
-import { DayView, type ProjectRail } from "./calendar/DayView";
+import { DayView } from "./calendar/DayView";
 import { MonthView } from "./calendar/MonthView";
 import { RangeSummary } from "./calendar/RangeSummary";
-import { ThreadsView } from "./calendar/ThreadsView";
-import { WeekThreads } from "./calendar/WeekThreads";
 import { WeekView } from "./calendar/WeekView";
-import {
-  useWorkflowLayout,
-  WorkflowLayoutControl,
-} from "./calendar/WorkflowLayoutControl";
 
 type CalendarRoute = Extract<Route, { name: "calendar" }>;
-
-const NO_THREADS: DayThreads[] = [];
 
 interface CalendarProps {
   route: CalendarRoute;
@@ -92,7 +83,6 @@ function categorySlices(
 
 export function Calendar({ route, navigate }: CalendarProps) {
   const { settings } = useSettings();
-  const agentsOn = settings.advancedWorkflowTracking;
   const aiStatus = useAiStatus();
   const catalog = useCatalog();
   const { categoryById, projectById } = catalog;
@@ -117,27 +107,10 @@ export function Calendar({ route, navigate }: CalendarProps) {
     return { start, end, weeks };
   }, [range]);
 
-  // Day boundaries for the threads and agent rails: one pair for a day, a
-  // pair per day for a week. Month has none.
-  const threadEdges = useMemo(
-    () =>
-      scale === "day"
-        ? [startMs, endMs]
-        : scale === "week"
-          ? calendarDayEdges(range.start, range.end)
-          : [],
-    [scale, startMs, endMs, range],
-  );
-
   const [entries, setEntries] = useState<TimeEntry[]>([]);
-  const [agentEntries, setAgentEntries] = useState<TimeEntry[]>([]);
   const [segments, setSegments] = useState<ActivitySegment[]>([]);
   const [cells, setCells] = useState<RollupCell[]>([]);
   const [breakEntries, setBreakEntries] = useState<BreakEntry[]>([]);
-  const [loadedThreads, setThreadDays] = useState<DayThreads[]>([]);
-  // Threads loaded before advanced workflow tracking went off must not show.
-  const threadDays = agentsOn ? loadedThreads : NO_THREADS;
-  const { layout, choose } = useWorkflowLayout();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
@@ -165,19 +138,14 @@ export function Calendar({ route, navigate }: CalendarProps) {
           setBreakEntries(breakList);
         }
       } else {
-        const [list, snapshot, breakList, threads, agentList] =
-          await Promise.all([
-            api.listTimeEntries(startMs, endMs - 1),
-            scale === "day" ? api.fetchActivitySnapshot(startMs) : null,
-            api.listBreaks(startMs, endMs),
-            agentsOn ? api.threadDays(threadEdges) : [],
-            agentsOn ? api.listAgentEntries(startMs, endMs - 1) : [],
-          ]);
+        const [list, snapshot, breakList] = await Promise.all([
+          api.listTimeEntries(startMs, endMs - 1),
+          scale === "day" ? api.fetchActivitySnapshot(startMs) : null,
+          api.listBreaks(startMs, endMs),
+        ]);
         if (shownKey.current === key) {
           setEntries(list);
-          setAgentEntries(agentList);
           setBreakEntries(breakList);
-          setThreadDays(threads);
           if (snapshot) {
             setSegments(
               snapshot.segments.filter(
@@ -192,7 +160,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
     } catch (cause) {
       setError(describeError(cause));
     }
-  }, [scale, startMs, endMs, grid, threadEdges, agentsOn]);
+  }, [scale, startMs, endMs, grid]);
 
   /**
    * Full load: rebuild the range's entries from its segments (a past day
@@ -203,27 +171,19 @@ export function Calendar({ route, navigate }: CalendarProps) {
     const key = `${scale}:${startMs}`;
     setLoading(true);
     try {
-      const [list, snapshot, breakList, threads] = await Promise.all([
+      const [list, snapshot, breakList] = await Promise.all([
         api.rebuildTimeEntries(startMs, endMs - 1),
         scale === "day" ? api.fetchActivitySnapshot(startMs) : null,
         api.listBreaks(startMs, endMs),
-        scale === "month" || !agentsOn ? [] : api.threadDays(threadEdges),
       ]);
       if (shownKey.current !== key) return;
       setBreakEntries(breakList);
-      setThreadDays(threads);
       if (scale === "month") {
         await refresh();
       } else {
         setEntries(list);
         setError(null);
       }
-      const agentList =
-        agentsOn && scale !== "month"
-          ? await api.listAgentEntries(startMs, endMs - 1)
-          : [];
-      if (shownKey.current !== key) return;
-      setAgentEntries(agentList);
       // The snapshot runs to now; keep only this day's segments.
       setSegments(
         snapshot?.segments.filter(
@@ -236,7 +196,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
     } finally {
       setLoading(false);
     }
-  }, [scale, startMs, endMs, refresh, threadEdges, agentsOn]);
+  }, [scale, startMs, endMs, refresh]);
 
   useEffect(() => {
     load();
@@ -246,7 +206,6 @@ export function Calendar({ route, navigate }: CalendarProps) {
   useTauriEvent(api.ACTIVITY_CHANGED, () => void refresh());
   useTauriEvent(api.BREAK_STATE_CHANGED, () => void refresh());
   useTauriEvent(api.SUGGESTION_READY, () => void refresh());
-  useTauriEvent(api.AGENTS_CHANGED, () => void refresh());
 
   useEffect(() => {
     let timer: number | undefined;
@@ -482,21 +441,6 @@ export function Calendar({ route, navigate }: CalendarProps) {
       : undefined;
 
   const targetMs = targetMsFor(settings, scale, daysInRange);
-  const rails = useMemo<ProjectRail[]>(
-    () =>
-      threadDays.flatMap((day) =>
-        day.threads.flatMap((thread) =>
-          thread.rails.map((rail) => ({
-            ...rail,
-            projectId: thread.projectId,
-          })),
-        ),
-      ),
-    [threadDays],
-  );
-  const agentsMs = threadDays.reduce((sum, day) => sum + day.agentsMs, 0);
-  const threadsShown = agentsOn && layout === "timeline" && scale !== "month";
-  const workflowEntries = agentsOn ? [...visible, ...agentEntries] : visible;
   const title =
     scale === "day"
       ? date.toLocaleDateString(undefined, {
@@ -531,13 +475,6 @@ export function Calendar({ route, navigate }: CalendarProps) {
           }
           isToday={now >= startMs && now < endMs}
         />
-        {agentsOn && scale !== "month" && (
-          <WorkflowLayoutControl
-            name="calendar-workflow-layout"
-            layout={layout}
-            onChange={choose}
-          />
-        )}
         <ScaleControl
           name="calendar-scale"
           value={scale}
@@ -554,25 +491,11 @@ export function Calendar({ route, navigate }: CalendarProps) {
 
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_320px] gap-4 overflow-hidden p-4 sharper:gap-0 sharper:p-0">
         <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-sm sharper:rounded-none sharper:border-0 sharper:shadow-none">
-          {scale === "day" && threadsShown && (
-            <ThreadsView
-              day={threadDays[0]}
-              dayStart={startMs}
-              layout={layout}
-              projectById={projectById}
-              selectedId={review.selectedId}
-              loading={loading}
-              onSelect={select}
-              now={now}
-            />
-          )}
-          {scale === "day" && !threadsShown && (
+          {scale === "day" && (
             <DayView
               key={startMs}
               dayStart={startMs}
-              showAgents={agentsOn}
-              rails={rails}
-              entries={workflowEntries}
+              entries={visible}
               segments={segments}
               breaks={breakEntries}
               loading={loading}
@@ -600,22 +523,10 @@ export function Calendar({ route, navigate }: CalendarProps) {
               now={now}
             />
           )}
-          {scale === "week" && threadsShown && (
-            <WeekThreads
-              weekStart={range.start}
-              days={threadDays}
-              projectById={projectById}
-              loading={loading}
-              onOpenDay={(day) => go({ scale: "day", date: day })}
-              now={now}
-            />
-          )}
-          {scale === "week" && !threadsShown && (
+          {scale === "week" && (
             <WeekView
-              agentMsByDay={threadDays.map((day) => day.agentsMs)}
               weekStart={range.start}
-              entries={workflowEntries}
-              parallel={agentsOn}
+              entries={visible}
               breaks={breakEntries}
               loading={loading}
               selectedId={review.selectedId}
@@ -686,8 +597,6 @@ export function Calendar({ route, navigate }: CalendarProps) {
               targetLabel={formatTargetHours(targetMs)}
               entries={summary.count}
               processing={processingCount}
-              agentsMs={scale === "month" ? 0 : agentsMs}
-              focus={scale === "day" ? threadDays[0]?.focus : undefined}
               categories={summary.categories}
               topApps={
                 scale === "day"

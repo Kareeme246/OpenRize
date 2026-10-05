@@ -382,6 +382,74 @@ fn paid_and_void_transitions_release_time_only_on_void() {
     );
 }
 
+#[test]
+fn delete_void_removes_voided_invoice_and_enforces_restrictions() {
+    let mut conn = db();
+
+    // 1. Nonexistent invoice fails
+    assert_eq!(
+        delete_void(&mut conn, "does-not-exist").unwrap_err(),
+        "Invoice not found"
+    );
+
+    // 2. Draft invoice cannot be deleted via delete_void
+    let draft_inv = save_draft(&mut conn, &draft(None, vec![time("e1")]), 1).unwrap();
+    let draft_id = draft_inv.summary.id.clone();
+    assert_eq!(
+        delete_void(&mut conn, &draft_id).unwrap_err(),
+        "Only void invoices can be deleted"
+    );
+
+    // 3. Open (finalized active) invoice cannot be deleted via delete_void
+    finalize(&mut conn, &draft_id, 2).unwrap();
+    assert_eq!(
+        delete_void(&mut conn, &draft_id).unwrap_err(),
+        "Only void invoices can be deleted"
+    );
+
+    // 4. Paid invoice cannot be deleted via delete_void
+    set_paid(&conn, &draft_id, true, 3).unwrap();
+    assert_eq!(
+        delete_void(&mut conn, &draft_id).unwrap_err(),
+        "Only void invoices can be deleted"
+    );
+
+    // 5. Unpay and void the invoice
+    set_paid(&conn, &draft_id, false, 4).unwrap();
+    void(&mut conn, &draft_id, 5).unwrap();
+    assert_eq!(get(&conn, &draft_id).unwrap().summary.status, "void");
+
+    // delete_draft refuses to delete voided invoices
+    assert_eq!(
+        delete_draft(&mut conn, &draft_id).unwrap_err(),
+        "Only draft invoices can be deleted"
+    );
+
+    // 6. Successfully delete the voided invoice
+    delete_void(&mut conn, &draft_id).unwrap();
+
+    // Invoice is now gone
+    assert!(get(&conn, &draft_id).is_err());
+    assert!(stored_pdf(&conn, &draft_id).is_err());
+    let line_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM invoice_lines WHERE invoice_id = ?1",
+            [&draft_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(line_count, 0);
+
+    // Time entry e1 is detached and still exists
+    assert_eq!(linked(&conn, "e1"), None);
+
+    // Calling delete_void again on the deleted invoice fails
+    assert_eq!(
+        delete_void(&mut conn, &draft_id).unwrap_err(),
+        "Invoice not found"
+    );
+}
+
 fn set_profile(conn: &mut Connection, name: &str, address: &str) {
     profile::update(
         conn,

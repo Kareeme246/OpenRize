@@ -1135,6 +1135,12 @@ pub fn set_launch_at_login(enabled: bool) -> Result<LoginItemState, String> {
     login_item::set(enabled)
 }
 
+/// Current authorization status of required/requested system permissions.
+#[tauri::command]
+pub fn check_permissions() -> Vec<crate::permissions::PermissionInfo> {
+    crate::permissions::check_permissions()
+}
+
 #[tauri::command]
 pub fn storage_paths(app: AppHandle) -> Result<StoragePaths, String> {
     let data_dir = app

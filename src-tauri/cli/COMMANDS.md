@@ -53,7 +53,7 @@ installed.
 | `rize timers new <label>` | Create a timer. | `create_timer` | Yes | Shipped |
 | `rize timers start` / `pause` / `reset` / `rm <timer>` | Control or delete a timer by id or label; reset and rm are confirmed. | `start_timer`, `pause_timer`, `reset_timer`, `delete_timer` | Yes | Shipped |
 | `rize timers rename <timer> <label>` | Rename a timer. | `rename_timer` | Yes | Shipped |
-| `rize entries list` | Filter by range, project, client, category, app, status, billable, search and scope. Newest first, `--limit` 1 to 5000. | `query_time_entries` | Yes | Shipped |
+| `rize entries list` | Filter by range, project, client, category, app, status, billable and search. Newest first, `--limit` 1 to 5000. | `query_time_entries` | Yes | Shipped |
 | `rize entries show <id>` | One entry with its apps, events and AI suggestion; window titles with `--full`. | `get_entry_detail` | Yes | Shipped |
 | `rize entries add --from --to [fields]` | Create a manual entry. | `create_time_entry` | Yes | Shipped |
 | `rize entries edit <id...> [fields]` | Change description, project, category, billable, start or end on one or many entries; `none` clears a project or category. | `update_time_entry`, `update_time_entries` | Yes | Shipped |
@@ -90,13 +90,9 @@ installed.
 | `rize ai status` / `rules` / `rules accept` / `reject <rule>` | Classifier state, queue and suggested rules. | `ai_status`, `resolve_rule_suggestion` | Needs app | M2 |
 | `rize ai metrics [--days]` | Classification accuracy. | `ai_metrics` | Yes | M2 |
 | `rize ai retrain` / `reset-learned --days` / `retry <entry>` | Retrain, forget recent corrections, or reclassify one entry (confirmed where destructive). | `ai_retrain`, `ai_reset_learned`, `retry_classification` | Needs app | M2 |
-| `rize agents board` | Coding agent jobs in flight. Empty until `advancedWorkflowTracking` is on. | `agent_board` | Needs app | M2 |
-| `rize agents report --from --to` / `entries` / `confirm <job>` | Billed agent time and confirming a job. `report` and `confirm` are refused and `entries` is empty until `advancedWorkflowTracking` is on. | `agent_report`, `list_agent_entries`, `confirm_agent_job` | Yes | M2 |
-| `rize extensions list` | Herdr and tmux bridge status; switch them with `settings set extensions.<id>`. Empty until `settings set advancedWorkflowTracking true`. | `list_extensions` | Needs app | M2 |
 | `rize energy summary [--days]` / `history` / `reset` | Battery and energy history. | `get_energy_summary`, `query_energy_history`, `reset_energy_history` | Yes | M2 |
 | `rize login-item status` / `enable` / `disable` | Launch at login. | `launch_at_login`, `set_launch_at_login` | Needs app on macOS | M2 |
 | `rize update status` / `check` / `install` | App updates. | `update_status`, `check_for_updates`, `install_update` | Needs app | M2 |
-| `rize threads --from --to` | Per-day work threads, as the Calendar shows them. | `thread_days` | Yes | Later |
 | `rize activity --from --to [--full]` | Raw activity segments; titles only with `--full`. | `activity_snapshot` | Yes | Later |
 | `rize status --watch` | Live status that redraws on every change. | new streaming subscription | Needs app | Later |
 | `rize ai classify` / `models` | Classification and model downloads for a non-Apple model backend. | new | Later | Later |

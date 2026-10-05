@@ -8,7 +8,6 @@
 //! The file is written atomically (temp + rename) and a corrupt file is moved
 //! aside rather than silently reset, matching `timers.rs`.
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -460,16 +459,6 @@ pub struct Settings {
     pub tracking_hours: TrackingHours,
     pub breaks: BreakSettings,
     pub notification_placement: NotificationPlacement,
-    /// Extensions (agent bridges) the person switched on or off by hand,
-    /// keyed by extension id. An id with no entry follows auto-detection: on
-    /// when the tool is installed. An explicit value, on or off, persists and
-    /// is never overridden by detection.
-    pub extensions: BTreeMap<String, bool>,
-    /// Advanced workflow tracking: the experimental master switch for coding
-    /// agent tracking (the agent bridge, jobs, threads and agent time). Off by
-    /// default; while off nothing runs, nothing new is recorded, and every
-    /// surface for it is hidden. What was recorded before is kept.
-    pub advanced_workflow_tracking: bool,
 }
 
 impl Default for Settings {
@@ -490,22 +479,11 @@ impl Default for Settings {
             tracking_hours: TrackingHours::default(),
             breaks: BreakSettings::default(),
             notification_placement: NotificationPlacement::default(),
-            extensions: BTreeMap::new(),
-            advanced_workflow_tracking: false,
         }
     }
 }
 
-/// Extension ids a settings file may carry; anything else is dropped.
-pub const EXTENSION_IDS: [&str; 2] = ["herdr", "tmux"];
-
 impl Settings {
-    /// Whether an extension runs: the person's explicit choice, else whether
-    /// its tool was detected.
-    pub fn extension_enabled(&self, id: &str, detected: bool) -> bool {
-        self.extensions.get(id).copied().unwrap_or(detected)
-    }
-
     /// The only place a value is allowed in. Keeps persistence and validation
     /// in one spot so a command can never write something unloadable.
     fn normalized(mut self) -> Self {
@@ -523,8 +501,6 @@ impl Settings {
         }
         self.tracking_hours = self.tracking_hours.normalized();
         self.breaks = self.breaks.normalized();
-        self.extensions
-            .retain(|id, _| EXTENSION_IDS.contains(&id.as_str()));
         self
     }
 }
@@ -622,16 +598,12 @@ impl SettingsStore {
         let fields = slot
             .as_object_mut()
             .ok_or_else(|| format!("unknown setting {key}"))?;
-        // Extensions are a map keyed by id, so an id may not be stored yet.
-        if !fields.contains_key(*last) && parents != ["extensions"] {
+        if !fields.contains_key(*last) {
             return Err(format!("unknown setting {key}"));
         }
         fields.insert((*last).to_string(), value);
         let next: Settings = serde_json::from_value(document)
             .map_err(|error| format!("invalid value for {key}: {error}"))?;
-        if parents == ["extensions"] && !EXTENSION_IDS.contains(last) {
-            return Err(format!("unknown extension {last}"));
-        }
         self.set(next)
     }
 
@@ -678,12 +650,6 @@ mod tests {
                 .enabled,
             breaks
         );
-        assert!(
-            !store
-                .patch("extensions.tmux", serde_json::json!(false))
-                .unwrap()
-                .extensions["tmux"]
-        );
         // Clamped like any other write.
         assert_eq!(
             store
@@ -695,7 +661,6 @@ mod tests {
         for (key, value) in [
             ("nope", serde_json::json!(1)),
             ("breaks.nope", serde_json::json!(1)),
-            ("extensions.unknown", serde_json::json!(true)),
             ("breaks.enabled", serde_json::json!("maybe")),
             ("weeklyTargetHours.deeper", serde_json::json!(1)),
         ] {
@@ -756,8 +721,6 @@ mod tests {
                     },
                     breaks: BreakSettings::default(),
                     notification_placement: NotificationPlacement::TopLeft,
-                    extensions: BTreeMap::new(),
-                    advanced_workflow_tracking: true,
                 })
                 .unwrap();
         }
@@ -774,7 +737,6 @@ mod tests {
         assert_eq!(reloaded.auto_accept_percent, 90);
         assert_eq!(reloaded.ai_custom_prompt, "OpenRize is Coding");
         assert_eq!(reloaded.weekly_target_hours, 32);
-        assert!(reloaded.advanced_workflow_tracking);
         assert_eq!(
             reloaded.notification_placement,
             NotificationPlacement::TopLeft
@@ -785,37 +747,21 @@ mod tests {
     }
 
     #[test]
-    fn advanced_workflow_tracking_is_off_until_switched_on() {
-        let dir = temp_dir("workflow-tracking");
+    fn keys_from_removed_settings_are_ignored_and_dropped_on_the_next_save() {
+        let dir = temp_dir("removed-keys");
+        fs::write(
+            dir.join(FILE_NAME),
+            r#"{"weeklyTargetHours":32,"advancedWorkflowTracking":true,"extensions":{"tmux":false}}"#,
+        )
+        .unwrap();
         let mut store = SettingsStore::load(&dir).unwrap();
-        assert!(!store.snapshot().advanced_workflow_tracking);
+        assert_eq!(store.snapshot().weekly_target_hours, 32);
 
-        store
-            .patch("advancedWorkflowTracking", serde_json::json!(true))
-            .unwrap();
-        let reloaded = SettingsStore::load(&dir).unwrap().snapshot();
-        assert!(reloaded.advanced_workflow_tracking);
-    }
-
-    #[test]
-    fn an_extension_follows_detection_until_the_person_chooses() {
-        let dir = temp_dir("extensions");
-        let mut store = SettingsStore::load(&dir).unwrap();
-        let fresh = store.snapshot();
-        // No choice yet: detection decides, so a newly installed tool is on.
-        assert!(fresh.extension_enabled("herdr", true));
-        assert!(!fresh.extension_enabled("herdr", false));
-
-        let mut next = fresh;
-        next.extensions.insert("herdr".to_string(), false);
-        next.extensions.insert("not-an-extension".to_string(), true);
-        store.set(next).unwrap();
-
-        // An explicit off survives a restart and is not undone by detection.
-        let reloaded = SettingsStore::load(&dir).unwrap().snapshot();
-        assert!(!reloaded.extension_enabled("herdr", true));
-        assert!(reloaded.extension_enabled("tmux", true));
-        assert!(!reloaded.extensions.contains_key("not-an-extension"));
+        store.patch("retentionDays", serde_json::json!(7)).unwrap();
+        let saved = fs::read_to_string(dir.join(FILE_NAME)).unwrap();
+        assert!(!saved.contains("advancedWorkflowTracking"));
+        assert!(!saved.contains("extensions"));
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

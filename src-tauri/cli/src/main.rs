@@ -217,22 +217,12 @@ struct FilterArgs {
     /// Words that must all appear in the description or a window title
     #[arg(long)]
     search: Option<String>,
-    /// Your own entries (work, the default), counted agent time, or both
-    #[arg(long, value_enum)]
-    scope: Option<Scope>,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
 enum Status {
     Pending,
     Approved,
-}
-
-#[derive(ValueEnum, Clone, Copy, Debug)]
-enum Scope {
-    Work,
-    Agent,
-    All,
 }
 
 #[derive(Subcommand, Debug)]
@@ -1140,14 +1130,6 @@ fn entry_filter(
         }),
         billable: filter.billable,
         search: filter.search.clone(),
-        scope: filter.scope.map(|scope| {
-            match scope {
-                Scope::Work => "work",
-                Scope::Agent => "agent",
-                Scope::All => "all",
-            }
-            .into()
-        }),
     })
 }
 

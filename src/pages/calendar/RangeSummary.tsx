@@ -1,7 +1,6 @@
 import { BarRow, Donut, type Slice } from "../../components/Charts";
 import { Progress, StatCard } from "../../components/Page";
 import { Tooltip } from "../../components/Tooltip";
-import type { Focus } from "../../lib/agents";
 import { formatDuration, plural } from "../../lib/format";
 
 interface RangeSummaryProps {
@@ -12,10 +11,6 @@ interface RangeSummaryProps {
   targetLabel: string;
   entries: number;
   processing: number;
-  /** Counted agent time in the range: shown beside work time, never in it. */
-  agentsMs?: number;
-  /** A day's switches and longest stretch. */
-  focus?: Focus;
   categories: Slice[];
   topApps?: { app: string; ms: number }[];
 }
@@ -34,8 +29,6 @@ export function RangeSummary({
   targetLabel,
   entries,
   processing,
-  agentsMs = 0,
-  focus,
   categories,
   topApps,
 }: RangeSummaryProps) {
@@ -66,31 +59,6 @@ export function RangeSummary({
           <Progress value={progress} label="Work hours against target" />
         </div>
       </StatCard>
-
-      {(agentsMs > 0 || (focus !== undefined && focus.switches > 0)) && (
-        <div className="space-y-1 rounded-lg border border-line bg-surface px-3 py-2 text-[12px] text-fg-soft">
-          {agentsMs > 0 && (
-            <div>
-              Agents ran{" "}
-              <b className="font-semibold text-fg-strong tabular-nums">
-                {formatDuration(agentsMs)}
-              </b>{" "}
-              <span className="text-fg-faint">(not in work hours)</span>
-            </div>
-          )}
-          {focus !== undefined && focus.switches > 0 && (
-            <div>
-              <b className="font-semibold text-fg-strong tabular-nums">
-                {focus.switches}
-              </b>{" "}
-              {focus.switches === 1 ? "switch" : "switches"} · longest stretch{" "}
-              <b className="font-semibold text-fg-strong tabular-nums">
-                {formatDuration(focus.longestMs)}
-              </b>
-            </div>
-          )}
-        </div>
-      )}
 
       {statusLabel && (
         <div className="rounded-lg border border-line bg-surface p-3 text-center text-[14px] text-fg-soft">

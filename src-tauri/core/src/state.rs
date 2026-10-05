@@ -86,7 +86,6 @@ impl AppState {
         let activity_reader = ActivityStore::open_reader(dir)?;
         let settings = SettingsStore::load(&settings::config_dir())?;
         activity.set_tracking_hours(settings.snapshot().tracking_hours.clone());
-        activity.set_agents_enabled(settings.snapshot().advanced_workflow_tracking);
         Ok(Self {
             store: Mutex::new(store),
             activity: Mutex::new(activity),
@@ -101,37 +100,6 @@ impl AppState {
             .lock()
             .map(|store| store.snapshot())
             .unwrap_or_default()
-    }
-
-    /// Recomputes the agent ledger of every calendar day in `[start, end]`.
-    /// Does nothing while advanced workflow tracking is off.
-    pub fn refresh_agent_days(&self, start_ms: u64, end_ms: u64, now: u64) {
-        let settings = self.settings_snapshot();
-        if !settings.advanced_workflow_tracking {
-            return;
-        }
-        let auto_accept = settings.auto_accept;
-        let Ok(mut store) = self.activity.lock() else {
-            return;
-        };
-        let mut cursor = start_ms;
-        // At most two weeks, so a stray wide range cannot stall the store.
-        for _ in 0..16 {
-            let (day_start, day_end) = crate::agents::ledger::calendar_day(cursor);
-            if let Err(error) = crate::agents::ledger::refresh(
-                store.conn_mut(),
-                day_start,
-                day_end,
-                now,
-                auto_accept,
-            ) {
-                eprintln!("agent ledger: {error}");
-            }
-            if day_end > end_ms {
-                break;
-            }
-            cursor = day_end;
-        }
     }
 }
 

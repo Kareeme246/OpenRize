@@ -5,7 +5,6 @@
 //! while the app is closed.
 
 pub mod activity;
-pub mod agents;
 pub mod ai;
 pub mod capture;
 pub mod entry_builder;
@@ -62,10 +61,6 @@ pub struct EntryFilter {
     pub billable: Option<bool>,
     /// Words that must each appear in the description or a window title.
     pub search: Option<String>,
-    /// `work` (the default: the person's own entries), `agent` (counted agent
-    /// time only) or `all`. Work totals must never include agent entries, so
-    /// leaving this out can only ever give work.
-    pub scope: Option<String>,
 }
 
 pub struct Clause {
@@ -115,12 +110,6 @@ impl EntryFilter {
         let mut values: Vec<Value> =
             vec![(self.start_ms as i64).into(), (self.end_ms as i64).into()];
 
-        match self.scope.as_deref() {
-            None | Some("") | Some("work") => sql.push("te.source != 'agent'".to_string()),
-            Some("agent") => sql.push("te.source = 'agent'".to_string()),
-            Some("all") => {}
-            Some(other) => return Err(format!("unknown scope {other}")),
-        }
         id_condition("te.category_id", &self.category_id, &mut sql, &mut values);
         id_condition("te.project_id", &self.project_id, &mut sql, &mut values);
         id_condition("p.client_id", &self.client_id, &mut sql, &mut values);

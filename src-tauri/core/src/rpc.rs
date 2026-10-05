@@ -251,7 +251,6 @@ impl Context<'_> {
                 let entries = lock(&self.state.activity)?
                     .rebuild_time_entries_in_range(from, to, now)
                     .map_err(fail)?;
-                self.state.refresh_agent_days(from, to, now);
                 to_value(entries)
             }
             O::EntriesExport { filter, format } => {
@@ -296,16 +295,9 @@ impl Context<'_> {
                     .into_iter()
                     .find(|project| project.id == id)
                     .ok_or_else(|| not_found("project", &project))?;
-                let with_agents = self.state.settings_snapshot().advanced_workflow_tracking;
                 let stats = self
                     .read(|conn| {
-                        crate::projects::project_stats(
-                            conn,
-                            range_start,
-                            range_end,
-                            month_start,
-                            with_agents,
-                        )
+                        crate::projects::project_stats(conn, range_start, range_end, month_start)
                     })?
                     .into_iter()
                     .find(|stats| stats.project_id == id);
@@ -657,8 +649,18 @@ fn pick<T>(
     }
 }
 
+/// Local midnight at or before `now`, in epoch milliseconds: the start of the
+/// day `rize` calls today.
 fn day_start(now: u64) -> u64 {
-    crate::agents::ledger::calendar_day(now).0
+    use chrono::{DateTime, Local, TimeZone};
+    let local = DateTime::from_timestamp_millis(now as i64)
+        .map(|utc| utc.with_timezone(&Local))
+        .unwrap_or_else(Local::now);
+    local
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .and_then(|midnight| Local.from_local_datetime(&midnight).earliest())
+        .map_or(0, |start| start.timestamp_millis().max(0) as u64)
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, ApiError> {

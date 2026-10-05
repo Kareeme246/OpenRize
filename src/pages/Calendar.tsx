@@ -381,6 +381,25 @@ export function Calendar({ route, navigate }: CalendarProps) {
               : list.length - 1
             : (index + step + list.length) % list.length;
         select(list[nextIndex].id);
+      } else if (
+        (event.key === "Backspace" || event.key === "Delete") &&
+        review.selectedId &&
+        !document.querySelector("dialog[open]")
+      ) {
+        event.preventDefault();
+        const idToDelete = review.selectedId;
+        void (async () => {
+          try {
+            await api.deleteTimeEntry(idToDelete);
+            if (reviewing) {
+              await advanceFrom(idToDelete);
+            } else {
+              select(undefined);
+            }
+          } catch (cause) {
+            setError(describeError(cause));
+          }
+        })();
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -393,6 +412,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
     review.selectedId,
     select,
     startReviewMode,
+    advanceFrom,
   ]);
 
   const daysInRange =

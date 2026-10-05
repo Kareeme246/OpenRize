@@ -17,7 +17,6 @@ import { formatDuration } from "../../lib/format";
 import type { Category, Project, TimeEntry } from "../../lib/types";
 import { BreakBand, NowLine, useMinuteClock } from "./DayView";
 import { EntryBlock } from "./EntryBlock";
-import { packOverlaps } from "./overlap";
 import { gutterLabel, hourOffset, place, timelineFor } from "./timeline";
 import { useRememberedScroll } from "./useRememberedScroll";
 import { readViewport } from "./viewport";
@@ -34,11 +33,7 @@ interface WeekViewProps {
   projectById: Map<string, Project>;
   onSelect: (id: string) => void;
   onOpenDay: (date: string) => void;
-  /** Counted agent time per day (Monday first): a ghost beside the total. */
-  agentMsByDay?: number[];
   now?: number;
-  parallel?: boolean;
-  viewportKey?: string;
 }
 
 /**
@@ -55,11 +50,9 @@ export function WeekView({
   projectById,
   onSelect,
   onOpenDay,
-  agentMsByDay,
   now: propsNow,
-  parallel = false,
-  viewportKey = `calendar:week:${weekStart.getTime()}`,
 }: WeekViewProps) {
+  const viewportKey = `calendar:week:${weekStart.getTime()}`;
   const clockNow = useMinuteClock();
   const now = propsNow ?? clockNow;
   const days = Array.from({ length: 7 }, (_, index) =>
@@ -75,9 +68,7 @@ export function WeekView({
       day,
       start,
       entries: list,
-      totalMs: list
-        .filter((entry) => entry.source !== "agent")
-        .reduce((sum, entry) => sum + durationOf(entry, now), 0),
+      totalMs: list.reduce((sum, entry) => sum + durationOf(entry, now), 0),
       pending: list.filter(isReviewable).length,
     };
   });
@@ -156,14 +147,6 @@ export function WeekView({
                 </div>
                 <div className="mt-0.5 flex items-center gap-1.5 truncate font-mono text-[10.5px] text-fg-faint tabular-nums">
                   {column.totalMs > 0 ? formatDuration(column.totalMs) : "–"}
-                  {(agentMsByDay?.[columns.indexOf(column)] ?? 0) > 0 && (
-                    <span className="font-sans text-fg-faint opacity-70">
-                      +
-                      {formatDuration(
-                        agentMsByDay?.[columns.indexOf(column)] ?? 0,
-                      )}
-                    </span>
-                  )}
                   {column.pending > 0 && (
                     <span className="rounded-full bg-review/15 px-1.5 font-sans font-semibold text-review">
                       {column.pending}
@@ -262,63 +245,40 @@ export function WeekView({
                       />
                     );
                   })}
-                {(parallel
-                  ? packOverlaps(
-                      column.entries.map((entry) => ({
-                        ...entry,
-                        endedAt: entryEnd(entry, now),
-                      })),
-                    )
-                  : column.entries.map((item) => ({
-                      item,
-                      column: 0,
-                      columns: 1,
-                    }))
-                ).map(
-                  ({
-                    item: entry,
-                    column: entryColumn,
-                    columns: entryColumns,
-                  }) => {
-                    const end = entryEnd(entry, now);
-                    const { top, height } = place(
-                      timeline,
-                      entry.startedAt,
-                      end,
-                      column.start,
-                      "wall",
-                      3,
-                    );
-                    return (
-                      <EntryBlock
-                        key={entry.id}
-                        entry={entry}
-                        top={top}
-                        height={height}
-                        narrow
-                        selected={entry.id === selectedId}
-                        category={
-                          entry.categoryId
-                            ? categoryById.get(entry.categoryId)
-                            : undefined
-                        }
-                        project={
-                          entry.projectId
-                            ? projectById.get(entry.projectId)
-                            : undefined
-                        }
-                        onSelect={onSelect}
-                        now={now}
-                        recording={entry.id === recording?.id}
-                        column={
-                          parallel
-                            ? { index: entryColumn, count: entryColumns }
-                            : undefined
-                        }
-                      />
-                    );
-                  },
-                )}
+                {column.entries.map((entry) => {
+                  const end = entryEnd(entry, now);
+                  const { top, height } = place(
+                    timeline,
+                    entry.startedAt,
+                    end,
+                    column.start,
+                    "wall",
+                    3,
+                  );
+                  return (
+                    <EntryBlock
+                      key={entry.id}
+                      entry={entry}
+                      top={top}
+                      height={height}
+                      narrow
+                      selected={entry.id === selectedId}
+                      category={
+                        entry.categoryId
+                          ? categoryById.get(entry.categoryId)
+                          : undefined
+                      }
+                      project={
+                        entry.projectId
+                          ? projectById.get(entry.projectId)
+                          : undefined
+                      }
+                      onSelect={onSelect}
+                      now={now}
+                      recording={entry.id === recording?.id}
+                    />
+                  );
+                })}
                 {isToday &&
                   nowOffset >= timeline.startHour &&
                   nowOffset <= timeline.endHour && (

@@ -1,5 +1,4 @@
 mod activity;
-mod agents;
 mod ai;
 mod breaks;
 mod capture;
@@ -10,11 +9,10 @@ mod login_item;
 mod permissions;
 mod pulse;
 mod rpc;
-mod threads;
 mod tray;
 mod updater;
 
-use openrize_core::{entry_builder, models, projects, reports, settings, timers};
+use openrize_core::{models, projects, reports, settings, timers};
 
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -118,7 +116,6 @@ pub fn run() {
             app.manage(state);
             app.manage(ai::AiRuntime::default());
             app.manage(pulse::PulseState::default());
-            app.manage(agents::AgentRuntime::default());
             breaks::init(app.handle())?;
             app.manage(updater::UpdaterState::new(
                 app.package_info().version.to_string(),
@@ -134,7 +131,6 @@ pub fn run() {
                 dir.join("ml"),
             );
             energy::spawn_sampler(app.handle().clone(), dir.join(activity::DB_FILE));
-            agents::spawn(app.handle().clone(), dir.join(activity::DB_FILE));
             capture::register_sleep_listeners(app.handle().clone());
             spawn_retention_sweeper(app.handle().clone());
             updater::spawn_scheduler(app.handle().clone());
@@ -299,12 +295,6 @@ pub fn run() {
             commands::update_status,
             commands::check_for_updates,
             commands::install_update,
-            commands::list_extensions,
-            commands::agent_board,
-            commands::agent_report,
-            commands::thread_days,
-            commands::confirm_agent_job,
-            commands::list_agent_entries,
         ])
         .build(tauri::generate_context!())
         .expect("error while building OpenRize")

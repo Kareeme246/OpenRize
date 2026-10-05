@@ -53,7 +53,6 @@ import type {
   UpdateStatus,
 } from "../lib/types";
 import { BreakSettingsGroups } from "./settings/BreakSettings";
-import { ExtensionSettingsGroups } from "./settings/ExtensionSettings";
 import {
   Select,
   SettingBlock,
@@ -112,9 +111,7 @@ type SettingsSection =
   | "data"
   | "notifications"
   | "ai"
-  | "extensions"
-  | "advanced"
-  | "experimental";
+  | "advanced";
 
 const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   "overview",
@@ -125,17 +122,11 @@ const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   "data",
   "notifications",
   "ai",
-  "extensions",
   "advanced",
-  "experimental",
 ];
 
 /** The sections under the Advanced settings group in the nav. */
-const ADVANCED_SECTIONS: readonly SettingsSection[] = [
-  "ai",
-  "advanced",
-  "experimental",
-];
+const ADVANCED_SECTIONS: readonly SettingsSection[] = ["ai", "advanced"];
 
 function isAdvancedSection(section: SettingsSection): boolean {
   return ADVANCED_SECTIONS.includes(section);
@@ -161,7 +152,6 @@ const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
   { id: "suggestions", label: "Suggestions" },
   { id: "data", label: "Data & storage" },
   { id: "notifications", label: "Notifications" },
-  { id: "extensions", label: "Extensions" },
 ];
 
 /** One line on which tiers are running and why. */
@@ -1043,7 +1033,6 @@ export function Settings({
     selectSection("overview");
   }, [route.section, revealUpdates, selectSection]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the Extensions section only exists while advanced workflow tracking is on, so the sections are looked up again when it flips.
   useEffect(() => {
     const content = contentRef.current;
     if (content === null) return;
@@ -1090,7 +1079,7 @@ export function Settings({
       observer.disconnect();
       content.removeEventListener("scroll", onScroll);
     };
-  }, [settings.advancedWorkflowTracking]);
+  }, []);
 
   const toggleAdvanced = (): void => {
     setAdvancedExpanded((prev) => {
@@ -1153,10 +1142,7 @@ export function Settings({
           >
             Overview
           </button>
-          {SETTINGS_NAV_ITEMS.filter(
-            (item) =>
-              item.id !== "extensions" || settings.advancedWorkflowTracking,
-          ).map((item) => (
+          {SETTINGS_NAV_ITEMS.map((item) => (
             <button
               type="button"
               key={item.id}
@@ -1214,20 +1200,6 @@ export function Settings({
                   }`}
                 >
                   Battery & Energy
-                </button>
-                <button
-                  type="button"
-                  aria-current={
-                    activeSection === "experimental" ? "location" : undefined
-                  }
-                  onClick={() => selectSection("experimental")}
-                  className={`settings-nav-item !text-[11.5px] !py-1.5 cursor-pointer ${
-                    activeSection === "experimental"
-                      ? "settings-nav-item-active"
-                      : ""
-                  }`}
-                >
-                  Experimental
                 </button>
               </div>
             )}
@@ -1617,20 +1589,6 @@ export function Settings({
             </SettingGroup>
           </section>
 
-          {settings.advancedWorkflowTracking && (
-            <section
-              id="settings-section-extensions"
-              data-settings-section="extensions"
-              className="settings-page-section flex flex-col gap-4"
-            >
-              <SettingsSectionHeading
-                title="Extensions"
-                description="Connect the terminal tools your coding agents run in. Tools found on this Mac are turned on automatically."
-              />
-              <ExtensionSettingsGroups />
-            </section>
-          )}
-
           <section
             id="settings-section-advanced"
             data-settings-section="advanced"
@@ -1648,31 +1606,6 @@ export function Settings({
                 onRangeChange={setEnergyDays}
                 onReset={resetEnergyHistory}
               />
-            </SettingGroup>
-          </section>
-
-          <section
-            id="settings-section-experimental"
-            data-settings-section="experimental"
-            className="settings-page-section flex flex-col gap-4"
-          >
-            <SettingsSectionHeading
-              title="Experimental"
-              description="Features still taking shape. They are off by default and may change."
-            />
-            <SettingGroup title="Workflow">
-              <SettingRow
-                title="Advanced workflow tracking"
-                description="Track coding agents running in Herdr or tmux as jobs, bill their time separately from yours, and see them in Pulse, Calendar threads, Timesheets and invoices. Turning it off stops all tracking and hides these views; what was recorded is kept."
-              >
-                <Toggle
-                  checked={settings.advancedWorkflowTracking}
-                  label="Advanced workflow tracking"
-                  onChange={(enabled) =>
-                    update({ advancedWorkflowTracking: enabled })
-                  }
-                />
-              </SettingRow>
             </SettingGroup>
           </section>
           {confirmReset && (

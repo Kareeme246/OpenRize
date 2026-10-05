@@ -27,8 +27,6 @@ import * as api from "../lib/api";
 import { describeError } from "../lib/api";
 import { BAND_TONE, band, percent } from "../lib/confidence";
 import {
-  calendarRange,
-  currentCalendarDay,
   localDateString,
   parseLocalDate,
   rangeFor,
@@ -57,8 +55,6 @@ import type {
   TimesheetGroup,
   TimesheetTab,
 } from "../lib/types";
-
-import { TimesheetWorkflow } from "./calendar/TimesheetWorkflow";
 
 type TimesheetRoute = Extract<Route, { name: "timesheet" }>;
 
@@ -220,22 +216,8 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
   const scale: CalendarScale = route.scale ?? "day";
   const tab: TimesheetTab = route.tab ?? "review";
   const groupBy: TimesheetGroup = route.groupBy ?? "project";
-  const date = useMemo(
-    () =>
-      route.date
-        ? parseLocalDate(route.date)
-        : settings.advancedWorkflowTracking
-          ? currentCalendarDay(new Date())
-          : parseLocalDate(),
-    [route.date, settings.advancedWorkflowTracking],
-  );
-  const range = useMemo(
-    () =>
-      settings.advancedWorkflowTracking
-        ? calendarRange(scale, date)
-        : rangeFor(scale, date),
-    [scale, date, settings.advancedWorkflowTracking],
-  );
+  const date = useMemo(() => parseLocalDate(route.date), [route.date]);
+  const range = useMemo(() => rangeFor(scale, date), [scale, date]);
   const startMs = range.start.getTime();
   const endMs = range.end.getTime();
 
@@ -465,20 +447,6 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-4">
-          {settings.advancedWorkflowTracking && (
-            <TimesheetWorkflow
-              scale={scale}
-              start={range.start}
-              end={range.end}
-              entries={inRange}
-              categoryById={categoryById}
-              projectById={projectById}
-              selectedId={review.selectedId}
-              onSelect={review.select}
-              onCreated={refresh}
-              onOpenDay={(date) => go({ date, scale: "day" })}
-            />
-          )}
           <div className="shape-strip shape-top grid grid-cols-3 gap-3">
             <StatCard
               label="Pending review"

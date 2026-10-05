@@ -253,7 +253,6 @@ interface EntryBlockProps {
   now?: number;
   /** The session capturing right now; the now line rides its bottom edge. */
   recording?: boolean;
-  column?: { index: number; count: number };
 }
 
 /**
@@ -273,7 +272,6 @@ export function EntryBlock({
   onSelect,
   now,
   recording = false,
-  column,
 }: EntryBlockProps) {
   // The live session reads as recording even while the AI already has a
   // look at it; "Categorizing…" would contradict the now line's tag.
@@ -292,7 +290,7 @@ export function EntryBlock({
   const description =
     state === "processing"
       ? "Categorizing…"
-      : `${entry.source === "agent" ? "Agent · " : ""}${entry.description || "Untitled session"}`;
+      : entry.description || "Untitled session";
 
   const hasStatus =
     state === "needsYou" || state === "pending" || state === "failed";
@@ -399,11 +397,6 @@ export function EntryBlock({
           top: `${top}px`,
           height: `${height}px`,
           ...blockStyle(state),
-          ...(column && {
-            left: `calc((100% - 16px) * ${column.index} / ${column.count})`,
-            width: `calc((100% - 16px) / ${column.count} - 4px)`,
-            right: "auto",
-          }),
         }}
       >
         {narrow ? (

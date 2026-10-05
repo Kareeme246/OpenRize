@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Slice, StackedBar } from "./components/Charts";
-import { boardHasContent, FlightBoard } from "./components/FlightBoard";
 import { Tooltip } from "./components/Tooltip";
-import { useAgentBoard } from "./hooks/useAgents";
 import { useBreaks } from "./hooks/useBreaks";
 import { useCatalog } from "./hooks/useCatalog";
 import { SettingsProvider, useSettings } from "./hooks/useSettings";
@@ -61,7 +59,6 @@ function PulsePanel() {
   const timers = useTimers();
   const { now } = timers;
   const breaks = useBreaks();
-  const board = useAgentBoard(settings.advancedWorkflowTracking);
 
   // Only the live fields are read; a full snapshot is a tick plus segments.
   const [live, setLive] = useState<ActivityTick | null>(null);
@@ -183,11 +180,6 @@ function PulsePanel() {
           now={now}
         />
       </section>
-      {boardHasContent(board) && (
-        <section className="border-line border-t px-3.5 py-3">
-          <FlightBoard board={board} projectById={projectById} now={now} />
-        </section>
-      )}
       <section className="border-line border-t px-3.5 py-2.5">
         <BreakRow state={breaks.state} now={now} />
       </section>

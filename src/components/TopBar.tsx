@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { useSettings } from "../hooks/useSettings";
 import { PLATFORM } from "../lib/platform";
 import { Tooltip } from "./Tooltip";
 
@@ -10,7 +9,6 @@ interface TopBarProps {
   onForward: () => void;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
-  workflowPage?: boolean;
 }
 
 /**
@@ -26,9 +24,7 @@ export function TopBar({
   onForward,
   sidebarCollapsed,
   onToggleSidebar,
-  workflowPage,
 }: TopBarProps) {
-  const { settings } = useSettings();
   return (
     <header
       data-tauri-drag-region="deep"
@@ -62,11 +58,6 @@ export function TopBar({
             <path d="M16 10l-2 2 2 2" />
           )}
         </IconButton>
-        {workflowPage && settings.advancedWorkflowTracking && (
-          <span className="select-none whitespace-nowrap text-[12px] font-semibold text-fg-muted">
-            AI Workflow View
-          </span>
-        )}
       </div>
 
       <span className="shrink-0 select-none font-mono text-[11.5px] font-semibold tracking-wide text-fg-soft">

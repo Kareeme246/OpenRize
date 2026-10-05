@@ -76,9 +76,6 @@ pub struct PaperInvoice {
     pub bill_to_lines: Vec<String>,
     pub lines: Vec<PaperLine>,
     pub subtotal_cents: i64,
-    /// Per-project you/agents lines, printed under the totals when agents
-    /// contributed time; empty otherwise.
-    pub splits: Vec<String>,
     pub payment_instructions: Option<String>,
     pub notes: Option<String>,
 }
@@ -640,9 +637,6 @@ pub fn render(invoice: &PaperInvoice) -> Result<Vec<u8>, String> {
         flow.row(line);
     }
     flow.totals(invoice.subtotal_cents);
-    if !invoice.splits.is_empty() {
-        flow.section("TIME BY PROJECT", &invoice.splits.join("\n"));
-    }
     if let Some(text) = &invoice.payment_instructions {
         flow.section("PAYMENT INSTRUCTIONS", text);
     }

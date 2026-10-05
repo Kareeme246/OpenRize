@@ -70,7 +70,7 @@ function entryLine(entry: BillableEntry): DraftLine {
     quantity: quantityInput(entry.quantityHundredths),
     unit: "hrs",
     rate: entry.rateCents == null ? "" : rateInput(entry.rateCents),
-    detail: `${entry.projectName} · ${date}${entry.agent ? " · agents" : ""}`,
+    detail: `${entry.projectName} · ${date}`,
     trackedHundredths: entry.quantityHundredths,
   };
 }
@@ -587,13 +587,6 @@ export function InvoiceEditor({
             onAddAllReady={() => addEntries(ready)}
             disabled={!form.clientId}
           />
-          {(preview.quote?.splits.length ?? 0) > 0 && (
-            <ul className="mt-3 space-y-1 text-[12px] text-fg-muted">
-              {preview.quote?.splits.map((split) => (
-                <li key={split.projectName}>{split.label}</li>
-              ))}
-            </ul>
-          )}
         </EditorSection>
 
         <EditorSection

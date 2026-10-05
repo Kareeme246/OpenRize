@@ -1,7 +1,7 @@
 use rusqlite::{Connection, Result};
 
 /// The `user_version` `run_migrations` leaves a database at.
-pub const SCHEMA_VERSION: i32 = 9;
+pub const SCHEMA_VERSION: i32 = 10;
 
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     let current_version: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
@@ -365,6 +365,13 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
     }
 
+    if current_version < 10 {
+        let tx = conn.transaction()?;
+        tx.execute_batch(REMOVE_AGENTS_V10)?;
+        tx.execute("PRAGMA user_version = 10;", [])?;
+        tx.commit()?;
+    }
+
     Ok(())
 }
 
@@ -420,6 +427,45 @@ CREATE INDEX agent_focus_pane ON agent_focus (pane_key, started_at);
 
 ALTER TABLE time_entries ADD COLUMN agent_job_id TEXT;
 CREATE INDEX idx_time_entries_agent_job ON time_entries (agent_job_id);
+";
+
+/// Removes the agent job tables and counted agent time that v9 added.
+///
+/// - Agent time (`source = 'agent'`) was derived from the job tables and was
+///   never part of the person's own work, so it goes with them. It is deleted
+///   outright, not soft-deleted: the entry builder treats every row in a
+///   range, deleted ones included, as already accounting for its span, and
+///   agent rows overlap the person's own time.
+/// - Invoices keep their amounts. A draft line that billed agent time becomes
+///   a fixed (`manual`) line with the same description, quantity, rate and
+///   amount, so the draft total does not move and the draft stays editable.
+///   Lines of issued invoices are left as they are: they are snapshots (the
+///   issued PDF is stored) and never read the entry again.
+/// - The person's own time that was carved out for an agent's folder keeps its
+///   project and stays as ordinary entries (`source = 'auto'`).
+const REMOVE_AGENTS_V10: &str = "
+UPDATE invoice_lines
+SET kind = 'manual', entry_id = NULL, started_at = NULL, ended_at = NULL
+WHERE entry_id IN (SELECT id FROM time_entries WHERE source = 'agent')
+  AND invoice_id IN (SELECT id FROM invoices WHERE status = 'draft');
+
+UPDATE segments SET entry_id = NULL
+WHERE entry_id IN (SELECT id FROM time_entries WHERE source = 'agent');
+DELETE FROM suggestions
+WHERE entry_id IN (SELECT id FROM time_entries WHERE source = 'agent');
+DELETE FROM entry_events
+WHERE entry_id IN (SELECT id FROM time_entries WHERE source = 'agent');
+DELETE FROM entry_embeddings
+WHERE entry_id IN (SELECT id FROM time_entries WHERE source = 'agent');
+DELETE FROM classify_jobs
+WHERE entry_id IN (SELECT id FROM time_entries WHERE source = 'agent');
+DELETE FROM time_entries WHERE source = 'agent';
+
+DROP INDEX idx_time_entries_agent_job;
+ALTER TABLE time_entries DROP COLUMN agent_job_id;
+DROP TABLE agent_transitions;
+DROP TABLE agent_jobs;
+DROP TABLE agent_focus;
 ";
 
 /// Break reminders: one row per break decision (taken, skipped, missed, or
@@ -774,7 +820,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 9);
+        assert_eq!(v, 10);
 
         let cat_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM categories;", [], |r| r.get(0))
@@ -873,7 +919,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 9);
+        assert_eq!(v, 10);
 
         let ids: Vec<String> = conn
             .prepare("SELECT id FROM invoices ORDER BY id")
@@ -982,7 +1028,12 @@ mod tests {
     fn v5_upgrades_usd_drafts_and_v6_deletes_the_rest() {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
-            "CREATE TABLE time_entries (id TEXT PRIMARY KEY, invoice_id TEXT);
+            "CREATE TABLE time_entries (id TEXT PRIMARY KEY, invoice_id TEXT, source TEXT NOT NULL DEFAULT 'auto');
+             CREATE TABLE segments (entry_id TEXT);
+             CREATE TABLE suggestions (entry_id TEXT);
+             CREATE TABLE entry_events (entry_id TEXT);
+             CREATE TABLE entry_embeddings (entry_id TEXT);
+             CREATE TABLE classify_jobs (entry_id TEXT);
              CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT NOT NULL);
              CREATE TABLE invoices (
                id TEXT PRIMARY KEY, client_id TEXT NOT NULL, client_name TEXT NOT NULL,
@@ -999,8 +1050,8 @@ mod tests {
              INSERT INTO invoices VALUES ('paid', 'c', 'Acme', NULL, NULL, 'USD', 'paid', 86400000, 86400000);
              INSERT INTO invoice_lines VALUES ('e1', 'draft-usd', 'P', 'Work', 0, 1000000, 100.0, 2778);
              INSERT INTO invoice_lines VALUES ('e2', 'sent', 'P', 'Work', 0, 3600000, 100.5, 10050);
-             INSERT INTO time_entries VALUES ('e1', 'draft-usd');
-             INSERT INTO time_entries VALUES ('e2', 'sent');
+             INSERT INTO time_entries (id, invoice_id) VALUES ('e1', 'draft-usd');
+             INSERT INTO time_entries (id, invoice_id) VALUES ('e2', 'sent');
              PRAGMA user_version = 4;",
         )
         .unwrap();
@@ -1072,7 +1123,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 9);
+        assert_eq!(v, 10);
     }
 
     /// A database the v5 migration already ran on (with `legacy` rows kept) loses
@@ -1081,7 +1132,12 @@ mod tests {
     fn v6_deletes_legacy_invoices_from_an_already_upgraded_database() {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
-            "CREATE TABLE time_entries (id TEXT PRIMARY KEY, invoice_id TEXT);
+            "CREATE TABLE time_entries (id TEXT PRIMARY KEY, invoice_id TEXT, source TEXT NOT NULL DEFAULT 'auto');
+             CREATE TABLE segments (entry_id TEXT);
+             CREATE TABLE suggestions (entry_id TEXT);
+             CREATE TABLE entry_events (entry_id TEXT);
+             CREATE TABLE entry_embeddings (entry_id TEXT);
+             CREATE TABLE classify_jobs (entry_id TEXT);
              CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT NOT NULL);
              CREATE TABLE invoices (
                id TEXT PRIMARY KEY, client_id TEXT NOT NULL, client_name TEXT NOT NULL,
@@ -1114,8 +1170,8 @@ mod tests {
                VALUES ('l1', 'old-sent', 0, 'time', 'e-old', 'Work', 100, 10000, 10000);
              INSERT INTO invoice_lines (id, invoice_id, position, kind, entry_id, description, quantity_hundredths, rate_cents, amount_cents)
                VALUES ('l2', 'draft', 0, 'time', 'e-draft', 'Work', 100, 10000, 10000);
-             INSERT INTO time_entries VALUES ('e-old', 'old-sent');
-             INSERT INTO time_entries VALUES ('e-draft', 'draft');
+             INSERT INTO time_entries (id, invoice_id) VALUES ('e-old', 'old-sent');
+             INSERT INTO time_entries (id, invoice_id) VALUES ('e-draft', 'draft');
              PRAGMA user_version = 5;",
         )
         .unwrap();
@@ -1187,7 +1243,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 9);
+        assert_eq!(v, 10);
     }
 
     /// A database as v6 shipped it: the fresh schema without the client
@@ -1198,11 +1254,6 @@ mod tests {
         run_migrations(&mut conn).unwrap();
         conn.execute_batch(
             "DROP TABLE breaks;
-             DROP TABLE agent_transitions;
-             DROP TABLE agent_jobs;
-             DROP TABLE agent_focus;
-             DROP INDEX idx_time_entries_agent_job;
-             ALTER TABLE time_entries DROP COLUMN agent_job_id;
              ALTER TABLE clients DROP COLUMN archived_at;
              ALTER TABLE clients DROP COLUMN notes;
              INSERT INTO clients (id, name, email, address, default_rate, currency, created_at, updated_at)
@@ -1233,7 +1284,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 9);
+        assert_eq!(v, 10);
 
         type Row = (
             String,
@@ -1305,11 +1356,6 @@ mod tests {
         run_migrations(&mut conn).unwrap();
         conn.execute_batch(
             "DROP TABLE breaks;
-             DROP TABLE agent_transitions;
-             DROP TABLE agent_jobs;
-             DROP TABLE agent_focus;
-             DROP INDEX idx_time_entries_agent_job;
-             ALTER TABLE time_entries DROP COLUMN agent_job_id;
              INSERT INTO clients (id, name, created_at, updated_at, archived_at, notes)
                VALUES ('c1', 'Acme', 10, 20, 30, 'Net 15');
              INSERT INTO projects (id, client_id, name, color, created_at, updated_at)
@@ -1334,7 +1380,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 9);
+        assert_eq!(v, 10);
         let mut fresh = Connection::open_in_memory().unwrap();
         run_migrations(&mut fresh).unwrap();
         assert_eq!(schema_snapshot(&fresh), schema_snapshot(&conn));
@@ -1371,6 +1417,94 @@ mod tests {
                 []
             )
             .is_err());
+    }
+
+    /// A database as v9 shipped it, with agent time on an unbilled entry, on
+    /// a draft invoice and on an issued one, next to the person's own time.
+    #[test]
+    fn a_v9_database_drops_agent_data_and_keeps_everything_else() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        conn.execute_batch(AGENTS_V9).unwrap();
+        conn.execute_batch(
+            "INSERT INTO clients (id, name, created_at, updated_at) VALUES ('c1', 'Acme', 1, 1);
+             INSERT INTO projects (id, client_id, name, color, created_at, updated_at)
+               VALUES ('p1', 'c1', 'Swap', '#fff', 1, 1);
+             INSERT INTO time_entries (id, started_at, ended_at, description, project_id, status, source, billable, invoice_id, created_at, updated_at)
+               VALUES ('you', 0, 3600000, 'Work', 'p1', 'approved', 'auto', 1, NULL, 1, 1),
+                      ('carved', 3600000, 7200000, 'Work', 'p1', 'approved', 'auto', 1, NULL, 1, 1),
+                      ('bot-free', 0, 1800000, 'agent', 'p1', 'approved', 'agent', 1, NULL, 1, 1),
+                      ('bot-draft', 0, 1800000, 'agent', 'p1', 'approved', 'agent', 1, 'draft', 1, 1),
+                      ('bot-issued', 0, 1800000, 'agent', 'p1', 'approved', 'agent', 1, 'issued', 1, 1);
+             UPDATE time_entries SET agent_job_id = 'job' WHERE id LIKE 'bot-%';
+             INSERT INTO entry_events (id, entry_id, kind, actor, at)
+               VALUES ('ev1', 'bot-free', 'accepted', 'me', 1), ('ev2', 'you', 'accepted', 'me', 1);
+             INSERT INTO agent_jobs (id, source, agent, pane_key, project_id, cwd, started_at, state, state_since, last_seen_at, created_at, updated_at)
+               VALUES ('job', 'herdr', 'claude', 'pane', 'p1', '/work', 1, 'working', 1, 1, 1, 1);
+             INSERT INTO agent_transitions (job_id, at, state) VALUES ('job', 1, 'working');
+             INSERT INTO agent_focus (pane_key, project_id, agent, started_at, ended_at)
+               VALUES ('pane', 'p1', 'claude', 1, 2);
+             INSERT INTO invoices (id, client_id, client_name, currency, status, from_name, from_address, total_cents, created_at, updated_at)
+               VALUES ('draft', 'c1', 'Acme', 'USD', 'draft', 'Me', '1 Main', 15000, 5, 5),
+                      ('issued', 'c1', 'Acme', 'USD', 'open', 'Me', '1 Main', 5000, 5, 5);
+             INSERT INTO invoice_lines (id, invoice_id, position, kind, entry_id, project_name, description, started_at, ended_at, quantity_hundredths, unit, rate_cents, amount_cents)
+               VALUES ('l1', 'draft', 0, 'time', 'you', 'Swap', 'Work', 0, 3600000, 100, 'hrs', 10000, 10000),
+                      ('l2', 'draft', 1, 'time', 'bot-draft', 'Swap', 'agent', 0, 1800000, 50, 'hrs', 10000, 5000),
+                      ('l3', 'issued', 0, 'time', 'bot-issued', 'Swap', 'agent', 0, 1800000, 50, 'hrs', 10000, 5000);
+             PRAGMA user_version = 9;",
+        )
+        .unwrap();
+
+        run_migrations(&mut conn).unwrap();
+
+        let mut fresh = Connection::open_in_memory().unwrap();
+        run_migrations(&mut fresh).unwrap();
+        assert_eq!(schema_snapshot(&fresh), schema_snapshot(&conn));
+        let version: i32 = conn
+            .query_row("PRAGMA user_version;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 10);
+        for table in ["agent_jobs", "agent_transitions", "agent_focus"] {
+            assert!(conn.prepare(&format!("SELECT 1 FROM {table}")).is_err());
+        }
+
+        let ids: Vec<String> = conn
+            .prepare("SELECT id FROM time_entries ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_>>()
+            .unwrap();
+        assert_eq!(ids, ["carved", "you"]);
+        let events: i64 = conn
+            .query_row("SELECT COUNT(*) FROM entry_events", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(events, 1);
+
+        // The draft keeps its total: the agent line is now a fixed line.
+        let lines: Vec<(String, String, Option<String>, i64)> = conn
+            .prepare("SELECT id, kind, entry_id, amount_cents FROM invoice_lines ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<Result<_>>()
+            .unwrap();
+        assert_eq!(
+            lines,
+            [
+                ("l1".into(), "time".into(), Some("you".into()), 10_000),
+                ("l2".into(), "manual".into(), None, 5_000),
+                ("l3".into(), "time".into(), Some("bot-issued".into()), 5_000),
+            ]
+        );
+        let totals: i64 = conn
+            .query_row(
+                "SELECT total_cents FROM invoices WHERE id = 'draft'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(totals, 15_000);
     }
 
     #[test]

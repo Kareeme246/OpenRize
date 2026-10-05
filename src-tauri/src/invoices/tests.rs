@@ -102,24 +102,6 @@ fn linked(conn: &Connection, entry: &str) -> Option<String> {
 }
 
 #[test]
-fn agent_time_is_offered_for_billing_only_while_workflow_tracking_is_on() {
-    let conn = db();
-    entry(&conn, "you", "p", HOUR, 2 * HOUR, "approved", true);
-    entry(&conn, "bot", "p", 3 * HOUR, 4 * HOUR, "approved", true);
-    conn.execute(
-        "UPDATE time_entries SET source = 'agent' WHERE id = 'bot'",
-        [],
-    )
-    .unwrap();
-
-    let on = billable_entries(&conn, "c", 0, 10 * HOUR as u64, None, true).unwrap();
-    assert!(on.iter().any(|e| e.entry_id == "bot" && e.agent));
-    let off = billable_entries(&conn, "c", 0, 10 * HOUR as u64, None, false).unwrap();
-    assert!(off.iter().any(|e| e.entry_id == "you"));
-    assert!(!off.iter().any(|e| e.entry_id == "bot"));
-}
-
-#[test]
 fn lists_only_approved_billable_uninvoiced_time_for_the_client() {
     let conn = db();
     entry(&conn, "pending", "p", 5 * HOUR, 6 * HOUR, "pending", true);
@@ -142,14 +124,14 @@ fn lists_only_approved_billable_uninvoiced_time_for_the_client() {
         true,
     );
     entry(&conn, "late", "p", 90 * HOUR, 91 * HOUR, "approved", true);
-    let found = billable_entries(&conn, "c", 0, 10 * HOUR as u64, None, true).unwrap();
+    let found = billable_entries(&conn, "c", 0, 10 * HOUR as u64, None).unwrap();
     let ids: Vec<_> = found.iter().map(|e| e.entry_id.as_str()).collect();
     assert_eq!(ids, ["e1", "e2"]);
     assert_eq!(found[0].rate_cents, Some(10_000)); // client fallback
     assert_eq!(found[1].rate_cents, Some(15_000)); // project rate
     assert_eq!(found[1].quantity_hundredths, 150);
     assert_eq!(found[1].amount_cents, Some(22_500));
-    assert!(billable_entries(&conn, "c", 5, 5, None, true).is_err());
+    assert!(billable_entries(&conn, "c", 5, 5, None).is_err());
 }
 
 #[test]
@@ -608,7 +590,6 @@ fn paper_fixture(lines: Vec<PaperLine>, logo: bool, number: Option<&str>) -> Pap
         bill_to_lines: vec!["Accounts Payable Contact".into(), "123 Main St.".into()],
         lines,
         subtotal_cents: subtotal,
-        splits: Vec::new(),
         payment_instructions: Some("ACH: routing 000000000, account 000000000".into()),
         notes: Some("Thank you for your business.".into()),
     }
@@ -716,74 +697,4 @@ fn renders_short_long_unicode_and_draft_specimens() {
         assert!(bytes.starts_with(b"%PDF-"));
     }
     assert!(pdf::render(&paper_fixture(vec![], false, None)).is_err());
-}
-
-#[test]
-fn agent_time_is_billed_as_its_own_lines_and_the_split_is_computed_in_rust() {
-    let mut conn = db();
-    entry(
-        &conn,
-        "ag",
-        "p",
-        10 * HOUR,
-        10 * HOUR + 67 * 60_000,
-        "approved",
-        true,
-    );
-    conn.execute(
-        "UPDATE time_entries SET source = 'agent' WHERE id = 'ag'",
-        [],
-    )
-    .unwrap();
-
-    let saved = save_draft(&mut conn, &draft(None, vec![time("e1"), time("ag")]), 1).unwrap();
-
-    let agent_line = saved
-        .lines
-        .iter()
-        .find(|l| l.entry_id.as_deref() == Some("ag"))
-        .unwrap();
-    assert!(agent_line.agent);
-    assert!(!saved.lines[0].agent);
-    // 1h at $100 plus 1.12h (1h07m rounded to hundredths) at $100.
-    assert_eq!(saved.summary.total_cents, 10_000 + 11_200);
-    assert_eq!(
-        saved.splits,
-        vec![ProjectSplit {
-            project_name: "Swap".into(),
-            you_ms: HOUR as u64,
-            agents_ms: 67 * 60_000,
-            label: "Swap · 2h07m (you 1h · agents 1h07m)".into(),
-        }]
-    );
-    // The split survives a reload and prints on the paper.
-    let reloaded = get(&conn, &saved.summary.id).unwrap();
-    assert_eq!(reloaded.splits, saved.splits);
-    let paper = paper(&reloaded, None, None).unwrap();
-    assert_eq!(
-        paper.splits,
-        vec!["Swap · 2h07m (you 1h · agents 1h07m)".to_string()]
-    );
-    assert!(paper.lines[1]
-        .detail
-        .as_deref()
-        .unwrap()
-        .ends_with(" · agents"));
-    assert!(pdf::render(&paper).unwrap().starts_with(b"%PDF-"));
-}
-
-#[test]
-fn an_invoice_without_agent_time_has_no_split() {
-    let conn = db();
-    let quoted = quote(&conn, &draft(None, vec![time("e1"), time("e2")])).unwrap();
-    assert!(quoted.splits.is_empty());
-}
-
-#[test]
-fn spans_read_as_hours_and_minutes() {
-    assert_eq!(format_span(0), "0m");
-    assert_eq!(format_span(45 * 60_000), "45m");
-    assert_eq!(format_span(60 * 60_000), "1h");
-    assert_eq!(format_span(67 * 60_000 + 20_000), "1h07m");
-    assert_eq!(format_span(112 * 60_000), "1h52m");
 }

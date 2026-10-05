@@ -349,10 +349,6 @@ export default function App() {
             onForward={forward}
             sidebarCollapsed={sidebarCollapsed}
             onToggleSidebar={toggleSidebar}
-            workflowPage={
-              currentRoute.name === "calendar" ||
-              currentRoute.name === "timesheet"
-            }
           />
           {deletionError && (
             <div

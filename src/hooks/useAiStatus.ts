@@ -9,16 +9,21 @@ export function useAiStatus(): AiStatus | null {
 
   useEffect(() => {
     let active = true;
-    api
-      .aiStatus()
-      .then((loaded) => {
-        if (active) setStatus(loaded);
-      })
-      .catch((err: unknown) =>
-        console.error("Failed to load AI status", api.describeError(err)),
-      );
+    const refresh = (): void => {
+      api
+        .aiStatus()
+        .then((loaded) => {
+          if (active) setStatus(loaded);
+        })
+        .catch((err: unknown) =>
+          console.error("Failed to load AI status", api.describeError(err)),
+        );
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
     return () => {
       active = false;
+      window.removeEventListener("focus", refresh);
     };
   }, []);
   useTauriEvent<AiStatus>(api.AI_STATUS_CHANGED, setStatus);

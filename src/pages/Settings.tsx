@@ -45,7 +45,13 @@ import {
   type Theme,
   type TrackingHours,
 } from "../lib/settings";
-import type { AiStatus, ReleaseNotes, Route, UpdateStatus } from "../lib/types";
+import type {
+  AiStatus,
+  PermissionInfo,
+  ReleaseNotes,
+  Route,
+  UpdateStatus,
+} from "../lib/types";
 import { BreakSettingsGroups } from "./settings/BreakSettings";
 import { ExtensionSettingsGroups } from "./settings/ExtensionSettings";
 import {
@@ -319,6 +325,37 @@ function AppleIntelligenceRow({
     isOff ||
     isModelDownloading ||
     (!isUnsupported && status !== null);
+  const statusIndicator =
+    status === null || status.engine === "starting" ? (
+      <span className="shrink-0 font-mono text-[11px] text-fg-muted">
+        Checking…
+      </span>
+    ) : isAvailable ? (
+      <span className="inline-flex shrink-0 items-center gap-1.5 text-[11.5px] font-medium text-emerald-500">
+        <span
+          className="h-2 w-2 rounded-full bg-emerald-500"
+          aria-hidden="true"
+        />
+        Enabled
+      </span>
+    ) : isOff ? (
+      <span className="inline-flex shrink-0 items-center gap-1.5 text-[11.5px] font-medium text-rose-500">
+        <span className="h-2 w-2 rounded-full bg-rose-500" aria-hidden="true" />
+        Not enabled
+      </span>
+    ) : isModelDownloading ? (
+      <span className="inline-flex shrink-0 items-center gap-1.5 text-[11.5px] font-medium text-amber-500">
+        <span
+          className="h-2 w-2 rounded-full bg-amber-500"
+          aria-hidden="true"
+        />
+        Downloading…
+      </span>
+    ) : (
+      <span className="shrink-0 font-mono text-[11px] text-fg-muted">
+        {llmUnavailableReason(status) ?? "Unavailable"}
+      </span>
+    );
 
   return (
     <SettingRow
@@ -338,21 +375,18 @@ function AppleIntelligenceRow({
                 : "Manage Apple Intelligence and Siri preferences in macOS System Settings"
       }
     >
-      {showButton ? (
-        <button
-          type="button"
-          onClick={handleOpenSettings}
-          className="shrink-0 rounded-md border border-line px-2.5 py-1 text-[11.5px] font-medium text-fg-muted transition-colors hover:bg-surface hover:text-fg cursor-pointer"
-        >
-          Open Apple Intelligence Settings
-        </button>
-      ) : (
-        <span className="shrink-0 font-mono text-[11px] text-fg-muted">
-          {status !== null
-            ? (llmUnavailableReason(status) ?? "Unavailable")
-            : "Checking…"}
-        </span>
-      )}
+      <div className="flex shrink-0 items-center gap-3">
+        {statusIndicator}
+        {showButton && (
+          <button
+            type="button"
+            onClick={handleOpenSettings}
+            className="shrink-0 rounded-md border border-line px-2.5 py-1 text-[11.5px] font-medium text-fg-muted transition-colors hover:bg-surface hover:text-fg cursor-pointer"
+          >
+            Apple intelligence settings
+          </button>
+        )}
+      </div>
     </SettingRow>
   );
 }
@@ -780,6 +814,128 @@ function UpdatesSetting({ status }: { status: UpdateStatus | null }) {
   );
 }
 
+function PermissionsSetting({
+  onError,
+}: {
+  onError: (message: string | null) => void;
+}) {
+  const [permissions, setPermissions] = useState<PermissionInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadPermissions = useCallback(() => {
+    api
+      .checkPermissions()
+      .then((data) => {
+        setPermissions(data);
+        setLoading(false);
+      })
+      .catch((cause: unknown) => {
+        onError(describeError(cause));
+        setLoading(false);
+      });
+  }, [onError]);
+
+  useEffect(() => {
+    loadPermissions();
+    window.addEventListener("focus", loadPermissions);
+    return () => window.removeEventListener("focus", loadPermissions);
+  }, [loadPermissions]);
+
+  const handleOpenSettings = (url: string): void => {
+    onError(null);
+    openUrl(url).catch((cause: unknown) => {
+      onError(describeError(cause));
+    });
+  };
+
+  if (!loading && permissions.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="px-1 font-mono text-[11px] font-semibold uppercase tracking-wider text-fg-muted">
+        Permissions
+      </h2>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        {loading && permissions.length === 0 ? (
+          <div className="settings-group-card shape-bleed-table rounded-xl border border-settings-card-border bg-settings-card p-4 text-[12px] text-fg-muted">
+            Checking permissions…
+          </div>
+        ) : (
+          permissions.map((perm) => (
+            <div
+              key={perm.id}
+              className="settings-group-card shape-bleed-table flex flex-col justify-between gap-3 rounded-xl border border-settings-card-border bg-settings-card p-4"
+            >
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[13px] font-medium text-fg">
+                    {perm.name}
+                  </span>
+                  <span
+                    className={`shrink-0 rounded-full border px-2 py-0.5 font-mono text-[9.5px] uppercase tracking-wider ${
+                      perm.required
+                        ? "border-accent/40 bg-accent-soft text-accent"
+                        : "border-line bg-surface text-fg-muted"
+                    }`}
+                  >
+                    {perm.required ? "Required" : "Not required"}
+                  </span>
+                </div>
+                <p className="text-[12px] leading-relaxed text-fg-muted">
+                  {perm.description}
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 border-t border-line/60 pt-3">
+                {perm.granted ? (
+                  <div className="inline-flex items-center gap-1.5 text-[12px] font-medium text-emerald-500">
+                    <svg
+                      className="h-3.5 w-3.5 fill-current"
+                      viewBox="0 0 16 16"
+                      aria-hidden="true"
+                    >
+                      <circle cx="8" cy="8" r="6" />
+                    </svg>
+                    <span>Granted</span>
+                  </div>
+                ) : (
+                  <div className="inline-flex items-center gap-1.5 text-[12px] font-medium text-rose-500">
+                    <svg
+                      className="h-3.5 w-3.5"
+                      fill="none"
+                      viewBox="0 0 16 16"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <line x1="4" y1="4" x2="12" y2="12" />
+                      <line x1="12" y1="4" x2="4" y2="12" />
+                    </svg>
+                    <span>Not granted</span>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenSettings(perm.settingsUrl)}
+                  className="shrink-0 cursor-pointer rounded-md border border-line bg-surface px-2.5 py-1 text-[11.5px] font-medium text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
+                  aria-label={`Open ${perm.name} settings`}
+                >
+                  Open {perm.name} settings
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
 export function Settings({
   route,
   updates,
@@ -793,6 +949,7 @@ export function Settings({
   const { settings, storage, error, update } = useSettings();
   const [openError, setOpenError] = useState<string | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
 
   const openStorage = (): void => {
     if (storage === null) return;
@@ -1088,8 +1245,14 @@ export function Settings({
           >
             <SettingsSectionHeading
               title="Overview"
-              description="Check for updates and see your current version."
+              description="System permissions, updates, and your current version."
             />
+            {overviewError && (
+              <div className="rounded-lg border border-danger/30 bg-danger/10 p-3 text-[12px] text-danger">
+                {overviewError}
+              </div>
+            )}
+            <PermissionsSetting onError={setOverviewError} />
             <UpdatesSetting status={updates} />
           </section>
 

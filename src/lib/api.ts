@@ -27,6 +27,7 @@ import type {
   NewClient,
   NewProject,
   NewTimeEntry,
+  PermissionInfo,
   Project,
   ProjectRule,
   ProjectStats,
@@ -94,6 +95,11 @@ export async function setLaunchAtLogin(
   enabled: boolean,
 ): Promise<LoginItemState> {
   return await invoke<LoginItemState>("set_launch_at_login", { enabled });
+}
+
+/** Reads authorization status of system permissions (Accessibility, Automation, etc.). */
+export async function checkPermissions(): Promise<PermissionInfo[]> {
+  return await invoke<PermissionInfo[]>("check_permissions");
 }
 
 // --- Agents ---

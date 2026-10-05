@@ -7,6 +7,7 @@ mod commands;
 mod energy;
 mod invoices;
 mod login_item;
+mod permissions;
 mod pulse;
 mod rpc;
 mod threads;
@@ -213,6 +214,7 @@ pub fn run() {
             commands::storage_paths,
             commands::launch_at_login,
             commands::set_launch_at_login,
+            commands::check_permissions,
             commands::list_categories,
             commands::create_category,
             commands::update_category,

@@ -769,3 +769,14 @@ export interface UpdateStatus {
   available: AvailableUpdate | null;
   error: string | null;
 }
+
+// --- Permissions (src-tauri/src/permissions.rs) ---
+
+export interface PermissionInfo {
+  id: string;
+  name: string;
+  description: string;
+  required: boolean;
+  granted: boolean;
+  settingsUrl: string;
+}

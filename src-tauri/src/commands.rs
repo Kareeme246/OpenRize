@@ -401,6 +401,13 @@ pub fn delete_draft_invoice(app: AppHandle, id: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+pub fn delete_void_invoice(app: AppHandle, id: String) -> Result<(), String> {
+    with_writer(&app, |conn| invoices::delete_void(conn, &id))?;
+    entries_changed(&app);
+    Ok(())
+}
+
 /// Asks where to save an invoice PDF and writes it: a finalized invoice's
 /// archived bytes (`id`), or a fresh DRAFT render of `draft`. Returns the saved
 /// path, or `None` when the user cancels.

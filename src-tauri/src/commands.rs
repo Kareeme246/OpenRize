@@ -605,6 +605,22 @@ pub fn split_time_entry(
 }
 
 #[tauri::command]
+pub fn merge_time_entries(
+    app: AppHandle,
+    primary_id: String,
+    secondary_id: String,
+) -> Result<TimeEntry, String> {
+    let now = now_epoch_ms();
+    let res = {
+        let state = app.state::<AppState>();
+        let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+        store.merge_time_entries(&primary_id, &secondary_id, now)?
+    };
+    entries_changed(&app);
+    Ok(res)
+}
+
+#[tauri::command]
 pub fn delete_time_entry(app: AppHandle, id: String) -> Result<(), String> {
     delete_time_entries(app, vec![id])
 }

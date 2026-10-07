@@ -240,3 +240,156 @@ fn restored_live_activity_is_closed_and_does_not_recreate_deleted_time() {
         1
     );
 }
+
+#[test]
+fn split_and_undo_redo_round_trip() {
+    let mut store = store();
+    let (first, second) = store.split_time_entry("a", 150, 400).unwrap();
+    assert_eq!(first.ended_at, 150);
+    assert_eq!(second.started_at, 150);
+    assert_eq!(second.ended_at, 200);
+    assert_eq!(
+        count(
+            &store,
+            "SELECT count(*) FROM time_entries WHERE deleted_at IS NULL"
+        ),
+        3
+    );
+
+    // Undo the split
+    assert!(store.undo_deletion(500).unwrap());
+    assert_eq!(
+        count(
+            &store,
+            "SELECT count(*) FROM time_entries WHERE deleted_at IS NULL"
+        ),
+        2
+    );
+    let a_end: i64 = store
+        .conn()
+        .query_row("SELECT ended_at FROM time_entries WHERE id='a'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(a_end, 200);
+
+    // Redo the split
+    assert!(store.redo_deletion(600).unwrap());
+    assert_eq!(
+        count(
+            &store,
+            "SELECT count(*) FROM time_entries WHERE deleted_at IS NULL"
+        ),
+        3
+    );
+    let a_end_split: i64 = store
+        .conn()
+        .query_row("SELECT ended_at FROM time_entries WHERE id='a'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(a_end_split, 150);
+}
+
+#[test]
+fn merge_and_undo_redo_round_trip() {
+    let mut store = store();
+    // 'a' is 100..200, 'b' is 200..300. They share border 200.
+    let merged = store.merge_time_entries("a", "b", 400).unwrap();
+    assert_eq!(merged.started_at, 100);
+    assert_eq!(merged.ended_at, 300);
+    assert_eq!(
+        count(
+            &store,
+            "SELECT count(*) FROM time_entries WHERE deleted_at IS NULL"
+        ),
+        1
+    );
+
+    // Undo the merge
+    assert!(store.undo_deletion(500).unwrap());
+    assert_eq!(
+        count(
+            &store,
+            "SELECT count(*) FROM time_entries WHERE deleted_at IS NULL"
+        ),
+        2
+    );
+    let a_end: i64 = store
+        .conn()
+        .query_row("SELECT ended_at FROM time_entries WHERE id='a'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    let b_start: i64 = store
+        .conn()
+        .query_row(
+            "SELECT started_at FROM time_entries WHERE id='b'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(a_end, 200);
+    assert_eq!(b_start, 200);
+
+    // Redo the merge
+    assert!(store.redo_deletion(600).unwrap());
+    assert_eq!(
+        count(
+            &store,
+            "SELECT count(*) FROM time_entries WHERE deleted_at IS NULL"
+        ),
+        1
+    );
+}
+
+#[test]
+fn add_and_undo_redo_round_trip() {
+    let mut store = store();
+    let new_entry = crate::models::NewTimeEntry {
+        started_at: 500,
+        ended_at: 600,
+        description: "Added".to_string(),
+        category_id: None,
+        project_id: None,
+        billable: None,
+        review: false,
+    };
+    let created = store.create_manual_entry(new_entry, 400).unwrap();
+    assert_eq!(
+        count(
+            &store,
+            "SELECT count(*) FROM time_entries WHERE deleted_at IS NULL"
+        ),
+        3
+    );
+
+    // Undo the add
+    assert!(store.undo_deletion(500).unwrap());
+    assert_eq!(
+        count(
+            &store,
+            "SELECT count(*) FROM time_entries WHERE deleted_at IS NULL"
+        ),
+        2
+    );
+
+    // Redo the add
+    assert!(store.redo_deletion(600).unwrap());
+    assert_eq!(
+        count(
+            &store,
+            "SELECT count(*) FROM time_entries WHERE deleted_at IS NULL"
+        ),
+        3
+    );
+    let created_deleted: Option<i64> = store
+        .conn()
+        .query_row(
+            "SELECT deleted_at FROM time_entries WHERE id=?1",
+            params![created.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(created_deleted, None);
+}

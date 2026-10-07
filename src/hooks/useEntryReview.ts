@@ -31,6 +31,8 @@ export interface EntryReview {
   setTimes: (startedAt: number, endedAt: number) => Promise<void>;
   /** Splits the open entry and opens its first half. */
   split: () => Promise<void>;
+  /** Merges the open entry with an adjacent entry. */
+  merge: (otherId: string) => Promise<void>;
   remove: () => Promise<void>;
   removeField: (field: SuggestionField, id: string) => Promise<void>;
   retry: () => Promise<void>;
@@ -175,6 +177,21 @@ export function useEntryReview(initialId?: string): EntryReview {
     }
   }, [detail, load]);
 
+  const merge = useCallback(
+    async (otherId: string): Promise<void> => {
+      if (!detail) return;
+      try {
+        const merged = await api.mergeTimeEntries(detail.entry.id, otherId);
+        setError(null);
+        setSelectedId(merged.id);
+        await load(merged.id);
+      } catch (cause) {
+        setError(describeError(cause));
+      }
+    },
+    [detail, load],
+  );
+
   const remove = useCallback(async (): Promise<void> => {
     if (!detail) return;
     try {
@@ -211,6 +228,7 @@ export function useEntryReview(initialId?: string): EntryReview {
     saveDescription,
     setTimes,
     split,
+    merge,
     remove,
     removeField,
     retry,

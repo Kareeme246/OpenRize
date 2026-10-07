@@ -237,6 +237,14 @@ impl Context<'_> {
                     .map_err(fail)?;
                 to_value([first, second])
             }
+            O::EntryMerge { entry, other } => {
+                let primary_id = self.entry(&entry)?;
+                let secondary_id = self.entry(&other)?;
+                let merged = lock(&self.state.activity)?
+                    .merge_time_entries(&primary_id, &secondary_id, now)
+                    .map_err(fail)?;
+                to_value(merged)
+            }
             O::EntriesDelete { entries } => {
                 let ids = self.entries(&entries)?;
                 lock(&self.state.activity)?

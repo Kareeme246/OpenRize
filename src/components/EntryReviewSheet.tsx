@@ -4,7 +4,12 @@ import { useSettings } from "../hooks/useSettings";
 import { isTyping } from "../lib/entries";
 import { formatDuration, formatTime } from "../lib/format";
 import { shortcutLabel } from "../lib/platform";
-import type { Category, Project, SuggestionField } from "../lib/types";
+import type {
+  Category,
+  Project,
+  SuggestionField,
+  TimeEntry,
+} from "../lib/types";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { EntryReviewPanel } from "./EntryReviewPanel";
 
@@ -14,6 +19,8 @@ interface EntryReviewSheetProps {
   projects: Project[];
   /** "3 of 7" in review mode. */
   reviewPosition?: { index: number; total: number };
+  /** Adjacent mergeable entries that start or end at the same border. */
+  mergeCandidates?: { prev?: TimeEntry; next?: TimeEntry };
   /** Overrides approval, e.g. to advance review mode afterwards. */
   onAccept?: (id: string) => void;
   onReject?: (id: string) => void;
@@ -22,7 +29,7 @@ interface EntryReviewSheetProps {
 
 /**
  * The entry review panel bound to `useEntryReview`, with its keyboard
- * contract: ⌘↵ accepts, ⌘⌫ rejects, S splits, Esc closes. The panel itself
+ * contract: ⌘↵ accepts, ⌘⌫ rejects, S splits, M merges, Esc closes. The panel itself
  * owns 1–9, C, P, and E. Renders nothing while no entry is open.
  */
 export function EntryReviewSheet({
@@ -30,6 +37,7 @@ export function EntryReviewSheet({
   categories,
   projects,
   reviewPosition,
+  mergeCandidates,
   onAccept,
   onReject,
   onClose,
@@ -42,6 +50,8 @@ export function EntryReviewSheet({
   const accept = onAccept ?? ((id: string) => void review.accept(id));
   const reject = onReject ?? ((id: string) => void review.reject(id));
   const close = onClose ?? (() => review.select(undefined));
+  const prevId = mergeCandidates?.prev?.id;
+  const nextId = mergeCandidates?.next?.id;
 
   useEffect(() => {
     if (!detail) return;
@@ -60,11 +70,19 @@ export function EntryReviewSheet({
       } else if (!command && !event.altKey && event.key.toLowerCase() === "s") {
         event.preventDefault();
         void review.split();
+      } else if (!command && !event.altKey && event.key.toLowerCase() === "m") {
+        if (prevId) {
+          event.preventDefault();
+          void review.merge(prevId);
+        } else if (nextId) {
+          event.preventDefault();
+          void review.merge(nextId);
+        }
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [detail, accept, reject, close, review]);
+  }, [detail, accept, reject, close, review, prevId, nextId]);
 
   if (!detail) return null;
   return (
@@ -89,6 +107,20 @@ export function EntryReviewSheet({
           onReject={() => reject(detail.entry.id)}
           onUnapprove={() => void review.unapprove()}
           onSplit={() => void review.split()}
+          canMerge={Boolean(prevId || nextId)}
+          onMerge={
+            prevId
+              ? () => void review.merge(prevId)
+              : nextId
+                ? () => void review.merge(nextId)
+                : undefined
+          }
+          onMergePrev={
+            prevId && nextId ? () => void review.merge(prevId) : undefined
+          }
+          onMergeNext={
+            prevId && nextId ? () => void review.merge(nextId) : undefined
+          }
           onDelete={() => setDeleting("entry")}
           onDeleteField={(field, id) => setDeleting({ field, id })}
           onRetry={() => void review.retry()}

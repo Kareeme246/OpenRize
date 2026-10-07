@@ -249,6 +249,7 @@ pub fn run() {
             commands::unapprove_time_entries,
             commands::reject_time_entry,
             commands::split_time_entry,
+            commands::merge_time_entries,
             commands::delete_time_entry,
             commands::delete_time_entries,
             commands::undo_deletion,

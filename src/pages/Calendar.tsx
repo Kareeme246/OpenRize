@@ -440,6 +440,18 @@ export function Calendar({ route, navigate }: CalendarProps) {
         })()
       : undefined;
 
+  const mergeCandidates = useMemo(() => {
+    if (!review.detail) return undefined;
+    const current = review.detail.entry;
+    const prev = entries.find(
+      (e) => e.id !== current.id && e.endedAt === current.startedAt,
+    );
+    const next = entries.find(
+      (e) => e.id !== current.id && e.startedAt === current.endedAt,
+    );
+    return { prev, next };
+  }, [entries, review.detail]);
+
   const targetMs = targetMsFor(settings, scale, daysInRange);
   const title =
     scale === "day"
@@ -556,6 +568,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
               categories={catalog.categories}
               projects={catalog.projects}
               reviewPosition={reviewPosition}
+              mergeCandidates={mergeCandidates}
               onAccept={(id) => void accept(id)}
               onReject={(id) => void reject(id)}
               onClose={() => {

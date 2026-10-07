@@ -83,6 +83,10 @@ export interface EntryReviewPanelProps {
   onReject: () => void;
   onUnapprove: () => void;
   onSplit: () => void;
+  canMerge?: boolean;
+  onMerge?: () => void;
+  onMergePrev?: () => void;
+  onMergeNext?: () => void;
   onDelete: () => void;
   onDeleteField: (field: SuggestionField, id: string) => void;
   onRetry: () => void;
@@ -186,6 +190,10 @@ export function EntryReviewPanel({
   onReject,
   onUnapprove,
   onSplit,
+  canMerge,
+  onMerge,
+  onMergePrev,
+  onMergeNext,
   onDelete,
   onDeleteField,
   onRetry,
@@ -557,6 +565,38 @@ export function EntryReviewPanel({
               Split
             </button>
           </Tooltip>
+          {onMergePrev && onMergeNext ? (
+            <>
+              <Tooltip content="Merge with earlier adjacent entry (M)">
+                <button
+                  type="button"
+                  onClick={onMergePrev}
+                  className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+                >
+                  Merge ⭡
+                </button>
+              </Tooltip>
+              <Tooltip content="Merge with later adjacent entry">
+                <button
+                  type="button"
+                  onClick={onMergeNext}
+                  className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+                >
+                  Merge ⭣
+                </button>
+              </Tooltip>
+            </>
+          ) : onMerge || canMerge ? (
+            <Tooltip content="Merge adjacent entries (M)">
+              <button
+                type="button"
+                onClick={onMerge}
+                className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+              >
+                Merge
+              </button>
+            </Tooltip>
+          ) : null}
           <Tooltip content="Delete entry">
             <button
               type="button"

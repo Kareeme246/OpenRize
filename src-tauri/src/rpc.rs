@@ -108,6 +108,7 @@ impl Live for App<'_> {
             | O::EntriesUnapprove { .. }
             | O::EntryReject { .. }
             | O::EntrySplit { .. }
+            | O::EntryMerge { .. }
             | O::EntriesDelete { .. }
             | O::EntriesRebuild { .. } => commands::entries_changed(self.0),
             _ => {}

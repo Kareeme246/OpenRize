@@ -61,6 +61,7 @@ installed.
 | `rize entries unapprove <id...>` | Send entries back to review. | `unapprove_time_entries` | Yes | Shipped |
 | `rize entries reject <id>` | Reject an AI suggestion. | `reject_time_entry` | Yes | Shipped |
 | `rize entries split <id> --at <time>` | Split one entry in two. | `split_time_entry` | Yes | Shipped |
+| `rize entries merge <id> <other-id>` | Merge two adjacent entries into one. | `merge_time_entries` | Yes | Shipped |
 | `rize entries rm <id...>` | Delete entries (confirmed). | `delete_time_entries` | Yes | Shipped |
 | `rize entries rebuild [range]` | Rebuild entries from recorded activity (confirmed). | `rebuild_time_entries` | Yes | Shipped |
 | `rize entries export --format csv\|json [--out file]` | Export filtered entries to stdout or a file. | `export_time_entries` (`reports::export_body`) | Yes | Shipped |

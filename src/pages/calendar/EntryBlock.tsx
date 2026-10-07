@@ -390,7 +390,7 @@ export function EntryBlock({
           narrow ? "right-1 left-0.5" : "right-4 left-0"
         } ${(narrow ? NARROW_DENSITY_CLASSES : DENSITY_CLASSES)[density]} ${
           selected
-            ? "z-20 shadow-lg ring-2 ring-accent"
+            ? "z-20 shadow-lg ring-1 ring-accent"
             : "z-10 hover:border-fg-soft/40"
         } ${recording ? "border-dashed border-danger/45 bg-danger/5" : BLOCK_CLASSES[state]}`}
         style={{

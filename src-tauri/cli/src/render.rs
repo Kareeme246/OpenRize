@@ -130,6 +130,9 @@ pub fn show(command: Option<&Command>, data: &Value, full: bool) {
                     parts.iter().map(short).collect::<Vec<_>>().join(" and ")
                 );
             }
+            EntriesCommand::Merge { .. } => {
+                println!("Merged into {}.", short(data));
+            }
             EntriesCommand::Rm { .. } => {
                 println!("Deleted {}.", count(&data["deleted"], "entry", "entries"));
             }

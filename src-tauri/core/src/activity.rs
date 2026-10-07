@@ -165,8 +165,8 @@ mod deletions;
 
 pub struct ActivityStore {
     conn: Connection,
-    undo_deletions: Vec<deletions::Deletion>,
-    redo_deletions: Vec<deletions::Deletion>,
+    undo_stack: Vec<deletions::UndoItem>,
+    redo_stack: Vec<deletions::UndoItem>,
     current: Option<Current>,
     pending_switch: Option<PendingSwitch>,
     capture_enabled: bool,
@@ -205,8 +205,8 @@ impl ActivityStore {
 
         let mut store = Self {
             conn,
-            undo_deletions: Vec::new(),
-            redo_deletions: Vec::new(),
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
             current: None,
             pending_switch: None,
             capture_enabled: true,
@@ -244,6 +244,14 @@ impl ActivityStore {
 
     pub fn conn_mut(&mut self) -> &mut Connection {
         &mut self.conn
+    }
+
+    fn record_undo(&mut self, item: deletions::UndoItem) {
+        self.undo_stack.push(item);
+        self.redo_stack.clear();
+        if self.undo_stack.len() > 100 {
+            self.undo_stack.remove(0);
+        }
     }
 
     pub fn read_setting(&self, key: &str) -> Option<String> {
@@ -1755,7 +1763,115 @@ impl ActivityStore {
 
         self.log_event(id, "split", "user", None, now);
 
+        self.record_undo(deletions::UndoItem::Split {
+            original_id: id.to_string(),
+            original_ended_at: original.ended_at,
+            new_id: new_id.clone(),
+            split_at: at_ms,
+        });
+
         Ok((first, second))
+    }
+
+    pub fn merge_time_entries(
+        &mut self,
+        primary_id: &str,
+        secondary_id: &str,
+        now: u64,
+    ) -> Result<TimeEntry, String> {
+        let primary = self
+            .conn
+            .query_row(
+                "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at, description_origin
+                 FROM time_entries WHERE id = ?1 AND deleted_at IS NULL;",
+                params![primary_id],
+                time_entry_from_row,
+            )
+            .map_err(|e| format!("Primary entry not found: {e}"))?;
+
+        let secondary = self
+            .conn
+            .query_row(
+                "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at, description_origin
+                 FROM time_entries WHERE id = ?1 AND deleted_at IS NULL;",
+                params![secondary_id],
+                time_entry_from_row,
+            )
+            .map_err(|e| format!("Secondary entry not found: {e}"))?;
+
+        let adjacent =
+            primary.ended_at == secondary.started_at || secondary.ended_at == primary.started_at;
+        if !adjacent {
+            return Err(
+                "Time entries must start and stop at the same border to be mergeable".to_string(),
+            );
+        }
+
+        let new_started_at = primary.started_at.min(secondary.started_at);
+        let new_ended_at = primary.ended_at.max(secondary.ended_at);
+
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM segments WHERE entry_id = ?1;")
+            .map_err(|e| e.to_string())?;
+        let secondary_segment_ids: Vec<String> = stmt
+            .query_map(params![secondary_id], |row| row.get(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<String>, _>>()
+            .map_err(|e| e.to_string())?;
+        drop(stmt);
+
+        let tx = self.conn.transaction().map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE time_entries SET started_at = ?1, ended_at = ?2, updated_at = ?3 WHERE id = ?4;",
+            params![
+                new_started_at as i64,
+                new_ended_at as i64,
+                now as i64,
+                primary_id
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE segments SET entry_id = ?1 WHERE entry_id = ?2;",
+            params![primary_id, secondary_id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE time_entries SET deleted_at = ?1, updated_at = ?2 WHERE id = ?3;",
+            params![now as i64, now as i64, secondary_id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
+
+        if self
+            .current
+            .as_ref()
+            .is_some_and(|c| c.entry_id.as_deref() == Some(secondary_id))
+        {
+            if let Some(ref mut c) = self.current {
+                c.entry_id = Some(primary_id.to_string());
+            }
+        }
+
+        self.log_event(primary_id, "merged", "user", None, now);
+
+        self.record_undo(deletions::UndoItem::Merge {
+            primary_id: primary_id.to_string(),
+            secondary_id: secondary_id.to_string(),
+            primary_original_started_at: primary.started_at,
+            primary_original_ended_at: primary.ended_at,
+            secondary_original_started_at: secondary.started_at,
+            secondary_original_ended_at: secondary.ended_at,
+            secondary_segment_ids,
+        });
+
+        Ok(TimeEntry {
+            started_at: new_started_at,
+            ended_at: new_ended_at,
+            updated_at: now,
+            ..primary
+        })
     }
 
     pub fn delete_time_entry(&mut self, id: &str, now: u64) -> Result<(), String> {
@@ -1811,6 +1927,8 @@ impl ActivityStore {
             // review is embedded once it is approved.
             crate::ai::store::enqueue(&self.conn, &id, crate::ai::store::JOB_EMBED, now)?;
         }
+
+        self.record_undo(deletions::UndoItem::Add { id: id.clone() });
 
         Ok(TimeEntry {
             id,

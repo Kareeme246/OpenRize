@@ -501,112 +501,125 @@ export function EntryReviewPanel({
           />
         )}
 
-        <div className="flex items-center gap-1.5 border-line border-t pt-3">
-          <Tooltip
-            content={
-              approved
-                ? "Already approved"
-                : entry.categoryId
-                  ? `Accept (${shortcutLabel("Enter")})`
-                  : "Pick a category first (1–9)"
-            }
-            wrapperClassName="flex min-w-0 flex-1"
-          >
-            <button
-              type="button"
-              onClick={onAccept}
-              disabled={!entry.categoryId || approved}
-              className="whitespace-nowrap flex-1 rounded-md bg-accent px-3 py-1.5 font-semibold text-[12px] text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {approved ? "Approved ✓" : "Accept"}{" "}
-              {!approved && (
-                <span className="text-[10px] opacity-70">
-                  {shortcutLabel("Enter")}
-                </span>
-              )}
-            </button>
-          </Tooltip>
-          {approved ? (
+        <div className="space-y-1.5 border-line border-t pt-3">
+          <div className="flex items-center gap-1.5">
             <Tooltip
               content={
-                invoiced
-                  ? "Invoiced entries can't be unapproved"
-                  : "Return to pending to edit"
+                approved
+                  ? "Already approved"
+                  : entry.categoryId
+                    ? `Accept (${shortcutLabel("Enter")})`
+                    : "Pick a category first (1–9)"
               }
-              wrapperClassName="inline-flex"
+              wrapperClassName="flex min-w-0 flex-1"
             >
               <button
                 type="button"
-                onClick={onUnapprove}
-                disabled={invoiced}
-                className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={onAccept}
+                disabled={!entry.categoryId || approved}
+                className="whitespace-nowrap flex-1 rounded-md bg-accent px-3 py-1.5 font-semibold text-[12px] text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Unapprove
+                {approved ? "Approved ✓" : "Accept"}{" "}
+                {!approved && (
+                  <span className="text-[10px] opacity-70">
+                    {shortcutLabel("Enter")}
+                  </span>
+                )}
               </button>
             </Tooltip>
-          ) : (
-            <button
-              type="button"
-              onClick={onReject}
-              className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
-            >
-              Reject{" "}
-              <span className="text-[10px] opacity-70">
-                {shortcutLabel("Backspace")}
-              </span>
-            </button>
-          )}
-          <Tooltip content="Split at the main app switch (S)">
-            <button
-              type="button"
-              onClick={onSplit}
-              className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
-            >
-              Split
-            </button>
-          </Tooltip>
+            {approved ? (
+              <Tooltip
+                content={
+                  invoiced
+                    ? "Invoiced entries can't be unapproved"
+                    : "Return to pending to edit"
+                }
+                wrapperClassName="inline-flex"
+              >
+                <button
+                  type="button"
+                  onClick={onUnapprove}
+                  disabled={invoiced}
+                  className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Unapprove
+                </button>
+              </Tooltip>
+            ) : (
+              <button
+                type="button"
+                onClick={onReject}
+                className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+              >
+                Reject{" "}
+                <span className="text-[10px] opacity-70">
+                  {shortcutLabel("Backspace")}
+                </span>
+              </button>
+            )}
+            <Tooltip content="Split at the main app switch (S)">
+              <button
+                type="button"
+                onClick={onSplit}
+                className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+              >
+                Split
+              </button>
+            </Tooltip>
+            <Tooltip content="Delete entry">
+              <button
+                type="button"
+                onClick={onDelete}
+                aria-label="Delete time entry"
+                className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-danger transition-colors hover:bg-danger/10"
+              >
+                ✕
+              </button>
+            </Tooltip>
+          </div>
           {onMergePrev && onMergeNext ? (
-            <>
-              <Tooltip content="Merge with earlier adjacent entry (M)">
+            <div className="flex items-center gap-1.5">
+              <Tooltip
+                content="Merge with earlier adjacent entry (M)"
+                wrapperClassName="flex min-w-0 flex-1"
+              >
                 <button
                   type="button"
                   onClick={onMergePrev}
-                  className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+                  className="whitespace-nowrap flex-1 rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
                 >
                   Merge ⭡
                 </button>
               </Tooltip>
-              <Tooltip content="Merge with later adjacent entry">
+              <Tooltip
+                content="Merge with later adjacent entry"
+                wrapperClassName="flex min-w-0 flex-1"
+              >
                 <button
                   type="button"
                   onClick={onMergeNext}
-                  className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+                  className="whitespace-nowrap flex-1 rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
                 >
                   Merge ⭣
                 </button>
               </Tooltip>
-            </>
+            </div>
           ) : onMerge || canMerge ? (
-            <Tooltip content="Merge adjacent entries (M)">
-              <button
-                type="button"
-                onClick={onMerge}
-                className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+            <div className="flex items-center gap-1.5">
+              <Tooltip
+                content="Merge adjacent entries (M)"
+                wrapperClassName="flex min-w-0 flex-1"
               >
-                Merge
-              </button>
-            </Tooltip>
+                <button
+                  type="button"
+                  onClick={onMerge}
+                  className="whitespace-nowrap flex-1 rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+                >
+                  Merge
+                </button>
+              </Tooltip>
+            </div>
           ) : null}
-          <Tooltip content="Delete entry">
-            <button
-              type="button"
-              onClick={onDelete}
-              aria-label="Delete time entry"
-              className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-danger transition-colors hover:bg-danger/10"
-            >
-              ✕
-            </button>
-          </Tooltip>
         </div>
         <p className="text-[10.5px] text-fg-faint">
           <Kbd>1–9</Kbd> pick · <Kbd>C</Kbd>

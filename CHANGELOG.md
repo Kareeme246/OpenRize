@@ -4,6 +4,10 @@ All notable changes are documented here. Entries are generated from commit histo
 
 ## [unreleased]
 
+### Bug Fixes
+- **review:** Place merge buttons on a row under action buttons (#91)
+## [0.9.5] - 2026-10-07
+
 ### Features
 - **calendar:** Support keyboard deletion with Command-Z undo (#86)
 - **invoices:** Allow admin deletion of voided invoices (#87)
@@ -12,6 +16,9 @@ All notable changes are documented here. Entries are generated from commit histo
 
 ### Refactoring
 - Remove AI workflow tracking (#89)
+
+### Documentation
+- Update changelog for v0.9.5
 ## [0.9.0] - 2026-10-04
 
 ### Features

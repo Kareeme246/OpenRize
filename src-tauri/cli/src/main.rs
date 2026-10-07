@@ -294,6 +294,8 @@ enum EntriesCommand {
         #[arg(long)]
         at: String,
     },
+    /// Merge two adjacent entries into one
+    Merge { entry: String, other: String },
     /// Delete entries (asks first)
     Rm {
         #[arg(required = true)]
@@ -812,6 +814,10 @@ fn run(args: &Args) -> Result<Outcome, Response> {
             EntriesCommand::Split { entry, at } => ask(Operation::EntrySplit {
                 entry: entry.clone(),
                 at: time(at)?,
+            }),
+            EntriesCommand::Merge { entry, other } => ask(Operation::EntryMerge {
+                entry: entry.clone(),
+                other: other.clone(),
             }),
             EntriesCommand::Rm { entries } => {
                 let count = entries.len();

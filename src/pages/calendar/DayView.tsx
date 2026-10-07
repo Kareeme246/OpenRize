@@ -604,7 +604,7 @@ function LaneBlock({
         onClick={() => onSelect(entryId)}
         aria-label={label}
         className={`calendar-entry absolute right-1 left-0.5 flex items-center overflow-hidden rounded-md px-1.5 text-left font-medium text-[10.5px] leading-tight transition-all ${
-          selected ? "z-20 ring-2 ring-accent" : "z-10 hover:border-fg-soft/40"
+          selected ? "z-20 ring-1 ring-accent" : "z-10 hover:border-fg-soft/40"
         }`}
         style={{
           top: `${top}px`,

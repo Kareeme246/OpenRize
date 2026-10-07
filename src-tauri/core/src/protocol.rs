@@ -125,6 +125,10 @@ pub enum Operation {
         entry: String,
         at: u64,
     },
+    EntryMerge {
+        entry: String,
+        other: String,
+    },
     EntriesDelete {
         entries: Vec<String>,
     },

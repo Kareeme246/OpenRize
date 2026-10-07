@@ -517,6 +517,16 @@ export async function splitTimeEntry(
   });
 }
 
+export async function mergeTimeEntries(
+  primaryId: string,
+  secondaryId: string,
+): Promise<TimeEntry> {
+  return await invoke<TimeEntry>("merge_time_entries", {
+    primaryId,
+    secondaryId,
+  });
+}
+
 export async function deleteTimeEntry(id: string): Promise<void> {
   await invoke("delete_time_entry", { id });
 }

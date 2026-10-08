@@ -16,22 +16,16 @@ use rusqlite::{params, params_from_iter, types::Value, Connection};
 use serde::Serialize;
 
 use crate::models::TimeEntry;
+use crate::{err, APP_KEY};
 pub use crate::{EntryFilter, MAX_QUERY_ROWS};
 
 /// Enough for a year by day, plus the closing boundary.
 pub const MAX_BUCKETS: usize = 400;
 
-/// An app or a website: sites are keyed by domain, apps by name, matching how
-/// the Apps page lists them.
-const APP_KEY: &str = "COALESCE(NULLIF(s.domain, ''), s.app)";
 /// A segment's share of its entry, clamped to the entry's bounds so app
 /// totals add up to the same time as every other grouping (the open segment
 /// ends with its entry).
 const SEGMENT_MS: &str = "MAX(0, MIN(COALESCE(s.ended_at, te.ended_at), te.ended_at) - MAX(s.started_at, te.started_at))";
-
-fn err(error: rusqlite::Error) -> String {
-    error.to_string()
-}
 
 /// Entries matching a filter, newest first, with the AI summary and the
 /// dominant app the list views show.

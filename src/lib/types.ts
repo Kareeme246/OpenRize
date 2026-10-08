@@ -13,27 +13,6 @@ export interface Category {
   deletedAt?: number;
 }
 
-export interface NewCategory {
-  name: string;
-  color: string;
-  description?: string;
-  aiPrompt?: string;
-  billableDefault?: boolean;
-  countsAsWork?: boolean;
-  sort?: number;
-}
-
-export interface UpdateCategory {
-  name?: string;
-  color?: string;
-  description?: string;
-  aiPrompt?: string;
-  billableDefault?: boolean;
-  countsAsWork?: boolean;
-  archived?: boolean;
-  sort?: number;
-}
-
 export interface Client {
   id: string;
   name: string;
@@ -458,6 +437,12 @@ export interface ActivitySnapshot {
   trackingActive?: boolean;
 }
 
+/**
+ * The lightweight push (1Hz focused / 30s heartbeat backgrounded) - same
+ * numbers as `ActivitySnapshot`, minus `segments`. A structural change
+ * always arrives as a full `ActivitySnapshot` instead, so the segment list
+ * only ever comes from that path.
+ */
 export interface ActivityTick {
   current: ActivitySegment | null;
   trackedMs: number;
@@ -691,19 +676,6 @@ export interface ImportSummary {
 }
 
 export type EnergyImpactLevel = "low" | "medium" | "high";
-
-export interface EnergySample {
-  id: number;
-  sampledAt: number;
-  durationMs: number;
-  cpuTimeMs: number;
-  energyNj: number;
-  powerWatts: number;
-  impactLevel: EnergyImpactLevel;
-  aiActive: boolean;
-  onBattery: boolean;
-  batteryLevel?: number | null;
-}
 
 export interface EnergySummary {
   currentImpact: EnergyImpactLevel;

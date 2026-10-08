@@ -3133,6 +3133,25 @@ mod tests {
         assert_eq!(open.started_at, start);
         assert_eq!(open.ended_at, now);
         assert!(entries.iter().any(|e| e.id == dragged.id));
+        // The live segments stay owned by the open entry (no untinted blocks).
+        let owned: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM segments WHERE entry_id = ?1;",
+                params![open.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(owned > 0);
+        let orphaned: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM segments WHERE entry_id IS NULL;",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(orphaned, 0);
     }
 
     #[test]

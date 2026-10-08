@@ -197,9 +197,16 @@ export const DEFAULT_BREAK_SETTINGS: BreakSettings = {
 
 export type NotificationPlacement =
   | "topLeft"
-  | "centerMiddle"
+  | "topRight"
+  | "topCenter"
   | "bottomLeft"
   | "bottomRight";
+
+export interface StopwatchReminder {
+  enabled: boolean;
+  /** Current run length; accumulated time never counts. */
+  afterMinutes: number;
+}
 
 export interface Settings {
   theme: Theme;
@@ -220,6 +227,7 @@ export interface Settings {
   weeklyTargetHours: number;
   trackingHours: TrackingHours;
   breaks: BreakSettings;
+  stopwatchReminder: StopwatchReminder;
   notificationPlacement: NotificationPlacement;
 }
 
@@ -238,6 +246,7 @@ export const DEFAULT_SETTINGS: Settings = {
   weeklyTargetHours: 40,
   trackingHours: DEFAULT_TRACKING_HOURS,
   breaks: DEFAULT_BREAK_SETTINGS,
+  stopwatchReminder: { enabled: true, afterMinutes: 180 },
   notificationPlacement: "bottomRight",
 };
 

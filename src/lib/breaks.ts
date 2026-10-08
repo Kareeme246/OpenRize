@@ -50,6 +50,13 @@ export interface BreakState {
   next: NextBreak | null;
   pausedUntil: number | null;
   snoozedUntil: number | null;
+  stopwatch: StopwatchReminderView | null;
+}
+
+export interface StopwatchReminderView {
+  id: string;
+  label: string;
+  startedAt: number;
 }
 
 export const IDLE_BREAK_STATE: BreakState = {
@@ -59,6 +66,7 @@ export const IDLE_BREAK_STATE: BreakState = {
   next: null,
   pausedUntil: null,
   snoozedUntil: null,
+  stopwatch: null,
 };
 
 export type BreakStatus = "taken" | "skipped" | "missed";

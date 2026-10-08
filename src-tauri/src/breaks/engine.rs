@@ -265,9 +265,12 @@ pub struct BreakState {
     pub next: Option<NextBreak>,
     pub paused_until: Option<u64>,
     pub snoozed_until: Option<u64>,
+    pub stopwatch: Option<super::stopwatch::ReminderView>,
 }
 
 pub struct Engine {
+    pub(super) stopwatch: super::stopwatch::Engine,
+    pub(super) quiet: Option<Quiet>,
     streak_ms: u64,
     last_tick: Option<u64>,
     day_key: Option<i64>,
@@ -286,6 +289,8 @@ pub struct Engine {
 impl Engine {
     pub fn new(streak_ms: u64, paused_until: Option<u64>) -> Self {
         Self {
+            stopwatch: super::stopwatch::Engine::default(),
+            quiet: Some(Quiet::NotTracking),
             streak_ms,
             last_tick: None,
             day_key: None,
@@ -331,6 +336,7 @@ impl Engine {
     // --- tick -----------------------------------------------------------
 
     pub fn step(&mut self, input: &Input<'_>) -> Vec<Effect> {
+        self.quiet = self.quiet_reason(input);
         let mut effects = Vec::new();
         let now = input.now;
         let previous_tick = self.last_tick;
@@ -962,6 +968,7 @@ impl Engine {
             next: self.next_break(now, settings, local),
             paused_until: self.paused_until.filter(|until| *until > now),
             snoozed_until,
+            stopwatch: self.stopwatch.view.clone(),
         }
     }
 
@@ -1009,7 +1016,7 @@ impl Engine {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Quiet {
+pub(super) enum Quiet {
     NotTracking,
     Away,
     Paused,

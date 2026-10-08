@@ -17,14 +17,15 @@ import {
   formatWorked,
   type ReminderView,
   SNOOZE_CHOICES,
+  type StopwatchReminderView,
 } from "./lib/breaks";
 
 const HOUR_MS = 3_600_000;
 
 /**
- * The positioned break panel: the reminder, the elapsed-time capsule, and the
- * welcome-back card. Rust decides when it is on screen; this only draws the
- * state and reports its own size so the window can be fitted to it.
+ * The positioned panel: break reminders, the elapsed-time capsule, the
+ * welcome-back card, and stopwatch reminders. Rust decides when it is on
+ * screen; this draws the state and reports its size so the window fits it.
  */
 export default function Reminder() {
   return (
@@ -60,8 +61,8 @@ function ReminderPanel() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: state, menu and compact are what change the layout
   useLayoutEffect(() => {
     const element = card.current;
-    // Nothing is drawn while idle, so there is nothing to size a window to.
-    if (!element || state.phase === "idle") return;
+    // No break or stopwatch card means there is nothing to size a window to.
+    if (!element || (state.phase === "idle" && !state.stopwatch)) return;
     const measure = (): {
       height: number;
       signature: string;
@@ -129,6 +130,10 @@ function PanelBody({
   onToggle: () => void;
 }) {
   switch (state.phase) {
+    case "idle":
+      return state.stopwatch ? (
+        <StopwatchCard reminder={state.stopwatch} now={now} />
+      ) : null;
     case "due":
       return state.reminder ? (
         <ReminderCard
@@ -157,6 +162,43 @@ function PanelBody({
     default:
       return null;
   }
+}
+
+function StopwatchCard({
+  reminder,
+  now,
+}: {
+  reminder: StopwatchReminderView;
+  now: number;
+}) {
+  return (
+    <div className="w-[300px] px-4 py-3">
+      <div className="flex items-start gap-2.5">
+        <span className="mt-[5px] size-2 shrink-0 rounded-full bg-review" />
+        <div className="min-w-0 flex-1 break-words font-semibold text-[13.5px] text-fg-strong leading-snug">
+          {reminder.label} has run {formatWorked(now - reminder.startedAt)}
+        </div>
+      </div>
+      <div className="mt-3 flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => act(api.pauseTimer(reminder.id))}
+          className="rounded-lg bg-accent px-3 py-1.5 font-semibold text-[12px] text-accent-fg transition-opacity hover:opacity-90"
+        >
+          Pause
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            act(api.dismissStopwatchReminder(reminder.id, reminder.startedAt))
+          }
+          className="rounded-none px-2.5 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+        >
+          Keep going
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /** Fire and forget: Rust answers with a `break-state-changed` event. */
@@ -215,7 +257,7 @@ function ReminderCard({
             <button
               type="button"
               onClick={() => act(api.snoozeBreak(15))}
-              className="shrink-0 whitespace-nowrap rounded-lg border border-line bg-surface px-3 py-1.5 font-medium text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
+              className="shrink-0 whitespace-nowrap rounded-none border border-line bg-surface px-3 py-1.5 font-medium text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
             >
               In 15 min
             </button>
@@ -243,7 +285,7 @@ function ReminderCard({
         <button
           type="button"
           onClick={() => act(api.skipBreak())}
-          className="shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+          className="shrink-0 whitespace-nowrap rounded-none px-2.5 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
         >
           {scheduled ? "Skip today" : "Skip"}
         </button>
@@ -253,7 +295,7 @@ function ReminderCard({
             aria-label="More options"
             aria-expanded={menu === "more"}
             onClick={() => onMenu(menu === "more" ? null : "more")}
-            className="grid size-7 place-items-center rounded-lg text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+            className="grid size-7 place-items-center rounded-none text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
           >
             <svg
               viewBox="0 0 24 24"
@@ -312,7 +354,7 @@ function SnoozeButton({
   onToggle: () => void;
 }) {
   return (
-    <div className="flex overflow-hidden rounded-lg border border-line bg-surface">
+    <div className="flex overflow-hidden rounded-none border border-line bg-surface">
       <button
         type="button"
         onClick={() => act(api.snoozeBreak(minutes))}
@@ -376,7 +418,7 @@ function MenuItem({
     <button
       type="button"
       onClick={onClick}
-      className="whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
+      className="whitespace-nowrap rounded-none px-2.5 py-1.5 text-left text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
     >
       {children}
     </button>
@@ -426,7 +468,7 @@ function BreakCard({
         onClick={onToggle}
         aria-expanded={expanded}
         aria-label={expanded ? "Collapse break tile" : "Expand break tile"}
-        className="flex min-h-[38px] w-full items-center gap-2 rounded-full px-4 py-2 text-left hover:bg-surface"
+        className="flex min-h-[38px] w-full items-center gap-2 rounded-none px-4 py-2 text-left hover:bg-surface"
       >
         <span
           className={`size-2 shrink-0 rounded-full bg-break ${over ? "" : "animate-pulse"}`}
@@ -469,7 +511,7 @@ function BreakCard({
             <button
               type="button"
               onClick={() => act(api.extendBreak())}
-              className="rounded-lg border border-line bg-surface px-3 py-1.5 font-medium text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
+              className="rounded-none border border-line bg-surface px-3 py-1.5 font-medium text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
             >
               +5 min
             </button>

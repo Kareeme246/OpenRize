@@ -279,6 +279,7 @@ pub fn run() {
             commands::resize_pulse_panel,
             commands::hide_pulse_panel,
             commands::break_state,
+            commands::dismiss_stopwatch_reminder,
             commands::start_break,
             commands::end_break,
             commands::snooze_break,

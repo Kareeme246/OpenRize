@@ -1482,7 +1482,7 @@ export function Settings({
             <SettingGroup title="Placement">
               <SettingRow
                 title="Notification position"
-                description="Applies to break reminders, the live break tile, and welcome-back notifications."
+                description="Applies to break reminders, the live break tile, welcome-back notifications, and stopwatch reminders."
               >
                 <Picker
                   ariaLabel="Notification position"
@@ -1492,7 +1492,8 @@ export function Settings({
                   }
                   options={[
                     { value: "topLeft", label: "Top left" },
-                    { value: "centerMiddle", label: "Center middle" },
+                    { value: "topRight", label: "Top right" },
+                    { value: "topCenter", label: "Top center" },
                     { value: "bottomLeft", label: "Bottom left" },
                     { value: "bottomRight", label: "Bottom right" },
                   ]}
@@ -1503,9 +1504,49 @@ export function Settings({
             <SettingGroup title="Stopwatch reminders">
               <SettingRow
                 title="Long-run reminders"
-                description="Ping me when a tracker has been running unusually long"
-                status="not-implemented"
-              />
+                description="Remind once when a stopwatch's current run reaches this length."
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-[12px] text-fg-muted">After</span>
+                  <Select
+                    label="Remind after"
+                    value={settings.stopwatchReminder.afterMinutes}
+                    options={[
+                      ...new Set([
+                        60,
+                        120,
+                        180,
+                        240,
+                        360,
+                        480,
+                        settings.stopwatchReminder.afterMinutes,
+                      ]),
+                    ]
+                      .sort((a, b) => a - b)
+                      .map((value) => ({ value, label: `${value / 60}h` }))}
+                    onChange={(afterMinutes) =>
+                      update({
+                        stopwatchReminder: {
+                          ...settings.stopwatchReminder,
+                          afterMinutes,
+                        },
+                      })
+                    }
+                  />
+                  <Toggle
+                    label="Long-run reminders"
+                    checked={settings.stopwatchReminder.enabled}
+                    onChange={(enabled) =>
+                      update({
+                        stopwatchReminder: {
+                          ...settings.stopwatchReminder,
+                          enabled,
+                        },
+                      })
+                    }
+                  />
+                </div>
+              </SettingRow>
             </SettingGroup>
           </section>
 

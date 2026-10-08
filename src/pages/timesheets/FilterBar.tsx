@@ -3,6 +3,7 @@ import { Dot } from "../../components/Page";
 import type { Catalog } from "../../hooks/useCatalog";
 import { hasTimesheetFilters, NONE } from "../../lib/timesheetGrid";
 import type { TimesheetFilters } from "../../lib/types";
+import { Glyph } from "./Glyph";
 import { useDismiss } from "./useDismiss";
 
 type Dimension = keyof TimesheetFilters;
@@ -18,24 +19,6 @@ interface Section {
   label: string;
   icon: ReactNode;
   options: Option[];
-}
-
-/** A 24px stroke glyph at the chip's size. */
-function Glyph({ children }: { children: ReactNode }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="size-3.5 shrink-0"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      {children}
-    </svg>
-  );
 }
 
 const ICONS: Record<Dimension, ReactNode> = {

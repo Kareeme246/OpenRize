@@ -14,6 +14,7 @@ import {
   METER_SEGMENTS,
   percent,
 } from "../lib/confidence";
+import { isTyping } from "../lib/entries";
 import { shortcutLabel } from "../lib/platform";
 import type {
   Category,
@@ -167,16 +168,6 @@ function buildOptions(
     }
   }
   return ranked;
-}
-
-function isTyping(target: EventTarget | null): boolean {
-  const element = target as HTMLElement | null;
-  return (
-    element?.tagName === "INPUT" ||
-    element?.tagName === "TEXTAREA" ||
-    element?.tagName === "SELECT" ||
-    element?.isContentEditable === true
-  );
 }
 
 export function EntryReviewPanel({

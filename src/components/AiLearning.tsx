@@ -9,6 +9,7 @@
 
 import { useEffect, useId, useState } from "react";
 import { percent } from "../lib/confidence";
+import { plural } from "../lib/format";
 import type {
   AiMetrics,
   AiStatus,
@@ -26,10 +27,6 @@ const SAVE_DEBOUNCE_MS = 350;
 
 function share(part: number, whole: number): string {
   return whole === 0 ? "-" : percent(part / whole);
-}
-
-function plural(count: number, one: string, many = `${one}s`): string {
-  return `${count} ${count === 1 ? one : many}`;
 }
 
 function ago(epochMs: number, now: number = Date.now()): string {

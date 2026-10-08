@@ -1,23 +1,7 @@
 import type { ReactNode } from "react";
 import { formatDuration, plural } from "../../lib/format";
 import type { SheetSummary, SheetTally } from "../../lib/timesheetGrid";
-
-function Glyph({ children }: { children: ReactNode }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="size-3.5 shrink-0"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      {children}
-    </svg>
-  );
-}
+import { Glyph } from "./Glyph";
 
 const CHECK_CIRCLE = (
   <Glyph>

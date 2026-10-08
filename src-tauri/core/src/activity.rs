@@ -3097,6 +3097,64 @@ mod tests {
     }
 
     #[test]
+    fn a_manual_session_dragged_over_the_live_entry_leaves_it_running() {
+        let mut store = store();
+        let start = 13 * 60 * MIN;
+        // Tracking since 1:00 PM, still going at 2:00 PM.
+        store.tick(sample("Code", "main.rs"), 0, start).unwrap();
+        let now = start + 60 * MIN;
+        store.tick(sample("Code", "main.rs"), 0, now).unwrap();
+        store.rebuild_range(0, now + MIN, now).unwrap();
+        let live = live_entries(&store);
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].status, "building");
+
+        // Drag a session from 1:30 PM to 2:30 PM.
+        let dragged = store
+            .create_manual_entry(
+                NewTimeEntry {
+                    started_at: start + 30 * MIN,
+                    ended_at: now + 30 * MIN,
+                    description: "Untitled session".to_string(),
+                    category_id: None,
+                    project_id: None,
+                    billable: None,
+                    review: true,
+                },
+                now,
+            )
+            .unwrap();
+        store.rebuild_range(0, now + 40 * MIN, now).unwrap();
+
+        let entries = live_entries(&store);
+        assert_eq!(entries.len(), 2);
+        let open = entries.iter().find(|e| e.id == live[0].id).unwrap();
+        assert_eq!(open.status, "building");
+        assert_eq!(open.started_at, start);
+        assert_eq!(open.ended_at, now);
+        assert!(entries.iter().any(|e| e.id == dragged.id));
+        // The live segments stay owned by the open entry (no untinted blocks).
+        let owned: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM segments WHERE entry_id = ?1;",
+                params![open.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(owned > 0);
+        let orphaned: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM segments WHERE entry_id IS NULL;",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(orphaned, 0);
+    }
+
+    #[test]
     fn manual_drag_session_stays_pending_without_ai_categorization() {
         let mut store = store();
         let cat = store

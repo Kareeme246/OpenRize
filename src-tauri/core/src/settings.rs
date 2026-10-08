@@ -73,10 +73,29 @@ pub enum CloseBehavior {
 #[serde(rename_all = "camelCase")]
 pub enum NotificationPlacement {
     TopLeft,
-    CenterMiddle,
+    TopRight,
+    #[serde(alias = "centerMiddle")]
+    TopCenter,
     BottomLeft,
     #[default]
     BottomRight,
+}
+
+/// Reminds once per current stopwatch run, rather than accumulated time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct StopwatchReminder {
+    pub enabled: bool,
+    pub after_minutes: u32,
+}
+
+impl Default for StopwatchReminder {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            after_minutes: 180,
+        }
+    }
 }
 
 /// What the AI suggests for each entry (Rize's "Suggestion level").
@@ -458,6 +477,7 @@ pub struct Settings {
     pub weekly_target_hours: u16,
     pub tracking_hours: TrackingHours,
     pub breaks: BreakSettings,
+    pub stopwatch_reminder: StopwatchReminder,
     pub notification_placement: NotificationPlacement,
 }
 
@@ -478,6 +498,7 @@ impl Default for Settings {
             weekly_target_hours: DEFAULT_WEEKLY_TARGET_HOURS,
             tracking_hours: TrackingHours::default(),
             breaks: BreakSettings::default(),
+            stopwatch_reminder: StopwatchReminder::default(),
             notification_placement: NotificationPlacement::default(),
         }
     }
@@ -501,6 +522,8 @@ impl Settings {
         }
         self.tracking_hours = self.tracking_hours.normalized();
         self.breaks = self.breaks.normalized();
+        self.stopwatch_reminder.after_minutes =
+            self.stopwatch_reminder.after_minutes.clamp(30, 720);
         self
     }
 }
@@ -627,6 +650,86 @@ mod tests {
     }
 
     #[test]
+    fn notification_placements_round_trip_and_legacy_center_migrates() {
+        let dir = temp_dir("notification-placement");
+        let mut store = SettingsStore::load(&dir).unwrap();
+        for placement in [
+            NotificationPlacement::TopLeft,
+            NotificationPlacement::TopRight,
+            NotificationPlacement::TopCenter,
+            NotificationPlacement::BottomLeft,
+            NotificationPlacement::BottomRight,
+        ] {
+            store
+                .set(Settings {
+                    notification_placement: placement,
+                    ..Settings::default()
+                })
+                .unwrap();
+            assert_eq!(
+                SettingsStore::load(&dir)
+                    .unwrap()
+                    .snapshot()
+                    .notification_placement,
+                placement
+            );
+        }
+        fs::write(
+            dir.join(FILE_NAME),
+            r#"{"notificationPlacement":"centerMiddle","accent":"orange"}"#,
+        )
+        .unwrap();
+        let mut legacy = SettingsStore::load(&dir).unwrap();
+        let migrated = legacy.snapshot();
+        assert_eq!(
+            migrated.notification_placement,
+            NotificationPlacement::TopCenter
+        );
+        assert_eq!(migrated.accent, Accent::Orange);
+        legacy.set(migrated).unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.join(FILE_NAME)).unwrap()).unwrap();
+        assert_eq!(saved["notificationPlacement"], "topCenter");
+        assert_eq!(
+            SettingsStore::load(&dir)
+                .unwrap()
+                .snapshot()
+                .notification_placement,
+            NotificationPlacement::TopCenter
+        );
+    }
+
+    #[test]
+    fn stopwatch_reminder_defaults_bounds_and_saved_values() {
+        let dir = temp_dir("stopwatch-reminder");
+        let mut store = SettingsStore::load(&dir).unwrap();
+        assert_eq!(
+            store.snapshot().stopwatch_reminder,
+            StopwatchReminder::default()
+        );
+        let old: Settings = serde_json::from_str(r#"{"theme":"light"}"#).unwrap();
+        assert!(old.stopwatch_reminder.enabled);
+        assert_eq!(old.stopwatch_reminder.after_minutes, 180);
+        for (input, expected) in [(0, 30), (240, 240), (u32::MAX, 720)] {
+            store
+                .set(Settings {
+                    stopwatch_reminder: StopwatchReminder {
+                        enabled: false,
+                        after_minutes: input,
+                    },
+                    ..Settings::default()
+                })
+                .unwrap();
+            let saved = SettingsStore::load(&dir)
+                .unwrap()
+                .snapshot()
+                .stopwatch_reminder;
+            assert!(!saved.enabled);
+            assert_eq!(saved.after_minutes, expected);
+        }
+    }
+
+    #[test]
     fn patch_changes_one_field_and_validates_it() {
         let dir = temp_dir("patch");
         let mut store = SettingsStore::load(&dir).unwrap();
@@ -720,6 +823,7 @@ mod tests {
                         sunday: DaySchedule::default(),
                     },
                     breaks: BreakSettings::default(),
+                    stopwatch_reminder: StopwatchReminder::default(),
                     notification_placement: NotificationPlacement::TopLeft,
                 })
                 .unwrap();

@@ -1090,6 +1090,15 @@ pub fn break_state(app: AppHandle) -> Result<breaks::engine::BreakState, String>
     breaks::current_state(&app)
 }
 
+#[tauri::command]
+pub fn dismiss_stopwatch_reminder(
+    app: AppHandle,
+    id: String,
+    started_at: u64,
+) -> Result<breaks::engine::BreakState, String> {
+    breaks::dismiss_stopwatch(&app, &id, started_at)
+}
+
 /// Starts the pending reminder's break, or a manual one when none is pending.
 #[tauri::command]
 pub fn start_break(app: AppHandle) -> Result<breaks::engine::BreakState, String> {

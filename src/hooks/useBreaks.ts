@@ -23,7 +23,8 @@ export function useBreaks(): BreaksApi {
   }, []);
   useTauriEvent<BreakState>(api.BREAK_STATE_CHANGED, setState);
 
-  const ticking = state.phase !== "idle" || state.next !== null;
+  const ticking =
+    state.phase !== "idle" || state.next !== null || state.stopwatch !== null;
   useEffect(() => {
     if (!ticking) return;
     setNow(Date.now());

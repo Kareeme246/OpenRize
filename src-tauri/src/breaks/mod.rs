@@ -9,7 +9,9 @@
 //! - `engine.rs` is the pure state machine: the work clock, the reminder
 //!   lifecycle, scheduled breaks and the quiet rules. It returns `Effect`s.
 //! - `store.rs` reads and writes the table.
-//! - `surface.rs` is the top-right reminder panel.
+//! - `surface.rs` is the positioned reminder panel.
+//! - `stopwatch.rs` checks current stopwatch runs once a minute and yields
+//!   to breaks, using the same quiet rules and panel.
 //! - This file is the driver. The 1 Hz activity sampler calls `after_tick`;
 //!   the frontend's commands come through `command`. Both run under the
 //!   engine's lock, apply the effects (open or close the segment, pause or
@@ -20,6 +22,7 @@
 //! store locks. Nothing holds an activity lock while asking for the engine.
 
 pub mod engine;
+pub mod stopwatch;
 pub mod store;
 pub mod surface;
 
@@ -40,6 +43,8 @@ pub const EVENT_BREAK_STATE: &str = "break-state-changed";
 
 /// Runtime key in the activity DB `settings` table (epoch ms).
 const PAUSED_UNTIL_KEY: &str = "breaks_paused_until";
+/// Runs already reminded, so restarting the app does not repeat a card.
+const STOPWATCH_FIRED_KEY: &str = "stopwatch_reminder_fired";
 
 /// Extra minutes the "+5 min" control adds to a running break.
 pub const EXTEND_MINUTES: u16 = 5;
@@ -55,7 +60,7 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     let settings = state.settings_snapshot().breaks;
     let now = now_epoch_ms();
-    let (streak, paused_until) = {
+    let (streak, paused_until, fired) = {
         let store = state.activity.lock().map_err(|error| error.to_string())?;
         store::close_orphans(store.conn(), now)?;
         let break_ms = u64::from(settings.break_minutes) * 60_000;
@@ -64,10 +69,16 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
             .read_setting(PAUSED_UNTIL_KEY)
             .and_then(|value| value.parse::<u64>().ok())
             .filter(|until| *until > now);
-        (streak, paused_until)
+        let fired = store
+            .read_setting(STOPWATCH_FIRED_KEY)
+            .and_then(|value| serde_json::from_str(&value).ok())
+            .unwrap_or_default();
+        (streak, paused_until, fired)
     };
+    let mut engine = Engine::new(streak, paused_until);
+    engine.stopwatch.fired = fired;
     app.manage(BreakRuntime {
-        engine: Mutex::new(Engine::new(streak, paused_until)),
+        engine: Mutex::new(engine),
         last_published: Mutex::new(None),
     });
     app.manage(surface::SurfaceState::default());
@@ -108,6 +119,17 @@ pub fn command(app: &AppHandle, command: Command) -> Result<BreakState, String> 
     let settings = app.state::<AppState>().settings_snapshot().breaks;
     run(app, &settings, now, |engine| {
         engine.command(command, now, &settings)
+    })
+    .ok_or_else(|| "break state is unavailable".to_string())
+}
+
+/// "Keep going" dismisses just the run shown on the card.
+pub fn dismiss_stopwatch(app: &AppHandle, id: &str, started_at: u64) -> Result<BreakState, String> {
+    let now = now_epoch_ms();
+    let settings = app.state::<AppState>().settings_snapshot().breaks;
+    run(app, &settings, now, |engine| {
+        engine.stopwatch.dismiss(id, started_at);
+        Vec::new()
     })
     .ok_or_else(|| "break state is unavailable".to_string())
 }
@@ -216,6 +238,35 @@ fn run(
     let mut engine = runtime.engine.lock().ok()?;
     let effects = act(&mut engine);
     apply(app, &mut engine, effects, now);
+    let state = app.state::<AppState>();
+    let preferences = state.settings_snapshot();
+    // Trigger discovery is throttled to once a minute inside the stopwatch
+    // engine; each tick still reconciles a card against timer controls.
+    let timers = state.store.lock().ok()?.snapshot().ok()?;
+    let break_view = engine.view(now, settings, local_time(now));
+    let quiet = engine.quiet;
+    let previous_fired = engine.stopwatch.fired.clone();
+    engine.stopwatch.step(
+        now,
+        &preferences.stopwatch_reminder,
+        &timers,
+        quiet,
+        break_view.phase != Phase::Idle || break_view.paused_until.is_some(),
+    );
+    if engine.stopwatch.fired != previous_fired {
+        let saved = serde_json::to_string(&engine.stopwatch.fired)
+            .map_err(|error| error.to_string())
+            .and_then(|value| {
+                state
+                    .activity
+                    .lock()
+                    .map_err(|error| error.to_string())?
+                    .write_setting(STOPWATCH_FIRED_KEY, &value)
+            });
+        if let Err(error) = saved {
+            eprintln!("could not save stopwatch reminder runs: {error}");
+        }
+    }
     let view = engine.view(now, settings, local_time(now));
     drop(engine);
     publish(app, &runtime, &view);
@@ -231,7 +282,7 @@ fn publish(app: &AppHandle, runtime: &BreakRuntime, view: &BreakState) {
     }
     *last = Some(view.clone());
     drop(last);
-    surface::sync(app, view.phase != Phase::Idle);
+    surface::sync(app, view.phase != Phase::Idle || view.stopwatch.is_some());
     let _ = app.emit(EVENT_BREAK_STATE, view);
 }
 

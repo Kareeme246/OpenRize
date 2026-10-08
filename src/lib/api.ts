@@ -124,6 +124,16 @@ export async function breakState(): Promise<BreakState> {
   return await invoke<BreakState>("break_state");
 }
 
+export async function dismissStopwatchReminder(
+  id: string,
+  startedAt: number,
+): Promise<BreakState> {
+  return await invoke<BreakState>("dismiss_stopwatch_reminder", {
+    id,
+    startedAt,
+  });
+}
+
 /** Starts the pending reminder's break, or a manual one when none is pending. */
 export async function startBreak(): Promise<BreakState> {
   return await invoke<BreakState>("start_break");

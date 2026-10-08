@@ -1,11 +1,10 @@
-//! The reminder panel: a small, borderless window in the top-right corner of
-//! the active display, just below the menu bar. It carries the break reminder,
-//! the countdown capsule and the welcome-back card, and is the only surface
-//! break reminders use.
+//! The reminder panel: a small, borderless window at the chosen position in
+//! the active display's work area. It carries break and stopwatch reminders,
+//! the countdown capsule and the welcome-back card.
 //!
 //! Like the Pulse panel it is created on first need, hidden (not destroyed)
 //! between uses, and sized by its page: the page measures its card and calls
-//! `resize_reminder_panel`, and the window is re-anchored to the corner on
+//! `resize_reminder_panel`, and the window is re-anchored on
 //! every resize. When it becomes visible it waits for the page's next
 //! measurement, so it never shows at a stale size.
 //!
@@ -107,7 +106,7 @@ pub fn resize(app: &AppHandle, width: f64, height: f64) {
     }
 }
 
-/// Puts the window in the corner of the display the user is working on.
+/// Puts the window at the chosen anchor on the display the user is working on.
 fn place(app: &AppHandle, window: &WebviewWindow, (width, height): (f64, f64)) {
     let cursor = app.cursor_position().ok();
     let monitor = cursor
@@ -156,10 +155,10 @@ fn notification_origin(
     let top_edge = top + edge.min((area_height - height).max(0.0));
     match placement {
         NotificationPlacement::TopLeft => (left_edge, top_edge),
-        NotificationPlacement::CenterMiddle => (
-            left + ((area_width - width) / 2.0).max(0.0),
-            top + ((area_height - height) / 2.0).max(0.0),
-        ),
+        NotificationPlacement::TopRight => (right, top_edge),
+        NotificationPlacement::TopCenter => {
+            (left + ((area_width - width) / 2.0).max(0.0), top_edge)
+        }
         NotificationPlacement::BottomLeft => (left_edge, bottom),
         NotificationPlacement::BottomRight => (right, bottom),
     }
@@ -298,14 +297,12 @@ mod tests {
             (-1908.0, 42.0)
         );
         assert_eq!(
-            notification_origin(
-                NotificationPlacement::CenterMiddle,
-                origin,
-                area,
-                size,
-                12.0
-            ),
-            (-1140.0, 495.0)
+            notification_origin(NotificationPlacement::TopCenter, origin, area, size, 12.0),
+            (-1140.0, 42.0)
+        );
+        assert_eq!(
+            notification_origin(NotificationPlacement::TopRight, origin, area, size, 12.0),
+            (-372.0, 42.0)
         );
         assert_eq!(
             notification_origin(NotificationPlacement::BottomLeft, origin, area, size, 12.0),

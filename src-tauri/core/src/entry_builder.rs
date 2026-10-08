@@ -172,7 +172,8 @@ fn push_closed(
 
 /// Whether a segment is already accounted for by a frozen entry: linked to
 /// it, or inside its span (a deleted entry's segments are unlinked, but its
-/// time must stay unassigned).
+/// time must stay unassigned). A segment linked to another entry, or still
+/// open, only counts when the overlapping entry was deleted.
 fn belongs_to_frozen(
     seg: &SegmentInput,
     frozen_ids: &HashSet<&str>,
@@ -187,8 +188,12 @@ fn belongs_to_frozen(
         return true;
     }
     let seg_end = seg.ended_at.unwrap_or(now);
+    // A live entry's own segments (linked to it, or still open) are never
+    // swallowed by a manual entry dragged over them: the two just overlap.
+    let live = seg.entry_id.is_some() || seg.ended_at.is_none();
     frozen_entries
         .iter()
+        .filter(|fe| fe.deleted_at.is_some() || !live)
         .any(|fe| seg.started_at < fe.ended_at && seg_end > fe.started_at)
 }
 

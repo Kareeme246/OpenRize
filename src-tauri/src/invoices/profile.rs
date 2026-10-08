@@ -8,6 +8,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 
+use super::err;
+
 const MAX_LOGO_UPLOAD_BYTES: usize = 5 * 1024 * 1024;
 /// Decoded-pixel guard against decompression bombs (a tiny file, a huge canvas).
 const MAX_LOGO_SOURCE_PIXELS: u64 = 40_000_000;
@@ -57,10 +59,6 @@ pub struct IssuerSnapshot {
     pub address: String,
     pub email: Option<String>,
     pub phone: Option<String>,
-}
-
-fn err(error: impl std::fmt::Display) -> String {
-    error.to_string()
 }
 
 fn optional(value: Option<String>, max: usize, label: &str) -> Result<Option<String>, String> {

@@ -14,6 +14,7 @@ use super::calibration::Calibrator;
 use super::knn::{self, Labeled};
 use super::rules::Rule;
 use super::{Field, FIELD_CATEGORY, FIELD_PROJECT};
+use crate::err;
 use crate::models::{
     Alternative, ClassifyJob, Dominant, EntryAi, FieldSuggestion, RuleSuggestion, Signal,
 };
@@ -39,10 +40,6 @@ const ARTIFACT_HISTORY: u32 = 20;
 const LEARNING_RESET_KEY: &str = "ai_learning_reset_at";
 
 type Result<T> = std::result::Result<T, String>;
-
-fn err(error: rusqlite::Error) -> String {
-    error.to_string()
-}
 
 fn new_id() -> String {
     uuid::Uuid::now_v7().to_string()

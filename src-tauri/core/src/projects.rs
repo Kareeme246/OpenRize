@@ -16,6 +16,7 @@ use serde::Serialize;
 
 use crate::activity::{segment_from_row, ActivitySegment, ActivityStore, KIND_BREAK};
 use crate::ai::rules::Rule;
+use crate::err;
 use crate::models::{NewClient, NewProject};
 
 pub const ORIGIN_HINT: &str = "hint";
@@ -32,10 +33,6 @@ pub const PALETTE: [&str; 10] = [
     "#75a4e5", "#56c2b1", "#52b788", "#df84b5", "#e4817d", "#9aa6b4", "#bfa181", "#707bf0",
     "#66b1df", "#9b87df",
 ];
-
-fn err(error: rusqlite::Error) -> String {
-    error.to_string()
-}
 
 // --- Hints ------------------------------------------------------------------
 

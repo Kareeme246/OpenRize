@@ -5,7 +5,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { NotImplementedProvider } from "./components/NotImplemented";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { useBreaks } from "./hooks/useBreaks";
@@ -340,63 +339,61 @@ export default function App() {
 
   return (
     <SettingsProvider>
-      <NotImplementedProvider>
-        <div className="flex h-full min-h-0 flex-col overflow-hidden">
-          <TopBar
-            canGoBack={nav.cursor > 0}
-            canGoForward={nav.cursor < nav.entries.length - 1}
-            onBack={back}
-            onForward={forward}
-            sidebarCollapsed={sidebarCollapsed}
-            onToggleSidebar={toggleSidebar}
-          />
-          {deletionError && (
-            <div
-              role="alert"
-              className="bg-danger-soft px-4 py-2 text-[12px] text-danger"
-            >
-              {deletionError}
-            </div>
-          )}
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
+        <TopBar
+          canGoBack={nav.cursor > 0}
+          canGoForward={nav.cursor < nav.entries.length - 1}
+          onBack={back}
+          onForward={forward}
+          sidebarCollapsed={sidebarCollapsed}
+          onToggleSidebar={toggleSidebar}
+        />
+        {deletionError && (
           <div
-            className={`grid min-h-0 flex-1 overflow-hidden transition-[grid-template-columns] duration-150 ${
-              sidebarCollapsed
-                ? "grid-cols-[56px_minmax(0,1fr)]"
-                : "grid-cols-[224px_minmax(0,1fr)]"
-            }`}
+            role="alert"
+            className="bg-danger-soft px-4 py-2 text-[12px] text-danger"
           >
-            <Sidebar
-              currentRoute={currentRoute}
-              onNavigate={navigate}
-              pendingCount={pendingCount}
-              currentApp={currentApp}
-              collapsed={sidebarCollapsed}
-              captureEnabled={captureEnabled}
-              trackingActive={trackingActive}
-              onToggleCapture={handleToggleCapture}
-              onBreak={
-                breaks.state.current && breaks.state.current.endedAt === null
-                  ? {
-                      label: breaks.state.current.label,
-                      remainingMs:
-                        breaks.state.current.startedAt +
-                        breaks.state.current.plannedMs -
-                        breaks.now,
-                    }
-                  : undefined
-              }
-              updateVersion={updates?.available?.version}
-              onOpenUpdate={() => {
-                navigate({ name: "settings", section: "updates" });
-                setRevealUpdates((count) => count + 1);
-              }}
-            />
-            <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
-              {renderView()}
-            </div>
+            {deletionError}
+          </div>
+        )}
+        <div
+          className={`grid min-h-0 flex-1 overflow-hidden transition-[grid-template-columns] duration-150 ${
+            sidebarCollapsed
+              ? "grid-cols-[56px_minmax(0,1fr)]"
+              : "grid-cols-[224px_minmax(0,1fr)]"
+          }`}
+        >
+          <Sidebar
+            currentRoute={currentRoute}
+            onNavigate={navigate}
+            pendingCount={pendingCount}
+            currentApp={currentApp}
+            collapsed={sidebarCollapsed}
+            captureEnabled={captureEnabled}
+            trackingActive={trackingActive}
+            onToggleCapture={handleToggleCapture}
+            onBreak={
+              breaks.state.current && breaks.state.current.endedAt === null
+                ? {
+                    label: breaks.state.current.label,
+                    remainingMs:
+                      breaks.state.current.startedAt +
+                      breaks.state.current.plannedMs -
+                      breaks.now,
+                  }
+                : undefined
+            }
+            updateVersion={updates?.available?.version}
+            onOpenUpdate={() => {
+              navigate({ name: "settings", section: "updates" });
+              setRevealUpdates((count) => count + 1);
+            }}
+          />
+          <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+            {renderView()}
           </div>
         </div>
-      </NotImplementedProvider>
+      </div>
     </SettingsProvider>
   );
 }

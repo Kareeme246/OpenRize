@@ -135,14 +135,6 @@ export function dayEdges(start: Date, end: Date): number[] {
   return edges;
 }
 
-export function daysIn(range: DateRange): Date[] {
-  const days: Date[] = [];
-  for (let day = range.start; day < range.end; day = addDays(day, 1)) {
-    days.push(day);
-  }
-  return days;
-}
-
 /** `Wed, Sep 23`, `Week 39 · Sep 21–27`, or `September 2026`. */
 export function rangeLabel(scale: CalendarScale, date: Date): string {
   if (scale === "day") {

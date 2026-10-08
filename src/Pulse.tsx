@@ -6,11 +6,7 @@ import { useCatalog } from "./hooks/useCatalog";
 import { SettingsProvider, useSettings } from "./hooks/useSettings";
 import { useTauriEvent } from "./hooks/useTauriEvent";
 import { useTimers } from "./hooks/useTimers";
-import {
-  type ActivitySnapshot,
-  type ActivityTick,
-  startOfToday,
-} from "./lib/activity";
+import { startOfToday } from "./lib/activity";
 import * as api from "./lib/api";
 import { describeError } from "./lib/api";
 import { type BreakState, formatCountdown, formatUntil } from "./lib/breaks";
@@ -33,7 +29,13 @@ import {
   formatDuration as formatStopwatch,
   type Timer,
 } from "./lib/timers";
-import type { Category, Project, TimeEntry } from "./lib/types";
+import type {
+  ActivitySnapshot,
+  ActivityTick,
+  Category,
+  Project,
+  TimeEntry,
+} from "./lib/types";
 
 const DAY_MS = 86_400_000;
 const MAX_TIMERS = 3;

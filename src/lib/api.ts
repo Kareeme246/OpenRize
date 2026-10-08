@@ -10,7 +10,6 @@ import type {
   BillableEntry,
   Category,
   Client,
-  EnergySample,
   EnergySummary,
   EntryDetail,
   EntryQuery,
@@ -22,7 +21,6 @@ import type {
   InvoiceProfile,
   InvoiceProfileInput,
   InvoiceSummary,
-  NewCategory,
   NewClient,
   NewProject,
   NewTimeEntry,
@@ -35,7 +33,6 @@ import type {
   RollupGroup,
   RuleSuggestion,
   TimeEntry,
-  UpdateCategory,
   UpdateClient,
   UpdateProject,
   UpdateStatus,
@@ -198,46 +195,14 @@ export async function fetchActivitySnapshot(
   return await invoke<ActivitySnapshot>("activity_snapshot", { sinceMs });
 }
 
-export const activitySnapshot = fetchActivitySnapshot;
-
 export async function setCaptureEnabled(enabled: boolean): Promise<void> {
   await invoke("set_capture_enabled", { enabled });
-}
-
-export async function setIdleThreshold(minutes: number): Promise<void> {
-  await invoke("set_idle_threshold", { minutes });
-}
-
-export async function startSession(
-  kind: string,
-  label?: string,
-): Promise<void> {
-  await invoke("start_session", { kind, label });
-}
-
-export async function stopSession(): Promise<void> {
-  await invoke("stop_session");
-}
-
-export async function markSegmentReviewed(id: number): Promise<void> {
-  await invoke("mark_segment_reviewed", { id });
 }
 
 // --- Categories ---
 
 export async function listCategories(): Promise<Category[]> {
   return await invoke<Category[]>("list_categories");
-}
-
-export async function createCategory(category: NewCategory): Promise<Category> {
-  return await invoke<Category>("create_category", { category });
-}
-
-export async function updateCategory(
-  id: string,
-  patch: UpdateCategory,
-): Promise<Category> {
-  return await invoke<Category>("update_category", { id, patch });
 }
 
 export async function deleteCategory(id: string): Promise<void> {
@@ -632,13 +597,6 @@ export function deleteTimer(id: string): Promise<Timer[]> {
 
 export function getEnergySummary(days?: number): Promise<EnergySummary> {
   return invoke<EnergySummary>("get_energy_summary", { days });
-}
-
-export function queryEnergyHistory(
-  sinceMs?: number,
-  limit?: number,
-): Promise<EnergySample[]> {
-  return invoke<EnergySample[]>("query_energy_history", { sinceMs, limit });
 }
 
 export function resetEnergyHistory(): Promise<EnergySummary> {

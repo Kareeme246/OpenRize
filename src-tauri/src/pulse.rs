@@ -10,6 +10,11 @@
 //! `resize_pulse_panel`, and the window is re-anchored under the icon on every
 //! resize. The first open waits for that first measurement, so the panel is
 //! never shown at a guessed height.
+//!
+//! On macOS the window is a panel that takes key focus but never becomes the
+//! app's main window, like a native menu bar extra. Tiling window managers
+//! (komorebi, for one) adopt whatever window an app reports as its main
+//! window, so a plain window here would be tiled the moment it took focus.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -174,27 +179,61 @@ fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .visible(false)
         .focused(false)
         .build()?;
-    join_every_space(&window);
+    make_panel(&window);
     Ok(window)
 }
 
-/// Opens on whichever Space is current, like a native menu, including a
-/// full-screen app's: without `FullScreenAuxiliary`, showing the panel there
-/// would switch the display away from that app.
+/// Turns the window into a panel that can be key (it takes typing and its
+/// blur closes it) but never main, so window managers that track the main
+/// window leave it alone. It opens on whichever Space is current, like a
+/// native menu, including a full-screen app's: without `FullScreenAuxiliary`,
+/// showing the panel there would switch the display away from that app.
 #[cfg(target_os = "macos")]
-fn join_every_space(window: &WebviewWindow) {
-    use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
+fn make_panel(window: &WebviewWindow) {
+    use objc2::runtime::{AnyClass, AnyObject};
+    use objc2::{define_class, ClassType, MainThreadOnly};
+    use objc2_app_kit::{NSPanel, NSWindowCollectionBehavior};
+
+    define_class!(
+        // SAFETY: NSPanel has no subclassing requirements, the class adds no
+        // instance variables, and it overrides nothing but two predicates.
+        #[unsafe(super(NSPanel))]
+        #[thread_kind = MainThreadOnly]
+        #[name = "OpenRizePulsePanel"]
+        struct PulsePanel;
+
+        impl PulsePanel {
+            #[unsafe(method(canBecomeKeyWindow))]
+            fn can_become_key_window(&self) -> bool {
+                true
+            }
+
+            #[unsafe(method(canBecomeMainWindow))]
+            fn can_become_main_window(&self) -> bool {
+                false
+            }
+        }
+    );
 
     let target = window.clone();
     let _ = window.run_on_main_thread(move || {
         let Ok(pointer) = target.ns_window() else {
             return;
         };
-        // SAFETY: `ns_window` is the live NSWindow behind this Tauri window,
-        // and this runs on the main thread, where AppKit requires it.
-        let ns_window = unsafe { &*pointer.cast::<NSWindow>() };
-        ns_window.setCollectionBehavior(
-            ns_window.collectionBehavior()
+        let object = pointer.cast::<AnyObject>();
+        let class: &AnyClass = PulsePanel::class();
+        // SAFETY: `ns_window` is the live NSWindow behind this Tauri window and
+        // this runs on the main thread. The swap is the one the reminder panel
+        // makes (see `breaks::surface`): an NSPanel subclass with no extra
+        // instance variables, overriding the predicates tao's subclass used.
+        unsafe { objc2::ffi::object_setClass(object, class) };
+        // SAFETY: the object is now a `PulsePanel`, an NSPanel.
+        let panel = unsafe { &*object.cast::<NSPanel>() };
+        // Panels hide when the app deactivates; the blur handler already
+        // hides this one, and two paths racing to hide it confuse the toggle.
+        panel.setHidesOnDeactivate(false);
+        panel.setCollectionBehavior(
+            panel.collectionBehavior()
                 | NSWindowCollectionBehavior::CanJoinAllSpaces
                 | NSWindowCollectionBehavior::FullScreenAuxiliary,
         );
@@ -202,7 +241,7 @@ fn join_every_space(window: &WebviewWindow) {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn join_every_space(window: &WebviewWindow) {
+fn make_panel(window: &WebviewWindow) {
     let _ = window.set_visible_on_all_workspaces(true);
 }
 

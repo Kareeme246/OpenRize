@@ -7,7 +7,7 @@ import {
   useState,
 } from "react";
 import { useBreaks } from "./hooks/useBreaks";
-import { SettingsProvider } from "./hooks/useSettings";
+import { SettingsProvider, useSettings } from "./hooks/useSettings";
 import * as api from "./lib/api";
 import {
   type BreakState,
@@ -37,6 +37,12 @@ export default function Reminder() {
 
 function ReminderPanel() {
   const { state, now } = useBreaks();
+  const { settings } = useSettings();
+  // A panel in a bottom corner opens its menus upwards, and is pinned to the
+  // window's bottom edge, which Rust keeps fixed as the window grows to fit.
+  const upward =
+    settings.notificationPlacement === "bottomLeft" ||
+    settings.notificationPlacement === "bottomRight";
   const [menu, setMenu] = useState<"snooze" | "more" | null>(null);
   const [collapsed, setCollapsed] = useState<{
     id: string | null;
@@ -93,7 +99,7 @@ function ReminderPanel() {
   }, [state, menu, compact]);
 
   return (
-    <div className="fixed top-0 right-0">
+    <div className={`fixed right-0 ${upward ? "bottom-0" : "top-0"}`}>
       <div
         ref={card}
         className={`w-max select-none border border-line-strong bg-panel text-[12px] text-fg ${compact ? "rounded-full" : "rounded-[14px]"}`}
@@ -104,6 +110,7 @@ function ReminderPanel() {
           menu={menu}
           menuRef={menuRef}
           onMenu={setMenu}
+          upward={upward}
           expanded={!compact}
           onToggle={() => setCollapsed({ id: currentId, value: !compact })}
         />
@@ -118,6 +125,7 @@ function PanelBody({
   menu,
   menuRef,
   onMenu,
+  upward,
   expanded,
   onToggle,
 }: {
@@ -126,6 +134,7 @@ function PanelBody({
   menu: "snooze" | "more" | null;
   menuRef: RefObject<HTMLDivElement | null>;
   onMenu: (menu: "snooze" | "more" | null) => void;
+  upward: boolean;
   expanded: boolean;
   onToggle: () => void;
 }) {
@@ -141,6 +150,7 @@ function PanelBody({
           menu={menu}
           menuRef={menuRef}
           onMenu={onMenu}
+          upward={upward}
         />
       ) : null;
     case "nudge":
@@ -192,7 +202,7 @@ function StopwatchCard({
           onClick={() =>
             act(api.dismissStopwatchReminder(reminder.id, reminder.startedAt))
           }
-          className="rounded-none px-2.5 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+          className="rounded-lg px-2.5 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
         >
           Keep going
         </button>
@@ -211,11 +221,13 @@ function ReminderCard({
   menu,
   menuRef,
   onMenu,
+  upward,
 }: {
   reminder: ReminderView;
   menu: "snooze" | "more" | null;
   menuRef: RefObject<HTMLDivElement | null>;
   onMenu: (menu: "snooze" | "more" | null) => void;
+  upward: boolean;
 }) {
   const scheduled = reminder.source === "scheduled";
   const title = scheduled
@@ -257,7 +269,7 @@ function ReminderCard({
             <button
               type="button"
               onClick={() => act(api.snoozeBreak(15))}
-              className="shrink-0 whitespace-nowrap rounded-none border border-line bg-surface px-3 py-1.5 font-medium text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
+              className="shrink-0 whitespace-nowrap rounded-lg border border-line bg-surface px-3 py-1.5 font-medium text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
             >
               In 15 min
             </button>
@@ -269,7 +281,7 @@ function ReminderCard({
                 onToggle={() => onMenu(menu === "snooze" ? null : "snooze")}
               />
               {menu === "snooze" && (
-                <Menu align="left" menuRef={menuRef}>
+                <Menu align="left" upward={upward} menuRef={menuRef}>
                   {SNOOZE_CHOICES.map((minutes) => (
                     <MenuItem
                       key={minutes}
@@ -285,7 +297,7 @@ function ReminderCard({
         <button
           type="button"
           onClick={() => act(api.skipBreak())}
-          className="shrink-0 whitespace-nowrap rounded-none px-2.5 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+          className="shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
         >
           {scheduled ? "Skip today" : "Skip"}
         </button>
@@ -295,7 +307,7 @@ function ReminderCard({
             aria-label="More options"
             aria-expanded={menu === "more"}
             onClick={() => onMenu(menu === "more" ? null : "more")}
-            className="grid size-7 place-items-center rounded-none text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+            className="grid size-7 place-items-center rounded-lg text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
           >
             <svg
               viewBox="0 0 24 24"
@@ -308,7 +320,7 @@ function ReminderCard({
             </svg>
           </button>
           {menu === "more" && (
-            <Menu align="right" menuRef={menuRef}>
+            <Menu align="right" upward={upward} menuRef={menuRef}>
               <MenuItem
                 onClick={() =>
                   act(api.pauseBreakReminders(Date.now() + HOUR_MS))
@@ -354,11 +366,11 @@ function SnoozeButton({
   onToggle: () => void;
 }) {
   return (
-    <div className="flex overflow-hidden rounded-none border border-line bg-surface">
+    <div className="flex rounded-lg border border-line bg-surface">
       <button
         type="button"
         onClick={() => act(api.snoozeBreak(minutes))}
-        className="shrink-0 whitespace-nowrap px-3 py-1.5 font-medium text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
+        className="shrink-0 whitespace-nowrap rounded-l-[calc(var(--radius-lg)-1px)] px-3 py-1.5 font-medium text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
       >
         Snooze {minutes} min
       </button>
@@ -367,7 +379,9 @@ function SnoozeButton({
         aria-label="Choose snooze length"
         aria-expanded={open}
         onClick={onToggle}
-        className="grid w-7 place-items-center border-line border-l text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+        className={`grid w-7 place-items-center rounded-r-[calc(var(--radius-lg)-1px)] border-line border-l transition-colors hover:bg-surface-strong hover:text-fg ${
+          open ? "bg-surface-strong text-fg" : "text-fg-soft"
+        }`}
       >
         <svg
           viewBox="0 0 24 24"
@@ -388,19 +402,21 @@ function SnoozeButton({
 
 function Menu({
   align,
+  upward,
   menuRef,
   children,
 }: {
   align: "left" | "right";
+  upward: boolean;
   menuRef: RefObject<HTMLDivElement | null>;
   children: ReactNode;
 }) {
   return (
     <div
       ref={menuRef}
-      className={`absolute top-full z-50 mt-1 flex w-fit min-w-[150px] flex-col rounded-lg border border-line bg-panel p-1 ${
-        align === "right" ? "right-0" : "left-0"
-      }`}
+      className={`absolute z-50 flex w-fit min-w-[150px] flex-col rounded-lg border border-line bg-panel p-1 ${
+        upward ? "bottom-full mb-1" : "top-full mt-1"
+      } ${align === "right" ? "right-0" : "left-0"}`}
     >
       {children}
     </div>
@@ -418,7 +434,7 @@ function MenuItem({
     <button
       type="button"
       onClick={onClick}
-      className="whitespace-nowrap rounded-none px-2.5 py-1.5 text-left text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
+      className="whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
     >
       {children}
     </button>
@@ -468,7 +484,7 @@ function BreakCard({
         onClick={onToggle}
         aria-expanded={expanded}
         aria-label={expanded ? "Collapse break tile" : "Expand break tile"}
-        className="flex min-h-[38px] w-full items-center gap-2 rounded-none px-4 py-2 text-left hover:bg-surface"
+        className="flex min-h-[38px] w-full items-center gap-2 rounded-full px-4 py-2 text-left hover:bg-surface"
       >
         <span
           className={`size-2 shrink-0 rounded-full bg-break ${over ? "" : "animate-pulse"}`}
@@ -511,7 +527,7 @@ function BreakCard({
             <button
               type="button"
               onClick={() => act(api.extendBreak())}
-              className="rounded-none border border-line bg-surface px-3 py-1.5 font-medium text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
+              className="rounded-lg border border-line bg-surface px-3 py-1.5 font-medium text-[12px] text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
             >
               +5 min
             </button>

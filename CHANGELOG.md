@@ -4,8 +4,24 @@ All notable changes are documented here. Entries are generated from commit histo
 
 ## [unreleased]
 
+### Features
+- Add long-running stopwatch reminders and notification placement options (#97)
+
+### Bug Fixes
+- **calendar:** Keep the open tracking entry running when a manual session overlaps it (#92)
+
+### Refactoring
+- Remove dead activity UI layer and duplicate IPC types (#94)
+- Use shared isTyping, plural and Glyph helpers (#95)
+- Share the SQLite error converter and APP_KEY (#96)
+- Remove unreachable NotImplemented dialog (#93)
+## [0.9.6] - 2026-10-07
+
 ### Bug Fixes
 - **review:** Place merge buttons on a row under action buttons (#91)
+
+### Documentation
+- Update changelog for v0.9.6
 ## [0.9.5] - 2026-10-07
 
 ### Features

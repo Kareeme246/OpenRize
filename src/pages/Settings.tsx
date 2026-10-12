@@ -20,7 +20,7 @@ import { useEnergy } from "../hooks/useEnergy";
 import { useSettings } from "../hooks/useSettings";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
-import { formatRelative, formatShortDate } from "../lib/format";
+import { formatShortDate } from "../lib/format";
 import {
   FILE_MANAGER,
   OS_NAME,
@@ -656,7 +656,7 @@ function TrackingHoursSetting({
 }
 
 /** "Checking…", "Downloading 42%", or when the last check ran. */
-function updateSummary(status: UpdateStatus, now: number): string {
+function updateSummary(status: UpdateStatus): string {
   switch (status.phase.kind) {
     case "checking":
       return "Checking for updates…";
@@ -676,7 +676,7 @@ function updateSummary(status: UpdateStatus, now: number): string {
   }
   return status.lastCheckedMs === null
     ? `You have ${status.currentVersion}`
-    : `Up to date · Checked ${formatRelative(status.lastCheckedMs, now).toLowerCase()}`;
+    : `Up to date · ${status.currentVersion}`;
 }
 
 /**
@@ -732,17 +732,7 @@ function ReleaseNotesList({ releases }: { releases: ReleaseNotes[] }) {
  * schedule (see src-tauri/src/updater.rs); this only shows the result.
  */
 function UpdatesSetting({ status }: { status: UpdateStatus | null }) {
-  const [now, setNow] = useState(() => Date.now());
   const [requestError, setRequestError] = useState<string | null>(null);
-
-  // Keeps "Checked 5 min ago" honest while the page stays open.
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(id);
-  }, []);
-  useEffect(() => {
-    if (status?.lastCheckedMs) setNow(Date.now());
-  }, [status?.lastCheckedMs]);
 
   const check = (): void => {
     setRequestError(null);
@@ -765,7 +755,7 @@ function UpdatesSetting({ status }: { status: UpdateStatus | null }) {
     <SettingGroup title="Updates">
       <SettingRow
         title="OpenRize updates"
-        description={status === null ? "Loading…" : updateSummary(status, now)}
+        description={status === null ? "Loading…" : updateSummary(status)}
       >
         {available ? (
           <button

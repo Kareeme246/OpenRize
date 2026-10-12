@@ -1,10 +1,10 @@
-//! Session-local undo for deletions. Only the fields deletion changes are
+//! Undoable deletions (one `history::Command`). Only the fields deletion changes are
 //! captured, so restoring a catalog link never overwrites later descriptions.
 use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::{params, Connection};
 
-use super::{segment_from_row, ActivityStore};
+use super::{history::Command, segment_from_row, ActivityStore};
 use crate::models::ActivitySegment;
 
 #[cfg(test)]
@@ -213,7 +213,7 @@ impl Deletion {
         Ok(deletion)
     }
 
-    fn apply(&self, conn: &Connection, undo: bool, now: u64) -> Result<(), String> {
+    pub(super) fn apply(&self, conn: &Connection, undo: bool, now: u64) -> Result<(), String> {
         let conflict = "The deleted items have changed since this operation; undo/redo cannot safely overwrite them.";
         if !undo {
             // Recording may have resumed into a restored building entry. Do
@@ -328,28 +328,6 @@ impl Deletion {
     }
 }
 
-pub(super) enum UndoItem {
-    Deletion(Deletion),
-    Split {
-        original_id: String,
-        original_ended_at: u64,
-        new_id: String,
-        split_at: u64,
-    },
-    Add {
-        id: String,
-    },
-    Merge {
-        primary_id: String,
-        secondary_id: String,
-        primary_original_started_at: u64,
-        primary_original_ended_at: u64,
-        secondary_original_started_at: u64,
-        secondary_original_ended_at: u64,
-        secondary_segment_ids: Vec<String>,
-    },
-}
-
 impl ActivityStore {
     pub(super) fn delete_undoable(
         &mut self,
@@ -368,220 +346,22 @@ impl ActivityStore {
         }
         deletion.apply(&tx, false, now)?;
         tx.commit().map_err(|error| error.to_string())?;
-        if self
-            .current
-            .as_ref()
-            .is_some_and(|current| current.entry_id.as_ref().is_some_and(|id| ids.contains(id)))
-        {
-            self.current = None;
-            self.pending_switch = None;
-        }
-        self.record_undo(UndoItem::Deletion(deletion));
+        self.forget_deleted_segment(&deletion);
+        self.record_undo(Command::Deletion(deletion));
         Ok(())
     }
 
-    pub fn undo_deletion(&mut self, now: u64) -> Result<bool, String> {
-        let Some(item) = self.undo_stack.last() else {
-            return Ok(false);
-        };
-        let tx = self.conn.transaction().map_err(|error| error.to_string())?;
-        match item {
-            UndoItem::Deletion(deletion) => {
-                deletion.apply(&tx, true, now)?;
-            }
-            UndoItem::Split {
-                original_id,
-                original_ended_at,
-                new_id,
-                ..
-            } => {
-                tx.execute(
-                    "UPDATE time_entries SET ended_at = ?1, updated_at = ?2 WHERE id = ?3;",
-                    params![*original_ended_at as i64, now as i64, original_id],
-                )
-                .map_err(|e| e.to_string())?;
-                tx.execute(
-                    "UPDATE segments SET entry_id = ?1 WHERE entry_id = ?2;",
-                    params![original_id, new_id],
-                )
-                .map_err(|e| e.to_string())?;
-                tx.execute(
-                    "UPDATE time_entries SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2;",
-                    params![now as i64, new_id],
-                )
-                .map_err(|e| e.to_string())?;
-            }
-            UndoItem::Add { id } => {
-                tx.execute(
-                    "UPDATE time_entries SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2;",
-                    params![now as i64, id],
-                )
-                .map_err(|e| e.to_string())?;
-            }
-            UndoItem::Merge {
-                primary_id,
-                secondary_id,
-                primary_original_started_at,
-                primary_original_ended_at,
-                secondary_original_started_at,
-                secondary_original_ended_at,
-                secondary_segment_ids,
-            } => {
-                tx.execute(
-                    "UPDATE time_entries SET started_at = ?1, ended_at = ?2, updated_at = ?3 WHERE id = ?4;",
-                    params![
-                        *primary_original_started_at as i64,
-                        *primary_original_ended_at as i64,
-                        now as i64,
-                        primary_id
-                    ],
-                )
-                .map_err(|e| e.to_string())?;
-                tx.execute(
-                    "UPDATE time_entries SET deleted_at = NULL, started_at = ?1, ended_at = ?2, updated_at = ?3 WHERE id = ?4;",
-                    params![
-                        *secondary_original_started_at as i64,
-                        *secondary_original_ended_at as i64,
-                        now as i64,
-                        secondary_id
-                    ],
-                )
-                .map_err(|e| e.to_string())?;
-                for seg_id in secondary_segment_ids {
-                    tx.execute(
-                        "UPDATE segments SET entry_id = ?1 WHERE id = ?2;",
-                        params![secondary_id, seg_id],
-                    )
-                    .map_err(|e| e.to_string())?;
-                }
-            }
+    /// Deleting the live entry deletes the segment capture is writing; the
+    /// next tick opens a fresh one instead of writing into a missing row.
+    pub(super) fn forget_deleted_segment(&mut self, deletion: &Deletion) {
+        if self.current.as_ref().is_some_and(|current| {
+            deletion
+                .segments
+                .iter()
+                .any(|segment| segment.id == current.id)
+        }) {
+            self.current = None;
+            self.pending_switch = None;
         }
-        tx.commit().map_err(|error| error.to_string())?;
-
-        let item = self.undo_stack.pop().unwrap();
-        match &item {
-            UndoItem::Split {
-                original_id,
-                new_id,
-                ..
-            } => {
-                if self
-                    .current
-                    .as_ref()
-                    .is_some_and(|c| c.entry_id.as_deref() == Some(new_id))
-                {
-                    if let Some(ref mut c) = self.current {
-                        c.entry_id = Some(original_id.clone());
-                    }
-                }
-                self.log_event(original_id, "merged", "user", None, now);
-            }
-            UndoItem::Add { id } => {
-                if self
-                    .current
-                    .as_ref()
-                    .is_some_and(|c| c.entry_id.as_deref() == Some(id))
-                {
-                    self.current = None;
-                    self.pending_switch = None;
-                }
-            }
-            UndoItem::Merge { primary_id, .. } => {
-                self.log_event(primary_id, "split", "user", None, now);
-            }
-            UndoItem::Deletion(_) => {}
-        }
-
-        self.redo_stack.push(item);
-        Ok(true)
-    }
-
-    pub fn redo_deletion(&mut self, now: u64) -> Result<bool, String> {
-        let Some(item) = self.redo_stack.last() else {
-            return Ok(false);
-        };
-        let tx = self.conn.transaction().map_err(|error| error.to_string())?;
-        match item {
-            UndoItem::Deletion(deletion) => {
-                deletion.apply(&tx, false, now)?;
-            }
-            UndoItem::Split {
-                original_id,
-                split_at,
-                new_id,
-                ..
-            } => {
-                tx.execute(
-                    "UPDATE time_entries SET ended_at = ?1, updated_at = ?2 WHERE id = ?3;",
-                    params![*split_at as i64, now as i64, original_id],
-                )
-                .map_err(|e| e.to_string())?;
-                tx.execute(
-                    "UPDATE time_entries SET deleted_at = NULL, updated_at = ?1 WHERE id = ?2;",
-                    params![now as i64, new_id],
-                )
-                .map_err(|e| e.to_string())?;
-                tx.execute(
-                    "UPDATE segments SET entry_id = ?1 WHERE entry_id = ?2 AND started_at >= ?3;",
-                    params![new_id, original_id, *split_at as i64],
-                )
-                .map_err(|e| e.to_string())?;
-            }
-            UndoItem::Add { id } => {
-                tx.execute(
-                    "UPDATE time_entries SET deleted_at = NULL, updated_at = ?1 WHERE id = ?2;",
-                    params![now as i64, id],
-                )
-                .map_err(|e| e.to_string())?;
-            }
-            UndoItem::Merge {
-                primary_id,
-                secondary_id,
-                primary_original_started_at,
-                primary_original_ended_at,
-                secondary_original_started_at,
-                secondary_original_ended_at,
-                ..
-            } => {
-                let merged_started_at =
-                    primary_original_started_at.min(secondary_original_started_at);
-                let merged_ended_at = primary_original_ended_at.max(secondary_original_ended_at);
-                tx.execute(
-                    "UPDATE time_entries SET started_at = ?1, ended_at = ?2, updated_at = ?3 WHERE id = ?4;",
-                    params![
-                        *merged_started_at as i64,
-                        *merged_ended_at as i64,
-                        now as i64,
-                        primary_id
-                    ],
-                )
-                .map_err(|e| e.to_string())?;
-                tx.execute(
-                    "UPDATE segments SET entry_id = ?1 WHERE entry_id = ?2;",
-                    params![primary_id, secondary_id],
-                )
-                .map_err(|e| e.to_string())?;
-                tx.execute(
-                    "UPDATE time_entries SET deleted_at = ?1, updated_at = ?2 WHERE id = ?3;",
-                    params![now as i64, now as i64, secondary_id],
-                )
-                .map_err(|e| e.to_string())?;
-            }
-        }
-        tx.commit().map_err(|error| error.to_string())?;
-
-        let item = self.redo_stack.pop().unwrap();
-        match &item {
-            UndoItem::Split { original_id, .. } => {
-                self.log_event(original_id, "split", "user", None, now);
-            }
-            UndoItem::Merge { primary_id, .. } => {
-                self.log_event(primary_id, "merged", "user", None, now);
-            }
-            UndoItem::Add { .. } | UndoItem::Deletion(_) => {}
-        }
-
-        self.undo_stack.push(item);
-        Ok(true)
     }
 }

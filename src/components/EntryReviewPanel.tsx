@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useMinuteClock } from "../hooks/useMinuteClock";
 import {
   BAND_FILL,
   BAND_LABEL,
@@ -14,11 +15,12 @@ import {
   METER_SEGMENTS,
   percent,
 } from "../lib/confidence";
-import { isTyping } from "../lib/entries";
+import { entryEnd, isTyping } from "../lib/entries";
 import { shortcutLabel } from "../lib/platform";
 import type {
   Category,
   EntryDetail,
+  EntryEvent,
   FieldSuggestion,
   Project,
   RuleSuggestion,
@@ -62,6 +64,27 @@ const EVENT_LABELS: Record<string, string> = {
   recategorized: "Recategorized",
   auto_approved: "Auto-approved",
 };
+
+/** "Undid split": undo and redo name the change they reversed. */
+function eventLabel(event: EntryEvent): string {
+  if (event.kind === "undone" || event.kind === "redone") {
+    let action = "change";
+    try {
+      const payload: unknown = JSON.parse(event.payload ?? "{}");
+      if (
+        typeof payload === "object" &&
+        payload !== null &&
+        "action" in payload &&
+        typeof payload.action === "string"
+      )
+        action = payload.action.toLowerCase();
+    } catch {
+      // A malformed payload still reads as an undo.
+    }
+    return `${event.kind === "undone" ? "Undid" : "Redid"} ${action}`;
+  }
+  return EVENT_LABELS[event.kind] ?? event.kind;
+}
 
 const ACTOR_LABELS: Record<string, string> = {
   user: "you",
@@ -196,6 +219,7 @@ export function EntryReviewPanel({
   formatTime,
   formatDuration,
 }: EntryReviewPanelProps) {
+  const now = useMinuteClock();
   const { entry, job } = detail;
   const [tab, setTab] = useState<"apps" | "titles" | "log" | "history">("apps");
   const [editing, setEditing] = useState(false);
@@ -282,6 +306,8 @@ export function EntryReviewPanel({
   };
 
   /** Saves new bounds; an end at or before the start is refused. */
+  // The live entry's stored end trails the clock until the next rebuild.
+  const endedAt = entryEnd(entry, now);
   const commitTimes = (startedAt: number, endedAt: number): boolean => {
     if (endedAt <= startedAt) return false;
     onSetTimes(startedAt, endedAt);
@@ -347,17 +373,17 @@ export function EntryReviewPanel({
               epochMs={entry.startedAt}
               label="Start time"
               disabled={locked}
-              onCommit={(startedAt) => commitTimes(startedAt, entry.endedAt)}
+              onCommit={(startedAt) => commitTimes(startedAt, endedAt)}
             />
             <span>–</span>
             <TimeField
-              epochMs={entry.endedAt}
+              epochMs={endedAt}
               label="End time"
               disabled={locked}
               onCommit={(endedAt) => commitTimes(entry.startedAt, endedAt)}
             />
             <span className="ml-1">
-              · {formatDuration(entry.endedAt - entry.startedAt)}
+              · {formatDuration(endedAt - entry.startedAt)}
             </span>
           </span>
         </div>
@@ -548,7 +574,7 @@ export function EntryReviewPanel({
                 </span>
               </button>
             )}
-            <Tooltip content="Split at the main app switch (S)">
+            <Tooltip content="Split in two (S)">
               <button
                 type="button"
                 onClick={onSplit}
@@ -711,7 +737,7 @@ export function EntryReviewPanel({
                     className="flex items-center justify-between text-fg-soft"
                   >
                     <span>
-                      {EVENT_LABELS[event.kind] ?? event.kind} by{" "}
+                      {eventLabel(event)} by{" "}
                       {ACTOR_LABELS[event.actor] ?? event.actor}
                     </span>
                     <span className="font-mono text-[10px] text-fg-faint">

@@ -70,8 +70,14 @@ export default function App() {
     };
   }
   const [revealTimer, setRevealTimer] = useState<{ id: string }>();
-  const [deletionError, setDeletionError] = useState<string | null>(null);
-  const deletionBusy = useRef(false);
+  const [undoError, setUndoError] = useState<string | null>(null);
+  // A fresh id per ⌘Z, so repeating the same undo restarts the notice.
+  const [undoNotice, setUndoNotice] = useState<{
+    id: number;
+    text: string;
+  } | null>(null);
+  const clearUndoNotice = useCallback(() => setUndoNotice(null), []);
+  const undoBusy = useRef(false);
 
   const [captureEnabled, setCaptureEnabledState] = useState(true);
   const [trackingActive, setTrackingActive] = useState(true);
@@ -153,8 +159,8 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [navigate]);
 
-  // Leave native text undo alone. Deletion history belongs to the app, so it
-  // remains available after navigating away from the page that deleted it.
+  // Leave native text undo alone. Entry history belongs to the app, so it
+  // remains available after navigating away from the page that made it.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (
@@ -165,14 +171,23 @@ export default function App() {
       )
         return;
       event.preventDefault();
-      if (deletionBusy.current) return;
-      deletionBusy.current = true;
+      if (undoBusy.current) return;
+      undoBusy.current = true;
+      const redo = event.shiftKey;
       void api
-        .undoDeletion(event.shiftKey)
-        .then(() => setDeletionError(null))
-        .catch((cause: unknown) => setDeletionError(api.describeError(cause)))
+        .undo(redo)
+        .then((label) => {
+          setUndoError(null);
+          setUndoNotice({
+            id: Date.now(),
+            text: label
+              ? `${redo ? "Redid" : "Undid"} ${label.toLowerCase()}`
+              : `Nothing to ${redo ? "redo" : "undo"}`,
+          });
+        })
+        .catch((cause: unknown) => setUndoError(api.describeError(cause)))
         .finally(() => {
-          deletionBusy.current = false;
+          undoBusy.current = false;
         });
     };
     window.addEventListener("keydown", onKeyDown);
@@ -348,13 +363,20 @@ export default function App() {
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={toggleSidebar}
         />
-        {deletionError && (
+        {undoError && (
           <div
             role="alert"
             className="bg-danger-soft px-4 py-2 text-[12px] text-danger"
           >
-            {deletionError}
+            {undoError}
           </div>
+        )}
+        {undoNotice && (
+          <UndoNotice
+            key={undoNotice.id}
+            text={undoNotice.text}
+            onDone={clearUndoNotice}
+          />
         )}
         <div
           className={`grid min-h-0 flex-1 overflow-hidden transition-[grid-template-columns] duration-150 ${
@@ -395,5 +417,18 @@ export default function App() {
         </div>
       </div>
     </SettingsProvider>
+  );
+}
+
+/** "Undid split": a brief pill confirming what ⌘Z did, then gone. */
+function UndoNotice({ text, onDone }: { text: string; onDone: () => void }) {
+  useEffect(() => {
+    const timer = window.setTimeout(onDone, 1800);
+    return () => window.clearTimeout(timer);
+  }, [onDone]);
+  return (
+    <output className="pointer-events-none fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-full border border-line-strong bg-surface-strong px-3.5 py-1.5 font-medium text-[12px] text-fg shadow-lg">
+      {text}
+    </output>
   );
 }

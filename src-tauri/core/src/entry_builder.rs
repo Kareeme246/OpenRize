@@ -79,8 +79,10 @@ pub struct BuiltTimeEntry {
 /// 4. Frozen entries are preserved and never altered or re-segmented, and
 ///    their segments stay out of the build. Callers freeze every entry that
 ///    has closed (so its suggestion and any edits stay attached to a stable
-///    id), plus deleted ones, whose time must stay unassigned rather than be
-///    rebuilt into a new entry.
+///    id), plus ones the user deleted, whose unclaimed time must stay
+///    unassigned rather than be rebuilt into a new entry. A deleted entry
+///    never takes a segment that another entry owns: only the user's own
+///    deletions leave these tombstones, and they must not eat live time.
 /// 5. Ids are stable across rebuilds: an entry keeps the id its segments were
 ///    linked to, so re-running the builder updates the open entry in place
 ///    instead of minting a duplicate.
@@ -171,9 +173,9 @@ fn push_closed(
 }
 
 /// Whether a segment is already accounted for by a frozen entry: linked to
-/// it, or inside its span (a deleted entry's segments are unlinked, but its
-/// time must stay unassigned). A segment linked to another entry, or still
-/// open, only counts when the overlapping entry was deleted.
+/// it, or inside its span. Inside a deleted entry's span only unlinked
+/// segments count (its time must stay unassigned, but a segment some other
+/// entry owns is that entry's); inside a kept one, only closed unlinked ones.
 fn belongs_to_frozen(
     seg: &SegmentInput,
     frozen_ids: &HashSet<&str>,
@@ -187,13 +189,15 @@ fn belongs_to_frozen(
     {
         return true;
     }
+    if seg.entry_id.is_some() {
+        return false;
+    }
     let seg_end = seg.ended_at.unwrap_or(now);
-    // A live entry's own segments (linked to it, or still open) are never
-    // swallowed by a manual entry dragged over them: the two just overlap.
-    let live = seg.entry_id.is_some() || seg.ended_at.is_none();
+    // A live entry's open segment is never swallowed by a manual entry
+    // dragged over it: the two just overlap.
     frozen_entries
         .iter()
-        .filter(|fe| fe.deleted_at.is_some() || !live)
+        .filter(|fe| fe.deleted_at.is_some() || seg.ended_at.is_some())
         .any(|fe| seg.started_at < fe.ended_at && seg_end > fe.started_at)
 }
 
@@ -238,7 +242,14 @@ fn create_entry_from_segments(
 }
 
 /// The name an ongoing session carries until it closes.
-const UNTITLED_SESSION: &str = "Untitled session";
+pub const UNTITLED_SESSION: &str = "Untitled session";
+
+/// The template description a closed session gets: its dominant app and that
+/// app's first few window titles.
+pub fn describe(segments: &[SegmentInput]) -> String {
+    let work: Vec<&SegmentInput> = segments.iter().filter(|s| s.kind != "break").collect();
+    generate_description(&work)
+}
 
 fn generate_description(segments: &[&SegmentInput]) -> String {
     let mut app_counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
@@ -552,5 +563,26 @@ mod tests {
         );
 
         assert_eq!(entries, vec![deleted]);
+    }
+
+    #[test]
+    fn a_deleted_entry_never_takes_time_another_entry_owns() {
+        let mut deleted = frozen_entry("gone", 0, 10 * MIN, "pending");
+        deleted.deleted_at = Some(11 * MIN);
+        let mut segs = vec![
+            make_seg(1, "Code", "main.rs", "activity", 0, 5 * MIN),
+            make_seg(2, "Code", "main.rs", "activity", 5 * MIN, 12 * MIN),
+        ];
+        segs[1].entry_id = Some("live".to_string());
+        let entries = build_entries(
+            &segs,
+            std::slice::from_ref(&deleted),
+            &EntrySettings::default(),
+            12 * MIN,
+        );
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[1].id, "live");
+        assert_eq!(entries[1].segment_ids, vec![2]);
     }
 }

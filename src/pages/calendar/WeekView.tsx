@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from "react";
 import { Tooltip } from "../../components/Tooltip";
+import { useMinuteClock } from "../../hooks/useMinuteClock";
 import { type BreakEntry, breakEnd, takenBreaks } from "../../lib/breaks";
 import {
   addDays,
@@ -15,8 +16,9 @@ import {
 } from "../../lib/entries";
 import { formatDuration } from "../../lib/format";
 import type { Category, Project, TimeEntry } from "../../lib/types";
-import { BreakBand, NowLine, useMinuteClock } from "./DayView";
+import { BreakBand, NowLine } from "./DayView";
 import { EntryBlock } from "./EntryBlock";
+import { SplitPicker } from "./SplitPicker";
 import { gutterLabel, hourOffset, place, timelineFor } from "./timeline";
 import { useRememberedScroll } from "./useRememberedScroll";
 import { readViewport } from "./viewport";
@@ -33,6 +35,9 @@ interface WeekViewProps {
   projectById: Map<string, Project>;
   onSelect: (id: string) => void;
   onOpenDay: (date: string) => void;
+  /** Split mode: the selected entry whose cut is being picked. */
+  splitPick?: { id: string; at: number };
+  onPickSplit?: (at: number) => void;
   now?: number;
 }
 
@@ -50,6 +55,8 @@ export function WeekView({
   projectById,
   onSelect,
   onOpenDay,
+  splitPick,
+  onPickSplit,
   now: propsNow,
 }: WeekViewProps) {
   const viewportKey = `calendar:week:${weekStart.getTime()}`;
@@ -279,6 +286,29 @@ export function WeekView({
                     />
                   );
                 })}
+                {column.entries.map((entry) =>
+                  entry.id === splitPick?.id && onPickSplit ? (
+                    <SplitPicker
+                      key={`split-${entry.id}`}
+                      {...place(
+                        timeline,
+                        entry.startedAt,
+                        entryEnd(entry, now),
+                        column.start,
+                        "wall",
+                        3,
+                      )}
+                      narrow
+                      startedAt={entry.startedAt}
+                      endsAt={entryEnd(entry, now)}
+                      initialAt={splitPick.at}
+                      timeline={timeline}
+                      dayStart={column.start}
+                      placement="wall"
+                      onPick={onPickSplit}
+                    />
+                  ) : null,
+                )}
                 {isToday &&
                   nowOffset >= timeline.startHour &&
                   nowOffset <= timeline.endHour && (

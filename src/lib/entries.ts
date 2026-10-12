@@ -119,21 +119,23 @@ export function isTyping(target: EventTarget | null): boolean {
   );
 }
 
-/** Splits at the app switch nearest the middle, else at the midpoint. */
+/**
+ * Splits at the app switch nearest the middle, else at the midpoint; for the
+ * live entry, the middle of what it has recorded until now.
+ */
 export function splitPoint(
   entry: TimeEntry,
   segments: { app: string; startedAt: number }[],
+  now: number = Date.now(),
 ): number {
-  const midpoint = Math.floor((entry.startedAt + entry.endedAt) / 2);
+  const end = entryEnd(entry, now);
+  const midpoint = Math.floor((entry.startedAt + end) / 2);
   let splitAt = midpoint;
   let best = Number.POSITIVE_INFINITY;
   segments.forEach((segment, index) => {
     const previous = segments[index - 1];
     if (!previous || previous.app === segment.app) return;
-    if (
-      segment.startedAt <= entry.startedAt ||
-      segment.startedAt >= entry.endedAt
-    )
+    if (segment.startedAt <= entry.startedAt || segment.startedAt >= end)
       return;
     const distance = Math.abs(segment.startedAt - midpoint);
     if (distance < best) {

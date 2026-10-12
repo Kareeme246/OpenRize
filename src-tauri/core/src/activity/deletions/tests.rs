@@ -59,7 +59,7 @@ fn entry_cleanup_and_captured_activity_are_one_undoable_operation() {
         0
     );
     assert_eq!(count(&store, "SELECT count(*) FROM apps WHERE default_category_id IS NOT NULL OR default_project_id IS NOT NULL"), 0);
-    assert!(store.undo_deletion(500).unwrap());
+    assert!(store.undo(500).map(|step| step.is_some()).unwrap());
     assert_eq!(count(&store, "SELECT count(*) FROM time_entries WHERE deleted_at IS NULL AND category_id='c' AND project_id='p'"), 2);
     assert_eq!(
         count(
@@ -89,13 +89,13 @@ fn entry_cleanup_and_captured_activity_are_one_undoable_operation() {
         ),
         1
     );
-    assert!(!store.undo_deletion(501).unwrap());
-    assert!(store.redo_deletion(600).unwrap());
+    assert!(!store.undo(501).map(|step| step.is_some()).unwrap());
+    assert!(store.redo(600).map(|step| step.is_some()).unwrap());
     assert_eq!(
         count(&store, "SELECT count(*) FROM segments WHERE entry_id='a'"),
         0
     );
-    assert!(store.undo_deletion(700).unwrap());
+    assert!(store.undo(700).map(|step| step.is_some()).unwrap());
     assert_eq!(
         count(&store, "SELECT count(*) FROM segments WHERE entry_id='a'"),
         1
@@ -115,8 +115,8 @@ fn categories_and_projects_delete_independently_and_undo_in_order() {
         ),
         2
     );
-    store.undo_deletion(600).unwrap();
-    store.undo_deletion(700).unwrap();
+    store.undo(600).map(|step| step.is_some()).unwrap();
+    store.undo(700).map(|step| step.is_some()).unwrap();
     assert_eq!(count(&store, "SELECT count(*) FROM time_entries WHERE deleted_at IS NULL AND category_id='c' AND project_id='p'"), 2);
     assert_eq!(
         count(
@@ -137,7 +137,7 @@ fn invoiced_shared_time_blocks_the_entire_cleanup_atomically() {
         count(&store, "SELECT count(*) FROM segments WHERE entry_id='a'"),
         1
     );
-    assert!(!store.undo_deletion(500).unwrap());
+    assert!(!store.undo(500).map(|step| step.is_some()).unwrap());
 }
 
 #[test]
@@ -151,7 +151,7 @@ fn undo_preserves_description_edits_and_new_deletion_clears_redo() {
             ["Edited later"],
         )
         .unwrap();
-    store.undo_deletion(500).unwrap();
+    store.undo(500).map(|step| step.is_some()).unwrap();
     let text: String = store
         .conn()
         .query_row(
@@ -162,7 +162,7 @@ fn undo_preserves_description_edits_and_new_deletion_clears_redo() {
         .unwrap();
     assert_eq!(text, "Edited later");
     store.delete_project("p", 600).unwrap();
-    assert!(!store.redo_deletion(700).unwrap());
+    assert!(!store.redo(700).map(|step| step.is_some()).unwrap());
 }
 
 #[test]
@@ -176,7 +176,7 @@ fn conflicting_link_edit_rolls_back_undo_without_losing_history() {
             ["another"],
         )
         .unwrap();
-    assert!(store.undo_deletion(500).is_err());
+    assert!(store.undo(500).map(|step| step.is_some()).is_err());
     assert_eq!(
         count(
             &store,
@@ -195,7 +195,7 @@ fn conflicting_link_edit_rolls_back_undo_without_losing_history() {
         .conn()
         .execute("UPDATE time_entries SET category_id=NULL WHERE id='b';", [])
         .unwrap();
-    assert!(store.undo_deletion(600).unwrap());
+    assert!(store.undo(600).map(|step| step.is_some()).unwrap());
 }
 
 #[test]
@@ -206,12 +206,12 @@ fn redo_refuses_new_or_edited_activity_without_losing_history() {
     ] {
         let mut store = store();
         store.delete_time_entry("a", 400).unwrap();
-        store.undo_deletion(500).unwrap();
+        store.undo(500).map(|step| step.is_some()).unwrap();
         store.conn().execute_batch(change).unwrap();
-        assert!(store.redo_deletion(600).is_err());
+        assert!(store.redo(600).map(|step| step.is_some()).is_err());
         assert_eq!(count(&store, "SELECT count(*) FROM time_entries WHERE deleted_at IS NULL AND category_id='c' AND project_id='p'"), 2);
         store.conn().execute_batch("DELETE FROM segments WHERE id=2; UPDATE segments SET title='First' WHERE id=1;").unwrap();
-        assert!(store.redo_deletion(700).unwrap());
+        assert!(store.redo(700).map(|step| step.is_some()).unwrap());
     }
 }
 
@@ -231,7 +231,7 @@ fn restored_live_activity_is_closed_and_does_not_recreate_deleted_time() {
         ),
         1
     );
-    store.undo_deletion(500).unwrap();
+    store.undo(500).map(|step| step.is_some()).unwrap();
     assert_eq!(
         count(
             &store,
@@ -257,7 +257,7 @@ fn split_and_undo_redo_round_trip() {
     );
 
     // Undo the split
-    assert!(store.undo_deletion(500).unwrap());
+    assert!(store.undo(500).map(|step| step.is_some()).unwrap());
     assert_eq!(
         count(
             &store,
@@ -274,7 +274,7 @@ fn split_and_undo_redo_round_trip() {
     assert_eq!(a_end, 200);
 
     // Redo the split
-    assert!(store.redo_deletion(600).unwrap());
+    assert!(store.redo(600).map(|step| step.is_some()).unwrap());
     assert_eq!(
         count(
             &store,
@@ -307,7 +307,7 @@ fn merge_and_undo_redo_round_trip() {
     );
 
     // Undo the merge
-    assert!(store.undo_deletion(500).unwrap());
+    assert!(store.undo(500).map(|step| step.is_some()).unwrap());
     assert_eq!(
         count(
             &store,
@@ -333,7 +333,7 @@ fn merge_and_undo_redo_round_trip() {
     assert_eq!(b_start, 200);
 
     // Redo the merge
-    assert!(store.redo_deletion(600).unwrap());
+    assert!(store.redo(600).map(|step| step.is_some()).unwrap());
     assert_eq!(
         count(
             &store,
@@ -365,7 +365,7 @@ fn add_and_undo_redo_round_trip() {
     );
 
     // Undo the add
-    assert!(store.undo_deletion(500).unwrap());
+    assert!(store.undo(500).map(|step| step.is_some()).unwrap());
     assert_eq!(
         count(
             &store,
@@ -375,7 +375,7 @@ fn add_and_undo_redo_round_trip() {
     );
 
     // Redo the add
-    assert!(store.redo_deletion(600).unwrap());
+    assert!(store.redo(600).map(|step| step.is_some()).unwrap());
     assert_eq!(
         count(
             &store,

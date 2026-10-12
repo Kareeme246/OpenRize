@@ -37,8 +37,10 @@ import {
   blockState,
   durationOf,
   isInFlight,
+  isLocked,
   isReviewable,
   isTyping,
+  LOCKED_HINT,
   totalDuration,
   workDuration,
 } from "../lib/entries";
@@ -857,6 +859,17 @@ function BulkBar({
   const unapprovable = entries.filter(
     (entry) => entry.status === "approved" && !entry.invoiceId,
   );
+  // Approved entries are frozen, so a bulk change that includes one would be
+  // refused whole: offer it only once they are unapproved.
+  const lockedCount = entries.filter(isLocked).length;
+  const lockedHint =
+    lockedCount > 0
+      ? `${lockedCount === 1 ? "1 selected entry is" : `${lockedCount} selected entries are`} approved and locked. ${
+          unapprovable.length > 0
+            ? "Unapprove to change them."
+            : "Invoiced entries cannot be changed."
+        }`
+      : undefined;
   return (
     <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-accent/30 bg-accent-soft px-3 py-2 text-[12px]">
       <span className="font-semibold text-fg-strong">
@@ -890,44 +903,56 @@ function BulkBar({
           </button>
         </Tooltip>
       )}
-      <Picker
-        ariaLabel="Set category"
-        value=""
-        placeholder="Set category…"
-        onChange={(val) => onSetCategory(val)}
-        options={[
-          { value: "", label: "Set category…", disabled: true },
-          ...categories
-            .filter((category) => !category.archived)
-            .map((category) => ({
-              value: category.id,
-              label: category.name,
-              color: category.color,
-            })),
-        ]}
-        variant="compact"
-      />
-      <button
-        type="button"
-        onClick={() => onSetBillable(true)}
-        className={BUTTON_SECONDARY}
-      >
-        Billable
-      </button>
-      <button
-        type="button"
-        onClick={() => onSetBillable(false)}
-        className={BUTTON_SECONDARY}
-      >
-        Not billable
-      </button>
-      <button
-        type="button"
-        onClick={onDelete}
-        className="rounded-md border border-danger/30 px-2 py-1 text-danger hover:bg-danger/10"
-      >
-        Delete {entries.length}
-      </button>
+      <Tooltip content={lockedHint} wrapperClassName="inline-flex">
+        <Picker
+          ariaLabel="Set category"
+          value=""
+          placeholder="Set category…"
+          disabled={lockedCount > 0}
+          onChange={(val) => onSetCategory(val)}
+          options={[
+            { value: "", label: "Set category…", disabled: true },
+            ...categories
+              .filter((category) => !category.archived)
+              .map((category) => ({
+                value: category.id,
+                label: category.name,
+                color: category.color,
+              })),
+          ]}
+          variant="compact"
+        />
+      </Tooltip>
+      <Tooltip content={lockedHint} wrapperClassName="inline-flex">
+        <button
+          type="button"
+          onClick={() => onSetBillable(true)}
+          disabled={lockedCount > 0}
+          className={`${BUTTON_SECONDARY} disabled:cursor-not-allowed disabled:opacity-40`}
+        >
+          Billable
+        </button>
+      </Tooltip>
+      <Tooltip content={lockedHint} wrapperClassName="inline-flex">
+        <button
+          type="button"
+          onClick={() => onSetBillable(false)}
+          disabled={lockedCount > 0}
+          className={`${BUTTON_SECONDARY} disabled:cursor-not-allowed disabled:opacity-40`}
+        >
+          Not billable
+        </button>
+      </Tooltip>
+      <Tooltip content={lockedHint} wrapperClassName="inline-flex">
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={lockedCount > 0}
+          className="rounded-md border border-danger/30 px-2 py-1 text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          Delete {entries.length}
+        </button>
+      </Tooltip>
       <button
         type="button"
         onClick={onClear}
@@ -1124,9 +1149,7 @@ function TimesheetRow({
           />
         ) : (
           <Tooltip
-            content={
-              isApproved ? "Unapprove to edit this entry" : "Edit description"
-            }
+            content={isApproved ? LOCKED_HINT : "Edit description"}
             wrapperClassName="inline-flex min-w-0"
           >
             <button
@@ -1184,7 +1207,7 @@ function TimesheetRow({
         <Tooltip
           content={
             isApproved
-              ? "Unapprove to edit this entry"
+              ? LOCKED_HINT
               : entry.billable
                 ? "Billable"
                 : "Not billable"
@@ -1263,6 +1286,7 @@ function TimesheetRow({
           onSplit={onSplit}
           onDelete={onDelete}
           canSplit={!inFlight}
+          locked={isApproved}
         />
       </span>
     </div>
@@ -1274,11 +1298,13 @@ function RowMenu({
   onSplit,
   onDelete,
   canSplit,
+  locked,
 }: {
   onOpenInCalendar: () => void;
   onSplit: () => void;
   onDelete: () => void;
   canSplit: boolean;
+  locked: boolean;
 }) {
   const item =
     "block w-full rounded px-2 py-1 text-left text-[12px] hover:bg-surface disabled:opacity-40";
@@ -1305,27 +1331,40 @@ function RowMenu({
         >
           Open in Calendar
         </button>
-        <button
-          type="button"
-          disabled={!canSplit}
-          className={`${item} text-fg-muted`}
-          onClick={(event) => {
-            close(event.currentTarget);
-            onSplit();
-          }}
+        <Tooltip
+          content={locked ? LOCKED_HINT : undefined}
+          placement="left"
+          wrapperClassName="block"
         >
-          Split
-        </button>
-        <button
-          type="button"
-          className={`${item} text-danger`}
-          onClick={(event) => {
-            close(event.currentTarget);
-            onDelete();
-          }}
+          <button
+            type="button"
+            disabled={!canSplit || locked}
+            className={`${item} text-fg-muted`}
+            onClick={(event) => {
+              close(event.currentTarget);
+              onSplit();
+            }}
+          >
+            Split
+          </button>
+        </Tooltip>
+        <Tooltip
+          content={locked ? LOCKED_HINT : undefined}
+          placement="left"
+          wrapperClassName="block"
         >
-          Delete
-        </button>
+          <button
+            type="button"
+            disabled={locked}
+            className={`${item} text-danger`}
+            onClick={(event) => {
+              close(event.currentTarget);
+              onDelete();
+            }}
+          >
+            Delete
+          </button>
+        </Tooltip>
       </div>
     </details>
   );

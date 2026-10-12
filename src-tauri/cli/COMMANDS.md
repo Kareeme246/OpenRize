@@ -56,13 +56,13 @@ installed.
 | `rize entries list` | Filter by range, project, client, category, app, status, billable and search. Newest first, `--limit` 1 to 5000. | `query_time_entries` | Yes | Shipped |
 | `rize entries show <id>` | One entry with its apps, events and AI suggestion; window titles with `--full`. | `get_entry_detail` | Yes | Shipped |
 | `rize entries add --from --to [fields]` | Create a manual entry. | `create_time_entry` | Yes | Shipped |
-| `rize entries edit <id...> [fields]` | Change description, project, category, billable, start or end on one or many entries; `none` clears a project or category. | `update_time_entry`, `update_time_entries` | Yes | Shipped |
+| `rize entries edit <id...> [fields]` | Change description, project, category, billable, start or end on one or many entries; `none` clears a project or category. Refused on approved entries (the whole batch): unapprove first. | `update_time_entry`, `update_time_entries` | Yes | Shipped |
 | `rize entries approve <id...>` / `--all-pending [range]` | Approve entries, or every pending entry in a range. | `approve_time_entries` | Yes | Shipped |
 | `rize entries unapprove <id...>` | Send entries back to review. | `unapprove_time_entries` | Yes | Shipped |
 | `rize entries reject <id>` | Reject an AI suggestion. | `reject_time_entry` | Yes | Shipped |
-| `rize entries split <id> --at <time>` | Split one entry in two. | `split_time_entry` | Yes | Shipped |
-| `rize entries merge <id> <other-id>` | Merge two adjacent entries into one. | `merge_time_entries` | Yes | Shipped |
-| `rize entries rm <id...>` | Delete entries (confirmed). | `delete_time_entries` | Yes | Shipped |
+| `rize entries split <id> --at <time>` | Split one entry in two. Refused on an approved entry. | `split_time_entry` | Yes | Shipped |
+| `rize entries merge <id> <other-id>` | Merge two adjacent entries into one. Refused when either is approved. | `merge_time_entries` | Yes | Shipped |
+| `rize entries rm <id...>` | Delete entries (confirmed). Refused when any is approved. | `delete_time_entries` | Yes | Shipped |
 | `rize entries rebuild [range]` | Rebuild entries from recorded activity (confirmed). | `rebuild_time_entries` | Yes | Shipped |
 | `rize entries export --format csv\|json [--out file]` | Export filtered entries to stdout or a file. | `export_time_entries` (`reports::export_body`) | Yes | Shipped |
 | `rize review [range]` | Pending entries, today by default. | `query_time_entries` (pending) | Yes | Shipped |

@@ -37,6 +37,18 @@ export function confidenceOf(entry: TimeEntry): number | undefined {
   );
 }
 
+/** The core's refusal text, kept in step with `LOCKED` in activity.rs. */
+export const LOCKED_HINT =
+  "Approved entries are locked. Unapprove to change them.";
+
+/**
+ * Approved entries are frozen: the core refuses every change but unapprove,
+ * so views disable their controls instead of offering a doomed action.
+ */
+export function isLocked(entry: TimeEntry): boolean {
+  return entry.status === "approved";
+}
+
 const REVIEWABLE: ReadonlySet<BlockState> = new Set([
   "pending",
   "needsYou",

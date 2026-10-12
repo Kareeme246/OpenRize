@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { EntryReview } from "../hooks/useEntryReview";
 import { useSettings } from "../hooks/useSettings";
-import { entryEnd, isTyping } from "../lib/entries";
+import { entryEnd, isLocked, isTyping } from "../lib/entries";
 import { formatDuration, formatTime } from "../lib/format";
 import { shortcutLabel } from "../lib/platform";
 import type {
@@ -33,6 +33,9 @@ interface EntryReviewSheetProps {
   pickSplitOnTimeline?: boolean;
 }
 
+const NEIGHBOUR_LOCKED =
+  "The adjacent entry is approved. Unapprove it to merge.";
+
 /**
  * The entry review panel bound to `useEntryReview`, with its keyboard
  * contract: ⌘↵ accepts, ⌘⌫ rejects, S splits, M merges, Esc closes (or leaves
@@ -60,6 +63,17 @@ export function EntryReviewSheet({
   const close = onClose ?? (() => review.select(undefined));
   const prevId = mergeCandidates?.prev?.id;
   const nextId = mergeCandidates?.next?.id;
+  const locked = detail ? isLocked(detail.entry) : false;
+  const mergeBlocked = {
+    prev:
+      mergeCandidates?.prev && isLocked(mergeCandidates.prev)
+        ? NEIGHBOUR_LOCKED
+        : undefined,
+    next:
+      mergeCandidates?.next && isLocked(mergeCandidates.next)
+        ? NEIGHBOUR_LOCKED
+        : undefined,
+  };
 
   useEffect(() => {
     if (!detail) return;
@@ -80,12 +94,13 @@ export function EntryReviewSheet({
         if (!approved) reject(detail.entry.id);
       } else if (!command && !event.altKey && event.key.toLowerCase() === "s") {
         event.preventDefault();
-        review.beginSplit(pickSplitOnTimeline);
+        if (!locked) review.beginSplit(pickSplitOnTimeline);
       } else if (!command && !event.altKey && event.key.toLowerCase() === "m") {
-        if (prevId) {
+        if (locked) return;
+        if (prevId && !mergeBlocked.prev) {
           event.preventDefault();
           void review.merge(prevId);
-        } else if (nextId) {
+        } else if (nextId && !mergeBlocked.next) {
           event.preventDefault();
           void review.merge(nextId);
         }
@@ -101,6 +116,9 @@ export function EntryReviewSheet({
     review,
     prevId,
     nextId,
+    locked,
+    mergeBlocked.prev,
+    mergeBlocked.next,
     pickSplitOnTimeline,
   ]);
 
@@ -141,6 +159,7 @@ export function EntryReviewSheet({
           onMergeNext={
             prevId && nextId ? () => void review.merge(nextId) : undefined
           }
+          mergeBlocked={mergeBlocked}
           onDelete={() => setDeleting("entry")}
           onDeleteField={(field, id) => setDeleting({ field, id })}
           onRetry={() => void review.retry()}

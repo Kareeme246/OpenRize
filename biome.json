@@ -16,7 +16,7 @@
       "tsconfig.node.json",
       "biome.json",
       "src-tauri/tauri.conf.json",
-      "!!**/.claude"
+      "!!.claude"
     ]
   },
   "formatter": {

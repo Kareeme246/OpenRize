@@ -88,10 +88,12 @@ appears; keep this list identical in both skills.
 
 - **Organizations.** Klock publishes time entries to an organization
   (`enterprise_source_bindings`, `server/`, `src-tauri/sync-protocol`, the
-  `enterprise` modules, the `organizations` pages). Splitting, merging,
-  deleting, undoing or redoing a published entry must not orphan its shared
-  record, and rebuilt entries (`entry_builder.rs`) must keep published entries
-  frozen. OpenRize has none of this.
+  `enterprise` modules, the `organizations` pages). A published entry's shared
+  record must never be orphaned: Klock refuses to split or merge a published
+  entry, or to undo a split, merge or creation that would strand one
+  (`src-tauri/core/src/activity/history.rs`), until its record is withdrawn.
+  Rebuilt entries (`entry_builder.rs`) keep published entries frozen. OpenRize
+  has none of this.
 - **Migrations.** Each app has its own migration sequence
   (`src-tauri/core/src/migrations.rs`); a ported schema change gets a new
   migration in the receiving repo, never the source's number.

@@ -655,8 +655,11 @@ function TrackingHoursSetting({
   );
 }
 
-/** "Checking…", "Downloading 42%", or when the last check ran. */
-function updateSummary(status: UpdateStatus): string {
+/**
+ * "Checking…", "Downloading 42%", or "Up to date · <version>" once a check
+ * has run. Before the first check there is no summary at all.
+ */
+function updateSummary(status: UpdateStatus): string | undefined {
   switch (status.phase.kind) {
     case "checking":
       return "Checking for updates…";
@@ -675,7 +678,7 @@ function updateSummary(status: UpdateStatus): string {
     return `Version ${status.available.version} is available. You have ${status.currentVersion}.`;
   }
   return status.lastCheckedMs === null
-    ? `You have ${status.currentVersion}`
+    ? undefined
     : `Up to date · ${status.currentVersion}`;
 }
 

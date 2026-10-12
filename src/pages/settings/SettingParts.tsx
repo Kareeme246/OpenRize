@@ -10,7 +10,7 @@ export function SettingRow({
   children,
 }: {
   title: string;
-  description: string;
+  description?: string;
   status?: Status;
   children?: ReactNode;
 }) {
@@ -18,9 +18,11 @@ export function SettingRow({
     <div className="setting-row flex items-center justify-between gap-4 border-b border-line px-4 py-3 last:border-b-0">
       <div className="min-w-0">
         <div className="text-[13px] font-medium text-fg">{title}</div>
-        <div className="text-[12px] leading-relaxed text-fg-muted">
-          {description}
-        </div>
+        {description !== undefined && (
+          <div className="text-[12px] leading-relaxed text-fg-muted">
+            {description}
+          </div>
+        )}
       </div>
       {children ?? (status !== undefined && <StatusBadge status={status} />)}
     </div>

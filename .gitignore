@@ -30,3 +30,6 @@ src-tauri/binaries
 
 # Agent worktrees
 .claude/worktrees/
+
+# Klock changes to port here (sync-klock skill)
+FROM_KLOCK.md

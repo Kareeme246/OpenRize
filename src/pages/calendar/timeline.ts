@@ -115,3 +115,17 @@ export function dayLength(dayStart: number): number {
   next.setDate(next.getDate() + 1);
   return Math.round((next.getTime() - dayStart) / HOUR_MS);
 }
+
+/** The time at `y` px down the timeline: the inverse of `place`'s top. */
+export function timeAtOffset(
+  timeline: Timeline,
+  y: number,
+  dayStart: number,
+  placement: Placement,
+): number {
+  const hours = timeline.startHour + y / timeline.hourHeight;
+  if (placement === "elapsed") return dayStart + hours * HOUR_MS;
+  const midnight = new Date(dayStart);
+  midnight.setHours(0, 0, 0, 0);
+  return midnight.getTime() + hours * HOUR_MS;
+}

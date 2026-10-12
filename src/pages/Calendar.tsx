@@ -532,6 +532,12 @@ export function Calendar({ route, navigate }: CalendarProps) {
                   setError(describeError(cause));
                 }
               }}
+              splitPick={
+                review.splitting?.stage === "pick" && review.selectedId
+                  ? { id: review.selectedId, at: review.splitting.at }
+                  : undefined
+              }
+              onPickSplit={review.pickSplit}
               now={now}
             />
           )}
@@ -546,6 +552,12 @@ export function Calendar({ route, navigate }: CalendarProps) {
               projectById={projectById}
               onSelect={select}
               onOpenDay={(day) => go({ scale: "day", date: day })}
+              splitPick={
+                review.splitting?.stage === "pick" && review.selectedId
+                  ? { id: review.selectedId, at: review.splitting.at }
+                  : undefined
+              }
+              onPickSplit={review.pickSplit}
               now={now}
             />
           )}
@@ -571,6 +583,10 @@ export function Calendar({ route, navigate }: CalendarProps) {
               mergeCandidates={mergeCandidates}
               onAccept={(id) => void accept(id)}
               onReject={(id) => void reject(id)}
+              pickSplitOnTimeline={
+                scale !== "month" &&
+                visible.some((entry) => entry.id === review.selectedId)
+              }
               onClose={() => {
                 select(undefined);
                 setReviewing(false);

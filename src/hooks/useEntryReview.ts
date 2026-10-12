@@ -1,13 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
-import { splitPoint } from "../lib/entries";
+import { entryEnd, splitPoint } from "../lib/entries";
 import type {
   EntryDetail,
   RuleSuggestion,
   SuggestionField,
 } from "../lib/types";
 import { useTauriEvent } from "./useTauriEvent";
+
+/**
+ * Where the split flow is: picking the cut on a timeline, or confirming it in
+ * the split dialog. `at` is the cut so far.
+ */
+export interface SplitStage {
+  stage: "pick" | "confirm";
+  at: number;
+}
 
 /**
  * The one entry review panel's state and commands, shared by every view that
@@ -29,8 +38,18 @@ export interface EntryReview {
   toggleBillable: () => Promise<void>;
   saveDescription: (description: string) => Promise<void>;
   setTimes: (startedAt: number, endedAt: number) => Promise<void>;
-  /** Splits the open entry and opens its first half. */
-  split: () => Promise<void>;
+  splitting: SplitStage | null;
+  /**
+   * Starts splitting the open entry (or entry `id`, once it has opened), at
+   * its smart split point: on a timeline by picking the cut there (`pick`),
+   * elsewhere straight in the split dialog.
+   */
+  beginSplit: (pick: boolean, id?: string) => void;
+  /** The cut picked on the timeline; moves on to the dialog. */
+  pickSplit: (at: number) => void;
+  cancelSplit: () => void;
+  /** Splits the open entry at `at`; resolves true once split. */
+  split: (at: number) => Promise<boolean>;
   /** Merges the open entry with an adjacent entry. */
   merge: (otherId: string) => Promise<void>;
   remove: () => Promise<void>;
@@ -39,10 +58,19 @@ export interface EntryReview {
   resolveRule: (suggestion: RuleSuggestion, accept: boolean) => Promise<void>;
 }
 
+/** The smart split point, on the minute like every cut the user picks. */
+function suggestedCut(detail: EntryDetail): number {
+  return (
+    Math.round(splitPoint(detail.entry, detail.segments) / 60_000) * 60_000
+  );
+}
+
 export function useEntryReview(initialId?: string): EntryReview {
   const [selectedId, setSelectedId] = useState<string | undefined>(initialId);
   const [detail, setDetail] = useState<EntryDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [splitting, setSplitting] = useState<SplitStage | null>(null);
+  const pendingSplit = useRef<{ id: string; pick: boolean } | null>(null);
   const selectedRef = useRef(selectedId);
   selectedRef.current = selectedId;
 
@@ -56,17 +84,32 @@ export function useEntryReview(initialId?: string): EntryReview {
       // A slower read for an entry the user already left must not win.
       if (selectedRef.current === id) setDetail(next);
     } catch (cause) {
-      if (selectedRef.current === id) {
-        setDetail(null);
-        setError(describeError(cause));
-      }
+      if (selectedRef.current !== id) return;
+      // Usually the entry is gone: an undo can take away the open entry (an
+      // added entry, a split's second half). The panel closes either way.
+      console.warn("entry review: could not open", id, describeError(cause));
+      setDetail(null);
+      setSplitting(null);
+      setSelectedId(undefined);
     }
   }, []);
 
   useEffect(() => {
     setError(null);
+    setSplitting(null);
     load(selectedId);
   }, [selectedId, load]);
+
+  // A split asked for before its entry had opened starts once it has.
+  useEffect(() => {
+    const pending = pendingSplit.current;
+    if (!pending || detail?.entry.id !== pending.id) return;
+    pendingSplit.current = null;
+    setSplitting({
+      stage: pending.pick ? "pick" : "confirm",
+      at: suggestedCut(detail),
+    });
+  }, [detail]);
 
   // Suggestions land in the background: patch the open panel.
   useTauriEvent(api.ENTRIES_CHANGED, () => void load(selectedRef.current));
@@ -74,7 +117,11 @@ export function useEntryReview(initialId?: string): EntryReview {
     if (payload.entryId === selectedRef.current) void load(selectedRef.current);
   });
 
-  const select = useCallback((id?: string) => setSelectedId(id), []);
+  const select = useCallback((id?: string) => {
+    pendingSplit.current = null;
+    setSplitting(null);
+    setSelectedId(id);
+  }, []);
 
   /** Runs a command, surfacing its error, then re-reads the panel. */
   const run = useCallback(
@@ -164,18 +211,58 @@ export function useEntryReview(initialId?: string): EntryReview {
     [detail, run],
   );
 
-  const split = useCallback(async (): Promise<void> => {
-    if (!detail) return;
-    const at = splitPoint(detail.entry, detail.segments);
-    try {
-      const [first] = await api.splitTimeEntry(detail.entry.id, at);
-      setError(null);
-      setSelectedId(first.id);
-      await load(first.id);
-    } catch (cause) {
-      setError(describeError(cause));
-    }
-  }, [detail, load]);
+  const beginSplit = useCallback(
+    (pick: boolean, id?: string): void => {
+      const target = id ?? selectedRef.current;
+      if (!target) return;
+      pendingSplit.current = { id: target, pick };
+      if (target !== selectedRef.current) {
+        setSplitting(null);
+        setSelectedId(target);
+      } else if (detail?.entry.id === target) {
+        pendingSplit.current = null;
+        setError(null);
+        setSplitting({
+          stage: pick ? "pick" : "confirm",
+          at: suggestedCut(detail),
+        });
+      }
+    },
+    [detail],
+  );
+
+  const pickSplit = useCallback((at: number): void => {
+    setError(null);
+    setSplitting({ stage: "confirm", at });
+  }, []);
+
+  const cancelSplit = useCallback((): void => {
+    pendingSplit.current = null;
+    setError(null);
+    setSplitting(null);
+  }, []);
+
+  const split = useCallback(
+    async (at: number): Promise<boolean> => {
+      if (!detail) return false;
+      if (at <= detail.entry.startedAt || at >= entryEnd(detail.entry)) {
+        setError("Split point must be inside the entry");
+        return false;
+      }
+      try {
+        const [first] = await api.splitTimeEntry(detail.entry.id, at);
+        setError(null);
+        setSplitting(null);
+        setSelectedId(first.id);
+        await load(first.id);
+        return true;
+      } catch (cause) {
+        setError(describeError(cause));
+        return false;
+      }
+    },
+    [detail, load],
+  );
 
   const merge = useCallback(
     async (otherId: string): Promise<void> => {
@@ -227,6 +314,10 @@ export function useEntryReview(initialId?: string): EntryReview {
     toggleBillable,
     saveDescription,
     setTimes,
+    splitting,
+    beginSplit,
+    pickSplit,
+    cancelSplit,
     split,
     merge,
     remove,

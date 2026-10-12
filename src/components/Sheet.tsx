@@ -36,6 +36,10 @@ export function Sheet({
     const dialog = ref.current;
     if (dialog === null) return;
     dialog.showModal();
+    // showModal() focuses the first control, the ✕; start in the form.
+    dialog
+      .querySelector<HTMLElement>("form input, form select, form textarea")
+      ?.focus();
     return () => dialog.close();
   }, []);
 

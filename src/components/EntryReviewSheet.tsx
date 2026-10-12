@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { EntryReview } from "../hooks/useEntryReview";
 import { useSettings } from "../hooks/useSettings";
-import { isTyping } from "../lib/entries";
+import { entryEnd, isTyping } from "../lib/entries";
 import { formatDuration, formatTime } from "../lib/format";
 import { shortcutLabel } from "../lib/platform";
 import type {
@@ -12,6 +12,7 @@ import type {
 } from "../lib/types";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { EntryReviewPanel } from "./EntryReviewPanel";
+import { SplitDialog } from "./SplitDialog";
 
 interface EntryReviewSheetProps {
   review: EntryReview;
@@ -25,11 +26,17 @@ interface EntryReviewSheetProps {
   onAccept?: (id: string) => void;
   onReject?: (id: string) => void;
   onClose?: () => void;
+  /**
+   * The view draws entries on a timeline, so a split starts by picking the
+   * cut there (see `useEntryReview`'s `splitting`) instead of in the dialog.
+   */
+  pickSplitOnTimeline?: boolean;
 }
 
 /**
  * The entry review panel bound to `useEntryReview`, with its keyboard
- * contract: ⌘↵ accepts, ⌘⌫ rejects, S splits, M merges, Esc closes. The panel itself
+ * contract: ⌘↵ accepts, ⌘⌫ rejects, S splits, M merges, Esc closes (or leaves
+ * a split in progress). The panel itself
  * owns 1–9, C, P, and E. Renders nothing while no entry is open.
  */
 export function EntryReviewSheet({
@@ -41,6 +48,7 @@ export function EntryReviewSheet({
   onAccept,
   onReject,
   onClose,
+  pickSplitOnTimeline = false,
 }: EntryReviewSheetProps) {
   const { settings } = useSettings();
   const { detail } = review;
@@ -59,8 +67,11 @@ export function EntryReviewSheet({
       if (isTyping(event.target)) return;
       const command = event.metaKey || event.ctrlKey;
       const approved = detail.entry.status === "approved";
+      // The split dialog handles its own keys.
+      if (review.splitting?.stage === "confirm") return;
       if (event.key === "Escape") {
-        close();
+        if (review.splitting) review.cancelSplit();
+        else close();
       } else if (command && event.key === "Enter") {
         event.preventDefault();
         if (detail.entry.categoryId && !approved) accept(detail.entry.id);
@@ -69,7 +80,7 @@ export function EntryReviewSheet({
         if (!approved) reject(detail.entry.id);
       } else if (!command && !event.altKey && event.key.toLowerCase() === "s") {
         event.preventDefault();
-        void review.split();
+        review.beginSplit(pickSplitOnTimeline);
       } else if (!command && !event.altKey && event.key.toLowerCase() === "m") {
         if (prevId) {
           event.preventDefault();
@@ -82,7 +93,16 @@ export function EntryReviewSheet({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [detail, accept, reject, close, review, prevId, nextId]);
+  }, [
+    detail,
+    accept,
+    reject,
+    close,
+    review,
+    prevId,
+    nextId,
+    pickSplitOnTimeline,
+  ]);
 
   if (!detail) return null;
   return (
@@ -106,7 +126,7 @@ export function EntryReviewSheet({
           onAccept={() => accept(detail.entry.id)}
           onReject={() => reject(detail.entry.id)}
           onUnapprove={() => void review.unapprove()}
-          onSplit={() => void review.split()}
+          onSplit={() => review.beginSplit(pickSplitOnTimeline)}
           canMerge={Boolean(prevId || nextId)}
           onMerge={
             prevId
@@ -137,6 +157,17 @@ export function EntryReviewSheet({
           formatDuration={formatDuration}
         />
       </div>
+      {review.splitting?.stage === "confirm" && (
+        <SplitDialog
+          key={review.splitting.at}
+          entry={detail.entry}
+          initialAt={review.splitting.at}
+          endsAt={entryEnd(detail.entry)}
+          error={review.error}
+          onCancel={review.cancelSplit}
+          onSplit={(at) => void review.split(at)}
+        />
+      )}
       {deleting && (
         <ConfirmDialog
           title={`Delete ${deleting === "entry" ? "time entry" : deleting.field}?`}

@@ -114,8 +114,12 @@ export async function openMainWindow(
   await invoke("open_main_window", { review, timerId });
 }
 
-export async function undoDeletion(redo = false): Promise<boolean> {
-  return await invoke<boolean>("undo_deletion", { redo });
+/**
+ * Undoes (or redoes) the last change to entries or the catalog. Resolves to
+ * what it was ("Split", "Accept", ...), or null when there was nothing.
+ */
+export async function undo(redo = false): Promise<string | null> {
+  return await invoke<string | null>("undo", { redo });
 }
 
 // --- Break reminders ---

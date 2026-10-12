@@ -4,6 +4,16 @@ All notable changes are documented here. Entries are generated from commit histo
 
 ## [unreleased]
 
+### Bug Fixes
+- Keep the menu bar panel out of tiling window managers and open reminder menus upward (#98)
+- **settings:** Show the app version next to up to date (#99)
+- **settings:** Show the installed version when up to date (#100)
+- Keep the live entry's second half after a split, and make every entry change undoable (#101)
+
+### Maintenance
+- Add the sync-klock skill and expose agent skills to Claude Code (#102)
+## [0.9.7] - 2026-10-09
+
 ### Features
 - Add long-running stopwatch reminders and notification placement options (#97)
 
@@ -15,6 +25,9 @@ All notable changes are documented here. Entries are generated from commit histo
 - Use shared isTyping, plural and Glyph helpers (#95)
 - Share the SQLite error converter and APP_KEY (#96)
 - Remove unreachable NotImplemented dialog (#93)
+
+### Documentation
+- Update changelog for v0.9.7
 ## [0.9.6] - 2026-10-07
 
 ### Bug Fixes

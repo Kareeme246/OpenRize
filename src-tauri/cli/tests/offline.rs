@@ -122,7 +122,8 @@ fn edits_and_reports_with_the_app_closed() {
     assert_eq!(list["entries"].as_array().unwrap().len(), 1);
     assert_eq!(list["names"][project["id"].as_str().unwrap()], "Acme site");
 
-    let edited = store.ok(&[
+    // A hand-made entry is approved, and approved entries are frozen.
+    let edit = [
         "entries",
         "edit",
         short,
@@ -130,10 +131,12 @@ fn edits_and_reports_with_the_app_closed() {
         "Homepage copy",
         "--project",
         "none",
-    ]);
+    ];
+    assert_eq!(store.err(&edit), ("FAILED".into(), 1));
+    store.ok(&["entries", "unapprove", short]);
+    let edited = store.ok(&edit);
     assert_eq!(edited[0]["description"], "Homepage copy");
     assert!(edited[0]["projectId"].is_null());
-    store.ok(&["entries", "unapprove", short]);
     let pending = store.ok(&["review", "--from", "2026-09-01"]);
     assert_eq!(pending["entries"].as_array().unwrap().len(), 1);
     let approved = store.ok(&[
@@ -165,6 +168,12 @@ fn edits_and_reports_with_the_app_closed() {
         store.err(&["entries", "rm", short]),
         ("INVALID_ARGUMENT".into(), 2)
     );
+    // ...and approved entries cannot be deleted until unapproved.
+    assert_eq!(
+        store.err(&["entries", "rm", short, "--yes"]),
+        ("FAILED".into(), 1)
+    );
+    store.ok(&["entries", "unapprove", short]);
     store.ok(&["entries", "rm", short, "--yes"]);
     assert_eq!(
         store.err(&["entries", "show", short]),

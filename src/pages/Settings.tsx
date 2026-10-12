@@ -655,10 +655,7 @@ function TrackingHoursSetting({
   );
 }
 
-/**
- * "Checking…", "Downloading 42%", or "Up to date · <version>" once a check
- * has run. Before the first check, "Not checked yet".
- */
+/** "Checking…", "Downloading 42%", or "Up to date · <version>". */
 function updateSummary(status: UpdateStatus): string {
   switch (status.phase.kind) {
     case "checking":
@@ -677,9 +674,7 @@ function updateSummary(status: UpdateStatus): string {
   if (status.available) {
     return `Version ${status.available.version} is available. You have ${status.currentVersion}.`;
   }
-  return status.lastCheckedMs === null
-    ? "Not checked yet"
-    : `Up to date · ${status.currentVersion}`;
+  return `Up to date · ${status.currentVersion}`;
 }
 
 /**

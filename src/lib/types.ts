@@ -717,7 +717,6 @@ export interface AvailableUpdate {
 
 export interface UpdateStatus {
   currentVersion: string;
-  lastCheckedMs: number | null;
   phase: UpdatePhase;
   available: AvailableUpdate | null;
   error: string | null;

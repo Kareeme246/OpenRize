@@ -29,8 +29,6 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
-use crate::timers::now_epoch_ms;
-
 /// Emitted with the full [`UpdateStatus`] whenever it changes.
 pub const EVENT_UPDATE_STATUS: &str = "update-status";
 
@@ -45,8 +43,6 @@ const PROGRESS_EMIT_GAP: Duration = Duration::from_millis(150);
 #[serde(rename_all = "camelCase")]
 pub struct UpdateStatus {
     pub current_version: String,
-    /// When the last check finished, successfully or not.
-    pub last_checked_ms: Option<u64>,
     pub phase: UpdatePhase,
     /// A newer version that can be installed, if the last successful check
     /// found one.
@@ -96,7 +92,6 @@ impl UpdaterState {
         Self {
             status: Mutex::new(UpdateStatus {
                 current_version,
-                last_checked_ms: None,
                 phase: UpdatePhase::Idle,
                 available: None,
                 error: None,
@@ -186,7 +181,6 @@ pub async fn check(app: &AppHandle, manual: bool) {
         return;
     };
     status.phase = UpdatePhase::Idle;
-    status.last_checked_ms = Some(now_epoch_ms());
     match result {
         Ok(found) => {
             status.error = None;
@@ -390,7 +384,6 @@ fn simulate(app: &AppHandle) {
     let Ok(mut status) = state.status.lock() else {
         return;
     };
-    status.last_checked_ms = Some(now_epoch_ms());
     status.available = Some(AvailableUpdate {
         version: "9.9.9".to_string(),
         releases: vec![

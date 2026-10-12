@@ -29,7 +29,6 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
-
 /// Emitted with the full [`UpdateStatus`] whenever it changes.
 pub const EVENT_UPDATE_STATUS: &str = "update-status";
 

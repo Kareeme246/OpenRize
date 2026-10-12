@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use rusqlite::{params, Connection, Row};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::Serialize;
 
 use crate::capture::WindowSample;
@@ -162,11 +162,14 @@ struct Totals {
 #[cfg(test)]
 mod break_regressions;
 mod deletions;
+mod history;
+#[cfg(test)]
+mod split_regressions;
 
 pub struct ActivityStore {
     conn: Connection,
-    undo_stack: Vec<deletions::UndoItem>,
-    redo_stack: Vec<deletions::UndoItem>,
+    undo_stack: Vec<history::Command>,
+    redo_stack: Vec<history::Command>,
     current: Option<Current>,
     pending_switch: Option<PendingSwitch>,
     capture_enabled: bool,
@@ -244,14 +247,6 @@ impl ActivityStore {
 
     pub fn conn_mut(&mut self) -> &mut Connection {
         &mut self.conn
-    }
-
-    fn record_undo(&mut self, item: deletions::UndoItem) {
-        self.undo_stack.push(item);
-        self.redo_stack.clear();
-        if self.undo_stack.len() > 100 {
-            self.undo_stack.remove(0);
-        }
     }
 
     pub fn read_setting(&self, key: &str) -> Option<String> {
@@ -1500,6 +1495,30 @@ impl ActivityStore {
         patch: UpdateTimeEntry,
         now: u64,
     ) -> Result<TimeEntry, String> {
+        let mut updated = self.update_time_entries(&[id.to_string()], patch, now)?;
+        Ok(updated.remove(0))
+    }
+
+    /// One patch applied to many entries, as one undoable change.
+    pub fn update_time_entries(
+        &mut self,
+        ids: &[String],
+        patch: UpdateTimeEntry,
+        now: u64,
+    ) -> Result<Vec<TimeEntry>, String> {
+        self.edit("Edit", ids, |store| {
+            ids.iter()
+                .map(|id| store.patch_time_entry(id, patch.clone(), now))
+                .collect()
+        })
+    }
+
+    fn patch_time_entry(
+        &mut self,
+        id: &str,
+        patch: UpdateTimeEntry,
+        now: u64,
+    ) -> Result<TimeEntry, String> {
         let mut entry = self.conn.query_row(
             "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at, description_origin
              FROM time_entries WHERE id = ?1;",
@@ -1531,6 +1550,15 @@ impl ActivityStore {
         if let Some(b) = patch.billable {
             entry.billable = b;
         }
+        let was_live = entry.status == "building";
+        // Setting the live session's times says when it really ran: it
+        // closes there, and capture carries on in a new session.
+        if was_live && (patch.started_at.is_some() || patch.ended_at.is_some()) {
+            entry.status = "pending".to_string();
+        }
+        if entry.ended_at <= entry.started_at {
+            return Err("Entry end must be after its start".to_string());
+        }
         entry.updated_at = now;
 
         self.conn.execute(
@@ -1559,10 +1587,13 @@ impl ActivityStore {
             entry.project_id.as_deref(),
             now,
         )?;
+        if was_live && entry.status != "building" {
+            self.describe_closed(id)?;
+        }
 
         self.log_event(id, "edited", "user", None, now);
 
-        Ok(entry)
+        self.time_entry(id)
     }
 
     pub fn approve_time_entries(
@@ -1571,12 +1602,26 @@ impl ActivityStore {
         approved_by: &str,
         now: u64,
     ) -> Result<(), String> {
+        self.edit("Accept", ids, |store| store.approve(ids, approved_by, now))
+    }
+
+    fn approve(&mut self, ids: &[String], approved_by: &str, now: u64) -> Result<(), String> {
         for id in ids {
             let entry = self.time_entry(id)?;
+            // Approval is final: the live session closes now, and capture
+            // carries on in a new one.
+            let ended_at = if entry.status == "building" {
+                entry.ended_at.max(now)
+            } else {
+                entry.ended_at
+            };
             self.conn.execute(
-                "UPDATE time_entries SET status = 'approved', approved_by = ?1, updated_at = ?2 WHERE id = ?3;",
-                params![approved_by, now as i64, id],
+                "UPDATE time_entries SET status = 'approved', approved_by = ?1, ended_at = ?2, updated_at = ?3 WHERE id = ?4;",
+                params![approved_by, ended_at as i64, now as i64, id],
             ).map_err(|e| e.to_string())?;
+            if entry.status == "building" {
+                self.describe_closed(id)?;
+            }
 
             // Feedback loop: the suggestion's outcome (accepted or changed)
             // feeds calibration and rule suggestions, and the entry joins the
@@ -1609,6 +1654,11 @@ impl ActivityStore {
     /// category, recording negative feedback. A project the AI pre-filled is
     /// cleared too; one the user picked stays.
     pub fn reject_time_entry(&mut self, id: &str, now: u64) -> Result<(), String> {
+        self.edit("Reject", &[id.to_string()], |store| store.reject(id, now))
+    }
+
+    /// The live session keeps recording: only its suggestion goes.
+    fn reject(&mut self, id: &str, now: u64) -> Result<(), String> {
         let entry = self.time_entry(id)?;
         let rejected = crate::ai::store::record_rejection(&self.conn, id, now)?;
         let prefilled_project = rejected.iter().any(|s| {
@@ -1620,7 +1670,8 @@ impl ActivityStore {
             .execute(
                 "UPDATE time_entries SET category_id = NULL,
                    project_id = CASE WHEN ?3 THEN NULL ELSE project_id END,
-                   status = 'pending', approved_by = NULL, updated_at = ?1
+                   status = CASE WHEN status = 'building' THEN 'building' ELSE 'pending' END,
+                   approved_by = NULL, updated_at = ?1
                  WHERE id = ?2;",
                 params![now as i64, id, prefilled_project],
             )
@@ -1634,6 +1685,10 @@ impl ActivityStore {
     /// project so they can be edited and approved again. Invoiced time stays
     /// frozen. Does not re-run AI classification.
     pub fn unapprove_time_entries(&mut self, ids: &[String], now: u64) -> Result<(), String> {
+        self.edit("Unapprove", ids, |store| store.unapprove(ids, now))
+    }
+
+    fn unapprove(&mut self, ids: &[String], now: u64) -> Result<(), String> {
         for id in ids {
             let entry = self.time_entry(id)?;
             if entry.invoice_id.is_some() {
@@ -1694,186 +1749,6 @@ impl ActivityStore {
         Ok(())
     }
 
-    pub fn split_time_entry(
-        &mut self,
-        id: &str,
-        at_ms: u64,
-        now: u64,
-    ) -> Result<(TimeEntry, TimeEntry), String> {
-        let original = self.conn.query_row(
-            "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at, description_origin
-             FROM time_entries WHERE id = ?1;",
-            params![id],
-            time_entry_from_row,
-        ).map_err(|e| e.to_string())?;
-
-        if at_ms <= original.started_at || at_ms >= original.ended_at {
-            return Err("Split point must be strictly inside the entry duration".to_string());
-        }
-
-        self.conn
-            .execute(
-                "UPDATE time_entries SET ended_at = ?1, updated_at = ?2 WHERE id = ?3;",
-                params![at_ms as i64, now as i64, id],
-            )
-            .map_err(|e| e.to_string())?;
-
-        let first = TimeEntry {
-            ended_at: at_ms,
-            updated_at: now,
-            ..original.clone()
-        };
-
-        let new_id = uuid::Uuid::now_v7().to_string();
-        self.conn.execute(
-            "INSERT INTO time_entries (id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, description_origin)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13);",
-            params![
-                new_id,
-                at_ms as i64,
-                original.ended_at as i64,
-                original.description,
-                original.category_id,
-                original.project_id,
-                original.status,
-                original.approved_by,
-                original.source,
-                original.billable as i64,
-                original.invoice_id,
-                now as i64,
-                original.description_origin,
-            ],
-        ).map_err(|e| e.to_string())?;
-
-        self.conn
-            .execute(
-                "UPDATE segments SET entry_id = ?1 WHERE entry_id = ?2 AND started_at >= ?3;",
-                params![new_id, id, at_ms as i64],
-            )
-            .map_err(|e| e.to_string())?;
-
-        let second = TimeEntry {
-            id: new_id.clone(),
-            started_at: at_ms,
-            ended_at: original.ended_at,
-            created_at: now,
-            updated_at: now,
-            ..original
-        };
-
-        self.log_event(id, "split", "user", None, now);
-
-        self.record_undo(deletions::UndoItem::Split {
-            original_id: id.to_string(),
-            original_ended_at: original.ended_at,
-            new_id: new_id.clone(),
-            split_at: at_ms,
-        });
-
-        Ok((first, second))
-    }
-
-    pub fn merge_time_entries(
-        &mut self,
-        primary_id: &str,
-        secondary_id: &str,
-        now: u64,
-    ) -> Result<TimeEntry, String> {
-        let primary = self
-            .conn
-            .query_row(
-                "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at, description_origin
-                 FROM time_entries WHERE id = ?1 AND deleted_at IS NULL;",
-                params![primary_id],
-                time_entry_from_row,
-            )
-            .map_err(|e| format!("Primary entry not found: {e}"))?;
-
-        let secondary = self
-            .conn
-            .query_row(
-                "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at, description_origin
-                 FROM time_entries WHERE id = ?1 AND deleted_at IS NULL;",
-                params![secondary_id],
-                time_entry_from_row,
-            )
-            .map_err(|e| format!("Secondary entry not found: {e}"))?;
-
-        let adjacent =
-            primary.ended_at == secondary.started_at || secondary.ended_at == primary.started_at;
-        if !adjacent {
-            return Err(
-                "Time entries must start and stop at the same border to be mergeable".to_string(),
-            );
-        }
-
-        let new_started_at = primary.started_at.min(secondary.started_at);
-        let new_ended_at = primary.ended_at.max(secondary.ended_at);
-
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id FROM segments WHERE entry_id = ?1;")
-            .map_err(|e| e.to_string())?;
-        let secondary_segment_ids: Vec<String> = stmt
-            .query_map(params![secondary_id], |row| row.get(0))
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<String>, _>>()
-            .map_err(|e| e.to_string())?;
-        drop(stmt);
-
-        let tx = self.conn.transaction().map_err(|e| e.to_string())?;
-        tx.execute(
-            "UPDATE time_entries SET started_at = ?1, ended_at = ?2, updated_at = ?3 WHERE id = ?4;",
-            params![
-                new_started_at as i64,
-                new_ended_at as i64,
-                now as i64,
-                primary_id
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-        tx.execute(
-            "UPDATE segments SET entry_id = ?1 WHERE entry_id = ?2;",
-            params![primary_id, secondary_id],
-        )
-        .map_err(|e| e.to_string())?;
-        tx.execute(
-            "UPDATE time_entries SET deleted_at = ?1, updated_at = ?2 WHERE id = ?3;",
-            params![now as i64, now as i64, secondary_id],
-        )
-        .map_err(|e| e.to_string())?;
-        tx.commit().map_err(|e| e.to_string())?;
-
-        if self
-            .current
-            .as_ref()
-            .is_some_and(|c| c.entry_id.as_deref() == Some(secondary_id))
-        {
-            if let Some(ref mut c) = self.current {
-                c.entry_id = Some(primary_id.to_string());
-            }
-        }
-
-        self.log_event(primary_id, "merged", "user", None, now);
-
-        self.record_undo(deletions::UndoItem::Merge {
-            primary_id: primary_id.to_string(),
-            secondary_id: secondary_id.to_string(),
-            primary_original_started_at: primary.started_at,
-            primary_original_ended_at: primary.ended_at,
-            secondary_original_started_at: secondary.started_at,
-            secondary_original_ended_at: secondary.ended_at,
-            secondary_segment_ids,
-        });
-
-        Ok(TimeEntry {
-            started_at: new_started_at,
-            ended_at: new_ended_at,
-            updated_at: now,
-            ..primary
-        })
-    }
-
     pub fn delete_time_entry(&mut self, id: &str, now: u64) -> Result<(), String> {
         self.delete_time_entries(&[id.to_string()], now)
     }
@@ -1887,6 +1762,18 @@ impl ActivityStore {
         new_entry: NewTimeEntry,
         now: u64,
     ) -> Result<TimeEntry, String> {
+        let id = uuid::Uuid::now_v7().to_string();
+        self.edit("Add", std::slice::from_ref(&id), |store| {
+            store.insert_manual_entry(&id, new_entry, now)
+        })
+    }
+
+    fn insert_manual_entry(
+        &mut self,
+        id: &str,
+        new_entry: NewTimeEntry,
+        now: u64,
+    ) -> Result<TimeEntry, String> {
         if new_entry.ended_at <= new_entry.started_at {
             return Err("Entry end must be after its start".to_string());
         }
@@ -1896,7 +1783,6 @@ impl ActivityStore {
         if new_entry.description.trim().is_empty() && !unclassified {
             return Err("Entry description cannot be empty".to_string());
         }
-        let id = uuid::Uuid::now_v7().to_string();
         let billable = new_entry.billable.unwrap_or(false) as i64;
         let pending = unclassified || new_entry.review;
         let status = if pending { "pending" } else { "approved" };
@@ -1919,19 +1805,17 @@ impl ActivityStore {
             ],
         ).map_err(|e| e.to_string())?;
 
-        self.log_event(&id, "created", "user", None, now);
+        self.log_event(id, "created", "user", None, now);
         if unclassified && new_entry.ended_at <= now {
-            crate::ai::store::enqueue(&self.conn, &id, crate::ai::store::JOB_CLASSIFY, now)?;
+            crate::ai::store::enqueue(&self.conn, id, crate::ai::store::JOB_CLASSIFY, now)?;
         } else if !pending {
             // A labeled hand-made entry contributes to kNN; one left for
             // review is embedded once it is approved.
-            crate::ai::store::enqueue(&self.conn, &id, crate::ai::store::JOB_EMBED, now)?;
+            crate::ai::store::enqueue(&self.conn, id, crate::ai::store::JOB_EMBED, now)?;
         }
 
-        self.record_undo(deletions::UndoItem::Add { id: id.clone() });
-
         Ok(TimeEntry {
-            id,
+            id: id.to_string(),
             started_at: new_entry.started_at,
             ended_at: new_entry.ended_at,
             description: new_entry.description,
@@ -1976,6 +1860,7 @@ impl ActivityStore {
     pub fn rebuild_range(&mut self, start_ms: u64, end_ms: u64, now: u64) -> Result<bool, String> {
         use crate::entry_builder::{build_entries, BuiltTimeEntry, EntrySettings, SegmentInput};
 
+        self.release_live_tail(now)?;
         let tx = self.conn.transaction().map_err(|e| e.to_string())?;
 
         let segments: Vec<SegmentInput> = {
@@ -2097,15 +1982,13 @@ impl ActivityStore {
         }
 
         // An open entry whose segments all moved elsewhere no longer exists.
+        // It goes for good: marking it deleted would leave a tombstone that
+        // keeps its span empty, and that span is still tracked time.
         for stale in existing
             .iter()
             .filter(|e| is_open(e) && !kept.contains(&e.id))
         {
-            tx.execute(
-                "UPDATE time_entries SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2;",
-                params![now as i64, stale.id],
-            )
-            .map_err(|e| e.to_string())?;
+            history::Stash::take(&tx, &stale.id)?;
             changed = true;
         }
 
@@ -2115,6 +1998,41 @@ impl ActivityStore {
 
         tx.commit().map_err(|e| e.to_string())?;
         Ok(changed)
+    }
+
+    /// Capture may still be writing a segment of a session the user closed
+    /// (approved it, set its end, merged it into a finished entry). What it
+    /// records past that entry's end belongs to the next session, so the
+    /// segment is cut there rather than lost inside a frozen entry.
+    fn release_live_tail(&mut self, now: u64) -> Result<(), String> {
+        let Some(current) = self.current.as_ref() else {
+            return Ok(());
+        };
+        let owner: Option<(String, i64)> = self
+            .conn
+            .query_row(
+                "SELECT e.id, e.ended_at FROM segments s JOIN time_entries e ON e.id = s.entry_id
+                 WHERE s.id = ?1 AND s.ended_at IS NULL
+                   AND e.status != 'building' AND e.deleted_at IS NULL AND e.ended_at < ?2;",
+                params![current.id, now as i64],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let Some((entry_id, ended_at)) = owner else {
+            return Ok(());
+        };
+        if current.started_at >= ended_at as u64 {
+            self.conn
+                .execute(
+                    "UPDATE segments SET entry_id = NULL WHERE id = ?1;",
+                    params![current.id],
+                )
+                .map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+        let id = current.id;
+        self.cut_segment(id, &entry_id, ended_at as u64, None)
     }
 
     // --- P1: Apps -------------------------------------------------------
@@ -2483,14 +2401,21 @@ mod tests {
         let entries = store
             .rebuild_time_entries_in_range(0, 25_000, 25_000)
             .unwrap();
-        // The session covering the Code segment starts first.
+        // One live session covers both apps.
+        assert_eq!(entries.len(), 1);
         let code_entry = entries.first().unwrap();
 
         store.delete_time_entry(&code_entry.id, 26_000).unwrap();
 
+        // Its segments go with it, the one capture was writing included:
+        // capture must not keep writing into a deleted row.
         let remaining = store.snapshot(0, 26_000).unwrap();
-        assert_eq!(remaining.segments.len(), 1);
-        assert_eq!(remaining.segments[0].app, "Slack");
+        assert!(remaining.segments.is_empty());
+        store.tick(sample("Slack", "#general"), 0, 27_000).unwrap();
+        let resumed = store.snapshot(0, 28_000).unwrap();
+        assert_eq!(resumed.segments.len(), 1);
+        assert_eq!(resumed.segments[0].app, "Slack");
+        assert_eq!(resumed.segments[0].started_at, 27_000);
         let linked: i64 = store
             .conn
             .query_row(

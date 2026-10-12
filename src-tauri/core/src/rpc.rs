@@ -199,14 +199,7 @@ impl Context<'_> {
                 let ids = self.entries(&entries)?;
                 let patch = self.entry_patch(patch)?;
                 let mut store = lock(&self.state.activity)?;
-                let mut updated = Vec::with_capacity(ids.len());
-                for id in &ids {
-                    updated.push(
-                        store
-                            .update_time_entry(id, patch.clone(), now)
-                            .map_err(fail)?,
-                    );
-                }
+                let updated = store.update_time_entries(&ids, patch, now).map_err(fail)?;
                 to_value(updated)
             }
             O::EntriesApprove { entries } => {

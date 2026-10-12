@@ -284,7 +284,7 @@ pub struct NewTimeEntry {
     pub review: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateTimeEntry {
     pub description: Option<String>,

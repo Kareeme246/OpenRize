@@ -566,11 +566,7 @@ pub fn update_time_entries(
     let entries = {
         let state = app.state::<AppState>();
         let mut store = state.activity.lock().map_err(|e| e.to_string())?;
-        let mut updated = Vec::with_capacity(ids.len());
-        for id in &ids {
-            updated.push(store.update_time_entry(id, patch.clone(), now)?);
-        }
-        updated
+        store.update_time_entries(&ids, patch, now)?
     };
     entries_changed(&app);
     Ok(entries)
@@ -637,21 +633,23 @@ pub fn delete_time_entries(app: AppHandle, ids: Vec<String>) -> Result<(), Strin
     Ok(())
 }
 
+/// Undoes (or redoes) the last change to entries or the catalog. Returns
+/// what it was ("Split", "Accept", ...), or `None` when there was nothing.
 #[tauri::command]
-pub fn undo_deletion(app: AppHandle, redo: bool) -> Result<bool, String> {
-    let changed = {
+pub fn undo(app: AppHandle, redo: bool) -> Result<Option<String>, String> {
+    let step = {
         let state = app.state::<AppState>();
         let mut store = state.activity.lock().map_err(|error| error.to_string())?;
         if redo {
-            store.redo_deletion(now_epoch_ms())?
+            store.redo(now_epoch_ms())?
         } else {
-            store.undo_deletion(now_epoch_ms())?
+            store.undo(now_epoch_ms())?
         }
     };
-    if changed {
+    if step.is_some() {
         entries_changed(&app);
     }
-    Ok(changed)
+    Ok(step.map(str::to_string))
 }
 
 #[tauri::command]

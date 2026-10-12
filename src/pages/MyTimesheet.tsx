@@ -39,7 +39,6 @@ import {
   isInFlight,
   isReviewable,
   isTyping,
-  splitPoint,
   totalDuration,
   workDuration,
 } from "../lib/entries";
@@ -388,14 +387,6 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
       return next;
     });
 
-  const splitEntry = async (entry: TimeEntry): Promise<void> => {
-    await act(async () => {
-      const detail = await api.getEntryDetail(entry.id);
-      await api.splitTimeEntry(entry.id, splitPoint(entry, detail.segments));
-      return undefined;
-    });
-  };
-
   const tabs = [
     { value: "review" as const, label: "To review", count: toReview.length },
     {
@@ -713,7 +704,7 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
                               entryId: entry.id,
                             })
                           }
-                          onSplit={() => void splitEntry(entry)}
+                          onSplit={() => review.beginSplit(false, entry.id)}
                           onDelete={() => setConfirmDelete([entry])}
                         />
                       ))}

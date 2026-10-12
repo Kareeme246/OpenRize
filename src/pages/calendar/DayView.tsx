@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { EmptyState } from "../../components/Page";
 import { Tooltip } from "../../components/Tooltip";
 import { type BreakEntry, breakEnd, takenBreaks } from "../../lib/breaks";
-import { recordingEntry } from "../../lib/entries";
+import { entryEnd, recordingEntry } from "../../lib/entries";
 import { formatDuration, formatTime } from "../../lib/format";
 import type {
   ActivitySegment,
@@ -11,6 +11,7 @@ import type {
   TimeEntry,
 } from "../../lib/types";
 import { clampStyle, EntryBlock } from "./EntryBlock";
+import { SplitPicker } from "./SplitPicker";
 import {
   dayLength,
   gutterLabel,
@@ -34,29 +35,10 @@ interface DayViewProps {
   onSelect: (id: string) => void;
   onEmpty: () => void;
   onCreate: (startMs: number, endMs: number) => void;
+  /** Split mode: the selected entry whose cut is being picked. */
+  splitPick?: { id: string; at: number };
+  onPickSplit?: (at: number) => void;
   now: number;
-}
-
-/** The week view's now line, updated only while the app is visible. */
-export function useMinuteClock(): number {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    let timer: number | undefined;
-    const sync = (): void => {
-      window.clearInterval(timer);
-      if (document.visibilityState === "visible") {
-        setNow(Date.now());
-        timer = window.setInterval(() => setNow(Date.now()), 15_000);
-      }
-    };
-    document.addEventListener("visibilitychange", sync);
-    sync();
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", sync);
-    };
-  }, []);
-  return now;
 }
 
 export function DayView({
@@ -71,6 +53,8 @@ export function DayView({
   onSelect,
   onEmpty,
   onCreate,
+  splitPick,
+  onPickSplit,
   now,
 }: DayViewProps) {
   const viewportKey = `calendar:day:${dayStart}`;
@@ -94,6 +78,7 @@ export function DayView({
   const nowOffset = hourOffset(now, dayStart, "elapsed");
   const showNow = now >= dayStart && now < dayEnd;
   const recording = showNow ? recordingEntry(entries, now) : undefined;
+  const splitting = splitPick && entryById.get(splitPick.id);
   const liveEnd = (entry: TimeEntry): number =>
     entry.status === "building"
       ? Math.min(Math.max(entry.startedAt, now), dayEnd)
@@ -444,6 +429,24 @@ export function DayView({
                     />
                   );
                 })}
+                {splitting && splitPick && onPickSplit && (
+                  <SplitPicker
+                    {...place(
+                      timeline,
+                      splitting.startedAt,
+                      liveEnd(splitting),
+                      dayStart,
+                      "elapsed",
+                    )}
+                    startedAt={splitting.startedAt}
+                    endsAt={entryEnd(splitting, now)}
+                    initialAt={splitPick.at}
+                    timeline={timeline}
+                    dayStart={dayStart}
+                    placement="elapsed"
+                    onPick={onPickSplit}
+                  />
+                )}
                 {draft && (
                   <div
                     className="pointer-events-none absolute right-4 left-0 z-20 rounded-md border border-accent bg-accent/20"

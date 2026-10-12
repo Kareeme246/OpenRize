@@ -283,6 +283,11 @@ fn make_non_activating(window: &WebviewWindow) {
     });
 }
 
+#[cfg(not(target_os = "macos"))]
+fn make_non_activating(window: &WebviewWindow) {
+    let _ = window.set_visible_on_all_workspaces(true);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,9 +318,4 @@ mod tests {
             (-372.0, 948.0)
         );
     }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn make_non_activating(window: &WebviewWindow) {
-    let _ = window.set_visible_on_all_workspaces(true);
 }

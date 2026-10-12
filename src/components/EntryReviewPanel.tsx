@@ -15,7 +15,7 @@ import {
   METER_SEGMENTS,
   percent,
 } from "../lib/confidence";
-import { entryEnd, isTyping } from "../lib/entries";
+import { entryEnd, isTyping, LOCKED_HINT } from "../lib/entries";
 import { shortcutLabel } from "../lib/platform";
 import type {
   Category,
@@ -111,6 +111,8 @@ export interface EntryReviewPanelProps {
   onMerge?: () => void;
   onMergePrev?: () => void;
   onMergeNext?: () => void;
+  /** Why merging with an adjacent entry is refused (it is approved). */
+  mergeBlocked?: { prev?: string; next?: string };
   onDelete: () => void;
   onDeleteField: (field: SuggestionField, id: string) => void;
   onRetry: () => void;
@@ -208,6 +210,7 @@ export function EntryReviewPanel({
   onMerge,
   onMergePrev,
   onMergeNext,
+  mergeBlocked,
   onDelete,
   onDeleteField,
   onRetry,
@@ -266,6 +269,9 @@ export function EntryReviewPanel({
   const invoiced = entry.invoiceId !== undefined && entry.invoiceId !== null;
   // Approved entries are frozen; unapprove one to edit it again.
   const locked = approved;
+  const lockedHint = locked ? LOCKED_HINT : undefined;
+  const mergePrevBlocked = lockedHint ?? mergeBlocked?.prev;
+  const mergeNextBlocked = lockedHint ?? mergeBlocked?.next;
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -284,7 +290,7 @@ export function EntryReviewPanel({
       } else if (key === "p" && suggestProjects) {
         event.preventDefault();
         setActiveField((field) => (field === "project" ? null : "project"));
-      } else if (key === "e") {
+      } else if (key === "e" && !locked) {
         event.preventDefault();
         editFinished.current = false;
         setEditing(true);
@@ -431,11 +437,12 @@ export function EntryReviewPanel({
               </div>
             </div>
           ) : (
-            <Tooltip content="Edit description (E)">
+            <Tooltip content={lockedHint ?? "Edit description (E)"}>
               <button
                 type="button"
                 onClick={startEditing}
-                className="w-full cursor-pointer text-left font-medium text-[12.5px] text-fg-strong transition-colors hover:text-accent"
+                disabled={locked}
+                className="w-full cursor-pointer text-left font-medium text-[12.5px] text-fg-strong transition-colors hover:text-accent disabled:cursor-default disabled:hover:text-fg-strong"
               >
                 {entry.description || (
                   <span className="text-fg-faint">Untitled session</span>
@@ -490,14 +497,21 @@ export function EntryReviewPanel({
           />
         ))}
 
-        <Tooltip content={entry.billable ? "Billable" : "Not billable"}>
-          <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-line p-2.5">
+        <Tooltip
+          content={lockedHint ?? (entry.billable ? "Billable" : "Not billable")}
+        >
+          <label
+            className={`flex items-center gap-2 rounded-lg border border-line p-2.5 ${
+              locked ? "cursor-default" : "cursor-pointer"
+            }`}
+          >
             <span className="font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider">
               Billable
             </span>
             <input
               type="checkbox"
               checked={entry.billable}
+              disabled={locked}
               onChange={onToggleBillable}
               className="accent-(--accent)"
             />
@@ -574,21 +588,23 @@ export function EntryReviewPanel({
                 </span>
               </button>
             )}
-            <Tooltip content="Split in two (S)">
+            <Tooltip content={lockedHint ?? "Split in two (S)"}>
               <button
                 type="button"
                 onClick={onSplit}
-                className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+                disabled={locked}
+                className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-surface disabled:hover:text-fg-soft"
               >
                 Split
               </button>
             </Tooltip>
-            <Tooltip content="Delete entry">
+            <Tooltip content={lockedHint ?? "Delete entry"}>
               <button
                 type="button"
                 onClick={onDelete}
+                disabled={locked}
                 aria-label="Delete time entry"
-                className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-danger transition-colors hover:bg-danger/10"
+                className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-danger transition-colors hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-surface"
               >
                 ✕
               </button>
@@ -597,25 +613,29 @@ export function EntryReviewPanel({
           {onMergePrev && onMergeNext ? (
             <div className="flex items-center gap-1.5">
               <Tooltip
-                content="Merge with earlier adjacent entry (M)"
+                content={
+                  mergePrevBlocked ?? "Merge with earlier adjacent entry (M)"
+                }
                 wrapperClassName="flex min-w-0 flex-1"
               >
                 <button
                   type="button"
                   onClick={onMergePrev}
-                  className="whitespace-nowrap flex-1 rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+                  disabled={Boolean(mergePrevBlocked)}
+                  className="whitespace-nowrap flex-1 rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-surface disabled:hover:text-fg-soft"
                 >
                   Merge ⭡
                 </button>
               </Tooltip>
               <Tooltip
-                content="Merge with later adjacent entry"
+                content={mergeNextBlocked ?? "Merge with later adjacent entry"}
                 wrapperClassName="flex min-w-0 flex-1"
               >
                 <button
                   type="button"
                   onClick={onMergeNext}
-                  className="whitespace-nowrap flex-1 rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+                  disabled={Boolean(mergeNextBlocked)}
+                  className="whitespace-nowrap flex-1 rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-surface disabled:hover:text-fg-soft"
                 >
                   Merge ⭣
                 </button>
@@ -624,13 +644,18 @@ export function EntryReviewPanel({
           ) : onMerge || canMerge ? (
             <div className="flex items-center gap-1.5">
               <Tooltip
-                content="Merge adjacent entries (M)"
+                content={
+                  mergePrevBlocked ??
+                  mergeNextBlocked ??
+                  "Merge adjacent entries (M)"
+                }
                 wrapperClassName="flex min-w-0 flex-1"
               >
                 <button
                   type="button"
                   onClick={onMerge}
-                  className="whitespace-nowrap flex-1 rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+                  disabled={Boolean(mergePrevBlocked ?? mergeNextBlocked)}
+                  className="whitespace-nowrap flex-1 rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-surface disabled:hover:text-fg-soft"
                 >
                   Merge
                 </button>
@@ -638,15 +663,21 @@ export function EntryReviewPanel({
             </div>
           ) : null}
         </div>
-        <p className="text-[10.5px] text-fg-faint">
-          <Kbd>1–9</Kbd> pick · <Kbd>C</Kbd>
-          {suggestProjects && (
-            <>
-              /<Kbd>P</Kbd>
-            </>
-          )}{" "}
-          field · <Kbd>J</Kbd>/<Kbd>K</Kbd> next · <Kbd>E</Kbd> edit
-        </p>
+        {locked ? (
+          <p className="text-[10.5px] text-fg-faint">
+            {LOCKED_HINT} <Kbd>J</Kbd>/<Kbd>K</Kbd> next
+          </p>
+        ) : (
+          <p className="text-[10.5px] text-fg-faint">
+            <Kbd>1–9</Kbd> pick · <Kbd>C</Kbd>
+            {suggestProjects && (
+              <>
+                /<Kbd>P</Kbd>
+              </>
+            )}{" "}
+            field · <Kbd>J</Kbd>/<Kbd>K</Kbd> next · <Kbd>E</Kbd> edit
+          </p>
+        )}
 
         <div className="pt-1">
           <div className="flex border-line border-b font-medium text-[11px]">
@@ -879,7 +910,7 @@ function FieldSection({
         </span>
       </button>
 
-      {value && (
+      {value && !locked && (
         <button
           type="button"
           onClick={onDelete}

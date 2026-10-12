@@ -34,6 +34,7 @@ import {
   countsAsWork,
   durationOf,
   entryEnd,
+  isLocked,
   isReviewable,
   isTyping,
 } from "../lib/entries";
@@ -346,6 +347,13 @@ export function Calendar({ route, navigate }: CalendarProps) {
         !document.querySelector("dialog[open]")
       ) {
         event.preventDefault();
+        // Approved entries are locked: the panel says how to change them.
+        if (
+          review.detail?.entry.id === review.selectedId &&
+          isLocked(review.detail.entry)
+        ) {
+          return;
+        }
         const idToDelete = review.selectedId;
         void (async () => {
           try {
@@ -369,6 +377,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
     reviewQueue,
     reviewing,
     review.selectedId,
+    review.detail,
     select,
     startReviewMode,
     advanceFrom,

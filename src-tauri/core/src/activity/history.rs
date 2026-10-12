@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::{params, params_from_iter, types::Value, Connection};
 
-use super::{deletions::Deletion, segment_from_row, ActivityStore};
+use super::{deletions::Deletion, segment_from_row, ActivityStore, LOCKED};
 use crate::entry_builder::{describe, SegmentInput};
 use crate::models::TimeEntry;
 
@@ -103,6 +103,10 @@ impl EntryRow {
 
     fn building(&self) -> bool {
         self.text(STATUS) == "building"
+    }
+
+    fn approved(&self) -> bool {
+        self.text(STATUS) == "approved"
     }
 }
 
@@ -268,6 +272,11 @@ impl Edit {
             let touched: Vec<usize> = (1..COLUMNS.len())
                 .filter(|&i| from.0[i] != to.0[i])
                 .collect();
+            // An approved entry may only leave approval (undoing an Accept);
+            // any other change to it waits for an unapprove.
+            if current.approved() && !(touched.contains(&STATUS) && !to.approved()) {
+                return Err(LOCKED.to_string());
+            }
             for &column in &touched {
                 // The builder owns a live entry's times and template text.
                 let live = matches!(column, STARTED | ENDED | DESCRIPTION)
@@ -568,6 +577,9 @@ impl ActivityStore {
         if entry.invoice_id.is_some() {
             return Err("Invoiced entries cannot be split.".to_string());
         }
+        if entry.status == "approved" {
+            return Err(LOCKED.to_string());
+        }
         let live = entry.status == "building";
         // A live entry's stored end trails the clock by up to a rebuild.
         let end = if live {
@@ -651,6 +663,9 @@ impl ActivityStore {
     fn unsplit(&mut self, split: &mut Split, now: u64) -> Result<(), String> {
         let first = EntryRow::editable(&self.conn, &split.original)?;
         let second = EntryRow::editable(&self.conn, &split.second)?;
+        if first.approved() || second.approved() {
+            return Err(LOCKED.to_string());
+        }
         // The second half may start later than the cut when the cut fell in
         // a gap; anything else means the halves were resized since.
         if first.int(ENDED) != split.at || second.int(STARTED) < split.at {
@@ -739,6 +754,9 @@ impl ActivityStore {
         if primary.invoice_id.is_some() || secondary.invoice_id.is_some() {
             return Err("Invoiced entries cannot be merged.".to_string());
         }
+        if primary.status == "approved" || secondary.status == "approved" {
+            return Err(LOCKED.to_string());
+        }
         let adjacent =
             primary.ended_at == secondary.started_at || secondary.ended_at == primary.started_at;
         if !adjacent {
@@ -748,13 +766,9 @@ impl ActivityStore {
         }
 
         let live = primary.status == "building" || secondary.status == "building";
-        // A captured session can take in its neighbour and keep recording; an
-        // approved or hand-made entry cannot be rebuilt, so the live session
-        // closes now instead and recording carries on in a new one.
-        let keep_live = live
-            && primary.source == "auto"
-            && secondary.source == "auto"
-            && primary.status != "approved";
+        // A captured session can take in its neighbour and keep recording; a
+        // hand-made entry cannot be rebuilt, so the live session closes now instead and recording carries on in a new one.
+        let keep_live = live && primary.source == "auto" && secondary.source == "auto";
         let started_at = primary.started_at.min(secondary.started_at);
         let mut ended_at = primary.ended_at.max(secondary.ended_at);
         if live {
@@ -788,6 +802,11 @@ impl ActivityStore {
 
     fn unmerge(&mut self, merge: &mut Merge, now: u64) -> Result<(), String> {
         let current = EntryRow::editable(&self.conn, &merge.primary)?;
+        if current.approved()
+            || EntryRow::editable(&self.conn, &merge.secondary).is_ok_and(|row| row.approved())
+        {
+            return Err(LOCKED.to_string());
+        }
         if !current.building()
             && (current.int(STARTED) != merge.after.int(STARTED)
                 || current.int(ENDED) != merge.after.int(ENDED))

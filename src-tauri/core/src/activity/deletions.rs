@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::{params, Connection};
 
-use super::{history::Command, segment_from_row, ActivityStore};
+use super::{history::Command, segment_from_row, ActivityStore, LOCKED};
 use crate::models::ActivitySegment;
 
 #[cfg(test)]
@@ -60,10 +60,13 @@ impl Deletion {
             projects.insert(id.to_owned());
         }
         for id in ids.iter().collect::<BTreeSet<_>>() {
-            let links: Links = conn.query_row(
-                "SELECT category_id, project_id, deleted_at FROM time_entries WHERE id = ?1 AND deleted_at IS NULL;",
-                [id], |row| Ok(Links { category: row.get(0)?, project: row.get(1)?, deleted: row.get(2)? }),
+            let (links, status): (Links, String) = conn.query_row(
+                "SELECT category_id, project_id, deleted_at, status FROM time_entries WHERE id = ?1 AND deleted_at IS NULL;",
+                [id], |row| Ok((Links { category: row.get(0)?, project: row.get(1)?, deleted: row.get(2)? }, row.get(3)?)),
             ).map_err(|error| error.to_string())?;
+            if status == "approved" {
+                return Err(LOCKED.to_string());
+            }
             if let Some(id) = links.category {
                 categories.insert(id);
             }
@@ -254,6 +257,19 @@ impl Deletion {
             } else {
                 (&entry.before, &entry.after)
             };
+            // Deleting or restoring the time itself is refused once it is
+            // approved; only a catalog unlink rides along on approved entries.
+            if from.deleted != to.deleted
+                && conn
+                    .query_row(
+                        "SELECT status = 'approved' FROM time_entries WHERE id = ?1;",
+                        [&entry.id],
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .map_err(|error| error.to_string())?
+            {
+                return Err(LOCKED.to_string());
+            }
             let count = conn.execute(
                 "UPDATE time_entries SET category_id = ?1, project_id = ?2, deleted_at = ?3, updated_at = ?4 WHERE id = ?5 AND category_id IS ?6 AND project_id IS ?7 AND deleted_at IS ?8 AND invoice_id IS NULL;",
                 params![to.category, to.project, to.deleted, now as i64, entry.id, from.category, from.project, from.deleted],

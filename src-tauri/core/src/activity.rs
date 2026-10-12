@@ -33,6 +33,10 @@ pub const KIND_BREAK: &str = "break";
 
 pub const IDLE_LABEL: &str = "Idle";
 
+/// Why every change to an approved entry is refused. Approval freezes an
+/// entry; unapproving is the only way back to changing it.
+pub const LOCKED: &str = "Approved entries are locked. Unapprove to change them.";
+
 /// How long a statement waits on another connection's write lock. The AI
 /// worker reads on its own connection, so contention is brief but real.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -159,6 +163,8 @@ struct Totals {
     unreviewed: u64,
 }
 
+#[cfg(test)]
+mod approval_lock;
 #[cfg(test)]
 mod break_regressions;
 mod deletions;
@@ -1525,6 +1531,9 @@ impl ActivityStore {
             params![id],
             time_entry_from_row,
         ).map_err(|e| e.to_string())?;
+        if entry.status == "approved" {
+            return Err(LOCKED.to_string());
+        }
 
         if let Some(desc) = patch.description {
             if desc != entry.description {
@@ -1608,6 +1617,9 @@ impl ActivityStore {
     fn approve(&mut self, ids: &[String], approved_by: &str, now: u64) -> Result<(), String> {
         for id in ids {
             let entry = self.time_entry(id)?;
+            if entry.status == "approved" {
+                continue;
+            }
             // Approval is final: the live session closes now, and capture
             // carries on in a new one.
             let ended_at = if entry.status == "building" {
@@ -1660,6 +1672,9 @@ impl ActivityStore {
     /// The live session keeps recording: only its suggestion goes.
     fn reject(&mut self, id: &str, now: u64) -> Result<(), String> {
         let entry = self.time_entry(id)?;
+        if entry.status == "approved" {
+            return Err(LOCKED.to_string());
+        }
         let rejected = crate::ai::store::record_rejection(&self.conn, id, now)?;
         let prefilled_project = rejected.iter().any(|s| {
             s.field == crate::ai::FIELD_PROJECT
@@ -1713,7 +1728,7 @@ impl ActivityStore {
     pub fn queue_classification(&mut self, id: &str, now: u64) -> Result<(), String> {
         let entry = self.time_entry(id)?;
         if entry.status == "approved" {
-            return Err("approved entries are frozen".to_string());
+            return Err(LOCKED.to_string());
         }
         crate::ai::store::enqueue(&self.conn, id, crate::ai::store::JOB_CLASSIFY, now)
     }
@@ -3334,7 +3349,7 @@ mod tests {
     }
 
     #[test]
-    fn recategorizing_an_approved_entry_is_a_correction() {
+    fn recategorizing_an_unapproved_entry_is_a_correction() {
         let mut store = store();
         let auto = suggested_entry(&mut store, 0, "coding", "github.com");
         store
@@ -3347,6 +3362,9 @@ mod tests {
         let accepted = suggested_entry(&mut store, 40 * MIN, "coding", "github.com");
         store
             .approve_time_entries(&[auto.clone(), accepted.clone()], "user", 2)
+            .unwrap();
+        store
+            .unapprove_time_entries(&[auto.clone(), accepted.clone()], 3)
             .unwrap();
         set_category(&mut store, &auto, "review");
         set_category(&mut store, &accepted, "coding");

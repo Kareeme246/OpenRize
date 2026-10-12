@@ -54,6 +54,8 @@ CLI asset. `src-tauri/cli/COMMANDS.md`
 lists every current and planned CLI command and the Tauri command behind it; a PR that adds,
 changes or removes either side updates it.
 Windows is deliberately not released: it is built from source only, and its updater stays off.
+Klock (`../klock`) is the enterprise fork of this app: shared-foundation changes reach it by
+merging OpenRize `main` into it, never by porting code; see the `sync-klock` skill.
 Every user-facing change bumps the patch version in the same PR and uses a Conventional
 Commit subject; see `RELEASING.md` for the release and changelog procedure.
 

@@ -3,6 +3,7 @@ mod ai;
 mod breaks;
 mod capture;
 mod commands;
+mod crashes;
 mod energy;
 mod invoices;
 mod login_item;
@@ -81,6 +82,7 @@ const BACKGROUND_ARG: &str = "--background";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    crashes::init_panic_hook();
     let background = std::env::args().any(|arg| arg == BACKGROUND_ARG);
     tauri::Builder::default()
         // Registered first so a second launch exits before it opens the
@@ -103,6 +105,7 @@ pub fn run() {
         .setup(move |app| {
             install_bundled_cli();
             let dir = app.path().app_data_dir()?;
+            crashes::set_crash_data_dir(&dir);
             // Waits out a `rize` edit made while the app was closed, then
             // keeps the stores for as long as the app runs.
             std::fs::create_dir_all(&dir)?;
@@ -138,6 +141,9 @@ pub fn run() {
             // the first hour-long wait elapses.
             if let Err(error) = commands::sweep_retention(app.handle()) {
                 eprintln!("retention sweep failed: {error}");
+            }
+            if preferences.crash_reporting {
+                crashes::dispatch_pending_reports(dir.clone());
             }
             rpc::serve(app.handle().clone(), dir);
             // The window is created hidden (tauri.conf.json), so a background
@@ -297,6 +303,7 @@ pub fn run() {
             commands::update_status,
             commands::check_for_updates,
             commands::install_update,
+            commands::record_client_crash,
         ])
         .build(tauri::generate_context!())
         .expect("error while building OpenRize")

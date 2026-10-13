@@ -7,6 +7,7 @@
 pub mod activity;
 pub mod ai;
 pub mod capture;
+pub mod crashes;
 pub mod entry_builder;
 pub mod ipc;
 pub mod migrations;

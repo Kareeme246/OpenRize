@@ -479,6 +479,8 @@ pub struct Settings {
     pub breaks: BreakSettings,
     pub stopwatch_reminder: StopwatchReminder,
     pub notification_placement: NotificationPlacement,
+    /// Whether to send anonymous crash reports to the built-in endpoint.
+    pub crash_reporting: bool,
 }
 
 impl Default for Settings {
@@ -500,6 +502,7 @@ impl Default for Settings {
             breaks: BreakSettings::default(),
             stopwatch_reminder: StopwatchReminder::default(),
             notification_placement: NotificationPlacement::default(),
+            crash_reporting: false,
         }
     }
 }
@@ -825,6 +828,7 @@ mod tests {
                     breaks: BreakSettings::default(),
                     stopwatch_reminder: StopwatchReminder::default(),
                     notification_placement: NotificationPlacement::TopLeft,
+                    crash_reporting: true,
                 })
                 .unwrap();
         }
@@ -845,6 +849,7 @@ mod tests {
             reloaded.notification_placement,
             NotificationPlacement::TopLeft
         );
+        assert!(reloaded.crash_reporting);
         assert!(reloaded.tracking_hours.per_day);
         assert_eq!(reloaded.tracking_hours.monday.start, "09:00");
         assert!(!reloaded.tracking_hours.tuesday.enabled);

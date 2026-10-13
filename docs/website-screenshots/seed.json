@@ -1,0 +1,164 @@
+{
+  "about": "One fictional working day for the offlinestudios.net screenshots of OpenRize. Edit this file, never the screenshots. Run seed.mjs to load it into an app database; see README.md.",
+  "day": "2026-09-28",
+  "utcOffset": "-05:00",
+  "clients": [
+    { "id": "seed-client-northwind", "name": "Northwind", "email": "accounts@northwind.example", "defaultRate": 95, "currency": "USD" },
+    { "id": "seed-client-brightwell", "name": "Brightwell Clinics", "email": "billing@brightwell.example", "defaultRate": 110, "currency": "USD" }
+  ],
+  "projects": [
+    { "id": "seed-project-checkout", "name": "Checkout Redesign", "color": "#707bf0", "client": "Northwind", "billable": true },
+    { "id": "seed-project-portal", "name": "Patient Portal", "color": "#56c2b1", "client": "Brightwell Clinics", "billable": true },
+    { "id": "seed-project-platform", "name": "Platform Maintenance", "color": "#e5995c", "client": "Northwind", "billable": false }
+  ],
+  "entries": [
+    {
+      "id": "seed-entry-00",
+      "start": "08:33:00",
+      "end": "08:36:00",
+      "description": "Renew the domain and file expenses",
+      "category": "Administrative",
+      "project": "Platform Maintenance",
+      "status": "approved",
+      "activity": [["Zen", 3, "Registrar - renew domain"]]
+    },
+    {
+      "id": "seed-entry-01",
+      "start": "09:00:00",
+      "end": "09:22:50",
+      "description": "Morning Slack and Linear triage",
+      "category": "Communication",
+      "project": "Platform Maintenance",
+      "status": "approved",
+      "activity": [
+        ["Slack", 14.433, "#eng-checkout"],
+        ["Linear", 8.4, "Checkout Redesign - Active"]
+      ]
+    },
+    {
+      "id": "seed-entry-02",
+      "start": "09:22:50",
+      "end": "10:36:10",
+      "description": "Build Stripe payment step for checkout",
+      "category": "Coding",
+      "project": "Checkout Redesign",
+      "status": "approved",
+      "activity": [
+        ["WezTerm", 50, "pnpm dev - checkout"],
+        ["Zen", 23.333, "Stripe Docs - Payment Element"]
+      ]
+    },
+    {
+      "id": "seed-entry-03",
+      "start": "10:36:10",
+      "end": "10:53:00",
+      "description": "Northwind daily standup and sprint sync",
+      "category": "Meetings",
+      "project": "Checkout Redesign",
+      "status": "approved",
+      "activity": [
+        ["Zoom", 12, "Northwind daily standup"],
+        ["Slack", 4.833, "#northwind-sync"]
+      ]
+    },
+    {
+      "id": "seed-entry-04",
+      "start": "10:53:00",
+      "end": "11:52:00",
+      "description": "Checkout v3 address and mobile states",
+      "category": "Design",
+      "project": "Checkout Redesign",
+      "status": "approved",
+      "activity": [
+        ["Figma", 45, "Checkout v3 - Address"],
+        ["Preview", 8, "mobile-states.png"],
+        ["Zen", 6, "Apple HIG - Forms"]
+      ]
+    },
+    {
+      "id": "seed-entry-05",
+      "start": "11:52:00",
+      "end": "12:34:00",
+      "description": "Fix cart total rounding on discount codes",
+      "category": "Debugging",
+      "project": "Checkout Redesign",
+      "status": "approved",
+      "activity": [
+        ["WezTerm", 32, "cart.test.ts"],
+        ["Zen", 10, "MDN - Number.toFixed"]
+      ]
+    },
+    {
+      "id": "seed-entry-06",
+      "start": "13:16:00",
+      "end": "14:06:00",
+      "description": "Review PRs #287 and #291",
+      "category": "Review",
+      "project": "Checkout Redesign",
+      "status": "approved",
+      "activity": [
+        ["Zen", 28, "Pull request #287"],
+        ["WezTerm", 12, "git diff main"],
+        ["Slack", 7, "#eng-review"],
+        ["Linear", 3, "CHK-412"]
+      ]
+    },
+    {
+      "id": "seed-entry-07",
+      "start": "14:06:00",
+      "end": "15:01:00",
+      "description": "Fix duplicate appointment reminders after DST",
+      "category": "Debugging",
+      "project": "Patient Portal",
+      "status": "approved",
+      "activity": [
+        ["WezTerm", 42, "reminders.rs"],
+        ["Zen", 13, "chrono - DST gaps"]
+      ]
+    },
+    {
+      "id": "seed-entry-08",
+      "start": "15:09:00",
+      "end": "15:49:00",
+      "description": "Add regression tests for reminder scheduler",
+      "category": "Coding",
+      "project": "Patient Portal",
+      "status": "pending",
+      "confidence": { "category": 0.9, "project": 0.9 },
+      "activity": [
+        ["WezTerm", 38, "scheduler_test.rs"],
+        ["Zen", 2, "cargo test docs"]
+      ]
+    },
+    {
+      "id": "seed-entry-09",
+      "start": "15:49:00",
+      "end": "16:13:00",
+      "description": "Write up DST reminder incident",
+      "category": "Writing",
+      "project": "Patient Portal",
+      "status": "pending",
+      "confidence": { "category": 0.33, "project": 0.33 },
+      "activity": [
+        ["Notion", 14, "Incident - DST reminders"],
+        ["Zen", 10, "Postmortem template"]
+      ]
+    },
+    {
+      "id": "seed-entry-10",
+      "start": "16:13:00",
+      "end": "16:41:00",
+      "description": "Sprint planning in Linear and client email",
+      "category": "Planning",
+      "project": "Platform Maintenance",
+      "status": "pending",
+      "confidence": { "category": 0.67, "project": 0.67 },
+      "activity": [
+        ["Linear", 11, "Sprint 42 - Planning"],
+        ["Slack", 9, "#northwind-sync"],
+        ["Zen", 5, "Sprint 42 - Notes"],
+        ["Mail", 3, "Re: Q4 scope"]
+      ]
+    }
+  ]
+}

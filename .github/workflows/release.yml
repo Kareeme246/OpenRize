@@ -1,29 +1,57 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version (X.Y.Z, without v)
+        required: true
+        type: string
+      macos_arm:
+        description: Build macOS ARM
+        type: boolean
+        default: true
+      windows:
+        description: Build Windows x64 (unsigned NSIS installer)
+        type: boolean
+        default: false
+      scope:
+        description: Artifact scope
+        type: choice
+        options: [standard, comprehensive]
+        default: standard
+
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build:
-    # Needs Xcode 26+ (src-tauri/build.rs compiles the Swift sidecar, which
-    # requires the Foundation Models SDK). macos-26 ships Xcode 26.6 as its
-    # default toolchain - see AGENTS.md "On-device AI sidecar".
-    runs-on: macos-26
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify tag matches project versions
+      - name: Verify requested version matches project versions
+        id: version
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: v${{ inputs.version }}
+          MACOS_ARM: ${{ inputs.macos_arm }}
+          WINDOWS: ${{ inputs.windows }}
+          SCOPE: ${{ inputs.scope }}
         run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          [[ "$MACOS_ARM" == true || "$WINDOWS" == true ]] || exit 1
+          [[ "$SCOPE" == standard || "$SCOPE" == comprehensive ]] || exit 1
           package_version=$(node -p "require('./package.json').version")
           tauri_version=$(node -p "require('./src-tauri/tauri.conf.json').version")
           cargo_version=$(awk '
@@ -43,20 +71,44 @@ jobs:
               exit 1
             fi
           done
-          if [[ "$package_version" != "$tauri_version" ||
-                "$package_version" != "$cargo_version" ||
-                "$TAG" != "v$package_version" ]]; then
-            printf 'Tag %s does not match all project versions\n' "$TAG" >&2
-            printf 'package=%s, tauri=%s, cargo=%s\n' \
-              "$package_version" "$tauri_version" "$cargo_version" >&2
-            exit 1
-          fi
+          for version in "$tauri_version" "$cargo_version" "${TAG#v}"; do
+            if [[ "$version" != "$package_version" ]]; then
+              printf 'Tag %s does not match all project versions\n' "$TAG" >&2
+              exit 1
+            fi
+          done
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag or verify existing tag
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const tag = process.env.TAG;
+            try {
+              await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              throw new Error(`Release ${tag} already exists; refusing to mix asset sets`);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            try {
+              const { data } = await github.rest.repos.getCommit({ owner, repo, ref: `refs/tags/${tag}` });
+              if (data.sha !== context.sha) throw new Error(`Tag ${tag} points at another commit`);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.git.createRef({ owner, repo, ref: `refs/tags/${tag}`, sha: context.sha });
+            }
+
+      - name: Fetch release tag for notes
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: git fetch origin "refs/tags/$TAG:refs/tags/$TAG"
 
       - name: Generate release notes
-        id: git-cliff
-        # v4.9.1
-        uses: >-
-          orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff
+        uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4.9.1
         with:
           version: v2.14.2
           config: cliff.toml
@@ -64,6 +116,22 @@ jobs:
         env:
           OUTPUT: release-notes.md
 
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
+
+  macos:
+    needs: prepare
+    if: inputs.macos_arm
+    # Xcode 26+ is required by the Swift ML sidecar. Only Apple Silicon.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       # v6.1.0 (pnpm 12 support; v6.0.9 breaks pnpm 12 on Windows)
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
 
@@ -125,40 +193,152 @@ jobs:
           cd src-tauri/target/release/bundle/macos
           ditto -c -k --sequesterRsrc --keepParent openrize.app openrize.app.zip
 
-      # The in-app updater reads this from releases/latest/download/latest.json
-      # (plugins.updater.endpoints in tauri.conf.json). CI only builds on
-      # Apple Silicon, so darwin-aarch64 is the only platform.
+      - name: Stage selected macOS assets
+        env:
+          VERSION: ${{ inputs.version }}
+          SCOPE: ${{ inputs.scope }}
+        run: |
+          mkdir release-assets
+          cp "src-tauri/target/release/bundle/dmg/openrize_${VERSION}_aarch64.dmg" release-assets/
+          cp src-tauri/target/release/bundle/macos/openrize.app.tar.gz release-assets/
+          cp src-tauri/target/release/bundle/macos/openrize.app.tar.gz.sig release-assets/
+          if [[ "$SCOPE" == comprehensive ]]; then
+            cp src-tauri/target/release/bundle/macos/openrize.app.zip release-assets/
+          fi
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-assets-macos
+          path: release-assets/*
+          if-no-files-found: error
+
+  windows:
+    needs: prepare
+    if: inputs.windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile
+      # NSIS remains unsigned; the separate minisign key authenticates updates.
+      - run: pnpm tauri build --bundles nsis
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: >-
+            ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      - name: Stage Windows installer
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          mkdir release-assets
+          cp "src-tauri/target/release/bundle/nsis/openrize_${VERSION}_x64-setup.exe" release-assets/
+          cp "src-tauri/target/release/bundle/nsis/openrize_${VERSION}_x64-setup.exe.sig" release-assets/
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-assets-windows
+          path: release-assets/*
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, macos, windows]
+    if: >-
+      always() && !cancelled() && needs.prepare.result == 'success' &&
+      (needs.macos.result == 'success' || needs.macos.result == 'skipped') &&
+      (needs.windows.result == 'success' || needs.windows.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: release-assets-*
+          path: release-assets
+          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-notes
+      # Every release carries a complete manifest for precisely its selected platforms.
       - name: Write updater manifest
         env:
-          TAG: ${{ github.ref_name }}
+          VERSION: ${{ inputs.version }}
+          MACOS_ARM: ${{ inputs.macos_arm }}
+          WINDOWS: ${{ inputs.windows }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          bundle=src-tauri/target/release/bundle/macos
-          jq -n \
-            --arg version "${TAG#v}" \
-            --rawfile notes release-notes.md \
+          jq -n --arg version "$VERSION" --rawfile notes release-notes.md \
             --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg url "https://github.com/$REPOSITORY/releases/download/$TAG/openrize.app.tar.gz" \
-            --rawfile signature "$bundle/openrize.app.tar.gz.sig" \
-            '{
-              version: $version,
-              notes: $notes,
-              pub_date: $pub_date,
-              platforms: {
-                "darwin-aarch64": { url: $url, signature: $signature }
-              }
-            }' > latest.json
-          cat latest.json
+            '{version: $version, notes: $notes, pub_date: $pub_date, platforms: {}}' \
+            > release-assets/latest.json
+          add_platform() {
+            jq --arg platform "$1" \
+              --arg url "https://github.com/$REPOSITORY/releases/download/v$VERSION/$2" \
+              --rawfile signature "release-assets/$2.sig" \
+              '.platforms[$platform] = {url: $url, signature: $signature}' \
+              release-assets/latest.json > latest.tmp
+            mv latest.tmp release-assets/latest.json
+          }
+          if [[ "$MACOS_ARM" == true ]]; then
+            add_platform darwin-aarch64 openrize.app.tar.gz
+          fi
+          if [[ "$WINDOWS" == true ]]; then
+            add_platform windows-x86_64 "openrize_${VERSION}_x64-setup.exe"
+          fi
 
+      - name: Verify exact selected asset set
+        env:
+          VERSION: ${{ inputs.version }}
+          MACOS_ARM: ${{ inputs.macos_arm }}
+          WINDOWS: ${{ inputs.windows }}
+          SCOPE: ${{ inputs.scope }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          expected=$(mktemp)
+          platforms=$(mktemp)
+          echo latest.json > "$expected"
+          verify_platform() {
+            echo "$1" >> "$platforms"
+            jq -e --arg version "$VERSION" --arg platform "$1" \
+              --arg url "https://github.com/$REPOSITORY/releases/download/v$VERSION/$2" \
+              --rawfile signature "release-assets/$2.sig" \
+              '.version == $version and .platforms[$platform].url == $url and
+               .platforms[$platform].signature == $signature' release-assets/latest.json
+          }
+          if [[ "$MACOS_ARM" == true ]]; then
+            printf '%s\n' "openrize_${VERSION}_aarch64.dmg" \
+              openrize.app.tar.gz openrize.app.tar.gz.sig >> "$expected"
+            if [[ "$SCOPE" == comprehensive ]]; then
+              echo openrize.app.zip >> "$expected"
+            fi
+            verify_platform darwin-aarch64 openrize.app.tar.gz
+          fi
+          if [[ "$WINDOWS" == true ]]; then
+            printf '%s\n' "openrize_${VERSION}_x64-setup.exe" \
+              "openrize_${VERSION}_x64-setup.exe.sig" >> "$expected"
+            verify_platform windows-x86_64 "openrize_${VERSION}_x64-setup.exe"
+          fi
+          sort -o "$expected" "$expected"
+          find release-assets -type f -exec basename {} \; | sort > actual-assets.txt
+          diff -u "$expected" actual-assets.txt
+          sort -o "$platforms" "$platforms"
+          jq -r '.platforms | keys[]' release-assets/latest.json | sort > actual-platforms.txt
+          diff -u "$platforms" actual-platforms.txt
+          rm "$expected" "$platforms"
       - name: Create GitHub Release
-        # v3.0.2
-        uses: >-
-          softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
-          files: |
-            src-tauri/target/release/bundle/dmg/*.dmg
-            src-tauri/target/release/bundle/macos/openrize.app.zip
-            src-tauri/target/release/bundle/macos/openrize.app.tar.gz
-            latest.json
-          body: |
-            ${{ steps.git-cliff.outputs.content }}
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          files: release-assets/*
+          fail_on_unmatched_files: true
+          body_path: release-notes.md

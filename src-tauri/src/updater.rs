@@ -2,8 +2,8 @@
 //!
 //! `tauri-plugin-updater` reads `latest.json` from the newest GitHub Release
 //! (written by `.github/workflows/release.yml`), verifies the downloaded
-//! `openrize.app.tar.gz` against the minisign public key in `tauri.conf.json`,
-//! and swaps the bundle in place. This module owns *when* that happens and
+//! platform payload against the minisign public key in `tauri.conf.json`,
+//! and installs it. This module owns *when* that happens and
 //! what the UI sees:
 //!
 //! - **Schedule.** A check 10s after launch, then hourly, plus one whenever a
@@ -15,12 +15,14 @@
 //!   come from the GitHub Releases API, falling back to `latest.json`'s notes.
 //! - **Install.** Only on request. The restart goes through
 //!   [`AppHandle::request_restart`], so `RunEvent::Exit` still closes the open
-//!   activity segment and the relaunched app starts a fresh one.
+//!   activity segment and the relaunched app starts a fresh one. Windows quits
+//!   through the plugin before installation; its before-exit hook closes the
+//!   segment, and the installer relaunches the app.
 //!
 //! Debug builds never check: installing would overwrite `target/debug`. Set
 //! `OPENRIZE_SIMULATE_UPDATE=1` there to exercise the UI with a fake update.
-//! Nor do builds for platforms the release feed doesn't carry (Windows is
-//! experimental and only built from source), which would fail every check.
+//! Platforms the release feed never carries do not check. A release that omits
+//! this build's platform is a normal no-update result.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -113,7 +115,10 @@ impl UpdaterState {
 fn no_updates_reason() -> Option<&'static str> {
     if cfg!(debug_assertions) {
         Some("Development builds don't check for updates.")
-    } else if cfg!(target_os = "macos") {
+    } else if cfg!(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(windows, target_arch = "x86_64")
+    )) {
         None
     } else {
         Some("Builds from source don't update in place. Pull and rebuild to update.")
@@ -290,8 +295,34 @@ fn emit(app: &AppHandle, status: &UpdateStatus) {
 }
 
 async fn find_update(app: &AppHandle) -> Result<Option<(Update, Vec<ReleaseNotes>)>, String> {
-    let updater = app.updater().map_err(|error| error.to_string())?;
-    let Some(update) = updater.check().await.map_err(|error| error.to_string())? else {
+    let builder = app.updater_builder();
+    // The Windows plugin exits the process directly, bypassing RunEvent::Exit.
+    // Flush the same activity/break state before handing off to the installer.
+    #[cfg(windows)]
+    let builder = {
+        let app = app.clone();
+        builder.on_before_exit(move || {
+            crate::breaks::on_exit(&app);
+            if let Ok(mut store) = app.state::<crate::AppState>().activity.lock() {
+                let _ = store.close_active_segment(crate::timers::now_epoch_ms());
+            }
+            app.cleanup_before_exit();
+        })
+    };
+    let updater = builder.build().map_err(|error| error.to_string())?;
+    let update = match updater.check().await {
+        Ok(update) => update,
+        Err(tauri_plugin_updater::Error::TargetNotFound(platform)) => {
+            eprintln!("no update available for this platform: {platform}");
+            None
+        }
+        Err(tauri_plugin_updater::Error::TargetsNotFound(platforms)) => {
+            eprintln!("no update available for these platforms: {platforms:?}");
+            None
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    let Some(update) = update else {
         return Ok(None);
     };
 

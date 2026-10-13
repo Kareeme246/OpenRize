@@ -3,7 +3,7 @@
   "bundle": {
     "targets": ["nsis"],
     "externalBin": ["binaries/rize"],
-    "createUpdaterArtifacts": false,
+    "createUpdaterArtifacts": true,
     "windows": {
       "nsis": {
         "installMode": "currentUser"

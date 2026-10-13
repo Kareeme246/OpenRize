@@ -816,3 +816,19 @@ export function installedReleaseNotes(): Promise<ReleaseNotes[]> {
 export function installUpdate(): Promise<void> {
   return invoke<void>("install_update");
 }
+
+// --- Crash diagnostics ---
+
+export function recordClientCrash(
+  source: string,
+  message: string,
+  componentStack?: string,
+  metadata?: Record<string, unknown>,
+): Promise<void> {
+  return invoke<void>("record_client_crash", {
+    source,
+    message,
+    componentStack,
+    metadata,
+  });
+}

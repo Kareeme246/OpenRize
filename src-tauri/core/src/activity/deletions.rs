@@ -123,7 +123,7 @@ impl Deletion {
         ] {
             for value in values {
                 let mut statement = conn.prepare(&format!(
-                    "SELECT id, category_id, project_id, deleted_at, invoice_id FROM time_entries WHERE {column} = ?1 AND deleted_at IS NULL;"
+                    "SELECT id, category_id, project_id, deleted_at, invoice_id, status FROM time_entries WHERE {column} = ?1 AND deleted_at IS NULL;"
                 )).map_err(|error| error.to_string())?;
                 let rows = statement
                     .query_map([value], |row| {
@@ -135,11 +135,15 @@ impl Deletion {
                                 deleted: row.get(3)?,
                             },
                             row.get::<_, Option<String>>(4)?,
+                            row.get::<_, String>(5)?,
                         ))
                     })
                     .map_err(|error| error.to_string())?;
                 for row in rows {
-                    let (id, links, invoice) = row.map_err(|error| error.to_string())?;
+                    let (id, links, invoice, status) = row.map_err(|error| error.to_string())?;
+                    if status == "approved" {
+                        return Err("This deletion affects approved entries. Unapprove those entries before deleting their category or project.".to_string());
+                    }
                     if invoice.is_some() {
                         return Err("This deletion affects invoiced time. Remove its draft invoice first; finalized time cannot be deleted.".to_string());
                     }
@@ -219,6 +223,27 @@ impl Deletion {
     pub(super) fn apply(&self, conn: &Connection, undo: bool, now: u64) -> Result<(), String> {
         let conflict = "The deleted items have changed since this operation; undo/redo cannot safely overwrite them.";
         if !undo {
+            for (column, ids) in [
+                (
+                    "category_id",
+                    self.categories
+                        .iter()
+                        .map(|item| &item.id)
+                        .collect::<Vec<_>>(),
+                ),
+                ("project_id", self.projects.iter().collect()),
+            ] {
+                for id in ids {
+                    let approved: bool = conn.query_row(
+                        &format!("SELECT EXISTS(SELECT 1 FROM time_entries WHERE {column} = ?1 AND deleted_at IS NULL AND status = 'approved');"),
+                        [id],
+                        |row| row.get(0),
+                    ).map_err(|error| error.to_string())?;
+                    if approved {
+                        return Err(LOCKED.to_string());
+                    }
+                }
+            }
             // Recording may have resumed into a restored building entry. Do
             // not redo against new or edited activity that undo cannot restore.
             for entry in self
@@ -257,9 +282,9 @@ impl Deletion {
             } else {
                 (&entry.before, &entry.after)
             };
-            // Deleting or restoring the time itself is refused once it is
-            // approved; only a catalog unlink rides along on approved entries.
-            if from.deleted != to.deleted
+            // Catalog links are frozen too: undo/redo cannot change an
+            // entry that has been approved since this deletion was recorded.
+            if from != to
                 && conn
                     .query_row(
                         "SELECT status = 'approved' FROM time_entries WHERE id = ?1;",

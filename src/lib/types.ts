@@ -808,3 +808,29 @@ export interface DevToolsInfo {
   /** Whether the first-run permissions screen has been re-armed for this session. */
   onboardingRerun: boolean;
 }
+
+// --- Crash diagnostics (src-tauri/core/src/crashes.rs) ---
+
+export interface CrashReportSummary {
+  id: string;
+  timestampMs: number;
+  appVersion: string;
+  os: string;
+  source: string;
+  message: string;
+}
+
+export interface CrashReport {
+  id: string;
+  timestampMs: number;
+  appVersion: string;
+  os: string;
+  osVersion: string;
+  arch: string;
+  source: string;
+  message: string;
+  backtrace?: string | null;
+  componentStack?: string | null;
+  metadata?: Record<string, unknown> | null;
+  sent?: boolean;
+}

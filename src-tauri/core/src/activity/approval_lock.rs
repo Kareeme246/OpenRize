@@ -155,31 +155,166 @@ fn approving_stays_allowed_and_is_idempotent() {
 }
 
 #[test]
-fn manual_entries_are_created_approved_and_frozen_after() {
+fn manual_entry_creation_cannot_be_undone_until_unapproved() {
     let mut store = store();
     let id = entry(&mut store, 0, 30, false);
-    assert_eq!(status(&store, &id), "approved");
-    assert_locked(store.update_time_entry(&id, patch(|p| p.billable = Some(true)), NOW));
-    // The creation itself can still be taken back.
+    let before = store.time_entry(&id).unwrap();
+    assert_locked(store.undo(NOW));
+    assert_eq!(store.time_entry(&id).unwrap(), before);
+    // Another client unapproves without changing this client's history.
+    unapprove_behind_its_back(&store, &id);
     assert_eq!(store.undo(NOW).unwrap(), Some("Add"));
     assert!(store.time_entry(&id).is_err());
     assert_eq!(store.redo(NOW).unwrap(), Some("Add"));
-    assert_eq!(status(&store, &id), "approved");
+    assert_eq!(status(&store, &id), "pending");
 }
 
 #[test]
-fn an_approved_entry_a_catalog_delete_unlinks_stays_allowed() {
+fn catalog_deletion_waits_for_all_affected_entries_to_be_unapproved() {
+    for project in [false, true] {
+        let mut store = store();
+        store.conn.execute_batch("INSERT INTO projects (id,name,color,created_at,updated_at) VALUES ('p','Project','blue',1,1);").unwrap();
+        let approved = entry(&mut store, 0, 30, false);
+        let pending = entry(&mut store, 30, 60, true);
+        if project {
+            store
+                .conn
+                .execute("UPDATE time_entries SET project_id = 'p';", [])
+                .unwrap();
+        }
+        let before = store.list_time_entries(0, NOW).unwrap();
+        let category_count = store.list_categories().unwrap().len();
+        let history = store.undo_stack.len();
+        let result = if project {
+            store.delete_project("p", NOW)
+        } else {
+            store.delete_category("c", NOW)
+        };
+        assert_eq!(result.unwrap_err(), "This deletion affects approved entries. Unapprove those entries before deleting their category or project.");
+        assert_eq!(store.list_time_entries(0, NOW).unwrap(), before);
+        assert_eq!(store.undo_stack.len(), history);
+        assert_eq!(store.list_categories().unwrap().len(), category_count);
+        assert_eq!(store.list_projects().unwrap().len(), 1);
+        store.unapprove_time_entries(&[approved], NOW).unwrap();
+        if project {
+            store.delete_project("p", NOW).unwrap();
+        } else {
+            store.delete_category("c", NOW).unwrap();
+        }
+        let entry = store.time_entry(&pending).unwrap();
+        assert!(if project {
+            entry.project_id.is_none()
+        } else {
+            entry.category_id.is_none()
+        });
+        assert_eq!(store.undo(NOW).unwrap(), Some("Delete"));
+    }
+}
+
+#[test]
+fn catalog_undo_and_redo_cannot_change_entries_approved_since_deletion() {
+    for project in [false, true] {
+        let mut store = store();
+        let id = entry(&mut store, 0, 30, true);
+        if project {
+            store.conn.execute_batch("INSERT INTO projects (id,name,color,created_at,updated_at) VALUES ('p','Project','blue',1,1); UPDATE time_entries SET project_id = 'p';").unwrap();
+            store.delete_project("p", NOW).unwrap();
+        } else {
+            store.delete_category("c", NOW).unwrap();
+        }
+        approve_behind_its_back(&store, &id);
+        let before = store.time_entry(&id).unwrap();
+        assert_locked(store.undo(NOW));
+        assert_eq!(store.time_entry(&id).unwrap(), before);
+        unapprove_behind_its_back(&store, &id);
+        assert_eq!(store.undo(NOW).unwrap(), Some("Delete"));
+        approve_behind_its_back(&store, &id);
+        let before = store.time_entry(&id).unwrap();
+        assert_locked(store.redo(NOW));
+        assert_eq!(store.time_entry(&id).unwrap(), before);
+        unapprove_behind_its_back(&store, &id);
+        assert_eq!(store.redo(NOW).unwrap(), Some("Delete"));
+    }
+}
+
+fn manual(from: u64, to: u64, review: bool) -> NewTimeEntry {
+    NewTimeEntry {
+        started_at: from * MIN,
+        ended_at: to * MIN,
+        description: "Manual work".to_string(),
+        category_id: Some("c".to_string()),
+        project_id: None,
+        billable: None,
+        review,
+    }
+}
+
+#[test]
+fn manual_creation_refuses_every_overlap_with_approved_time_atomically() {
+    let mut store = store();
+    let id = entry(&mut store, 10, 30, false);
+    let before = store.time_entry(&id).unwrap();
+    let history = store.undo_stack.len();
+    let jobs: i64 = store
+        .conn
+        .query_row("SELECT COUNT(*) FROM classify_jobs;", [], |row| row.get(0))
+        .unwrap();
+    for (from, to) in [(0, 20), (20, 40), (15, 25), (0, 40), (10, 30)] {
+        for review in [false, true] {
+            assert_eq!(
+                store
+                    .create_manual_entry(manual(from, to, review), NOW)
+                    .unwrap_err(),
+                APPROVED_OVERLAP
+            );
+            assert_eq!(
+                store.list_time_entries(0, NOW).unwrap(),
+                vec![before.clone()]
+            );
+            assert_eq!(store.undo_stack.len(), history);
+            assert_eq!(
+                store
+                    .conn
+                    .query_row("SELECT COUNT(*) FROM classify_jobs;", [], |row| row
+                        .get::<_, i64>(0))
+                    .unwrap(),
+                jobs
+            );
+        }
+    }
+    // Sharing an edge does not overlap.
+    entry(&mut store, 0, 10, false);
+    entry(&mut store, 30, 40, false);
+}
+
+#[test]
+fn manual_creation_allows_unapproved_and_deleted_time() {
     let mut store = store();
     let id = entry(&mut store, 0, 30, false);
-    store.delete_category("c", NOW).unwrap();
-    let entry = store.time_entry(&id).unwrap();
-    assert_eq!(entry.status, "approved");
-    assert_eq!(entry.category_id, None);
-    assert_eq!(store.undo(NOW).unwrap(), Some("Delete"));
-    assert_eq!(
-        store.time_entry(&id).unwrap().category_id.as_deref(),
-        Some("c")
-    );
+    store.unapprove_time_entries(&[id], NOW).unwrap();
+    let overlap = entry(&mut store, 10, 20, false);
+    store
+        .conn
+        .execute(
+            "UPDATE time_entries SET deleted_at = ?1 WHERE id = ?2;",
+            params![NOW as i64, overlap],
+        )
+        .unwrap();
+    entry(&mut store, 10, 20, false);
+}
+
+#[test]
+fn redoing_manual_creation_checks_new_approved_time_and_keeps_the_history() {
+    let mut store = store();
+    let id = entry(&mut store, 0, 30, true);
+    store.undo(NOW).unwrap();
+    // An approved entry arrives from another client while Add is undone.
+    store.conn.execute_batch("INSERT INTO time_entries (id,started_at,ended_at,description,status,source,created_at,updated_at) VALUES ('other',600000,1200000,'Other','approved','manual',1,1);").unwrap();
+    assert_eq!(store.redo(NOW).unwrap_err(), APPROVED_OVERLAP);
+    assert!(store.time_entry(&id).is_err());
+    unapprove_behind_its_back(&store, "other");
+    assert_eq!(store.redo(NOW).unwrap(), Some("Add"));
+    assert_eq!(status(&store, &id), "pending");
 }
 
 /// What the AI worker or another client does behind the history's back.
@@ -331,4 +466,42 @@ fn tracking_never_extends_or_rebuilds_an_approved_entry() {
     assert_eq!(after.description, approved.description);
     assert_eq!(after.status, "approved");
     assert_eq!(store.list_time_entries(0, u64::MAX / 2).unwrap().len(), 2);
+}
+
+#[test]
+fn deleting_pending_time_cannot_unlink_a_shared_catalog_from_approved_time() {
+    let mut store = store();
+    let approved = entry(&mut store, 0, 30, false);
+    let pending = entry(&mut store, 30, 60, true);
+    let before = store.list_time_entries(0, NOW).unwrap();
+    assert!(store
+        .delete_time_entry(&pending, NOW)
+        .unwrap_err()
+        .contains("Unapprove those entries"));
+    assert_eq!(store.list_time_entries(0, NOW).unwrap(), before);
+    assert_eq!(
+        store.time_entry(&approved).unwrap().category_id.as_deref(),
+        Some("c")
+    );
+    assert_eq!(
+        store.undo(NOW).unwrap(),
+        Some("Add"),
+        "failed deletion adds no command"
+    );
+}
+
+#[test]
+fn redoing_catalog_deletion_checks_new_approved_links() {
+    let mut store = store();
+    let id = entry(&mut store, 0, 30, true);
+    store.delete_category("c", NOW).unwrap();
+    store.undo(NOW).unwrap();
+    store.conn.execute_batch("INSERT INTO time_entries (id,started_at,ended_at,description,category_id,status,source,created_at,updated_at) VALUES ('other',2400000,3000000,'Other','c','approved','manual',1,1);").unwrap();
+    assert_locked(store.redo(NOW));
+    assert_eq!(
+        store.time_entry(&id).unwrap().category_id.as_deref(),
+        Some("c")
+    );
+    unapprove_behind_its_back(&store, "other");
+    assert_eq!(store.redo(NOW).unwrap(), Some("Delete"));
 }

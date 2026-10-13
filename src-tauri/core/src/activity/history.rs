@@ -256,10 +256,19 @@ impl Edit {
         for change in &mut self.entries {
             let Some(before) = &change.before else {
                 if undo {
-                    EntryRow::editable(conn, &change.id)?;
+                    if EntryRow::editable(conn, &change.id)?.approved() {
+                        return Err(LOCKED.to_string());
+                    }
                     change.stash = Some(Stash::take(conn, &change.id)?);
                 } else {
-                    change.stash.take().ok_or(CONFLICT)?.restore(conn)?;
+                    change.stash.as_ref().ok_or(CONFLICT)?.restore(conn)?;
+                    let restored = EntryRow::editable(conn, &change.id)?;
+                    super::ensure_no_approved_overlap(
+                        conn,
+                        restored.int(STARTED),
+                        restored.int(ENDED),
+                    )?;
+                    change.stash = None;
                 }
                 continue;
             };

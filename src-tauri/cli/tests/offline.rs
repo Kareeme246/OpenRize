@@ -122,6 +122,24 @@ fn edits_and_reports_with_the_app_closed() {
     assert_eq!(list["entries"].as_array().unwrap().len(), 1);
     assert_eq!(list["names"][project["id"].as_str().unwrap()], "Acme site");
 
+    let overlap = store.rize(&[
+        "--json",
+        "entries",
+        "add",
+        "--from",
+        "2026-09-01T09:30",
+        "--to",
+        "2026-09-01T10:00",
+        "-d",
+        "Overlapping",
+    ]);
+    assert_eq!(overlap.status.code(), Some(1));
+    let refused: Value = serde_json::from_slice(&overlap.stdout).unwrap();
+    assert_eq!(
+        refused["error"]["message"],
+        openrize_core::activity::APPROVED_OVERLAP
+    );
+
     // A hand-made entry is approved, and approved entries are frozen.
     let edit = [
         "entries",

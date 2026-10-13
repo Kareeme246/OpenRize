@@ -55,7 +55,7 @@ installed.
 | `rize timers rename <timer> <label>` | Rename a timer. | `rename_timer` | Yes | Shipped |
 | `rize entries list` | Filter by range, project, client, category, app, status, billable and search. Newest first, `--limit` 1 to 5000. | `query_time_entries` | Yes | Shipped |
 | `rize entries show <id>` | One entry with its apps, events and AI suggestion; window titles with `--full`. | `get_entry_detail` | Yes | Shipped |
-| `rize entries add --from --to [fields]` | Create a manual entry. | `create_time_entry` | Yes | Shipped |
+| `rize entries add --from --to [fields]` | Create a manual entry. Refused when its time range overlaps approved entries: unapprove those entries first. | `create_time_entry` | Yes | Shipped |
 | `rize entries edit <id...> [fields]` | Change description, project, category, billable, start or end on one or many entries; `none` clears a project or category. Refused on approved entries (the whole batch): unapprove first. | `update_time_entry`, `update_time_entries` | Yes | Shipped |
 | `rize entries approve <id...>` / `--all-pending [range]` | Approve entries, or every pending entry in a range. | `approve_time_entries` | Yes | Shipped |
 | `rize entries unapprove <id...>` | Send entries back to review. | `unapprove_time_entries` | Yes | Shipped |
@@ -68,9 +68,9 @@ installed.
 | `rize review [range]` | Pending entries, today by default. | `query_time_entries` (pending) | Yes | Shipped |
 | `rize report --by project\|client\|category\|app\|status\|none --per day\|week\|month\|total` | Totals for a range, with the filters of `entries list`. | `entry_rollup` | Yes | Shipped |
 | `rize projects list` / `show <project>` | Projects; one with this month's time, budget and rules. | `list_projects`, `project_stats`, `project_rules` | Yes | Shipped |
-| `rize projects add` / `edit` / `rm` | Manage projects; rm is confirmed. | `create_project`, `update_project`, `delete_project` | Yes | Shipped |
+| `rize projects add` / `edit` / `rm` | Manage projects; rm is confirmed and refused when it would change approved entries. | `create_project`, `update_project`, `delete_project` | Yes | Shipped |
 | `rize clients list` / `show` / `add` / `edit` / `rm` | Manage clients; show lists their projects; rm is confirmed. | `list_clients`, `create_client`, `update_client`, `delete_client` | Yes | Shipped |
-| `rize categories list` / `add` / `edit` / `rm` | Manage categories; rm is confirmed. | `list_categories`, `create_category`, `update_category`, `delete_category` | Yes | Shipped |
+| `rize categories list` / `add` / `edit` / `rm` | Manage categories; rm is confirmed and refused when it would change approved entries. | `list_categories`, `create_category`, `update_category`, `delete_category` | Yes | Shipped |
 | `rize settings list` / `get <key>` / `set <key> <value>` | Every preference by dotted key, such as `tracking-hours.start` or `breaks.enabled`. Writes one field at a time. | `get_settings`, `SettingsStore::patch` | Yes (applies on next launch) | Shipped |
 | `rize paths` | Settings file, data directory and database path. | `storage_paths` | Yes | Shipped |
 | `rize install-path` | Put `rize` on PATH: a symlink on macOS, the user PATH on Windows. | client only | Yes | Shipped |

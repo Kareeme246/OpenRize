@@ -37,6 +37,20 @@ pub const IDLE_LABEL: &str = "Idle";
 /// entry; unapproving is the only way back to changing it.
 pub const LOCKED: &str = "Approved entries are locked. Unapprove to change them.";
 
+pub const APPROVED_OVERLAP: &str = "This time range overlaps approved entries. Unapprove those entries before creating a manual entry here.";
+
+fn ensure_no_approved_overlap(conn: &Connection, start: u64, end: u64) -> Result<(), String> {
+    let overlaps: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM time_entries WHERE deleted_at IS NULL AND status = 'approved' AND started_at < ?2 AND ended_at > ?1);",
+        params![start as i64, end as i64],
+        |row| row.get(0),
+    ).map_err(|error| error.to_string())?;
+    if overlaps {
+        return Err(APPROVED_OVERLAP.to_string());
+    }
+    Ok(())
+}
+
 /// How long a statement waits on another connection's write lock. The AI
 /// worker reads on its own connection, so contention is brief but real.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -1798,6 +1812,7 @@ impl ActivityStore {
         if new_entry.description.trim().is_empty() && !unclassified {
             return Err("Entry description cannot be empty".to_string());
         }
+        ensure_no_approved_overlap(&self.conn, new_entry.started_at, new_entry.ended_at)?;
         let billable = new_entry.billable.unwrap_or(false) as i64;
         let pending = unclassified || new_entry.review;
         let status = if pending { "pending" } else { "approved" };

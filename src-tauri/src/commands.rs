@@ -976,6 +976,15 @@ pub(crate) fn apply_settings_change(app: &AppHandle, previous: &Settings, next: 
     if next.notification_placement != previous.notification_placement {
         breaks::surface::reposition(app);
     }
+
+    if next.crash_reporting && !previous.crash_reporting {
+        if let Some(dir) =
+            crate::crashes::get_crash_data_dir().or_else(|| app.path().app_data_dir().ok())
+        {
+            crate::crashes::dispatch_pending_reports(dir);
+        }
+    }
+
     let _ = app.emit(crate::EVENT_SETTINGS_CHANGED, next);
 }
 
@@ -1175,4 +1184,28 @@ pub fn dev_sample_break_reminder(app: AppHandle) -> Result<breaks::engine::Break
 #[tauri::command]
 pub fn preview_break_chime() {
     breaks::chime();
+}
+
+// --- Crash diagnostics --------------------------------------------------
+
+#[tauri::command]
+pub fn record_client_crash(
+    app: AppHandle,
+    source: String,
+    message: String,
+    component_stack: Option<String>,
+    metadata: Option<serde_json::Value>,
+) -> Result<openrize_core::crashes::CrashReport, String> {
+    let report = crate::crashes::create_client_report(source, message, component_stack, metadata);
+    let dir = crate::crashes::get_crash_data_dir()
+        .or_else(|| app.path().app_data_dir().ok())
+        .ok_or_else(|| "Could not determine app data directory".to_string())?;
+    openrize_core::crashes::save_report(&dir, &report).map_err(|e| e.to_string())?;
+
+    let state = app.state::<AppState>();
+    if state.settings_snapshot().crash_reporting {
+        crate::crashes::spawn_dispatch(dir, report.clone());
+    }
+
+    Ok(report)
 }

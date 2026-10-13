@@ -732,3 +732,29 @@ export interface PermissionInfo {
   granted: boolean;
   settingsUrl: string;
 }
+
+// --- Crash diagnostics (src-tauri/core/src/crashes.rs) ---
+
+export interface CrashReportSummary {
+  id: string;
+  timestampMs: number;
+  appVersion: string;
+  os: string;
+  source: string;
+  message: string;
+}
+
+export interface CrashReport {
+  id: string;
+  timestampMs: number;
+  appVersion: string;
+  os: string;
+  osVersion: string;
+  arch: string;
+  source: string;
+  message: string;
+  backtrace?: string | null;
+  componentStack?: string | null;
+  metadata?: Record<string, unknown> | null;
+  sent?: boolean;
+}

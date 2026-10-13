@@ -1456,6 +1456,19 @@ export function Settings({
                 />
               </SettingRow>
             </SettingGroup>
+
+            <SettingGroup title="Privacy & diagnostics">
+              <SettingRow
+                title="Anonymous crash reporting"
+                description="Automatically submit anonymous crash diagnostics if an unexpected error occurs. Window titles, browser URLs, and personal data are never included."
+              >
+                <Toggle
+                  checked={settings.crashReporting}
+                  label="Anonymous crash reporting"
+                  onChange={(crashReporting) => update({ crashReporting })}
+                />
+              </SettingRow>
+            </SettingGroup>
           </section>
 
           <section

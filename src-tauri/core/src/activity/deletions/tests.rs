@@ -353,7 +353,7 @@ fn add_and_undo_redo_round_trip() {
         category_id: None,
         project_id: None,
         billable: None,
-        review: false,
+        review: true,
     };
     let created = store.create_manual_entry(new_entry, 400).unwrap();
     assert_eq!(

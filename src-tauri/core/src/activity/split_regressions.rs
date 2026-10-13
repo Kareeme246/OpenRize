@@ -234,7 +234,7 @@ fn undoing_an_entry_added_over_tracked_time_leaves_no_hole() {
                 category_id: None,
                 project_id: None,
                 billable: None,
-                review: false,
+                review: true,
             },
             70 * MIN,
         )

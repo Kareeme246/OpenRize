@@ -469,25 +469,17 @@ fn tracking_never_extends_or_rebuilds_an_approved_entry() {
 }
 
 #[test]
-fn deleting_pending_time_cannot_unlink_a_shared_catalog_from_approved_time() {
+fn deleting_pending_time_leaves_a_catalog_shared_with_approved_time_alone() {
     let mut store = store();
     let approved = entry(&mut store, 0, 30, false);
     let pending = entry(&mut store, 30, 60, true);
-    let before = store.list_time_entries(0, NOW).unwrap();
-    assert!(store
-        .delete_time_entry(&pending, NOW)
-        .unwrap_err()
-        .contains("Unapprove those entries"));
-    assert_eq!(store.list_time_entries(0, NOW).unwrap(), before);
-    assert_eq!(
-        store.time_entry(&approved).unwrap().category_id.as_deref(),
-        Some("c")
-    );
-    assert_eq!(
-        store.undo(NOW).unwrap(),
-        Some("Add"),
-        "failed deletion adds no command"
-    );
+    store.delete_time_entry(&pending, NOW).unwrap();
+    assert!(store.time_entry(&pending).unwrap().deleted_at.is_some());
+    let approved = store.time_entry(&approved).unwrap();
+    assert_eq!(approved.category_id.as_deref(), Some("c"));
+    assert_eq!(approved.status, "approved");
+    assert_eq!(store.undo(NOW).unwrap(), Some("Delete"));
+    assert!(store.time_entry(&pending).unwrap().deleted_at.is_none());
 }
 
 #[test]
@@ -504,4 +496,106 @@ fn redoing_catalog_deletion_checks_new_approved_links() {
     );
     unapprove_behind_its_back(&store, "other");
     assert_eq!(store.redo(NOW).unwrap(), Some("Delete"));
+}
+
+#[test]
+fn a_pending_entry_deletes_whatever_it_shares_with_approved_entries() {
+    let mut store = store();
+    store.conn.execute_batch("INSERT INTO projects (id,name,color,created_at,updated_at) VALUES ('p','Project','blue',1,1);
+         INSERT INTO rules (id,match_kind,pattern,category_id,project_id,created_at,updated_at) VALUES ('r','app','Editor','c','p',1,1);").unwrap();
+    let add =
+        |store: &mut ActivityStore, from: u64, category: Option<&str>, project: Option<&str>| {
+            store
+                .create_manual_entry(
+                    NewTimeEntry {
+                        started_at: from * MIN,
+                        ended_at: (from + 30) * MIN,
+                        description: "Work".to_string(),
+                        category_id: category.map(str::to_string),
+                        project_id: project.map(str::to_string),
+                        billable: None,
+                        review: true,
+                    },
+                    NOW,
+                )
+                .unwrap()
+                .id
+        };
+    let categorized = add(&mut store, 0, Some("c"), None);
+    let projected = add(&mut store, 30, Some("c"), Some("p"));
+    let bare = add(&mut store, 60, None, None);
+    let approved = entry(&mut store, 90, 120, false);
+    store
+        .conn
+        .execute(
+            "UPDATE time_entries SET project_id = 'p' WHERE id = ?1;",
+            [&approved],
+        )
+        .unwrap();
+
+    // The approved entry shares the category and project, and stays locked.
+    assert_locked(store.delete_time_entry(&approved, NOW));
+    store
+        .delete_time_entries(&[categorized, projected, bare], NOW)
+        .unwrap();
+    let live = store.list_time_entries(0, u64::MAX / 2).unwrap();
+    assert_eq!(live.len(), 1);
+    assert_eq!(live[0].id, approved);
+    assert_eq!(live[0].category_id.as_deref(), Some("c"));
+    assert_eq!(live[0].project_id.as_deref(), Some("p"));
+    assert!(store.list_categories().unwrap().iter().any(|c| c.id == "c"));
+    assert_eq!(store.list_projects().unwrap().len(), 1);
+    let rules: i64 = store
+        .conn
+        .query_row(
+            "SELECT count(*) FROM rules WHERE id = 'r' AND deleted_at IS NULL;",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(rules, 1);
+}
+
+#[test]
+fn deleting_an_entry_removes_exactly_its_time_from_project_totals() {
+    let mut store = store();
+    store.conn.execute_batch("INSERT INTO projects (id,name,color,created_at,updated_at) VALUES ('p','Project','blue',1,1);").unwrap();
+    let add = |store: &mut ActivityStore, from: u64, review: bool| {
+        store
+            .create_manual_entry(
+                NewTimeEntry {
+                    started_at: from * MIN,
+                    ended_at: (from + 30) * MIN,
+                    description: "Work".to_string(),
+                    category_id: Some("c".to_string()),
+                    project_id: Some("p".to_string()),
+                    billable: Some(true),
+                    review,
+                },
+                NOW,
+            )
+            .unwrap()
+            .id
+    };
+    let totals = |store: &ActivityStore| {
+        crate::projects::project_stats(&store.conn, 0, u64::MAX / 2, 0)
+            .unwrap()
+            .into_iter()
+            .map(|stats| (stats.entries, stats.total_ms, stats.unbilled_ms))
+            .collect::<Vec<_>>()
+    };
+    let kept = add(&mut store, 0, false);
+    let pending = add(&mut store, 30, true);
+    // A hand-added entry bills at once; a pending one waits for approval.
+    assert_eq!(totals(&store), vec![(2, 60 * MIN, 30 * MIN)]);
+    store.delete_time_entry(&pending, NOW).unwrap();
+    assert_eq!(totals(&store), vec![(1, 30 * MIN, 30 * MIN)]);
+    assert_eq!(status(&store, &kept), "approved");
+    let approved = add(&mut store, 60, false);
+    assert_locked(store.delete_time_entry(&approved, NOW));
+    store
+        .unapprove_time_entries(std::slice::from_ref(&approved), NOW)
+        .unwrap();
+    store.delete_time_entry(&approved, NOW).unwrap();
+    assert_eq!(totals(&store), vec![(1, 30 * MIN, 30 * MIN)]);
 }

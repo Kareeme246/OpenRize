@@ -555,3 +555,47 @@ fn a_pending_entry_deletes_whatever_it_shares_with_approved_entries() {
         .unwrap();
     assert_eq!(rules, 1);
 }
+
+#[test]
+fn deleting_an_entry_removes_exactly_its_time_from_project_totals() {
+    let mut store = store();
+    store.conn.execute_batch("INSERT INTO projects (id,name,color,created_at,updated_at) VALUES ('p','Project','blue',1,1);").unwrap();
+    let add = |store: &mut ActivityStore, from: u64, review: bool| {
+        store
+            .create_manual_entry(
+                NewTimeEntry {
+                    started_at: from * MIN,
+                    ended_at: (from + 30) * MIN,
+                    description: "Work".to_string(),
+                    category_id: Some("c".to_string()),
+                    project_id: Some("p".to_string()),
+                    billable: Some(true),
+                    review,
+                },
+                NOW,
+            )
+            .unwrap()
+            .id
+    };
+    let totals = |store: &ActivityStore| {
+        crate::projects::project_stats(&store.conn, 0, u64::MAX / 2, 0)
+            .unwrap()
+            .into_iter()
+            .map(|stats| (stats.entries, stats.total_ms, stats.unbilled_ms))
+            .collect::<Vec<_>>()
+    };
+    let kept = add(&mut store, 0, false);
+    let pending = add(&mut store, 30, true);
+    // A hand-added entry bills at once; a pending one waits for approval.
+    assert_eq!(totals(&store), vec![(2, 60 * MIN, 30 * MIN)]);
+    store.delete_time_entry(&pending, NOW).unwrap();
+    assert_eq!(totals(&store), vec![(1, 30 * MIN, 30 * MIN)]);
+    assert_eq!(status(&store, &kept), "approved");
+    let approved = add(&mut store, 60, false);
+    assert_locked(store.delete_time_entry(&approved, NOW));
+    store
+        .unapprove_time_entries(std::slice::from_ref(&approved), NOW)
+        .unwrap();
+    store.delete_time_entry(&approved, NOW).unwrap();
+    assert_eq!(totals(&store), vec![(1, 30 * MIN, 30 * MIN)]);
+}

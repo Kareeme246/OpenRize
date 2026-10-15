@@ -75,6 +75,9 @@ export function AddTimeSheet({
         categoryId,
         projectId: projectId || undefined,
         billable,
+        // Pending, so the entry can be reviewed, edited or deleted until it is
+        // approved.
+        review: true,
       });
       onCreated();
       onClose();

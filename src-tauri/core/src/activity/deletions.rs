@@ -60,18 +60,15 @@ impl Deletion {
             projects.insert(id.to_owned());
         }
         for id in ids.iter().collect::<BTreeSet<_>>() {
-            let (links, status): (Links, String) = conn.query_row(
-                "SELECT category_id, project_id, deleted_at, status FROM time_entries WHERE id = ?1 AND deleted_at IS NULL;",
-                [id], |row| Ok((Links { category: row.get(0)?, project: row.get(1)?, deleted: row.get(2)? }, row.get(3)?)),
-            ).map_err(|error| error.to_string())?;
+            let status: String = conn
+                .query_row(
+                    "SELECT status FROM time_entries WHERE id = ?1 AND deleted_at IS NULL;",
+                    [id],
+                    |row| row.get(0),
+                )
+                .map_err(|error| error.to_string())?;
             if status == "approved" {
                 return Err(LOCKED.to_string());
-            }
-            if let Some(id) = links.category {
-                categories.insert(id);
-            }
-            if let Some(id) = links.project {
-                projects.insert(id);
             }
             let mut statement = conn.prepare(
                 "SELECT id, app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id FROM segments WHERE entry_id = ?1;"

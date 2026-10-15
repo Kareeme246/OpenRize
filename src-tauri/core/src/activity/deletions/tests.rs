@@ -20,7 +20,7 @@ fn count(store: &ActivityStore, sql: &str) -> i64 {
 }
 
 #[test]
-fn entry_cleanup_and_captured_activity_are_one_undoable_operation() {
+fn deleting_an_entry_removes_only_the_entry_and_its_activity() {
     let mut store = store();
     store
         .delete_time_entries(&["a".into(), "a".into()], 400)
@@ -32,42 +32,8 @@ fn entry_cleanup_and_captured_activity_are_one_undoable_operation() {
         ),
         1
     );
-    assert_eq!(count(&store, "SELECT count(*) FROM time_entries WHERE category_id IS NOT NULL OR project_id IS NOT NULL"), 0);
-    assert_eq!(
-        count(
-            &store,
-            "SELECT count(*) FROM categories WHERE id='c' AND deleted_at IS NULL"
-        ),
-        0
-    );
-    assert_eq!(
-        count(
-            &store,
-            "SELECT count(*) FROM projects WHERE id='p' AND deleted_at IS NULL"
-        ),
-        0
-    );
-    assert_eq!(
-        count(
-            &store,
-            "SELECT count(*) FROM rules WHERE id='r' AND deleted_at IS NULL"
-        ),
-        0
-    );
-    assert_eq!(
-        count(&store, "SELECT count(*) FROM segments WHERE entry_id='a'"),
-        0
-    );
-    assert_eq!(count(&store, "SELECT count(*) FROM apps WHERE default_category_id IS NOT NULL OR default_project_id IS NOT NULL"), 0);
-    assert!(store.undo(500).map(|step| step.is_some()).unwrap());
-    assert_eq!(count(&store, "SELECT count(*) FROM time_entries WHERE deleted_at IS NULL AND category_id='c' AND project_id='p'"), 2);
-    assert_eq!(
-        count(
-            &store,
-            "SELECT count(*) FROM segments WHERE entry_id='a' AND ended_at=200"
-        ),
-        1
-    );
+    // The sibling and the catalog around it are untouched.
+    assert_eq!(count(&store, "SELECT count(*) FROM time_entries WHERE deleted_at IS NULL AND category_id='c' AND project_id='p'"), 1);
     assert_eq!(
         count(
             &store,
@@ -78,14 +44,40 @@ fn entry_cleanup_and_captured_activity_are_one_undoable_operation() {
     assert_eq!(
         count(
             &store,
-            "SELECT count(*) FROM rules WHERE id='r' AND deleted_at IS NULL"
+            "SELECT count(*) FROM projects WHERE id='p' AND deleted_at IS NULL"
         ),
         1
     );
     assert_eq!(
         count(
             &store,
+            "SELECT count(*) FROM rules WHERE id='r' AND deleted_at IS NULL"
+        ),
+        1
+    );
+    assert_eq!(
+        count(&store, "SELECT count(*) FROM segments WHERE entry_id='a'"),
+        0
+    );
+    assert_eq!(
+        count(
+            &store,
             "SELECT count(*) FROM apps WHERE default_category_id='c' AND default_project_id='p'"
+        ),
+        1
+    );
+    assert!(store.undo(500).map(|step| step.is_some()).unwrap());
+    assert_eq!(
+        count(
+            &store,
+            "SELECT count(*) FROM time_entries WHERE deleted_at IS NULL"
+        ),
+        2
+    );
+    assert_eq!(
+        count(
+            &store,
+            "SELECT count(*) FROM segments WHERE entry_id='a' AND ended_at=200"
         ),
         1
     );
@@ -128,10 +120,12 @@ fn categories_and_projects_delete_independently_and_undo_in_order() {
 }
 
 #[test]
-fn invoiced_shared_time_blocks_the_entire_cleanup_atomically() {
+fn invoiced_time_blocks_the_entire_deletion_atomically() {
     let mut store = store();
     store.conn().execute_batch("INSERT INTO invoices (id,client_id,client_name,currency,status,created_at,updated_at) VALUES ('invoice','client','Client','USD','draft',1,1); UPDATE time_entries SET invoice_id='invoice' WHERE id='b';").unwrap();
-    assert!(store.delete_time_entry("a", 400).is_err());
+    assert!(store
+        .delete_time_entries(&["a".into(), "b".into()], 400)
+        .is_err());
     assert_eq!(count(&store, "SELECT count(*) FROM time_entries WHERE deleted_at IS NULL AND category_id='c' AND project_id='p'"), 2);
     assert_eq!(
         count(&store, "SELECT count(*) FROM segments WHERE entry_id='a'"),

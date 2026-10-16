@@ -37,7 +37,6 @@ import {
   isLocked,
   isReviewable,
   isTyping,
-  LOCKED_HINT,
 } from "../lib/entries";
 import { formatDuration } from "../lib/format";
 import { formatTargetHours, targetMsFor } from "../lib/settings";
@@ -353,7 +352,9 @@ export function Calendar({ route, navigate }: CalendarProps) {
           review.detail?.entry.id === review.selectedId &&
           isLocked(review.detail.entry)
         ) {
-          setError(`${LOCKED_HINT} Unapprove it, then delete.`);
+          setError(
+            "Approved entries can't be deleted. Unapprove this one first.",
+          );
           return;
         }
         const idToDelete = review.selectedId;

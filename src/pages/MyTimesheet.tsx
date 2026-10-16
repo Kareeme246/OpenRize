@@ -36,7 +36,9 @@ import {
 import {
   blockState,
   durationOf,
+  INVOICED_HINT,
   isInFlight,
+  isInvoiced,
   isLocked,
   isReviewable,
   isTyping,
@@ -1285,8 +1287,10 @@ function TimesheetRow({
           onOpenInCalendar={onOpenInCalendar}
           onSplit={onSplit}
           onDelete={onDelete}
+          onUnapprove={onUnapprove}
           canSplit={!inFlight}
           locked={isApproved}
+          invoiced={isInvoiced(entry)}
         />
       </span>
     </div>
@@ -1297,14 +1301,18 @@ function RowMenu({
   onOpenInCalendar,
   onSplit,
   onDelete,
+  onUnapprove,
   canSplit,
   locked,
+  invoiced,
 }: {
   onOpenInCalendar: () => void;
   onSplit: () => void;
   onDelete: () => void;
+  onUnapprove: () => void;
   canSplit: boolean;
   locked: boolean;
+  invoiced: boolean;
 }) {
   const item =
     "block w-full rounded px-2 py-1 text-left text-[12px] hover:bg-surface disabled:opacity-40";
@@ -1348,23 +1356,44 @@ function RowMenu({
             Split
           </button>
         </Tooltip>
-        <Tooltip
-          content={locked ? LOCKED_HINT : undefined}
-          placement="left"
-          wrapperClassName="block"
-        >
-          <button
-            type="button"
-            disabled={locked}
-            className={`${item} text-danger`}
-            onClick={(event) => {
-              close(event.currentTarget);
-              onDelete();
-            }}
+        {locked && !invoiced ? (
+          // An approved entry cannot be deleted; unapproving is one tap from
+          // here, after which Delete is offered as for any other entry.
+          <Tooltip
+            content={`${LOCKED_HINT} Unapprove it to delete.`}
+            placement="left"
+            wrapperClassName="block"
           >
-            Delete
-          </button>
-        </Tooltip>
+            <button
+              type="button"
+              className={`${item} text-fg-muted`}
+              onClick={(event) => {
+                close(event.currentTarget);
+                onUnapprove();
+              }}
+            >
+              Unapprove to delete
+            </button>
+          </Tooltip>
+        ) : (
+          <Tooltip
+            content={invoiced ? INVOICED_HINT : undefined}
+            placement="left"
+            wrapperClassName="block"
+          >
+            <button
+              type="button"
+              disabled={invoiced}
+              className={`${item} text-danger`}
+              onClick={(event) => {
+                close(event.currentTarget);
+                onDelete();
+              }}
+            >
+              Delete
+            </button>
+          </Tooltip>
+        )}
       </div>
     </details>
   );

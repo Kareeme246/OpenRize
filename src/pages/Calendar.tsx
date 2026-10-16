@@ -37,6 +37,7 @@ import {
   isLocked,
   isReviewable,
   isTyping,
+  LOCKED_HINT,
 } from "../lib/entries";
 import { formatDuration } from "../lib/format";
 import { formatTargetHours, targetMsFor } from "../lib/settings";
@@ -347,11 +348,12 @@ export function Calendar({ route, navigate }: CalendarProps) {
         !document.querySelector("dialog[open]")
       ) {
         event.preventDefault();
-        // Approved entries are locked: the panel says how to change them.
+        // Approved entries are locked: say so, the panel beside it has Unapprove.
         if (
           review.detail?.entry.id === review.selectedId &&
           isLocked(review.detail.entry)
         ) {
+          setError(`${LOCKED_HINT} Unapprove it, then delete.`);
           return;
         }
         const idToDelete = review.selectedId;

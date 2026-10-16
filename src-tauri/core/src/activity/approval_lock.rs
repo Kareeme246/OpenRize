@@ -132,6 +132,29 @@ fn unapproving_is_the_way_out() {
 }
 
 #[test]
+fn an_approved_entry_is_refused_then_deletable_once_unapproved() {
+    let mut store = store();
+    let id = entry(&mut store, 0, 30, false);
+    let other = entry(&mut store, 30, 60, false);
+
+    assert_locked(store.delete_time_entry(&id, NOW));
+    assert!(store.time_entry(&id).unwrap().deleted_at.is_none());
+
+    store
+        .unapprove_time_entries(std::slice::from_ref(&id), NOW)
+        .unwrap();
+    assert_eq!(status(&store, &id), "pending");
+    store.delete_time_entry(&id, NOW).unwrap();
+
+    assert!(store.time_entry(&id).unwrap().deleted_at.is_some());
+    assert_eq!(
+        status(&store, &other),
+        "approved",
+        "only that entry changed"
+    );
+}
+
+#[test]
 fn approving_stays_allowed_and_is_idempotent() {
     let mut store = store();
     let id = entry(&mut store, 0, 30, true);

@@ -49,6 +49,13 @@ export function isLocked(entry: TimeEntry): boolean {
   return entry.status === "approved";
 }
 
+/** Invoiced time can be neither unapproved nor deleted. */
+export const INVOICED_HINT = "Invoiced entries can't be unapproved or deleted.";
+
+export function isInvoiced(entry: TimeEntry): boolean {
+  return entry.invoiceId !== undefined && entry.invoiceId !== null;
+}
+
 const REVIEWABLE: ReadonlySet<BlockState> = new Set([
   "pending",
   "needsYou",

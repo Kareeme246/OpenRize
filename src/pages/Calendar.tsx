@@ -347,11 +347,14 @@ export function Calendar({ route, navigate }: CalendarProps) {
         !document.querySelector("dialog[open]")
       ) {
         event.preventDefault();
-        // Approved entries are locked: the panel says how to change them.
+        // Approved entries are locked: say so, the panel beside it has Unapprove.
         if (
           review.detail?.entry.id === review.selectedId &&
           isLocked(review.detail.entry)
         ) {
+          setError(
+            "Approved entries can't be deleted. Unapprove this one first.",
+          );
           return;
         }
         const idToDelete = review.selectedId;

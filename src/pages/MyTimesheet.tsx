@@ -595,7 +595,9 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
             </div>
           )}
 
-          <div className="shape-bleed-table mt-3 overflow-hidden rounded-xl border border-line bg-panel">
+          <div
+            className={`shape-bleed-table mt-3 rounded-xl border border-line bg-panel ${rows.length === 1 ? "overflow-visible" : "overflow-hidden"}`}
+          >
             <div
               className="grid items-center gap-3 border-line border-b bg-surface px-3 py-2 font-semibold text-[10.5px] text-fg-faint uppercase tracking-wider"
               style={{ gridTemplateColumns: gridColumns(columns) }}

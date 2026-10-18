@@ -19,6 +19,51 @@ export interface Slice {
 const GAP_PX = 2;
 const OTHER_KEY = "__other";
 
+/** Round the four corners of an annular slice, keeping its radial edges flat. */
+function roundedDonutPath(
+  center: number,
+  radius: number,
+  thickness: number,
+  start: number,
+  end: number,
+): string {
+  const outer = radius + thickness / 2;
+  const inner = radius - thickness / 2;
+  const point = (r: number, angle: number) =>
+    `${center + r * Math.cos(angle)},${center + r * Math.sin(angle)}`;
+
+  // A single category is a continuous ring, without a seam or rounded ends.
+  if (end - start >= 2 * Math.PI - 1e-6) {
+    return [
+      `M ${point(outer, 0)}`,
+      `A ${outer},${outer} 0 1 1 ${point(outer, Math.PI)}`,
+      `A ${outer},${outer} 0 1 1 ${point(outer, 0)} Z`,
+      `M ${point(inner, 0)}`,
+      `A ${inner},${inner} 0 1 0 ${point(inner, Math.PI)}`,
+      `A ${inner},${inner} 0 1 0 ${point(inner, 0)} Z`,
+    ].join(" ");
+  }
+
+  // Limit rounding on narrow slices so their inner corners never cross.
+  const corner = Math.min(2, thickness / 2, ((end - start) * inner) / 2);
+  const outerTrim = corner / outer;
+  const innerTrim = corner / inner;
+  const outerLarge = end - start - 2 * outerTrim > Math.PI ? 1 : 0;
+  const innerLarge = end - start - 2 * innerTrim > Math.PI ? 1 : 0;
+
+  return [
+    `M ${point(outer, start + outerTrim)}`,
+    `A ${outer},${outer} 0 ${outerLarge} 1 ${point(outer, end - outerTrim)}`,
+    `Q ${point(outer, end)} ${point(outer - corner, end)}`,
+    `L ${point(inner + corner, end)}`,
+    `Q ${point(inner, end)} ${point(inner, end - innerTrim)}`,
+    `A ${inner},${inner} 0 ${innerLarge} 0 ${point(inner, start + innerTrim)}`,
+    `Q ${point(inner, start)} ${point(inner + corner, start)}`,
+    `L ${point(outer - corner, start)}`,
+    `Q ${point(outer, start)} ${point(outer, start + outerTrim)} Z`,
+  ].join(" ");
+}
+
 /** A donut with a legend beside it: share of time by group. */
 export function Donut({
   slices,
@@ -97,21 +142,24 @@ export function Donut({
         {total > 0 &&
           shown.map((slice) => {
             const length = (slice.ms / total) * circumference;
-            const dash = Math.max(0, length - gap);
+            const start = (offset + gap / 2) / radius - Math.PI / 2;
+            const end = (offset + length - gap / 2) / radius - Math.PI / 2;
+            offset += length;
+            if (end <= start) return null;
             const tooltipContent = `${slice.label}: ${formatDuration(slice.ms)} (${Math.round((slice.ms / total) * 100)}%)`;
             const element = (
               <Tooltip key={slice.key} content={tooltipContent}>
-                {/* biome-ignore lint/a11y/useSemanticElements: SVG circle cannot be an HTML button */}
-                <circle
-                  cx={size / 2}
-                  cy={size / 2}
-                  r={radius}
-                  fill="none"
-                  stroke={slice.color}
-                  strokeWidth={hovered === slice.key ? stroke + 3 : stroke}
-                  strokeDasharray={`${dash} ${circumference - dash}`}
-                  strokeDashoffset={-offset}
-                  transform={`rotate(-90 ${size / 2} ${size / 2})`}
+                {/* biome-ignore lint/a11y/useSemanticElements: SVG path cannot be an HTML button */}
+                <path
+                  d={roundedDonutPath(
+                    size / 2,
+                    radius,
+                    hovered === slice.key ? stroke + 3 : stroke,
+                    start,
+                    end,
+                  )}
+                  fill={slice.color}
+                  fillRule="evenodd"
                   onMouseEnter={() => setHovered(slice.key)}
                   onMouseLeave={() => setHovered(null)}
                   onFocus={() => setHovered(slice.key)}
@@ -119,11 +167,10 @@ export function Donut({
                   tabIndex={0}
                   role="button"
                   aria-label={tooltipContent}
-                  className="cursor-pointer outline-none transition-[stroke-width] focus-visible:stroke-[17px]"
+                  className="cursor-pointer outline-none"
                 />
               </Tooltip>
             );
-            offset += length;
             return element;
           })}
         <text

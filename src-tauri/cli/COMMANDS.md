@@ -53,6 +53,7 @@ installed.
 | `rize timers new <label>` | Create a timer. | `create_timer` | Yes | Shipped |
 | `rize timers start` / `pause` / `reset` / `rm <timer>` | Control or delete a timer by id or label; reset and rm are confirmed. | `start_timer`, `pause_timer`, `reset_timer`, `delete_timer` | Yes | Shipped |
 | `rize timers rename <timer> <label>` | Rename a timer. | `rename_timer` | Yes | Shipped |
+| `rize timers segments <timer>` / `segments add` / `edit` / `rm` | List, add, edit or remove the time segments that make up a timer's total. | `add_timer_segment`, `update_timer_segment`, `delete_timer_segment` | Yes | Planned |
 | `rize entries list` | Filter by range, project, client, category, app, status, billable and search. Newest first, `--limit` 1 to 5000. | `query_time_entries` | Yes | Shipped |
 | `rize entries show <id>` | One entry with its apps, events and AI suggestion; window titles with `--full`. | `get_entry_detail` | Yes | Shipped |
 | `rize entries add --from --to [fields]` | Create a manual entry. Refused when its time range overlaps approved entries: unapprove those entries first. | `create_time_entry` | Yes | Shipped |

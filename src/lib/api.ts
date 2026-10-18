@@ -603,6 +603,32 @@ export function renameTimer(id: string, label: string): Promise<Timer[]> {
   return invoke<Timer[]>("rename_timer", { id, label });
 }
 
+export function addTimerSegment(
+  id: string,
+  durationMs: number,
+): Promise<Timer[]> {
+  return invoke<Timer[]>("add_timer_segment", { id, durationMs });
+}
+
+export function updateTimerSegment(
+  id: string,
+  segmentId: number,
+  durationMs: number,
+): Promise<Timer[]> {
+  return invoke<Timer[]>("update_timer_segment", {
+    id,
+    segmentId,
+    durationMs,
+  });
+}
+
+export function deleteTimerSegment(
+  id: string,
+  segmentId: number,
+): Promise<Timer[]> {
+  return invoke<Timer[]>("delete_timer_segment", { id, segmentId });
+}
+
 export function deleteTimer(id: string): Promise<Timer[]> {
   return invoke<Timer[]>("delete_timer", { id });
 }

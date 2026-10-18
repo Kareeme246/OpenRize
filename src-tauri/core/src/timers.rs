@@ -28,6 +28,12 @@ CREATE TABLE IF NOT EXISTS timers (
   started_at     INTEGER,
   created_at     INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS timer_segments (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  timer_id    TEXT NOT NULL,
+  duration_ms INTEGER NOT NULL,
+  recorded_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -39,12 +45,30 @@ CREATE TABLE IF NOT EXISTS settings (
 pub struct Timer {
     pub id: String,
     pub label: String,
-    /// Sum of every completed run.
+    /// Sum of `segments`; the segments are the only stored time.
     pub accumulated_ms: u64,
+    /// Completed stretches of time, oldest first. Pausing records one, and
+    /// they can be added, edited and deleted by hand.
+    pub segments: Vec<TimerSegment>,
     /// Epoch milliseconds at which the current run started, or `None` if paused.
     pub started_at: Option<u64>,
     pub created_at: u64,
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimerSegment {
+    pub id: i64,
+    pub duration_ms: u64,
+    /// Epoch milliseconds at which the segment was recorded.
+    pub recorded_at: u64,
+}
+
+/// Selects a timer with its total computed from its segments.
+const TIMER_SELECT: &str = "SELECT id, label,
+       COALESCE((SELECT SUM(duration_ms) FROM timer_segments WHERE timer_id = timers.id), 0),
+       started_at, created_at
+     FROM timers";
 
 impl Timer {
     pub fn is_running(&self) -> bool {
@@ -104,17 +128,16 @@ impl TimerStore {
     pub fn snapshot(&self) -> Result<Vec<Timer>, String> {
         let mut statement = self
             .conn
-            .prepare(
-                "SELECT id, label, accumulated_ms, started_at, created_at
-                 FROM timers
-                 ORDER BY created_at ASC, id ASC",
-            )
+            .prepare(&format!("{TIMER_SELECT} ORDER BY created_at ASC, id ASC"))
             .map_err(|error| error.to_string())?;
-        let timers = statement
+        let mut timers = statement
             .query_map([], timer_from_row)
             .map_err(|error| error.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| error.to_string())?;
+        for timer in &mut timers {
+            timer.segments = self.segments_of(&timer.id)?;
+        }
         Ok(timers)
     }
 
@@ -139,7 +162,7 @@ impl TimerStore {
         self.conn
             .execute(
                 "INSERT INTO timers (id, label, accumulated_ms, started_at, created_at)
-                 VALUES (?1, ?2, 0, NULL, ?3)",
+                 VALUES (?1, ?2, 0, NULL, ?3)", // accumulated_ms is a retired column
                 params![id, label, now as i64],
             )
             .map_err(|error| error.to_string())?;
@@ -172,13 +195,13 @@ impl TimerStore {
     pub fn pause_at(&mut self, id: &str, now: u64) -> Result<Vec<Timer>, String> {
         let timer = self.find(id)?;
         if let Some(started) = timer.started_at {
-            let accumulated = timer.accumulated_ms + now.saturating_sub(started);
             self.conn
                 .execute(
-                    "UPDATE timers SET accumulated_ms = ?1, started_at = NULL WHERE id = ?2",
-                    params![accumulated as i64, id],
+                    "UPDATE timers SET started_at = NULL WHERE id = ?1",
+                    params![id],
                 )
                 .map_err(|error| error.to_string())?;
+            self.insert_segment(id, now.saturating_sub(started), now)?;
         }
         self.snapshot()
     }
@@ -187,7 +210,13 @@ impl TimerStore {
         self.find(id)?;
         self.conn
             .execute(
-                "UPDATE timers SET accumulated_ms = 0, started_at = NULL WHERE id = ?1",
+                "UPDATE timers SET started_at = NULL WHERE id = ?1",
+                params![id],
+            )
+            .map_err(|error| error.to_string())?;
+        self.conn
+            .execute(
+                "DELETE FROM timer_segments WHERE timer_id = ?1",
                 params![id],
             )
             .map_err(|error| error.to_string())?;
@@ -209,6 +238,60 @@ impl TimerStore {
         self.snapshot()
     }
 
+    /// Adds a stretch of time to the total.
+    pub fn add_segment(&mut self, id: &str, duration_ms: u64) -> Result<Vec<Timer>, String> {
+        let now = self.clock.now_ms();
+        self.add_segment_at(id, duration_ms, now)
+    }
+
+    pub fn add_segment_at(
+        &mut self,
+        id: &str,
+        duration_ms: u64,
+        now: u64,
+    ) -> Result<Vec<Timer>, String> {
+        self.find(id)?;
+        check_duration(duration_ms)?;
+        self.insert_segment(id, duration_ms, now)?;
+        self.snapshot()
+    }
+
+    pub fn update_segment(
+        &mut self,
+        id: &str,
+        segment_id: i64,
+        duration_ms: u64,
+    ) -> Result<Vec<Timer>, String> {
+        self.find(id)?;
+        check_duration(duration_ms)?;
+        let changed = self
+            .conn
+            .execute(
+                "UPDATE timer_segments SET duration_ms = ?1 WHERE id = ?2 AND timer_id = ?3",
+                params![duration_ms as i64, segment_id, id],
+            )
+            .map_err(|error| error.to_string())?;
+        if changed == 0 {
+            return Err(unknown_segment(segment_id));
+        }
+        self.snapshot()
+    }
+
+    pub fn delete_segment(&mut self, id: &str, segment_id: i64) -> Result<Vec<Timer>, String> {
+        self.find(id)?;
+        let changed = self
+            .conn
+            .execute(
+                "DELETE FROM timer_segments WHERE id = ?1 AND timer_id = ?2",
+                params![segment_id, id],
+            )
+            .map_err(|error| error.to_string())?;
+        if changed == 0 {
+            return Err(unknown_segment(segment_id));
+        }
+        self.snapshot()
+    }
+
     pub fn delete(&mut self, id: &str) -> Result<Vec<Timer>, String> {
         let changed = self
             .conn
@@ -217,18 +300,59 @@ impl TimerStore {
         if changed == 0 {
             return Err(unknown(id));
         }
+        self.conn
+            .execute(
+                "DELETE FROM timer_segments WHERE timer_id = ?1",
+                params![id],
+            )
+            .map_err(|error| error.to_string())?;
         self.snapshot()
     }
 
-    fn find(&self, id: &str) -> Result<Timer, String> {
+    fn insert_segment(&self, id: &str, duration_ms: u64, now: u64) -> Result<(), String> {
         self.conn
+            .execute(
+                "INSERT INTO timer_segments (timer_id, duration_ms, recorded_at)
+                 VALUES (?1, ?2, ?3)",
+                params![id, duration_ms as i64, now as i64],
+            )
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
+    fn segments_of(&self, id: &str) -> Result<Vec<TimerSegment>, String> {
+        let mut statement = self
+            .conn
+            .prepare(
+                "SELECT id, duration_ms, recorded_at FROM timer_segments
+                 WHERE timer_id = ?1 ORDER BY recorded_at ASC, id ASC",
+            )
+            .map_err(|error| error.to_string())?;
+        let segments = statement
+            .query_map(params![id], |row| {
+                Ok(TimerSegment {
+                    id: row.get(0)?,
+                    duration_ms: row.get::<_, i64>(1)? as u64,
+                    recorded_at: row.get::<_, i64>(2)? as u64,
+                })
+            })
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string());
+        segments
+    }
+
+    fn find(&self, id: &str) -> Result<Timer, String> {
+        let mut timer = self
+            .conn
             .query_row(
-                "SELECT id, label, accumulated_ms, started_at, created_at
-                 FROM timers WHERE id = ?1",
+                &format!("{TIMER_SELECT} WHERE id = ?1"),
                 params![id],
                 timer_from_row,
             )
-            .map_err(|_| unknown(id))
+            .map_err(|_| unknown(id))?;
+        timer.segments = self.segments_of(id)?;
+        Ok(timer)
     }
 
     fn read_setting(&self, key: &str) -> Option<String> {
@@ -270,9 +394,21 @@ fn timer_from_row(row: &Row<'_>) -> rusqlite::Result<Timer> {
         id: row.get(0)?,
         label: row.get(1)?,
         accumulated_ms: row.get::<_, i64>(2)? as u64,
+        segments: Vec::new(),
         started_at: row.get::<_, Option<i64>>(3)?.map(|value| value as u64),
         created_at: row.get::<_, i64>(4)? as u64,
     })
+}
+
+fn check_duration(duration_ms: u64) -> Result<(), String> {
+    if duration_ms == 0 {
+        return Err("a segment needs some time in it".to_string());
+    }
+    Ok(())
+}
+
+fn unknown_segment(segment_id: i64) -> String {
+    format!("no time segment with id {segment_id}")
 }
 
 fn unknown(id: &str) -> String {
@@ -310,6 +446,30 @@ mod tests {
         // Pausing again must not double-count.
         store.pause_at(&id, 9_000).unwrap();
         assert_eq!(store.snapshot().unwrap()[0].accumulated_ms, 3_500);
+    }
+
+    #[test]
+    fn segments_are_the_only_time_and_can_be_edited() {
+        let mut store = store("segments");
+        let id = store.create_at("Edit me", 1_000).unwrap()[0].id.clone();
+        store.start_at(&id, 1_000).unwrap();
+        store.pause_at(&id, 61_000).unwrap();
+        store.add_segment_at(&id, 30_000, 70_000).unwrap();
+
+        let timer = store.snapshot().unwrap().remove(0);
+        assert_eq!(timer.accumulated_ms, 90_000);
+        assert_eq!(timer.segments.len(), 2);
+
+        let first = timer.segments[0].id;
+        let second = timer.segments[1].id;
+        store.update_segment(&id, first, 10_000).unwrap();
+        assert_eq!(store.snapshot().unwrap()[0].accumulated_ms, 40_000);
+
+        store.delete_segment(&id, second).unwrap();
+        assert_eq!(store.snapshot().unwrap()[0].accumulated_ms, 10_000);
+
+        assert!(store.add_segment_at(&id, 0, 80_000).is_err());
+        assert!(store.update_segment(&id, second, 5_000).is_err());
     }
 
     #[test]

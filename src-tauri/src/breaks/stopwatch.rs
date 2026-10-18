@@ -153,6 +153,7 @@ mod tests {
             id: "acme".into(),
             label: "Acme site".into(),
             accumulated_ms: 20 * 3_600_000,
+            segments: Vec::new(),
             started_at,
             created_at: 0,
         }

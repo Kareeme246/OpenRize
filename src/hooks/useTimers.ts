@@ -15,6 +15,9 @@ export interface TimersApi {
   pause: (id: string) => void;
   reset: (id: string) => void;
   rename: (id: string, label: string) => void;
+  addSegment: (id: string, durationMs: number) => void;
+  updateSegment: (id: string, segmentId: number, durationMs: number) => void;
+  deleteSegment: (id: string, segmentId: number) => void;
   remove: (id: string) => void;
 }
 
@@ -80,6 +83,21 @@ export function useTimers(): TimersApi {
     (id: string, label: string) => send(api.renameTimer(id, label)),
     [send],
   );
+  const addSegment = useCallback(
+    (id: string, durationMs: number) =>
+      send(api.addTimerSegment(id, durationMs)),
+    [send],
+  );
+  const updateSegment = useCallback(
+    (id: string, segmentId: number, durationMs: number) =>
+      send(api.updateTimerSegment(id, segmentId, durationMs)),
+    [send],
+  );
+  const deleteSegment = useCallback(
+    (id: string, segmentId: number) =>
+      send(api.deleteTimerSegment(id, segmentId)),
+    [send],
+  );
   const remove = useCallback((id: string) => send(api.deleteTimer(id)), [send]);
 
   return {
@@ -92,6 +110,9 @@ export function useTimers(): TimersApi {
     pause,
     reset,
     rename,
+    addSegment,
+    updateSegment,
+    deleteSegment,
     remove,
   };
 }

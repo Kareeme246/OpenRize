@@ -1,7 +1,11 @@
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { elapsedMs, formatDuration, type Timer } from "../lib/timers";
+import type { Category, Project } from "../lib/types";
+import { useDismiss } from "../pages/timesheets/useDismiss";
+import { AddTimeSheet } from "./AddTimeSheet";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { HourRing } from "./HourRing";
+import { TimerSegmentsSheet } from "./TimerSegmentsSheet";
 import { Tooltip } from "./Tooltip";
 
 interface StopwatchCardProps {
@@ -11,7 +15,12 @@ interface StopwatchCardProps {
   onPause: (id: string) => void;
   onReset: (id: string) => void;
   onRename: (id: string, label: string) => void;
+  onAddSegment: (id: string, durationMs: number) => void;
+  onUpdateSegment: (id: string, segmentId: number, durationMs: number) => void;
+  onDeleteSegment: (id: string, segmentId: number) => void;
   onDelete: (id: string) => void;
+  categories: Category[];
+  projects: Project[];
 }
 
 export function StopwatchCard({
@@ -21,7 +30,12 @@ export function StopwatchCard({
   onPause,
   onReset,
   onRename,
+  onAddSegment,
+  onUpdateSegment,
+  onDeleteSegment,
   onDelete,
+  categories,
+  projects,
 }: StopwatchCardProps) {
   const running = timer.startedAt !== null;
   const elapsed = elapsedMs(timer, now);
@@ -29,6 +43,12 @@ export function StopwatchCard({
   const [draft, setDraft] = useState(timer.label);
   /** Which confirmation is up, if any. Both destroy real accumulated time. */
   const [pending, setPending] = useState<"reset" | "delete" | null>(null);
+  const [dialog, setDialog] = useState<"time" | "calendar" | null>(null);
+  /** Frozen when "Add to calendar" opens, so the prefilled range holds still. */
+  const [calendarRange, setCalendarRange] = useState<{
+    start: number;
+    end: number;
+  } | null>(null);
 
   const commitRename = (): void => {
     const next = draft.trim();
@@ -37,14 +57,36 @@ export function StopwatchCard({
     setEditing(false);
   };
 
+  const startRename = (): void => {
+    setDraft(timer.label);
+    setEditing(true);
+  };
+
+  const openCalendar = (): void => {
+    const end = Date.now();
+    const midnight = new Date(end).setHours(0, 0, 0, 0);
+    setCalendarRange({ start: Math.max(midnight, end - elapsed), end });
+    setDialog("calendar");
+  };
+
   return (
     <section
       id={`timer-${timer.id}`}
       tabIndex={-1}
       aria-label={`Stopwatch ${timer.label}`}
-      className={`shape-bleed-table flex min-w-0 flex-col items-center gap-3 rounded-xl border border-settings-card-border bg-settings-card p-4 outline-hidden focus:ring-2 focus:ring-accent ${running ? "border-l-4 border-l-accent" : ""}`}
+      className={`shape-bleed-table relative flex min-w-0 flex-col items-center gap-3 rounded-xl border border-settings-card-border bg-settings-card p-4 outline-hidden focus:ring-2 focus:ring-accent ${running ? "border-l-4 border-l-accent" : ""}`}
     >
-      <div className="flex w-full min-w-0 items-center justify-center gap-1.5">
+      <TimerMenu
+        label={timer.label}
+        canAddToCalendar={elapsed >= 60_000}
+        onRename={startRename}
+        onEditTime={() => setDialog("time")}
+        onAddToCalendar={openCalendar}
+        onReset={() => setPending("reset")}
+        onDelete={() => setPending("delete")}
+      />
+
+      <div className="flex w-full min-w-0 items-center justify-center gap-1.5 px-6">
         {editing ? (
           <input
             // biome-ignore lint/a11y/noAutofocus: intentional — focuses the rename input the moment editing starts
@@ -76,30 +118,6 @@ export function StopwatchCard({
                 {timer.label}
               </button>
             </Tooltip>
-            <Tooltip content="Rename">
-              <button
-                type="button"
-                aria-label="Rename tracker"
-                onClick={() => {
-                  setDraft(timer.label);
-                  setEditing(true);
-                }}
-                className="p-0.5 text-fg-faint opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 hover:text-fg"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  className="size-3"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-                </svg>
-              </button>
-            </Tooltip>
           </div>
         )}
       </div>
@@ -118,38 +136,32 @@ export function StopwatchCard({
         {formatDuration(elapsed)}
       </div>
 
-      <div className="flex gap-1.5">
-        <Tooltip content="Reset to zero and stop">
-          <button
-            type="button"
-            aria-label="Reset to zero and stop"
-            onClick={() => setPending("reset")}
-            className="grid size-8 shrink-0 place-items-center rounded-lg border border-line bg-surface text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              className="size-3.5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2.2}
-              strokeLinecap="round"
-              aria-hidden="true"
-            >
-              <path d="M3 11a9 9 0 1 0 3-6.7M3 4v5h5" />
-            </svg>
-          </button>
-        </Tooltip>
-        <Tooltip content="Delete">
-          <button
-            type="button"
-            aria-label="Delete"
-            onClick={() => setPending("delete")}
-            className="grid size-8 shrink-0 place-items-center rounded-lg border border-line bg-surface text-sm text-fg-soft transition-colors hover:bg-surface-strong hover:text-danger"
-          >
-            ×
-          </button>
-        </Tooltip>
-      </div>
+      {dialog === "time" && (
+        <TimerSegmentsSheet
+          timer={timer}
+          total={elapsed}
+          runningMs={elapsed - timer.accumulatedMs}
+          onAdd={(durationMs) => onAddSegment(timer.id, durationMs)}
+          onUpdate={(segmentId, durationMs) =>
+            onUpdateSegment(timer.id, segmentId, durationMs)
+          }
+          onDelete={(segmentId) => onDeleteSegment(timer.id, segmentId)}
+          onClose={() => setDialog(null)}
+        />
+      )}
+
+      {dialog === "calendar" && calendarRange !== null && (
+        <AddTimeSheet
+          date={new Date(calendarRange.start)}
+          initialStartMs={calendarRange.start}
+          initialEndMs={calendarRange.end}
+          initialDescription={timer.label}
+          categories={categories}
+          projects={projects}
+          onClose={() => setDialog(null)}
+          onCreated={() => onReset(timer.id)}
+        />
+      )}
 
       {pending === "reset" && (
         <ConfirmDialog
@@ -177,5 +189,95 @@ export function StopwatchCard({
         />
       )}
     </section>
+  );
+}
+
+interface TimerMenuProps {
+  label: string;
+  canAddToCalendar: boolean;
+  onRename: () => void;
+  onEditTime: () => void;
+  onAddToCalendar: () => void;
+  onReset: () => void;
+  onDelete: () => void;
+}
+
+/** The card's three-dot menu, pinned to its top right corner. */
+function TimerMenu({
+  label,
+  canAddToCalendar,
+  onRename,
+  onEditTime,
+  onAddToCalendar,
+  onReset,
+  onDelete,
+}: TimerMenuProps) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useDismiss(open, ref, close);
+
+  const item = (
+    text: string,
+    action: () => void,
+    options: { danger?: boolean; disabled?: boolean; hint?: string } = {},
+  ) => (
+    <button
+      type="button"
+      role="menuitem"
+      disabled={options.disabled}
+      title={options.disabled ? options.hint : undefined}
+      onClick={() => {
+        setOpen(false);
+        action();
+      }}
+      className={`flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-[12px] disabled:cursor-not-allowed disabled:opacity-40 ${
+        options.danger
+          ? "text-danger hover:bg-danger-soft"
+          : "text-fg-muted hover:bg-surface hover:text-fg disabled:hover:bg-transparent"
+      }`}
+    >
+      {text}
+    </button>
+  );
+
+  return (
+    <div ref={ref} className="absolute top-2 right-2">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Options for ${label}`}
+        onClick={() => setOpen(!open)}
+        className="grid size-7 place-items-center rounded-md text-fg-faint transition-colors hover:bg-surface hover:text-fg"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          className="size-4"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="5" r="1.7" />
+          <circle cx="12" cy="12" r="1.7" />
+          <circle cx="12" cy="19" r="1.7" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute top-full right-0 z-30 mt-1 w-48 rounded-lg border border-line bg-panel p-1 shadow-black/40 shadow-xl"
+        >
+          {item("Rename", onRename)}
+          {item("Edit time...", onEditTime)}
+          {item("Add to calendar...", onAddToCalendar, {
+            disabled: !canAddToCalendar,
+            hint: "Needs at least a minute of tracked time",
+          })}
+          <hr className="my-1 border-line" />
+          {item("Reset to zero", onReset)}
+          {item("Delete", onDelete, { danger: true })}
+        </div>
+      )}
+    </div>
   );
 }

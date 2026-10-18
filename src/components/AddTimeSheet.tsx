@@ -10,6 +10,9 @@ import { Field, Sheet } from "./Sheet";
 interface AddTimeSheetProps {
   date: Date;
   initialStartMs?: number;
+  /** Defaults to an hour after the start. */
+  initialEndMs?: number;
+  initialDescription?: string;
   categories: Category[];
   projects: Project[];
   onClose: () => void;
@@ -31,6 +34,8 @@ function at(day: string, time: string): number {
 export function AddTimeSheet({
   date,
   initialStartMs,
+  initialEndMs,
+  initialDescription = "",
   categories,
   projects,
   onClose,
@@ -41,9 +46,11 @@ export function AddTimeSheet({
   if (initialStartMs === undefined) initialStart.setHours(9, 0, 0, 0);
   const [day, setDay] = useState(localDateString(initialStart));
   const [start, setStart] = useState(initialStart.toTimeString().slice(0, 5));
-  const initialEnd = new Date(initialStart.getTime() + 3_600_000);
+  const initialEnd = new Date(
+    initialEndMs ?? initialStart.getTime() + 3_600_000,
+  );
   const [end, setEnd] = useState(initialEnd.toTimeString().slice(0, 5));
-  const [description, setDescription] = useState("");
+  const [description, setDescription] = useState(initialDescription);
   const [categoryId, setCategoryId] = useState("");
   const [projectId, setProjectId] = useState("");
   const [billable, setBillable] = useState(false);

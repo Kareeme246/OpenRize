@@ -6,6 +6,7 @@ import {
   SkeletonRows,
 } from "../components/Page";
 import { StopwatchCard } from "../components/StopwatchCard";
+import { useCatalog } from "../hooks/useCatalog";
 import { type TimersApi, useTimers } from "../hooks/useTimers";
 import { elapsedMs, formatDuration } from "../lib/timers";
 
@@ -17,6 +18,7 @@ interface TimersProps {
 export function Timers({ api: propApi, revealTimer }: TimersProps = {}) {
   const defaultApi = useTimers();
   const api = propApi ?? defaultApi;
+  const catalog = useCatalog();
   const [label, setLabel] = useState("");
   const trimmed = label.trim();
 
@@ -105,7 +107,12 @@ export function Timers({ api: propApi, revealTimer }: TimersProps = {}) {
                 onPause={api.pause}
                 onReset={api.reset}
                 onRename={api.rename}
+                onAddSegment={api.addSegment}
+                onUpdateSegment={api.updateSegment}
+                onDeleteSegment={api.deleteSegment}
                 onDelete={api.remove}
+                categories={catalog.categories}
+                projects={catalog.projects}
               />
             ))}
           </div>

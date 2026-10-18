@@ -100,6 +100,44 @@ pub fn rename_timer(app: AppHandle, id: String, label: String) -> Timers {
 }
 
 #[tauri::command]
+pub fn add_timer_segment(app: AppHandle, id: String, duration_ms: u64) -> Timers {
+    let timers = {
+        let state = app.state::<AppState>();
+        let mut store = state.store.lock().map_err(|error| error.to_string())?;
+        store.add_segment(&id, duration_ms)?
+    };
+    refresh_tray(&app, &timers);
+    Ok(timers)
+}
+
+#[tauri::command]
+pub fn update_timer_segment(
+    app: AppHandle,
+    id: String,
+    segment_id: i64,
+    duration_ms: u64,
+) -> Timers {
+    let timers = {
+        let state = app.state::<AppState>();
+        let mut store = state.store.lock().map_err(|error| error.to_string())?;
+        store.update_segment(&id, segment_id, duration_ms)?
+    };
+    refresh_tray(&app, &timers);
+    Ok(timers)
+}
+
+#[tauri::command]
+pub fn delete_timer_segment(app: AppHandle, id: String, segment_id: i64) -> Timers {
+    let timers = {
+        let state = app.state::<AppState>();
+        let mut store = state.store.lock().map_err(|error| error.to_string())?;
+        store.delete_segment(&id, segment_id)?
+    };
+    refresh_tray(&app, &timers);
+    Ok(timers)
+}
+
+#[tauri::command]
 pub fn delete_timer(app: AppHandle, id: String) -> Timers {
     let timers = {
         let state = app.state::<AppState>();

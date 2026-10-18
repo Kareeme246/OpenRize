@@ -3,10 +3,18 @@
  * The Rust struct carries #[serde(rename_all = "camelCase")], so the JSON keys
  * arriving over IPC match these field names exactly.
  */
+export interface TimerSegment {
+  id: number;
+  durationMs: number;
+  recordedAt: number;
+}
+
 export interface Timer {
   id: string;
   label: string;
+  /** Sum of `segments`. */
   accumulatedMs: number;
+  segments: TimerSegment[];
   startedAt: number | null;
   createdAt: number;
 }

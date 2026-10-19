@@ -294,32 +294,37 @@ impl Drop for AppNapAssertion {
     }
 }
 
-pub fn register_sleep_listeners(app: tauri::AppHandle) {
+pub fn register_sleep_listeners(app: tauri::AppHandle) -> Result<(), String> {
     use block2::RcBlock;
-    use objc2_app_kit::{NSWorkspace, NSWorkspaceWillSleepNotification};
+    use objc2_app_kit::{
+        NSWorkspace, NSWorkspaceDidWakeNotification, NSWorkspaceWillSleepNotification,
+    };
     use objc2_foundation::NSNotification;
-    use tauri::Manager;
 
-    let workspace = NSWorkspace::sharedWorkspace();
-    let center = workspace.notificationCenter();
-
-    let app_handle = app.clone();
-    let block = RcBlock::new(move |_notif: std::ptr::NonNull<NSNotification>| {
-        let now = crate::timers::now_epoch_ms();
-        let state = app_handle.state::<crate::AppState>();
-        if let Ok(mut store) = state.activity.lock() {
-            let _ = store.close_active_segment(now);
-        };
-    });
-
-    unsafe {
-        let _ = center.addObserverForName_object_queue_usingBlock(
-            Some(NSWorkspaceWillSleepNotification),
-            None,
-            None,
-            &block,
-        );
+    // NSWorkspace's own center is required; display sleep and screen lock
+    // notifications deliberately do not enter this path.
+    let center = NSWorkspace::sharedWorkspace().notificationCenter();
+    for (name, event) in unsafe {
+        [
+            (
+                NSWorkspaceWillSleepNotification,
+                super::SystemEvent::Suspend,
+            ),
+            (NSWorkspaceDidWakeNotification, super::SystemEvent::Resume),
+        ]
+    } {
+        let app = app.clone();
+        let block = RcBlock::new(move |_notification: std::ptr::NonNull<NSNotification>| {
+            crate::breaks::system_event(&app, event);
+        });
+        // SAFETY: the center copies the block and retains its observer for the
+        // process lifetime. No queue means the suspend save finishes synchronously.
+        unsafe {
+            let _ =
+                center.addObserverForName_object_queue_usingBlock(Some(name), None, None, &block);
+        }
     }
+    Ok(())
 }
 
 #[cfg(test)]

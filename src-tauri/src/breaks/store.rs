@@ -1,9 +1,9 @@
 //! The `breaks` table: one row per break decision.
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
-use super::engine::{streak_from_segments, BreakRecord};
+use super::engine::{streak_from_segments, ActiveBreak, BreakRecord};
 
 /// A row as the Calendar shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -63,16 +63,91 @@ pub fn set_planned(conn: &Connection, id: &str, planned_ms: u64, now: u64) -> Re
     .map_err(|error| error.to_string())
 }
 
-/// A break the app quit during has no end. Close it where its segment ended.
-pub fn close_orphans(conn: &Connection, now: u64) -> Result<(), String> {
+const CHECKPOINT_KEY: &str = "breaks_active_v1";
+
+/// Only active breaks get a checkpoint; ordinary sleep has nothing to recover.
+pub(super) fn save_checkpoint(
+    conn: &Connection,
+    active: Option<&ActiveBreak>,
+) -> Result<(), String> {
+    if let Some(active) = active {
+        let value = serde_json::to_string(active).map_err(|error| error.to_string())?;
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE value != excluded.value",
+            params![CHECKPOINT_KEY, value],
+        )
+    } else {
+        conn.execute("DELETE FROM settings WHERE key = ?1", [CHECKPOINT_KEY])
+    }
+    .map(|_| ())
+    .map_err(|error| error.to_string())
+}
+
+pub(super) fn load_checkpoint(conn: &Connection) -> Result<Option<ActiveBreak>, String> {
+    let value: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            [CHECKPOINT_KEY],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let active: ActiveBreak = serde_json::from_str(&value).map_err(|error| error.to_string())?;
+    let unfinished: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM breaks WHERE id = ?1 AND status = 'taken'
+         AND started_at IS NOT NULL AND ended_at IS NULL)",
+            [&active.id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(unfinished.then_some(active))
+}
+
+/// Stamp the row and, for sleep, its original segment in one transaction. Never
+/// stop whatever new segment may be running when the machine wakes up.
+pub fn finish(
+    conn: &Connection,
+    id: &str,
+    ended_at: u64,
+    now: u64,
+    slept: bool,
+) -> Result<(), String> {
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|error| error.to_string())?;
+    if slept {
+        tx.execute(
+            "UPDATE segments SET ended_at = MAX(started_at, ?2)
+             WHERE id = (SELECT segment_id FROM breaks WHERE id = ?1) AND kind = 'break'",
+            params![id, ended_at as i64],
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    set_ended(&tx, id, ended_at, now)?;
+    tx.commit().map_err(|error| error.to_string())
+}
+
+/// Legacy rows without a checkpoint retain the old recovery behaviour. A
+/// checkpointed break is restored into the engine and owns its planned end.
+pub(super) fn close_orphans(
+    conn: &Connection,
+    now: u64,
+    active: Option<&ActiveBreak>,
+) -> Result<(), String> {
     conn.execute(
         "UPDATE breaks
          SET ended_at = COALESCE(
                (SELECT ended_at FROM segments WHERE segments.id = breaks.segment_id),
                started_at),
              updated_at = ?1
-         WHERE status = 'taken' AND started_at IS NOT NULL AND ended_at IS NULL",
-        params![now as i64],
+         WHERE status = 'taken' AND started_at IS NOT NULL AND ended_at IS NULL
+           AND (?2 IS NULL OR id != ?2)",
+        params![now as i64, active.map(|active| active.id.as_str())],
     )
     .map(|_| ())
     .map_err(|error| error.to_string())
@@ -199,8 +274,103 @@ mod tests {
         insert(&conn, &record("a", STATUS_TAKEN, Some(2_000)), 5).unwrap();
         conn.execute("UPDATE breaks SET segment_id = 7 WHERE id = 'a'", [])
             .unwrap();
-        close_orphans(&conn, 100_000).unwrap();
+        close_orphans(&conn, 100_000, None).unwrap();
         assert_eq!(list(&conn, 0, 10_000).unwrap()[0].ended_at, Some(90_000));
+    }
+
+    fn checkpointed_break(conn: &Connection) -> super::super::engine::Engine {
+        use super::super::engine::{Command, Effect, Engine};
+        let settings = crate::settings::BreakSettings::default();
+        let mut engine = Engine::new(0, None);
+        let effects = engine.command(Command::StartBreak, 2_000, &settings);
+        let Effect::Begin { mut record, .. } = effects.into_iter().next().unwrap() else {
+            panic!("begin");
+        };
+        conn.execute("INSERT INTO segments (id, app, title, kind, started_at) VALUES (7, 'Break', 'Break', 'break', 2000)", []).unwrap();
+        record.segment_id = Some(7);
+        insert(conn, &record, 2_000).unwrap();
+        engine.attach_segment(Some(7));
+        // An extension must survive a crash as well.
+        engine.command(Command::Extend(5), 3_000, &settings);
+        set_planned(conn, &record.id, 600_000, 3_000).unwrap();
+        save_checkpoint(conn, engine.checkpoint()).unwrap();
+        engine
+    }
+
+    #[test]
+    fn next_start_recovers_the_active_break_and_only_its_planned_time() {
+        use super::super::engine::{Effect, Engine};
+        let conn = conn();
+        checkpointed_break(&conn);
+        // ActivityStore::open closes unclosed segments at their start. Recovery
+        // must work even after that defensive startup cleanup.
+        conn.execute(
+            "UPDATE segments SET ended_at = started_at WHERE ended_at IS NULL",
+            [],
+        )
+        .unwrap();
+        let recovered = load_checkpoint(&conn).unwrap().unwrap();
+        close_orphans(&conn, 900_000, Some(&recovered)).unwrap();
+        let mut engine = Engine::new(0, None);
+        engine.restore(recovered);
+        assert!(engine.settle_sleep(100_000).is_empty());
+        assert!(engine.capture_paused());
+        let effects = engine.settle_sleep(900_000);
+        let Effect::Finish {
+            id,
+            ended_at,
+            sleep_segment,
+            ..
+        } = &effects[0]
+        else {
+            panic!("finish");
+        };
+        assert_eq!(*ended_at, 602_000);
+        finish(&conn, id, *ended_at, 900_000, sleep_segment.is_some()).unwrap();
+        save_checkpoint(&conn, engine.checkpoint()).unwrap();
+        let rows = list(&conn, 0, 1_000_000).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, STATUS_TAKEN);
+        assert_eq!(rows[0].ended_at, Some(602_000));
+        let span: (i64, i64) = conn
+            .query_row(
+                "SELECT started_at, ended_at FROM segments WHERE id = 7",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(span, (2_000, 602_000));
+        assert!(load_checkpoint(&conn).unwrap().is_none());
+        // Repeated startup cannot create a second break or extend the old one.
+        close_orphans(&conn, 2_000_000, None).unwrap();
+        assert_eq!(list(&conn, 0, 1_000_000).unwrap(), rows);
+    }
+
+    #[test]
+    fn clean_exit_or_stale_checkpoint_does_not_recover_a_completed_row() {
+        use super::super::engine::Effect;
+        let conn = conn();
+        let mut engine = checkpointed_break(&conn);
+        let Effect::Finish { id, ended_at, .. } = engine.end_for_exit(90_000).remove(0) else {
+            panic!("finish");
+        };
+        finish(&conn, &id, ended_at, 90_000, false).unwrap();
+        // If exit dies between ending the row and clearing the checkpoint,
+        // the finished row is still authoritative.
+        assert!(load_checkpoint(&conn).unwrap().is_none());
+        save_checkpoint(&conn, None).unwrap();
+        assert!(load_checkpoint(&conn).unwrap().is_none());
+        close_orphans(&conn, 900_000, None).unwrap();
+        assert_eq!(list(&conn, 0, 1_000_000).unwrap()[0].ended_at, Some(90_000));
+    }
+
+    #[test]
+    fn restart_without_an_active_break_never_backfills_sleep() {
+        let conn = conn();
+        conn.execute("INSERT INTO segments (app, title, kind, started_at, ended_at) VALUES ('Code', 'Code', 'activity', 2000, 90000)", []).unwrap();
+        assert!(load_checkpoint(&conn).unwrap().is_none());
+        close_orphans(&conn, 900_000, None).unwrap();
+        assert!(list(&conn, 0, 1_000_000).unwrap().is_empty());
     }
 
     #[test]

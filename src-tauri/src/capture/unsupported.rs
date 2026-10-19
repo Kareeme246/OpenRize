@@ -19,4 +19,6 @@ impl AppNapAssertion {
     }
 }
 
-pub fn register_sleep_listeners(_app: tauri::AppHandle) {}
+pub fn register_sleep_listeners(_app: tauri::AppHandle) -> Result<(), String> {
+    Ok(())
+}

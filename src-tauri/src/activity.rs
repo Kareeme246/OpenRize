@@ -104,31 +104,13 @@ pub fn spawn_sampler(app: AppHandle) {
             let now = now_epoch_ms();
             let away = crate::capture::user_is_away();
             let sample = crate::capture::read_active_window();
-            let keeps_display_awake = sample.as_ref().is_some_and(|s| s.keeps_display_awake);
             let idle_ms = read_idle_ms();
 
             let state = app.state::<crate::AppState>();
 
-            // Sleep / lid-close defense: if a gap of >10s occurred between 1s ticks,
-            // close active segment at last_sample_time + 1000 so sleep time is not counted.
-            if last_sample_time > 0 && now.saturating_sub(last_sample_time) > 10_000 {
-                if let Ok(mut store) = state.activity.lock() {
-                    let _ = store.close_active_segment(last_sample_time + 1000);
-                }
-            }
+            let tick_result =
+                crate::breaks::sample_tick(&app, sample, idle_ms, away, last_sample_time);
             last_sample_time = now;
-
-            let tick_result = state
-                .activity
-                .lock()
-                .map_err(|_| "activity store lock poisoned".to_string())
-                .and_then(|mut store| {
-                    if away {
-                        store.tick_away(now)
-                    } else {
-                        store.tick(sample, idle_ms, now)
-                    }
-                });
 
             match tick_result {
                 Ok(true) => {
@@ -147,8 +129,6 @@ pub fn spawn_sampler(app: AppHandle) {
                 }
                 Err(error) => eprintln!("activity sample failed: {error}"),
             }
-
-            crate::breaks::after_tick(&app, keeps_display_awake, away);
         }
     });
 }

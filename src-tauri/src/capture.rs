@@ -27,3 +27,10 @@ fn domain_of(url: &str) -> Option<String> {
         .host_str()
         .map(|host| host.trim_start_matches("www.").to_string())
 }
+
+/// Actual system suspend/resume, distinct from a locked or sleeping display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SystemEvent {
+    Suspend,
+    Resume,
+}

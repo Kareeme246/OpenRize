@@ -124,6 +124,7 @@ pub fn run() {
             if preferences.tray_enabled {
                 tray::init(app.handle(), &timers)?;
             }
+            capture::register_sleep_listeners(app.handle().clone())?;
             activity::spawn_sampler(app.handle().clone());
             ai::worker::spawn(
                 app.handle().clone(),
@@ -131,7 +132,6 @@ pub fn run() {
                 dir.join("ml"),
             );
             energy::spawn_sampler(app.handle().clone(), dir.join(activity::DB_FILE));
-            capture::register_sleep_listeners(app.handle().clone());
             spawn_retention_sweeper(app.handle().clone());
             updater::spawn_scheduler(app.handle().clone());
             // One sweep on startup, so a long-dormant install is cleaned before

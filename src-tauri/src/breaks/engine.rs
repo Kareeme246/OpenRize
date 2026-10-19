@@ -1,5 +1,5 @@
 //! The break state machine: a pure function of time, settings and what the
-//! activity sampler sees. It performs no I/O; `step` and the command methods
+//! activity sampler sees, plus explicit system suspend/resume. It performs no I/O; `step` and the command methods
 //! change its state and return `Effect`s for the driver in `mod.rs` to apply.
 //!
 //! Vocabulary:
@@ -15,7 +15,7 @@
 
 use std::collections::HashSet;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::settings::{BreakSettings, ScheduledBreak};
 
@@ -38,13 +38,13 @@ pub const SUSTAINED_INPUT_MS: u64 = 120_000;
 const START_GRACE_MS: u64 = 15_000;
 /// Fresh input this recent after the planned end is "the first input".
 const FRESH_INPUT_MS: u64 = 1_500;
-/// The sampler ticks each second; a longer gap means the Mac slept.
+/// A long sampler gap is excluded from work; it is not proof of system sleep.
 const TICK_GAP_MS: u64 = 10_000;
 /// A scheduled break not shown within this long after its time is missed.
 const SCHEDULE_WINDOW_MIN: u32 = 10;
 const MINUTE_MS: u64 = 60_000;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Source {
     Interval,
@@ -109,6 +109,8 @@ pub enum Effect {
         ended_at: u64,
         close_segment: bool,
         resume_timers: Vec<String>,
+        /// A system sleep owns only the original break segment through its planned end.
+        sleep_segment: Option<i64>,
     },
     /// Store a decision that involves no segment of its own.
     Record(BreakRecord),
@@ -173,9 +175,9 @@ struct Reminder {
     nudged: bool,
 }
 
-#[derive(Debug, Clone)]
-struct ActiveBreak {
-    id: String,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(super) struct ActiveBreak {
+    pub(super) id: String,
     source: Source,
     label: String,
     planned_ms: u64,
@@ -185,6 +187,7 @@ struct ActiveBreak {
     paused: Vec<(String, String)>,
     /// Since when input has been steady (see `SUSTAINED_INPUT_MS`).
     back_since: Option<u64>,
+    pub(super) slept: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -272,6 +275,7 @@ pub struct Engine {
     pub(super) stopwatch: super::stopwatch::Engine,
     pub(super) quiet: Option<Quiet>,
     streak_ms: u64,
+    suspended: bool,
     last_tick: Option<u64>,
     day_key: Option<i64>,
     inactive_since: Option<u64>,
@@ -292,6 +296,7 @@ impl Engine {
             stopwatch: super::stopwatch::Engine::default(),
             quiet: Some(Quiet::NotTracking),
             streak_ms,
+            suspended: false,
             last_tick: None,
             day_key: None,
             inactive_since: None,
@@ -328,6 +333,51 @@ impl Engine {
         }
     }
 
+    /// OS notifications are inputs, never inferred from a dark display or tick gap.
+    pub fn system_event(&mut self, event: crate::capture::SystemEvent, segment_id: Option<i64>) {
+        self.suspended = event == crate::capture::SystemEvent::Suspend;
+        if self.suspended {
+            // Do not credit a pre-sleep idle segment through the sleep gap.
+            self.idle_seg = None;
+            self.quiet = Some(Quiet::Away);
+            if let Some(active) = &mut self.active {
+                if active.segment_id.is_some() && active.segment_id == segment_id {
+                    active.slept = true;
+                    active.back_since = None;
+                }
+            }
+        }
+    }
+
+    pub fn capture_paused(&self) -> bool {
+        self.suspended || self.active.as_ref().is_some_and(|active| active.slept)
+    }
+
+    /// Called before sampling so resumed work cannot overlap the planned break.
+    pub fn settle_sleep(&mut self, now: u64) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        if !self.suspended {
+            if let Some(active) = &self.active {
+                let end = active.started_at.saturating_add(active.planned_ms);
+                if active.slept && now >= end {
+                    self.last_tick = Some(now);
+                    self.finish(end, false, None, &mut effects);
+                }
+            }
+        }
+        effects
+    }
+
+    pub(super) fn checkpoint(&self) -> Option<&ActiveBreak> {
+        self.active.as_ref()
+    }
+
+    pub(super) fn restore(&mut self, mut active: ActiveBreak) {
+        active.slept = true;
+        active.back_since = None;
+        self.active = Some(active);
+    }
+
     /// Starting the break's segment failed: forget the break.
     pub fn abort_begin(&mut self) {
         self.active = None;
@@ -336,6 +386,10 @@ impl Engine {
     // --- tick -----------------------------------------------------------
 
     pub fn step(&mut self, input: &Input<'_>) -> Vec<Effect> {
+        if self.capture_paused() {
+            self.quiet = Some(Quiet::Away);
+            return self.settle_sleep(input.now);
+        }
         self.quiet = self.quiet_reason(input);
         let mut effects = Vec::new();
         let now = input.now;
@@ -436,7 +490,7 @@ impl Engine {
             (_, None) => false,
         };
         if segment_gone {
-            // A sleep or a lock closed it. It ended when we last saw it.
+            // A stop, lock or account switch interrupted it. Preserve the old end.
             let ended = previous_tick.map_or(now, |tick| (tick + 1_000).min(now));
             self.finish(
                 ended,
@@ -488,6 +542,7 @@ impl Engine {
             ended_at,
             close_segment,
             resume_timers: active.paused.iter().map(|(id, _)| id.clone()).collect(),
+            sleep_segment: active.slept.then_some(active.segment_id).flatten(),
         });
         self.streak_ms = 0;
         self.welcome = Some(Welcome {
@@ -827,6 +882,7 @@ impl Engine {
             segment_id: None,
             paused: Vec::new(),
             back_since: None,
+            slept: false,
         });
         self.welcome = None;
         self.streak_ms = 0;
@@ -875,7 +931,14 @@ impl Engine {
     /// The app is quitting: end the break at `now`.
     pub fn end_for_exit(&mut self, now: u64) -> Vec<Effect> {
         let mut effects = Vec::new();
-        self.finish(now, true, None, &mut effects);
+        let end = self
+            .active
+            .as_ref()
+            .filter(|active| active.slept)
+            .map_or(now, |active| {
+                now.min(active.started_at.saturating_add(active.planned_ms))
+            });
+        self.finish(end, true, None, &mut effects);
         effects
     }
 
@@ -1392,6 +1455,135 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn system_sleep_completes_only_the_planned_break() {
+        let mut sim = Sim::new();
+        let effects = sim.command(Command::StartBreak);
+        sim.begin(&effects);
+        let end = sim.now + 5 * MIN;
+        sim.engine
+            .attach_paused_timers(vec![("timer".into(), "Work".into())]);
+        sim.engine
+            .system_event(crate::capture::SystemEvent::Suspend, Some(2));
+        sim.segment = None;
+        assert!(sim.engine.capture_paused());
+        // Even background ticks during suspend must not resume timers.
+        assert!(sim.engine.settle_sleep(end + 10 * MIN).is_empty());
+        sim.engine
+            .system_event(crate::capture::SystemEvent::Resume, None);
+        let effects = sim.engine.settle_sleep(end + 10 * MIN);
+        assert!(matches!(effects.as_slice(), [Effect::Finish {
+            ended_at, close_segment: false, sleep_segment: Some(2), resume_timers, ..
+        }] if *ended_at == end && resume_timers == &["timer"]));
+        assert!(!sim.engine.capture_paused());
+        let view = sim.engine.view(end + 10 * MIN, &sim.settings, sim.local());
+        assert_eq!(view.current.unwrap().note, None);
+        assert!(sim.engine.settle_sleep(end + 20 * MIN).is_empty());
+    }
+
+    #[test]
+    fn waking_early_keeps_the_reserved_break_until_its_planned_end() {
+        let mut sim = Sim::new();
+        let effects = sim.command(Command::StartBreak);
+        sim.begin(&effects);
+        let end = sim.now + 5 * MIN;
+        sim.engine
+            .system_event(crate::capture::SystemEvent::Suspend, Some(2));
+        sim.engine
+            .system_event(crate::capture::SystemEvent::Resume, None);
+        assert!(sim.engine.settle_sleep(end - 1).is_empty());
+        assert!(sim.engine.capture_paused());
+        assert!(matches!(sim.engine.settle_sleep(end).as_slice(),
+            [Effect::Finish { ended_at, .. }] if *ended_at == end));
+        assert!(!sim.engine.capture_paused());
+    }
+
+    #[test]
+    fn ordinary_system_sleep_never_creates_a_break() {
+        let mut sim = Sim::new();
+        sim.engine
+            .system_event(crate::capture::SystemEvent::Suspend, Some(1));
+        sim.segment = None;
+        sim.now += 20 * MIN;
+        sim.engine
+            .system_event(crate::capture::SystemEvent::Resume, None);
+        assert!(sim.engine.settle_sleep(sim.now).is_empty());
+        assert!(sim.tick().is_empty());
+        assert!(sim.engine.checkpoint().is_none());
+        assert_eq!(sim.state().phase, Phase::Idle);
+    }
+
+    #[test]
+    fn sleep_does_not_credit_a_previous_idle_segment_through_the_gap() {
+        let mut sim = Sim::new();
+        sim.segment = Some(SegmentNow {
+            id: 3,
+            kind: "break".to_string(),
+            label: Some("Idle".to_string()),
+        });
+        sim.idle_ms = MIN;
+        assert!(sim.tick().is_empty());
+        sim.engine
+            .system_event(crate::capture::SystemEvent::Suspend, Some(3));
+        sim.segment = None;
+        sim.now += 60 * MIN;
+        sim.engine
+            .system_event(crate::capture::SystemEvent::Resume, None);
+        assert!(sim.tick().is_empty());
+        assert!(sim.engine.checkpoint().is_none());
+    }
+
+    #[test]
+    fn lock_stop_and_a_tick_gap_without_system_sleep_still_interrupt() {
+        for (away, gap) in [(true, 1_000), (false, 1_000), (false, 20 * MIN)] {
+            let mut sim = Sim::new();
+            let effects = sim.command(Command::StartBreak);
+            sim.begin(&effects);
+            let start = sim.now;
+            sim.segment = None;
+            sim.away = away;
+            sim.now += gap;
+            let effects = sim.tick();
+            assert!(matches!(effects.as_slice(), [Effect::Finish {
+                ended_at, sleep_segment: None, close_segment: false, ..
+            }] if *ended_at == start + 1_000));
+            assert_eq!(
+                sim.state().current.unwrap().note.as_deref(),
+                Some("The break was cut short")
+            );
+        }
+    }
+
+    #[test]
+    fn a_stop_before_suspend_is_not_reclassified_as_system_sleep() {
+        let mut sim = Sim::new();
+        let effects = sim.command(Command::StartBreak);
+        sim.begin(&effects);
+        sim.segment = None;
+        sim.engine
+            .system_event(crate::capture::SystemEvent::Suspend, None);
+        sim.engine
+            .system_event(crate::capture::SystemEvent::Resume, None);
+        assert!(matches!(
+            sim.run(1_000).as_slice(),
+            [Effect::Finish {
+                sleep_segment: None,
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn an_explicit_end_keeps_its_actual_time() {
+        let mut sim = Sim::new();
+        let effects = sim.command(Command::StartBreak);
+        sim.begin(&effects);
+        sim.idle_ms = MIN;
+        sim.run(MIN);
+        assert!(matches!(sim.command(Command::EndBreak).as_slice(),
+            [Effect::Finish { ended_at, sleep_segment: None, .. }] if *ended_at == sim.now));
     }
 
     #[test]

@@ -44,9 +44,9 @@ impl AppNapAssertion {
     }
 }
 
-/// Sleep needs no hook: the sampler thread is suspended with the machine,
-/// and the gap it sees on wake closes the open segment (activity.rs).
-pub fn register_sleep_listeners(_app: tauri::AppHandle) {}
+#[path = "windows/sleep.rs"]
+mod sleep;
+pub use sleep::register_sleep_listeners;
 
 /// Hosts the windows of packaged (UWP) apps; the app itself is a child
 /// window owned by another process.

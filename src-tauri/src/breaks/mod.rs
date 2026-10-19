@@ -12,7 +12,7 @@
 //! - `surface.rs` is the positioned reminder panel.
 //! - `stopwatch.rs` checks current stopwatch runs once a minute and yields
 //!   to breaks, using the same quiet rules and panel.
-//! - This file is the driver. The 1 Hz activity sampler calls `after_tick`;
+//! - This file is the driver. The 1 Hz activity sampler calls `sample_tick`;
 //!   the frontend's commands come through `command`. Both run under the
 //!   engine's lock, apply the effects (open or close the segment, pause or
 //!   resume stopwatches, write the row), then publish the new
@@ -60,9 +60,12 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     let settings = state.settings_snapshot().breaks;
     let now = now_epoch_ms();
-    let (streak, paused_until, fired) = {
+    let (streak, paused_until, fired, recovered) = {
         let store = state.activity.lock().map_err(|error| error.to_string())?;
-        store::close_orphans(store.conn(), now)?;
+        // The quit handler ends the row and clears its checkpoint. An unfinished
+        // checkpoint therefore means that handler never finished (crash/power loss).
+        let recovered = store::load_checkpoint(store.conn())?;
+        store::close_orphans(store.conn(), now, recovered.as_ref())?;
         let break_ms = u64::from(settings.break_minutes) * 60_000;
         let streak = store::rebuild_streak(store.conn(), local_day_start(now), now, break_ms)?;
         let paused_until = store
@@ -73,10 +76,13 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
             .read_setting(STOPWATCH_FIRED_KEY)
             .and_then(|value| serde_json::from_str(&value).ok())
             .unwrap_or_default();
-        (streak, paused_until, fired)
+        (streak, paused_until, fired, recovered)
     };
     let mut engine = Engine::new(streak, paused_until);
     engine.stopwatch.fired = fired;
+    if let Some(active) = recovered {
+        engine.restore(active);
+    }
     app.manage(BreakRuntime {
         engine: Mutex::new(engine),
         last_published: Mutex::new(None),
@@ -85,32 +91,97 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Called by the sampler after every activity tick.
-pub fn after_tick(app: &AppHandle, keeps_display_awake: bool, away: bool) {
+/// Serialize sampling with suspend notifications and break commands. No activity
+/// lock may be held on entry; the engine lock always comes first.
+pub fn sample_tick(
+    app: &AppHandle,
+    sample: Option<crate::capture::WindowSample>,
+    idle_ms: u64,
+    away: bool,
+    last_sample_time: u64,
+) -> Result<bool, String> {
     let now = now_epoch_ms();
     let state = app.state::<AppState>();
     let settings = state.settings_snapshot().breaks;
-    let live = match state.activity.lock() {
-        Ok(store) => store.live_state(now),
-        Err(_) => return,
-    };
-    let segment = live.segment_info().map(|info| SegmentNow {
-        id: info.id,
-        kind: info.kind,
-        label: info.label,
+    let keeps_display_awake = sample
+        .as_ref()
+        .is_some_and(|sample| sample.keeps_display_awake);
+    let mut result = Err("break state is unavailable".to_string());
+    run(app, &settings, now, |engine| {
+        let live = (|| {
+            let mut store = state.activity.lock().map_err(|error| error.to_string())?;
+            let paused = engine.capture_paused();
+            let mut changed = false;
+            if !paused {
+                // A gap alone still never creates a break. Actual suspend is
+                // handled separately, before its segment can disappear.
+                if last_sample_time > 0 && now.saturating_sub(last_sample_time) > 10_000 {
+                    changed |= store.close_active_segment(last_sample_time + 1_000)?;
+                }
+                changed |= if away {
+                    store.tick_away(now)?
+                } else {
+                    store.tick(sample, idle_ms, now)?
+                };
+            }
+            result = Ok(changed);
+            Ok::<_, String>(store.live_state(now))
+        })();
+        let live = match live {
+            Ok(live) => live,
+            Err(error) => {
+                result = Err(error);
+                return Vec::new();
+            }
+        };
+        // No reminders, idle credits or fresh-input handling during suspend.
+        if engine.capture_paused() {
+            return Vec::new();
+        }
+        let segment = live.segment_info().map(|info| SegmentNow {
+            id: info.id,
+            kind: info.kind,
+            label: info.label,
+        });
+        engine.step(&Input {
+            now,
+            settings: &settings,
+            tracking_active: live.tracking_active,
+            idle_ms: live.last_idle_ms,
+            idle_threshold_ms: live.idle_threshold_ms,
+            away,
+            keeps_display_awake,
+            segment,
+            local: local_time(now),
+        })
     });
-    let input = Input {
-        now,
-        settings: &settings,
-        tracking_active: live.tracking_active,
-        idle_ms: live.last_idle_ms,
-        idle_threshold_ms: live.idle_threshold_ms,
-        away,
-        keeps_display_awake,
-        segment,
-        local: local_time(now),
+    result
+}
+
+/// Shared input for both platform listeners. Persist the sleep decision before
+/// closing the segment; the sampler cannot race this operation under the lock.
+pub fn system_event(app: &AppHandle, event: crate::capture::SystemEvent) {
+    let Some(runtime) = app.try_state::<BreakRuntime>() else {
+        return;
     };
-    run(app, &settings, now, |engine| engine.step(&input));
+    let Ok(mut engine) = runtime.engine.lock() else {
+        return;
+    };
+    let state = app.state::<AppState>();
+    let Ok(mut activity) = state.activity.lock() else {
+        return;
+    };
+    let now = now_epoch_ms();
+    let segment = activity.live_state(now).segment_info().map(|info| info.id);
+    engine.system_event(event, segment);
+    if let Err(error) = store::save_checkpoint(activity.conn(), engine.checkpoint()) {
+        eprintln!("could not save sleeping break: {error}");
+    }
+    if event == crate::capture::SystemEvent::Suspend {
+        if let Err(error) = activity.close_active_segment(now) {
+            eprintln!("could not close segment before sleep: {error}");
+        }
+    }
 }
 
 /// The frontend (or the tray) asks for a break action.
@@ -180,11 +251,15 @@ pub fn on_exit(app: &AppHandle) {
     let Ok(mut engine) = runtime.engine.lock() else {
         return;
     };
+    let sleeping = engine.checkpoint().is_some_and(|active| active.slept);
     for effect in engine.end_for_exit(now) {
         if let Effect::Finish { id, ended_at, .. } = effect {
-            with_store(app, |conn| store::set_ended(conn, &id, ended_at, now));
+            with_store(app, |conn| {
+                store::finish(conn, &id, ended_at, now, sleeping)
+            });
         }
     }
+    with_store(app, |conn| store::save_checkpoint(conn, None));
 }
 
 /// Raises a sample reminder so the panel can be looked at without waiting an
@@ -236,8 +311,13 @@ fn run(
 ) -> Option<BreakState> {
     let runtime = app.try_state::<BreakRuntime>()?;
     let mut engine = runtime.engine.lock().ok()?;
+    let settled = engine.settle_sleep(now);
+    apply(app, &mut engine, settled, now);
     let effects = act(&mut engine);
     apply(app, &mut engine, effects, now);
+    with_store(app, |conn| {
+        store::save_checkpoint(conn, engine.checkpoint())
+    });
     let state = app.state::<AppState>();
     let preferences = state.settings_snapshot();
     // Trigger discovery is throttled to once a minute inside the stopwatch
@@ -299,13 +379,19 @@ fn apply(app: &AppHandle, engine: &mut Engine, effects: Vec<Effect>, now: u64) {
                 ended_at,
                 close_segment,
                 resume_timers,
+                sleep_segment,
             } => {
                 if close_segment {
                     if let Err(error) = crate::commands::stop_session(app.clone()) {
                         eprintln!("could not end the break segment: {error}");
                     }
                 }
-                with_store(app, |conn| store::set_ended(conn, &id, ended_at, now));
+                with_store(app, |conn| {
+                    store::finish(conn, &id, ended_at, now, sleep_segment.is_some())
+                });
+                if sleep_segment.is_some() {
+                    crate::activity::emit_full(app);
+                }
                 for timer in resume_timers {
                     // A stopwatch deleted during the break is simply gone.
                     let _ = crate::commands::start_timer(app.clone(), timer);

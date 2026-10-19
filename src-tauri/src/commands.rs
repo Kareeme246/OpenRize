@@ -18,7 +18,7 @@ use crate::models::{
 use crate::projects::{HintPreview, ImportSummary, ProjectRule, ProjectStats, ProjectSuggestion};
 use crate::reports::{self, EntryFilter, ExportFormat, ExportResult, GroupBy, RollupCell};
 use crate::settings::Settings;
-use crate::timers::{now_epoch_ms, Timer};
+use crate::timers::{now_epoch_ms, Timer, TimerSavedState};
 use crate::tray;
 use crate::updater::{self, UpdateStatus, UpdaterState};
 use crate::AppState;
@@ -135,6 +135,20 @@ pub fn delete_timer_segment(app: AppHandle, id: String, segment_id: i64) -> Time
     };
     refresh_tray(&app, &timers);
     Ok(timers)
+}
+
+#[tauri::command]
+pub fn save_timer_state(app: AppHandle, id: String) -> Result<TimerSavedState, String> {
+    let state = app.state::<AppState>();
+    let mut store = state.store.lock().map_err(|error| error.to_string())?;
+    store.save_state(&id)
+}
+
+#[tauri::command]
+pub fn list_timer_saved_states(app: AppHandle, id: String) -> Result<Vec<TimerSavedState>, String> {
+    let state = app.state::<AppState>();
+    let store = state.store.lock().map_err(|error| error.to_string())?;
+    store.saved_states(&id)
 }
 
 #[tauri::command]

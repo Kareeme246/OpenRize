@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { BreakEntry, BreakState } from "./breaks";
 import type { LoginItemState, Settings, StoragePaths } from "./settings";
-import type { Timer } from "./timers";
+import type { Timer, TimerSavedState } from "./timers";
 import type {
   ActivitySnapshot,
   AiMetrics,
@@ -627,6 +627,14 @@ export function deleteTimerSegment(
   segmentId: number,
 ): Promise<Timer[]> {
   return invoke<Timer[]>("delete_timer_segment", { id, segmentId });
+}
+
+export function saveTimerState(id: string): Promise<TimerSavedState> {
+  return invoke<TimerSavedState>("save_timer_state", { id });
+}
+
+export function listTimerSavedStates(id: string): Promise<TimerSavedState[]> {
+  return invoke<TimerSavedState[]>("list_timer_saved_states", { id });
 }
 
 export function deleteTimer(id: string): Promise<Timer[]> {

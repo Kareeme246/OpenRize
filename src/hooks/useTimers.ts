@@ -18,6 +18,7 @@ export interface TimersApi {
   addSegment: (id: string, durationMs: number) => void;
   updateSegment: (id: string, segmentId: number, durationMs: number) => void;
   deleteSegment: (id: string, segmentId: number) => void;
+  saveState: (id: string) => void;
   remove: (id: string) => void;
 }
 
@@ -98,6 +99,13 @@ export function useTimers(): TimersApi {
       send(api.deleteTimerSegment(id, segmentId)),
     [send],
   );
+  // A save changes nothing about the timers, so there is no list to adopt;
+  // it is read back through the Saved states sheet.
+  const saveState = useCallback((id: string) => {
+    api
+      .saveTimerState(id)
+      .catch((cause: unknown) => setError(describeError(cause)));
+  }, []);
   const remove = useCallback((id: string) => send(api.deleteTimer(id)), [send]);
 
   return {
@@ -113,6 +121,7 @@ export function useTimers(): TimersApi {
     addSegment,
     updateSegment,
     deleteSegment,
+    saveState,
     remove,
   };
 }

@@ -84,18 +84,39 @@ pub(super) fn complete_sleep(
     transaction.commit().map_err(|error| error.to_string())
 }
 
+/// The break now runs in this segment (a sleep closed the one it had).
+pub(super) fn set_segment(
+    conn: &Connection,
+    id: &str,
+    segment_id: Option<i64>,
+    now: u64,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE breaks SET segment_id = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, segment_id, now as i64],
+    )
+    .map(|_| ())
+    .map_err(|error| error.to_string())
+}
+
 /// Normal quit stamps ended_at in on_exit. A still-open taken row means the
-/// app died without that callback: honor the active break's planned duration.
+/// app died without that callback: honor the active break's planned duration,
+/// but never end it after `now`, so a quick relaunch cannot leave a future end.
 pub fn close_orphans(conn: &Connection, now: u64) -> Result<(), String> {
     let mut statement = conn
         .prepare(
-            "SELECT id, started_at + planned_ms FROM breaks
+            "SELECT id, started_at, started_at + planned_ms FROM breaks
          WHERE status = 'taken' AND started_at IS NOT NULL AND ended_at IS NULL",
         )
         .map_err(|error| error.to_string())?;
     let unfinished = statement
         .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
+            let started_at = row.get::<_, i64>(1)? as u64;
+            let planned_end = row.get::<_, i64>(2)? as u64;
+            Ok((
+                row.get::<_, String>(0)?,
+                planned_end.min(now).max(started_at),
+            ))
         })
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
@@ -227,8 +248,8 @@ mod tests {
         insert(&conn, &record("a", STATUS_TAKEN, Some(2_000)), 5).unwrap();
         conn.execute("UPDATE breaks SET segment_id = 7 WHERE id = 'a'", [])
             .unwrap();
-        close_orphans(&conn, 100_000).unwrap();
-        close_orphans(&conn, 200_000).unwrap(); // Reconciliation is idempotent.
+        close_orphans(&conn, 400_000).unwrap();
+        close_orphans(&conn, 500_000).unwrap(); // Reconciliation is idempotent.
         assert_eq!(list(&conn, 0, 10_000).unwrap()[0].ended_at, Some(302_000));
         assert_eq!(
             conn.query_row("SELECT ended_at FROM segments WHERE id = 7", [], |row| {
@@ -237,6 +258,44 @@ mod tests {
             .unwrap(),
             302_000
         );
+    }
+
+    #[test]
+    fn a_quick_relaunch_ends_the_break_at_the_restart_not_its_planned_end() {
+        let conn = conn();
+        conn.execute(
+            "INSERT INTO segments (id, app, title, kind, started_at, ended_at)
+             VALUES (7, 'Break', 'Break', 'break', 2000, 2000)",
+            [],
+        )
+        .unwrap();
+        insert(&conn, &record("a", STATUS_TAKEN, Some(2_000)), 5).unwrap();
+        conn.execute("UPDATE breaks SET segment_id = 7 WHERE id = 'a'", [])
+            .unwrap();
+        close_orphans(&conn, 100_000).unwrap();
+        close_orphans(&conn, 400_000).unwrap(); // Later launches leave it be.
+        assert_eq!(list(&conn, 0, 10_000).unwrap()[0].ended_at, Some(100_000));
+        assert_eq!(
+            conn.query_row("SELECT ended_at FROM segments WHERE id = 7", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            100_000
+        );
+    }
+
+    #[test]
+    fn a_break_moves_to_a_new_segment() {
+        let conn = conn();
+        conn.execute(
+            "INSERT INTO segments (id, app, title, kind, started_at)
+             VALUES (9, 'Break', 'Break', 'break', 50000)",
+            [],
+        )
+        .unwrap();
+        insert(&conn, &record("a", STATUS_TAKEN, Some(2_000)), 5).unwrap();
+        set_segment(&conn, "a", Some(9), 6).unwrap();
+        assert_eq!(list(&conn, 0, 10_000).unwrap()[0].segment_id, Some(9));
     }
 
     #[test]

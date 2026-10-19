@@ -30,12 +30,8 @@ pub const MAX_SNOOZES_IN_ROW: u32 = 3;
 pub const SCHEDULE_LEAD_MS: u64 = 15 * 60_000;
 /// A reminder held back by a playing video this long is dropped as missed.
 pub const DEFER_DROP_MS: u64 = 30 * 60_000;
-/// Input this recent counts as the user being at the keyboard mid-break.
-pub const BACK_INPUT_MS: u64 = 30_000;
-/// Input this steady during a break means the user is back.
-pub const SUSTAINED_INPUT_MS: u64 = 120_000;
-/// Right after Start break the user is still at the keyboard; the sustained
-/// input rule ignores that first moment.
+/// Right after Start break the user is still at the keyboard; the planned-end
+/// rule ignores that first moment.
 const START_GRACE_MS: u64 = 15_000;
 /// Fresh input this recent after the planned end is "the first input".
 const FRESH_INPUT_MS: u64 = 1_500;
@@ -111,10 +107,17 @@ pub enum Effect {
         close_segment: bool,
         resume_timers: Vec<String>,
     },
-    /// Persist completion before suspension, even if the app never wakes.
+    /// The system slept through the planned end: stretch the break's segment
+    /// and row to that end.
     Sleep {
         id: String,
         ended_at: u64,
+    },
+    /// The system woke before the planned end: the break goes on in a new
+    /// segment, since sleep closed the old one.
+    Wake {
+        id: String,
+        label: String,
     },
     /// Store a decision that involves no segment of its own.
     Record(BreakRecord),
@@ -189,8 +192,6 @@ struct ActiveBreak {
     segment_id: Option<i64>,
     /// Labels of the stopwatches this break paused.
     paused: Vec<(String, String)>,
-    /// Since when input has been steady (see `SUSTAINED_INPUT_MS`).
-    back_since: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -249,7 +250,7 @@ pub struct BreakView {
     pub paused_timers: Vec<String>,
     /// Labels of the stopwatches resumed when it ended.
     pub resumed_timers: Vec<String>,
-    /// Why the engine ended it, e.g. "Looks like you're back".
+    /// Why the engine ended it, e.g. "The break was cut short".
     pub note: Option<String>,
 }
 
@@ -431,8 +432,9 @@ impl Engine {
         effects
     }
 
-    /// Mid-break bookkeeping: the segment vanishing, the planned end, and the
-    /// user coming back early.
+    /// Mid-break bookkeeping: the segment vanishing and the planned end. Input
+    /// during the break never ends it; the user is assumed to be on the break
+    /// and ends it with End break or at its planned end.
     fn step_break(
         &mut self,
         input: &Input<'_>,
@@ -440,7 +442,7 @@ impl Engine {
         effects: &mut Vec<Effect>,
     ) {
         let now = input.now;
-        let Some(active) = &mut self.active else {
+        let Some(active) = &self.active else {
             return;
         };
         let segment_gone = match (&input.segment, active.segment_id) {
@@ -465,19 +467,6 @@ impl Engine {
         let fresh_input = input.idle_ms < FRESH_INPUT_MS && !input.away;
         if now >= planned_end && fresh_input && now > active.started_at + START_GRACE_MS {
             self.finish(now, true, None, effects);
-            return;
-        }
-
-        if input.idle_ms < BACK_INPUT_MS && !input.away {
-            if now >= active.started_at + START_GRACE_MS {
-                let since = *active.back_since.get_or_insert(now);
-                if now.saturating_sub(since) >= SUSTAINED_INPUT_MS {
-                    let note = format!("Looks like you're back - break ended at {}", clock(since));
-                    self.finish(now, true, Some(note), effects);
-                }
-            }
-        } else {
-            active.back_since = None;
         }
     }
 
@@ -840,7 +829,6 @@ impl Engine {
             started_at: now,
             segment_id: None,
             paused: Vec::new(),
-            back_since: None,
         });
         self.welcome = None;
         self.streak_ms = 0;
@@ -899,45 +887,59 @@ impl Engine {
         self.suspended = suspend;
         if suspend {
             self.quiet = Some(Quiet::Away);
+            // An Idle stretch open at suspend is not credited as a break
+            // through the sleep that follows it.
+            self.idle_seg = None;
         }
         let Some(active) = &self.active else {
             return Vec::new();
         };
-        // A stop or session switch just before suspend must not be upgraded
-        // to a completed break merely because its next sampler tick is late.
-        if suspend && active.segment_id.is_some() && active.segment_id != segment_id {
-            let ended_at = self.last_tick.map_or(now, |tick| (tick + 1_000).min(now));
-            let mut effects = Vec::new();
-            self.finish(
-                ended_at,
-                false,
-                Some("The break was cut short".to_string()),
-                &mut effects,
-            );
-            return effects;
-        }
-        let ended_at = active.started_at + active.planned_ms;
         if suspend {
-            vec![Effect::Sleep {
-                id: active.id.clone(),
-                ended_at,
-            }]
-        } else {
-            self.last_tick = Some(now);
-            let mut effects = Vec::new();
-            self.finish(ended_at, false, None, &mut effects);
-            effects
+            // A stop or session switch just before suspend must not be
+            // upgraded to a completed break merely because its next sampler
+            // tick is late.
+            if active.segment_id.is_some() && active.segment_id != segment_id {
+                let ended_at = self.last_tick.map_or(now, |tick| (tick + 1_000).min(now));
+                let mut effects = Vec::new();
+                self.finish(
+                    ended_at,
+                    false,
+                    Some("The break was cut short".to_string()),
+                    &mut effects,
+                );
+                return effects;
+            }
+            return Vec::new();
         }
+        self.last_tick = Some(now);
+        let planned_end = active.started_at + active.planned_ms;
+        if now < planned_end {
+            // Woke early: the break is still running, so nothing is ended.
+            return vec![Effect::Wake {
+                id: active.id.clone(),
+                label: active.label.clone(),
+            }];
+        }
+        // Slept through the planned end: it ended there, never at the wake.
+        let mut effects = vec![Effect::Sleep {
+            id: active.id.clone(),
+            ended_at: planned_end,
+        }];
+        self.finish(planned_end, false, None, &mut effects);
+        effects
     }
 
-    /// A normal quit ends at `now`; a suspended break keeps its checkpoint.
+    /// A normal quit ends at `now`; a break that slept past its planned end
+    /// ended there.
     pub fn end_for_exit(&mut self, now: u64) -> Vec<Effect> {
         let mut effects = Vec::new();
         let ended_at = self
             .active
             .as_ref()
             .filter(|_| self.suspended)
-            .map_or(now, |active| active.started_at + active.planned_ms);
+            .map_or(now, |active| {
+                (active.started_at + active.planned_ms).min(now)
+            });
         self.finish(ended_at, true, None, &mut effects);
         effects
     }
@@ -1090,13 +1092,6 @@ pub(super) enum Quiet {
 fn schedule_epoch(schedule: &ScheduledBreak, now: u64, local: LocalTime) -> u64 {
     let delta = i64::from(schedule.at_minutes()) - i64::from(local.minutes_of_day);
     (now as i64 + delta * MINUTE_MS as i64) as u64
-}
-
-fn clock(epoch_ms: u64) -> String {
-    use chrono::{DateTime, Local};
-    DateTime::from_timestamp_millis(epoch_ms as i64)
-        .map(|utc| utc.with_timezone(&Local).format("%H:%M").to_string())
-        .unwrap_or_default()
 }
 
 /// The work clock after a restart, rebuilt from today's segments:
@@ -1420,25 +1415,24 @@ mod tests {
     }
 
     #[test]
-    fn sustained_input_ends_a_break_and_says_so() {
+    fn steady_input_never_ends_a_break_before_its_planned_end() {
         let mut sim = Sim::new();
         let effects = sim.command(Command::StartBreak);
         sim.begin(&effects);
-        // The user never left: 2 minutes of steady input.
+        sim.command(Command::Extend(55));
+        // The user never left: half an hour of steady input.
         sim.idle_ms = 500;
-        let mut finished = false;
-        for _ in 0..(4 * MIN / 1000) {
-            finished = sim
-                .run(1000)
-                .iter()
-                .any(|effect| matches!(effect, Effect::Finish { .. }));
-            if finished {
-                break;
-            }
-        }
-        assert!(finished);
-        let note = sim.state().current.and_then(|current| current.note);
-        assert!(note.is_some_and(|note| note.starts_with("Looks like you're back")));
+        let effects = sim.run(30 * MIN);
+        assert!(effects.is_empty());
+        let state = sim.state();
+        assert_eq!(state.phase, Phase::OnBreak);
+        let current = state.current.unwrap();
+        assert_eq!(current.ended_at, None);
+        assert_eq!(current.note, None);
+        // End break still ends it, right now.
+        let finish = sim.command(Command::EndBreak);
+        assert!(matches!(finish.as_slice(),
+            [Effect::Finish { ended_at, close_segment: true, .. }] if *ended_at == sim.now));
     }
 
     #[test]
@@ -1460,38 +1454,132 @@ mod tests {
     }
 
     #[test]
-    fn sleep_completes_at_the_planned_end_and_resumes_timers_only_on_wake() {
-        for asleep_ms in [1_000, 20 * MIN] {
-            let mut sim = Sim::new();
-            let effects = sim.command(Command::StartBreak);
-            sim.begin(&effects);
-            sim.engine
-                .attach_paused_timers(vec![("timer".into(), "Client work".into())]);
-            sim.command(Command::Extend(5));
-            let planned_end = sim.now + u64::from(sim.settings.break_minutes + 5) * MIN;
-            assert!(
-                matches!(sim.engine.power_event(PowerEvent::Suspend, sim.now, Some(2)).as_slice(),
-                [Effect::Sleep { ended_at, .. }] if *ended_at == planned_end)
-            );
-            assert!(sim
-                .engine
-                .power_event(PowerEvent::Suspend, sim.now, None)
-                .is_empty());
-            sim.segment = None;
-            sim.now += asleep_ms;
-            // A tick racing the notification cannot report an interruption.
-            assert!(sim.tick().is_empty());
-            let effects = sim.engine.power_event(PowerEvent::Resume, sim.now, None);
-            assert!(
-                matches!(effects.as_slice(), [Effect::Finish { ended_at, close_segment: false, resume_timers, .. }]
-                if *ended_at == planned_end && resume_timers == &["timer"])
-            );
-            assert_eq!(sim.state().current.unwrap().note, None);
-            assert!(sim
-                .engine
-                .power_event(PowerEvent::Resume, sim.now, None)
-                .is_empty());
-        }
+    fn waking_after_the_planned_end_ends_it_there_and_resumes_timers() {
+        let mut sim = Sim::new();
+        let effects = sim.command(Command::StartBreak);
+        sim.begin(&effects);
+        sim.engine
+            .attach_paused_timers(vec![("timer".into(), "Client work".into())]);
+        sim.command(Command::Extend(5));
+        let planned_end = sim.now + u64::from(sim.settings.break_minutes + 5) * MIN;
+        // Suspending stamps nothing; the break is still running.
+        assert!(sim
+            .engine
+            .power_event(PowerEvent::Suspend, sim.now, Some(2))
+            .is_empty());
+        assert!(sim
+            .engine
+            .power_event(PowerEvent::Suspend, sim.now, None)
+            .is_empty());
+        sim.segment = None;
+        sim.now += 20 * MIN;
+        // A tick racing the notification cannot report an interruption.
+        assert!(sim.tick().is_empty());
+        let effects = sim.engine.power_event(PowerEvent::Resume, sim.now, None);
+        assert!(matches!(effects.as_slice(),
+            [Effect::Sleep { ended_at: slept_to, .. },
+             Effect::Finish { ended_at, close_segment: false, resume_timers, .. }]
+            if *slept_to == planned_end && *ended_at == planned_end && resume_timers == &["timer"]));
+        assert_eq!(sim.state().current.unwrap().note, None);
+        assert!(sim
+            .engine
+            .power_event(PowerEvent::Resume, sim.now, None)
+            .is_empty());
+    }
+
+    #[test]
+    fn waking_early_leaves_the_break_running_and_never_ends_it_after_the_wake() {
+        let mut sim = Sim::new();
+        let effects = sim.command(Command::StartBreak);
+        sim.begin(&effects);
+        sim.engine
+            .attach_paused_timers(vec![("timer".into(), "Client work".into())]);
+        sim.run(5_000);
+        sim.engine
+            .power_event(PowerEvent::Suspend, sim.now, Some(2));
+        sim.segment = None;
+        sim.now += 30_000;
+        let wake = sim.now;
+        let effects = sim.engine.power_event(PowerEvent::Resume, wake, None);
+        let [Effect::Wake { label, .. }] = effects.as_slice() else {
+            panic!("expected the break to carry on, got {effects:?}");
+        };
+        assert_eq!(label, "Break");
+        let state = sim.state();
+        assert_eq!(state.phase, Phase::OnBreak);
+        assert_eq!(state.current.unwrap().ended_at, None);
+        // The driver opened a new segment; ticks leave the break alone.
+        sim.engine.attach_segment(Some(3));
+        sim.segment = Some(SegmentNow {
+            id: 3,
+            kind: "break".to_string(),
+            label: Some("Break".to_string()),
+        });
+        sim.idle_ms = 500;
+        assert!(sim.run(MIN).is_empty());
+        // However it ends, it ends no later than the moment it is told to.
+        let finish = sim.command(Command::EndBreak);
+        let [Effect::Finish {
+            ended_at,
+            resume_timers,
+            ..
+        }] = finish.as_slice()
+        else {
+            panic!("expected End break to finish it, got {finish:?}");
+        };
+        assert!(*ended_at > wake && *ended_at <= sim.now);
+        assert_eq!(resume_timers, &["timer"]);
+    }
+
+    #[test]
+    fn a_break_woken_early_still_finishes_at_its_planned_end() {
+        let mut sim = Sim::new();
+        let effects = sim.command(Command::StartBreak);
+        sim.begin(&effects);
+        sim.run(5_000);
+        sim.engine
+            .power_event(PowerEvent::Suspend, sim.now, Some(2));
+        sim.segment = None;
+        sim.now += 30_000;
+        sim.engine.power_event(PowerEvent::Resume, sim.now, None);
+        sim.engine.attach_segment(Some(3));
+        sim.segment = Some(SegmentNow {
+            id: 3,
+            kind: "break".to_string(),
+            label: Some("Break".to_string()),
+        });
+        sim.idle_ms = 60_000;
+        sim.run(5 * MIN);
+        assert_eq!(sim.state().phase, Phase::Over);
+        sim.idle_ms = 200;
+        let effects = sim.run(1000);
+        assert!(
+            matches!(effects.as_slice(), [Effect::Finish { ended_at, close_segment: true, .. }]
+            if *ended_at == sim.now)
+        );
+    }
+
+    #[test]
+    fn sleeping_through_an_idle_stretch_credits_no_break() {
+        let mut sim = Sim::new();
+        sim.segment = Some(SegmentNow {
+            id: 3,
+            kind: "break".to_string(),
+            label: Some("Idle".to_string()),
+        });
+        sim.idle_ms = MIN;
+        assert!(sim.tick().is_empty());
+        assert!(sim
+            .engine
+            .power_event(PowerEvent::Suspend, sim.now, Some(3))
+            .is_empty());
+        sim.segment = None;
+        sim.now += 60 * MIN;
+        assert!(sim
+            .engine
+            .power_event(PowerEvent::Resume, sim.now, None)
+            .is_empty());
+        assert!(sim.tick().is_empty());
     }
 
     #[test]
@@ -1559,18 +1647,22 @@ mod tests {
     }
 
     #[test]
-    fn normal_quit_ends_now_but_quit_after_suspend_keeps_the_checkpoint() {
-        for sleep in [false, true] {
+    fn quitting_ends_now_but_never_past_the_planned_end_of_a_break_slept_through() {
+        for (sleep, asleep_ms) in [(false, MIN), (true, MIN), (true, 20 * MIN)] {
             let mut sim = Sim::new();
             let effects = sim.command(Command::StartBreak);
             sim.begin(&effects);
             let planned_end = sim.now + u64::from(sim.settings.break_minutes) * MIN;
-            sim.now += MIN;
             if sleep {
                 sim.engine
                     .power_event(PowerEvent::Suspend, sim.now, Some(2));
             }
-            let expected_end = if sleep { planned_end } else { sim.now };
+            sim.now += asleep_ms;
+            let expected_end = if sleep {
+                planned_end.min(sim.now)
+            } else {
+                sim.now
+            };
             assert!(
                 matches!(sim.engine.end_for_exit(sim.now).as_slice(), [Effect::Finish { ended_at, .. }]
                 if *ended_at == expected_end)

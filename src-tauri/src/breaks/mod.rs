@@ -328,16 +328,9 @@ fn apply(app: &AppHandle, engine: &mut Engine, effects: Vec<Effect>, now: u64) {
                 }
             }
             Effect::Sleep { id, ended_at } => {
-                let state = app.state::<AppState>();
-                let result = state
-                    .activity
-                    .lock()
-                    .map_err(|error| error.to_string())
-                    .and_then(|mut activity| checkpoint_sleep(&mut activity, &id, ended_at, now));
-                if let Err(error) = result {
-                    eprintln!("could not checkpoint the sleeping break: {error}");
-                }
+                with_store(app, |conn| store::complete_sleep(conn, &id, ended_at, now));
             }
+            Effect::Wake { id, label } => wake(app, engine, &id, &label, now),
             Effect::Record(record) => {
                 with_store(app, |conn| store::insert(conn, &record, now));
             }
@@ -349,14 +342,29 @@ fn apply(app: &AppHandle, engine: &mut Engine, effects: Vec<Effect>, now: u64) {
     }
 }
 
-fn checkpoint_sleep(
-    activity: &mut crate::activity::ActivityStore,
-    id: &str,
-    ended_at: u64,
-    now: u64,
-) -> Result<(), String> {
-    activity.close_active_segment(now)?;
-    store::complete_sleep(activity.conn(), id, ended_at, now)
+/// Sleep closed the break's segment, but the system woke before its planned
+/// end: open a new one so the break goes on.
+fn wake(app: &AppHandle, engine: &mut Engine, id: &str, label: &str, now: u64) {
+    if let Err(error) =
+        crate::commands::start_session(app.clone(), "break".to_string(), Some(label.to_string()))
+    {
+        // The engine still points at the closed segment, so the next tick
+        // ends the break as interrupted.
+        eprintln!("could not resume the break: {error}");
+        return;
+    }
+    let segment_id = live_segment_id(app, now);
+    engine.attach_segment(segment_id);
+    with_store(app, |conn| store::set_segment(conn, id, segment_id, now));
+}
+
+fn live_segment_id(app: &AppHandle, now: u64) -> Option<i64> {
+    app.state::<AppState>()
+        .activity
+        .lock()
+        .ok()
+        .and_then(|store| store.live_state(now).segment_info())
+        .map(|info| info.id)
 }
 
 fn begin(
@@ -374,13 +382,7 @@ fn begin(
         engine.abort_begin();
         return;
     }
-    let segment_id = app
-        .state::<AppState>()
-        .activity
-        .lock()
-        .ok()
-        .and_then(|store| store.live_state(now).segment_info())
-        .map(|info| info.id);
+    let segment_id = live_segment_id(app, now);
     record.segment_id = segment_id;
     engine.attach_segment(segment_id);
     with_store(app, |conn| store::insert(conn, &record, now));
@@ -450,19 +452,17 @@ mod tests {
     use super::*;
     use crate::capture::PowerEvent;
 
-    #[test]
-    fn suspend_checkpoints_the_decision_and_segment_before_wake_or_restart() {
+    /// A store and engine with a break started at `start` in its own segment.
+    fn on_break(start: u64) -> (crate::activity::ActivityStore, Engine, BreakRecord) {
         let mut activity = crate::activity::ActivityStore::from_conn(
             rusqlite::Connection::open_in_memory().unwrap(),
         )
         .unwrap();
-        let settings = BreakSettings::default();
-        let start = 1_000_000;
         let mut engine = Engine::new(0, None);
         let Effect::Begin {
             mut record, label, ..
         } = engine
-            .command(Command::StartBreak, start, &settings)
+            .command(Command::StartBreak, start, &BreakSettings::default())
             .remove(0)
         else {
             panic!("expected a taken break");
@@ -476,35 +476,64 @@ mod tests {
             .map(|segment| segment.id);
         engine.attach_segment(record.segment_id);
         store::insert(activity.conn(), &record, start).unwrap();
+        (activity, engine, record)
+    }
+
+    fn segment_end(activity: &crate::activity::ActivityStore) -> i64 {
+        activity
+            .conn()
+            .query_row("SELECT ended_at FROM segments", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn sleeping_stamps_no_end_and_waking_late_ends_at_the_planned_end() {
+        let start = 1_000_000;
+        let (mut activity, mut engine, record) = on_break(start);
         let sleep_at = start + 5_000;
-        let effects = engine.power_event(PowerEvent::Suspend, sleep_at, record.segment_id);
-        let [Effect::Sleep { id, ended_at }] = effects.as_slice() else {
-            panic!("expected the suspend checkpoint");
-        };
-        checkpoint_sleep(&mut activity, id, *ended_at, sleep_at).unwrap();
-        assert!(activity.live_state(sleep_at).segment_info().is_none());
         let planned_end = start + record.planned_ms;
+        assert!(engine
+            .power_event(PowerEvent::Suspend, sleep_at, record.segment_id)
+            .is_empty());
+        // The capture layer closes the segment at suspend.
+        activity.close_active_segment(sleep_at).unwrap();
+        let saved = store::list(activity.conn(), 0, sleep_at + 1).unwrap();
+        assert_eq!(saved[0].ended_at, None);
+        assert_eq!(segment_end(&activity), sleep_at as i64);
+
+        let wake_at = planned_end + 60_000;
+        let effects = engine.power_event(PowerEvent::Resume, wake_at, None);
+        let [Effect::Sleep { id, ended_at }, Effect::Finish {
+            ended_at: finished, ..
+        }] = effects.as_slice()
+        else {
+            panic!("expected the break to end at its planned end, got {effects:?}");
+        };
+        assert_eq!((*ended_at, *finished), (planned_end, planned_end));
+        store::complete_sleep(activity.conn(), id, *ended_at, wake_at).unwrap();
+        store::set_ended(activity.conn(), id, *finished, wake_at).unwrap();
         let saved = store::list(activity.conn(), 0, sleep_at + 1).unwrap();
         assert_eq!(saved[0].ended_at, Some(planned_end));
-        assert_eq!(saved[0].status, "taken");
-        assert_eq!(
-            activity
-                .conn()
-                .query_row("SELECT ended_at FROM segments", [], |row| {
-                    row.get::<_, i64>(0)
-                })
-                .unwrap(),
-            planned_end as i64
-        );
-        // A crash after the suspend checkpoint cannot shorten it on launch.
-        store::close_orphans(activity.conn(), planned_end + 60_000).unwrap();
-        assert_eq!(
-            store::list(activity.conn(), 0, sleep_at + 1).unwrap(),
-            saved
-        );
-        assert!(
-            matches!(engine.power_event(PowerEvent::Resume, planned_end + 60_000, None).as_slice(),
-            [Effect::Finish { ended_at, close_segment: false, .. }] if *ended_at == planned_end)
-        );
+        assert_eq!(segment_end(&activity), planned_end as i64);
+    }
+
+    #[test]
+    fn a_crash_while_asleep_ends_at_the_planned_end_or_the_restart_whichever_is_first() {
+        let start = 1_000_000;
+        for (restart, expected) in [
+            (start + 60_000, start + 60_000),
+            (start + 900_000, start + 300_000),
+        ] {
+            let (mut activity, mut engine, record) = on_break(start);
+            let sleep_at = start + 5_000;
+            engine.power_event(PowerEvent::Suspend, sleep_at, record.segment_id);
+            activity.close_active_segment(sleep_at).unwrap();
+            store::close_orphans(activity.conn(), restart).unwrap();
+            let saved = store::list(activity.conn(), 0, sleep_at + 1).unwrap();
+            assert_eq!(saved[0].ended_at, Some(expected));
+            assert_eq!(segment_end(&activity), expected as i64);
+        }
     }
 }

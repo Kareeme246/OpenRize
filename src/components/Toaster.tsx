@@ -2,6 +2,7 @@ import {
   type KeyboardEvent,
   type Ref,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -12,8 +13,10 @@ import { type Toast, type ToastTone, useToaster } from "../hooks/useToast";
  * main window. The default, bottom-right, keeps clear of the sidebar and its
  * tracking pill, of every page's header controls, and of the break panel and
  * its corner pill (separate windows at the top of the screen). It sits on
- * `z-40`, above page menus (`z-30`) and below pickers and tooltips; sheets
- * and dialogs are on the top layer, so a toast never covers one.
+ * `z-40`, above page menus (`z-30`) and below pickers and tooltips; modal
+ * sheets and dialogs are on the top layer, so a toast never covers one. A
+ * side panel that must stay readable, like the entry review sheet, carries
+ * `data-toast-avoid`, and the card steps beside it (or above, without room).
  *
  * It pauses while the pointer is on it, while focus is inside it, and while
  * the window is in the background, so it can't vanish mid-read or mid-click.
@@ -30,13 +33,57 @@ export type ToastCorner =
 /** `slide` moves in from the corner's side; `fade` only fades. */
 export type ToastMotion = "slide" | "fade";
 
+/** Space from the window's edge and from a panel it avoids, in rem. */
+const EDGE_REM = 1;
 /** Top corners clear the title bar (`h-11`). */
-const CORNERS: Record<ToastCorner, string> = {
-  "top-left": "top-14 left-4",
-  "top-right": "top-14 right-4",
-  "bottom-left": "bottom-4 left-4",
-  "bottom-right": "bottom-4 right-4",
-};
+const TOP_REM = 3.5;
+
+interface Insets {
+  x: number;
+  y: number;
+}
+
+/**
+ * The card's distance from its corner's two edges: `EDGE` from the window,
+ * moved sideways past any `avoid` panel it would cover, or above or below it
+ * when there is no room beside it.
+ */
+export function placeToast(
+  corner: ToastCorner,
+  width: number,
+  height: number,
+  avoid: DOMRect[],
+  viewportWidth: number,
+  viewportHeight: number,
+  rem: number,
+): Insets {
+  const right = corner.endsWith("right");
+  const bottom = corner.startsWith("bottom");
+  const edge = EDGE_REM * rem;
+  const insets = { x: edge, y: bottom ? edge : TOP_REM * rem };
+  const box = (): { left: number; top: number } => ({
+    left: right ? viewportWidth - insets.x - width : insets.x,
+    top: bottom ? viewportHeight - insets.y - height : insets.y,
+  });
+  for (const panel of avoid) {
+    const { left, top } = box();
+    const overlaps =
+      left < panel.right &&
+      left + width > panel.left &&
+      top < panel.bottom &&
+      top + height > panel.top;
+    if (!overlaps) continue;
+    const beside = right
+      ? viewportWidth - panel.left + edge
+      : panel.right + edge;
+    if (beside + width + edge <= viewportWidth) insets.x = beside;
+    else
+      insets.y = bottom
+        ? viewportHeight - panel.top + edge
+        : panel.bottom + edge;
+  }
+  return insets;
+}
 
 /** Where a sliding card comes from and leaves to; reduced motion only fades. */
 const SLIDE_LEFT = {
@@ -97,7 +144,12 @@ export function Toaster({
             ? document.activeElement
             : null;
       }
-      cardRef.current.querySelector<HTMLElement>("button")?.focus();
+      // The action first: it is what the keyboard came for.
+      const card = cardRef.current;
+      (
+        card.querySelector<HTMLElement>("[data-toast-action]") ??
+        card.querySelector<HTMLElement>("button")
+      )?.focus();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -126,7 +178,7 @@ export function Toaster({
           ref={cardRef}
           toast={shown}
           leaving={leaving}
-          placement={CORNERS[corner]}
+          corner={corner}
           slide={motion === "slide" ? SLIDES[corner] : null}
           onHold={hold}
           onClose={() => close(shown.id)}
@@ -147,7 +199,7 @@ interface ToastCardProps {
   ref: Ref<HTMLElement>;
   toast: Toast;
   leaving: boolean;
-  placement: string;
+  corner: ToastCorner;
   slide: { enter: string; exit: string } | null;
   onHold: (held: boolean) => void;
   onClose: () => void;
@@ -157,7 +209,7 @@ function ToastCard({
   ref,
   toast,
   leaving,
-  placement,
+  corner,
   slide,
   onHold,
   onClose,
@@ -200,6 +252,44 @@ function ToastCard({
     };
   }, [leaving, paused]);
 
+  // Placed before paint, and again whenever the page under it changes, so it
+  // steps aside as soon as a panel it must not cover opens.
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const [insets, setInsets] = useState<Insets | null>(null);
+  useLayoutEffect(() => {
+    const card = sectionRef.current;
+    if (card === null) return;
+    const place = (): void => {
+      const avoid = [
+        ...document.querySelectorAll<HTMLElement>("[data-toast-avoid]"),
+      ]
+        .map((element) => element.getBoundingClientRect())
+        .filter((rect) => rect.width > 0 && rect.height > 0);
+      const next = placeToast(
+        corner,
+        card.offsetWidth,
+        card.offsetHeight,
+        avoid,
+        document.documentElement.clientWidth,
+        document.documentElement.clientHeight,
+        Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
+      );
+      setInsets((previous) =>
+        previous?.x === next.x && previous.y === next.y ? previous : next,
+      );
+    };
+    place();
+    const observer = new MutationObserver(place);
+    observer.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener("resize", place);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", place);
+    };
+  }, [corner]);
+  const right = corner.endsWith("right");
+  const bottom = corner.startsWith("bottom");
+
   const onKeyDown = (event: KeyboardEvent): void => {
     if (event.key !== "Escape") return;
     // Only this toast: not a page's own Escape (review mode, a menu) as well.
@@ -210,7 +300,11 @@ function ToastCard({
 
   return (
     <section
-      ref={ref}
+      ref={(element) => {
+        sectionRef.current = element;
+        if (typeof ref === "function") ref(element);
+        else if (ref) ref.current = element;
+      }}
       aria-label="Notification"
       inert={leaving}
       onPointerEnter={() => setHovered(true)}
@@ -222,7 +316,12 @@ function ToastCard({
         }
       }}
       onKeyDown={onKeyDown}
-      className={`fixed z-40 w-[22rem] max-w-[calc(100vw-2rem)] rounded-xl border border-line-strong bg-panel p-3 text-fg shadow-black/30 shadow-xl transition-[opacity,translate] duration-200 ease-out starting:opacity-0 sharper:rounded-md ${placement} ${
+      style={{
+        [right ? "right" : "left"]: insets?.x ?? `${EDGE_REM}rem`,
+        [bottom ? "bottom" : "top"]:
+          insets?.y ?? `${bottom ? EDGE_REM : TOP_REM}rem`,
+      }}
+      className={`fixed z-40 w-[22rem] max-w-[calc(100vw-2rem)] rounded-xl border border-line-strong bg-panel p-3 text-fg shadow-black/30 shadow-xl transition-[opacity,translate,left,right,top,bottom] duration-200 ease-out starting:opacity-0 sharper:rounded-md ${
         slide?.enter ?? ""
       } ${leaving ? `opacity-0 ${slide?.exit ?? ""}` : ""}`}
     >
@@ -254,11 +353,12 @@ function ToastCard({
         <div className="mt-2.5 flex justify-end">
           <button
             type="button"
+            data-toast-action
             onClick={() => {
               toast.action?.onAction();
               onClose();
             }}
-            className="rounded-md border border-accent/30 bg-accent-soft px-2.5 py-1 font-semibold text-[12px] text-accent outline-accent outline-offset-2 transition-colors hover:border-accent/50 hover:bg-accent/20 focus-visible:outline-2"
+            className="rounded-md bg-accent px-2.5 py-1 font-semibold text-[12px] text-accent-fg outline-accent outline-offset-2 transition-opacity hover:opacity-90 focus-visible:outline-2 sharper:rounded"
           >
             {toast.action.label}
           </button>
@@ -269,14 +369,14 @@ function ToastCard({
 }
 
 const GLYPH_STYLES: Record<ToastTone, string> = {
-  neutral: "bg-accent-soft text-accent",
+  neutral: "bg-surface-strong text-fg-muted",
   success: "bg-success-soft text-success",
   error: "bg-danger-soft text-danger",
 };
 
-/** A dot for a plain fact, a tick for a finished job, a bang for a failure. */
+/** An i for a plain fact, a tick for a finished job, a bang for a failure. */
 const GLYPH_PATHS: Record<ToastTone, string> = {
-  neutral: "M12 12h.01",
+  neutral: "M12 11v5.5M12 7.5h.01",
   success: "M7.5 12.5l3 3 6-6.5",
   error: "M12 7.5v5.5M12 16.5h.01",
 };
@@ -292,7 +392,7 @@ function ToneGlyph({ tone }: { tone: ToastTone }) {
         className="size-4"
         fill="none"
         stroke="currentColor"
-        strokeWidth={tone === "neutral" ? 5 : 2.4}
+        strokeWidth={2.4}
         strokeLinecap="round"
         strokeLinejoin="round"
         aria-hidden="true"

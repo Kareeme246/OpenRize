@@ -813,7 +813,10 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
             }
             void act(async () => {
               await confirmChange(() => api.deleteTimeEntries(ids), {
-                message: `Deleted ${plural(ids.length, "entry", "entries")}`,
+                message:
+                  ids.length === 1
+                    ? "Entry deleted"
+                    : `Deleted ${plural(ids.length, "entry", "entries")}`,
               });
               setSelected(new Set());
               await refresh();

@@ -61,7 +61,9 @@ export function Timers({ api: propApi, revealTimer }: TimersProps = {}) {
         </div>
       </PageHeader>
 
-      <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
+      {/* The end padding lets the last row of cards scroll clear of a toast
+          in the bottom-right corner. */}
+      <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pt-4 pb-32">
         <form
           onSubmit={(event) => {
             event.preventDefault();

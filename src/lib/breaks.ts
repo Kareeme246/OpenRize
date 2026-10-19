@@ -33,7 +33,7 @@ export interface BreakView {
   endedAt: number | null;
   pausedTimers: string[];
   resumedTimers: string[];
-  /** Why the app ended the break, e.g. "Looks like you're back". */
+  /** Why the app ended the break, e.g. "The break was cut short". */
   note: string | null;
 }
 

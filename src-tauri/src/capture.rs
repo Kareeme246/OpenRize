@@ -19,6 +19,26 @@ pub use platform::{read_active_window, register_sleep_listeners, user_is_away, A
 
 pub use openrize_core::capture::WindowSample;
 
+/// Actual system power transitions, not display sleep or session locking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PowerEvent {
+    Suspend,
+    Resume,
+}
+
+fn power_event(app: &tauri::AppHandle, event: PowerEvent) {
+    use tauri::Manager;
+
+    crate::breaks::power_event(app, event);
+    if event == PowerEvent::Suspend {
+        let state = app.state::<crate::AppState>();
+        if let Ok(mut store) = state.activity.lock() {
+            let _ = store.close_active_segment(crate::timers::now_epoch_ms());
+        };
+    }
+    crate::activity::emit_full(app);
+}
+
 /// The host a browser URL points at, without a leading `www.`.
 #[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
 fn domain_of(url: &str) -> Option<String> {

@@ -9,57 +9,33 @@ import {
 } from "react";
 
 /**
- * The app's one way to confirm a short-lived result ("Undid split", "Exported
- * 12 entries"). Any component raises one with `useToast()`; `<Toaster />`
- * shows it. Errors that need fixing stay inline (InlineError, a
- * Sheet's error row); a toast only reports something that already happened.
+ * The app's one way to confirm a short-lived result ("Entry deleted",
+ * "Exported 12 entries"). Any component raises one with `useToast()`;
+ * `<Toaster />` shows it. A toast only informs: it carries no buttons, and
+ * errors that need fixing stay inline (InlineError, a Sheet's error row).
  */
 
 /** `neutral` for plain facts, `success` for a finished job, `error` for a failed one. */
 export type ToastTone = "neutral" | "success" | "error";
 
-export interface ToastAction {
-  label: string;
-  /** Runs on press; the toast closes after it. */
-  onAction: () => void;
-}
-
 export interface ToastOptions {
   message: string;
   tone?: ToastTone;
-  /** At most one follow-up, e.g. "Redo" or "Show in Finder". */
-  action?: ToastAction;
-  /** Milliseconds on screen while not paused. Defaults depend on the toast. */
+  /** Milliseconds on screen while not paused. Defaults depend on the tone. */
   duration?: number;
-  /**
-   * Toasts about one ordered history, like entry undo: a newer toast in the
-   * lane takes the action off older ones, which could no longer run in order.
-   */
-  lane?: string;
 }
 
 export interface Toast {
   id: number;
   message: string;
   tone: ToastTone;
-  action?: ToastAction;
   duration: number;
-  lane?: string;
 }
 
-const BASE_MS = 4000;
-/**
- * How long an action stays on offer, the same for every toast so Undo always
- * means the same window: once the toast is gone, the change stands.
- */
-export const ACTION_MS = 8000;
+/** How long a toast stays while not paused. */
+const BASE_MS = 3000;
 /** A failure is worth a second read. */
-const ERROR_MS = 8000;
-
-function defaultDuration({ tone, action }: ToastOptions): number {
-  if (tone === "error") return ERROR_MS;
-  return action ? ACTION_MS : BASE_MS;
-}
+const ERROR_MS = 7000;
 
 export type ShowToast = (options: ToastOptions) => void;
 
@@ -77,7 +53,7 @@ export interface ToasterApi {
   /** Newest first. */
   toasts: Toast[];
   dismiss: (id: number) => void;
-  /** The viewer is reading or reaching into the stack: don't add to it. */
+  /** The pointer is on the stack: don't add to it. */
   hold: (held: boolean) => void;
 }
 
@@ -87,16 +63,6 @@ const ToasterContext = createContext<ToasterApi>({
   dismiss: () => undefined,
   hold: () => undefined,
 });
-
-/** `toasts` without the action of any in `lane`. */
-function retire(toasts: Toast[], lane: string | undefined): Toast[] {
-  if (lane === undefined) return toasts;
-  return toasts.map((toast) =>
-    toast.lane === lane && toast.action
-      ? { ...toast, action: undefined }
-      : toast,
-  );
-}
 
 /** Raises a toast from anywhere under `ToastProvider`. Stable across renders. */
 export function useToast(): ShowToast {
@@ -118,17 +84,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       id: nextId.current++,
       message: options.message,
       tone: options.tone ?? "neutral",
-      action: options.action,
-      duration: options.duration ?? defaultDuration(options),
-      lane: options.lane,
+      duration:
+        options.duration ?? (options.tone === "error" ? ERROR_MS : BASE_MS),
     };
-    setState((previous) => {
-      const stack = retire(previous.stack, toast.lane);
-      const pending = retire(previous.pending, toast.lane);
-      return held.current && stack.length > 0
-        ? { stack, pending: [toast, ...pending] }
-        : { stack: [toast, ...pending, ...stack], pending: [] };
-    });
+    setState((previous) =>
+      held.current && previous.stack.length > 0
+        ? { ...previous, pending: [toast, ...previous.pending] }
+        : {
+            stack: [toast, ...previous.pending, ...previous.stack],
+            pending: [],
+          },
+    );
   }, []);
 
   const dismiss = useCallback((id: number): void => {

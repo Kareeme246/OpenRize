@@ -1,4 +1,3 @@
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   type ReactNode,
   useCallback,
@@ -22,7 +21,6 @@ import {
 } from "../components/Page";
 import { Picker } from "../components/Picker";
 import { type Catalog, useCatalog } from "../hooks/useCatalog";
-import { useInverseToast } from "../hooks/useChangeToast";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import { useToast } from "../hooks/useToast";
 import * as api from "../lib/api";
@@ -49,7 +47,6 @@ import {
   plural,
 } from "../lib/format";
 import { assignColors } from "../lib/palette";
-import { FILE_MANAGER } from "../lib/platform";
 import type {
   EntriesGroup,
   EntriesRange,
@@ -330,10 +327,6 @@ export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
       showToast({
         message: `Exported ${plural(result.count, "entry", "entries")} to ${result.path}`,
         tone: "success",
-        action: {
-          label: `Show in ${FILE_MANAGER}`,
-          onAction: () => void revealItemInDir(result.path),
-        },
       });
     } catch (cause) {
       showToast({
@@ -343,7 +336,6 @@ export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
     }
   };
 
-  const confirmView = useInverseToast();
   /** Rewrites the saved views from what is stored now, then shows them. */
   const rewriteViews = (change: (stored: SavedView[]) => SavedView[]): void => {
     const next = change(readViews());
@@ -351,35 +343,19 @@ export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
     writeViews(next);
   };
   const saveView = (name: string): void => {
-    const replaced = views.find((saved) => saved.name === name);
     const added = { name, route };
     rewriteViews((stored) => [
       ...stored.filter((saved) => saved.name !== name),
       added,
     ]);
-    confirmView(`Saved view "${name}"`, {
-      run: async () =>
-        rewriteViews((stored) => [
-          ...stored.filter((saved) => saved.name !== name),
-          ...(replaced ? [replaced] : []),
-        ]),
-      undone: replaced ? `"${name}" changed back` : `Removed "${name}"`,
-    });
+    showToast({ message: `Saved view "${name}"`, tone: "success" });
   };
   const deleteView = (name: string): void => {
     const index = views.findIndex((saved) => saved.name === name);
     const removed = views[index];
     rewriteViews((stored) => stored.filter((saved) => saved.name !== name));
     if (!removed) return;
-    confirmView(`Deleted view "${name}"`, {
-      run: async () =>
-        rewriteViews((stored) => {
-          const next = stored.filter((saved) => saved.name !== name);
-          next.splice(Math.min(index, next.length), 0, removed);
-          return next;
-        }),
-      undone: `Restored "${name}"`,
-    });
+    showToast({ message: `Deleted view "${name}"`, tone: "success" });
   };
 
   const totalMs = totals?.ms ?? 0;

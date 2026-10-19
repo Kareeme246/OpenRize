@@ -9,7 +9,6 @@ import { Sidebar } from "./components/Sidebar";
 import { Toaster } from "./components/Toaster";
 import { TopBar } from "./components/TopBar";
 import { useBreaks } from "./hooks/useBreaks";
-import { HISTORY_LANE } from "./hooks/useChangeToast";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { SettingsProvider } from "./hooks/useSettings";
 import { useTauriEvent } from "./hooks/useTauriEvent";
@@ -156,40 +155,6 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [navigate]);
 
-  // The toast offers the opposite step, so a slip of ⌘Z is one click to fix.
-  const runUndo = useCallback(
-    function run(redo: boolean): void {
-      if (undoBusy.current) return;
-      undoBusy.current = true;
-      void api
-        .undo(redo)
-        .then((label) =>
-          showToast(
-            label
-              ? {
-                  message: `${redo ? "Redid" : "Undid"} ${label.toLowerCase()}`,
-                  lane: HISTORY_LANE,
-                  action: {
-                    label: redo ? "Undo" : "Redo",
-                    onAction: () => run(!redo),
-                  },
-                }
-              : { message: `Nothing to ${redo ? "redo" : "undo"}` },
-          ),
-        )
-        .catch((cause: unknown) =>
-          showToast({
-            message: `${redo ? "Redo" : "Undo"} failed: ${api.describeError(cause)}`,
-            tone: "error",
-          }),
-        )
-        .finally(() => {
-          undoBusy.current = false;
-        });
-    },
-    [showToast],
-  );
-
   // Leave native text undo alone. Entry history belongs to the app, so it
   // remains available after navigating away from the page that made it.
   useEffect(() => {
@@ -202,11 +167,31 @@ export default function App() {
       )
         return;
       event.preventDefault();
-      runUndo(event.shiftKey);
+      if (undoBusy.current) return;
+      undoBusy.current = true;
+      const redo = event.shiftKey;
+      void api
+        .undo(redo)
+        .then((label) =>
+          showToast({
+            message: label
+              ? `${redo ? "Redid" : "Undid"} ${label.toLowerCase()}`
+              : `Nothing to ${redo ? "redo" : "undo"}`,
+          }),
+        )
+        .catch((cause: unknown) =>
+          showToast({
+            message: `${redo ? "Redo" : "Undo"} failed: ${api.describeError(cause)}`,
+            tone: "error",
+          }),
+        )
+        .finally(() => {
+          undoBusy.current = false;
+        });
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [runUndo]);
+  }, [showToast]);
 
   useTauriEvent<string>("open-timer", (id) => {
     setRevealTimer({ id });

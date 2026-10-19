@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { FIELD, TEXTAREA_FIELD } from "../../components/Page";
 import { Picker } from "../../components/Picker";
 import { Field, Sheet } from "../../components/Sheet";
-import { useInverseToast } from "../../hooks/useChangeToast";
+import { useToast } from "../../hooks/useToast";
 import * as api from "../../lib/api";
 import { describeError } from "../../lib/api";
 import { addDays, localDateString, parseLocalDate } from "../../lib/dates";
@@ -49,6 +49,7 @@ export function ProjectSheet({
   onClose,
   onSaved,
 }: ProjectSheetProps) {
+  const showToast = useToast();
   const [name, setName] = useState(project?.name ?? draft?.name ?? "");
   const [color, setColor] = useState(
     () =>
@@ -112,12 +113,10 @@ export function ProjectSheet({
     (budgetKind === "none" || Number(budgetValue) > 0) &&
     (newClient === null || newClient.trim() !== "");
 
-  const confirm = useInverseToast();
   const submit = async (): Promise<void> => {
     setSaving(true);
     try {
       let client = clientId || null;
-      const createdClient = newClient !== null;
       if (newClient !== null) {
         client = (await api.createClient({ name: newClient.trim() })).id;
       }
@@ -147,36 +146,10 @@ export function ProjectSheet({
           });
       onSaved(saved);
       onClose();
-      // An edit is taken back by writing every field as it was; a new project
-      // (and a client made for it) by removing it, before anything uses it.
-      confirm(
-        project ? `Saved "${saved.name}"` : `Created "${saved.name}"`,
-        project
-          ? {
-              run: () =>
-                api.updateProject(project.id, {
-                  name: project.name,
-                  color: project.color,
-                  clientId: project.clientId ?? null,
-                  description: project.description ?? null,
-                  aiHints: project.aiHints ?? null,
-                  billableDefault: project.billableDefault,
-                  hourlyRate: project.hourlyRate ?? null,
-                  budgetKind: project.budgetKind,
-                  budgetValue: project.budgetValue ?? null,
-                  budgetPeriod: project.budgetPeriod,
-                  dueDate: project.dueDate ?? null,
-                }),
-              undone: `Changes to "${project.name}" undone`,
-            }
-          : {
-              run: async () => {
-                await api.deleteProject(saved.id);
-                if (createdClient && client) await api.deleteClient(client);
-              },
-              undone: `Removed "${saved.name}"`,
-            },
-      );
+      showToast({
+        message: project ? `Saved "${saved.name}"` : `Created "${saved.name}"`,
+        tone: "success",
+      });
     } catch (cause) {
       setError(describeError(cause));
     } finally {

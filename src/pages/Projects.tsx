@@ -175,7 +175,6 @@ export function Projects({ route, navigate, replace }: ProjectsProps) {
     setSuggestions((list) => list.filter((entry) => entry.key !== key));
     try {
       await api.dismissProjectSuggestion(key);
-      // No Undo: nothing can un-dismiss a suggestion yet.
       showToast({ message: "Suggestion dismissed", tone: "success" });
     } catch (cause) {
       setError(describeError(cause));

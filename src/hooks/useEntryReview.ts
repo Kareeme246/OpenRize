@@ -145,18 +145,14 @@ export function useEntryReview(initialId?: string): EntryReview {
   const accept = useCallback(
     (id: string) =>
       run(() =>
-        confirmChange(() => api.approveTimeEntries([id]), {
-          message: "Entry approved",
-        }),
+        confirmChange(() => api.approveTimeEntries([id]), "Entry approved"),
       ),
     [run, confirmChange],
   );
   const reject = useCallback(
     (id: string) =>
       run(() =>
-        confirmChange(() => api.rejectTimeEntry(id), {
-          message: "Suggestion rejected",
-        }),
+        confirmChange(() => api.rejectTimeEntry(id), "Suggestion rejected"),
       ),
     [run, confirmChange],
   );
@@ -164,9 +160,10 @@ export function useEntryReview(initialId?: string): EntryReview {
   const unapprove = useCallback(async (): Promise<void> => {
     if (!detail) return;
     await run(() =>
-      confirmChange(() => api.unapproveTimeEntries([detail.entry.id]), {
-        message: "Entry moved back to review",
-      }),
+      confirmChange(
+        () => api.unapproveTimeEntries([detail.entry.id]),
+        "Entry moved back to review",
+      ),
     );
   }, [detail, run, confirmChange]);
 
@@ -188,11 +185,9 @@ export function useEntryReview(initialId?: string): EntryReview {
                 ? { categoryId: cleared ? "" : valueId }
                 : { projectId: cleared ? "" : valueId },
             ),
-          {
-            message: `${field === "category" ? "Category" : "Project"} ${
-              cleared ? "cleared" : "set"
-            }`,
-          },
+          `${field === "category" ? "Category" : "Project"} ${
+            cleared ? "cleared" : "set"
+          }`,
         ),
       );
     },
@@ -207,9 +202,7 @@ export function useEntryReview(initialId?: string): EntryReview {
             field === "category"
               ? api.deleteCategory(id)
               : api.deleteProject(id),
-          {
-            message: `${field === "category" ? "Category" : "Project"} deleted`,
-          },
+          `${field === "category" ? "Category" : "Project"} deleted`,
         ),
       );
     },
@@ -220,9 +213,10 @@ export function useEntryReview(initialId?: string): EntryReview {
     if (!detail) return;
     const billable = !detail.entry.billable;
     await run(() =>
-      confirmChange(() => api.updateTimeEntry(detail.entry.id, { billable }), {
-        message: billable ? "Marked billable" : "Marked non-billable",
-      }),
+      confirmChange(
+        () => api.updateTimeEntry(detail.entry.id, { billable }),
+        billable ? "Marked billable" : "Marked non-billable",
+      ),
     );
   }, [detail, run, confirmChange]);
 
@@ -232,7 +226,7 @@ export function useEntryReview(initialId?: string): EntryReview {
       await run(() =>
         confirmChange(
           () => api.updateTimeEntry(detail.entry.id, { description }),
-          { message: "Description saved" },
+          "Description saved",
         ),
       );
     },
@@ -245,7 +239,7 @@ export function useEntryReview(initialId?: string): EntryReview {
       await run(() =>
         confirmChange(
           () => api.updateTimeEntry(detail.entry.id, { startedAt, endedAt }),
-          { message: "Times updated" },
+          "Times updated",
         ),
       );
     },
@@ -293,7 +287,7 @@ export function useEntryReview(initialId?: string): EntryReview {
       try {
         const [first] = await confirmChange(
           () => api.splitTimeEntry(detail.entry.id, at),
-          { message: "Entry split in two" },
+          "Entry split in two",
         );
         setError(null);
         setSplitting(null);
@@ -314,7 +308,7 @@ export function useEntryReview(initialId?: string): EntryReview {
       try {
         const merged = await confirmChange(
           () => api.mergeTimeEntries(detail.entry.id, otherId),
-          { message: "Entries merged" },
+          "Entries merged",
         );
         setError(null);
         setSelectedId(merged.id);
@@ -329,9 +323,10 @@ export function useEntryReview(initialId?: string): EntryReview {
   const remove = useCallback(async (): Promise<void> => {
     if (!detail) return;
     try {
-      await confirmChange(() => api.deleteTimeEntry(detail.entry.id), {
-        message: "Entry deleted",
-      });
+      await confirmChange(
+        () => api.deleteTimeEntry(detail.entry.id),
+        "Entry deleted",
+      );
       setError(null);
       setSelectedId(undefined);
     } catch (cause) {

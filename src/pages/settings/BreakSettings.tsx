@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import {
   SegmentedControl,
   type SegmentedOption,
@@ -6,8 +6,8 @@ import {
 } from "../../components/SegmentedControl";
 import { Tooltip } from "../../components/Tooltip";
 import { useBreaks } from "../../hooks/useBreaks";
-import { useInverseToast } from "../../hooks/useChangeToast";
 import { useSettings } from "../../hooks/useSettings";
+import { useToast } from "../../hooks/useToast";
 import * as api from "../../lib/api";
 import { SNOOZE_CHOICES } from "../../lib/breaks";
 import { formatTime } from "../../lib/format";
@@ -228,14 +228,10 @@ function newSchedule(): ScheduledBreak {
 
 /** Settings > Notifications: interval reminders and scheduled breaks. */
 export function BreakSettingsGroups() {
+  const showToast = useToast();
   const { settings, update } = useSettings();
   const breaks = settings.breaks;
   const { state } = useBreaks();
-  const confirm = useInverseToast();
-  // Undo puts a deleted schedule back into the schedules as they are then,
-  // so edits made in between are kept.
-  const breaksRef = useRef(breaks);
-  breaksRef.current = breaks;
 
   const change = (patch: Partial<BreakSettings>): void =>
     update({ breaks: { ...breaks, ...patch } });
@@ -389,14 +385,9 @@ export function BreakSettingsGroups() {
                   (_, position) => position !== index,
                 ),
               });
-              confirm(`Deleted "${schedule.label}"`, {
-                run: async () => {
-                  const current = breaksRef.current;
-                  const schedules = [...current.schedules];
-                  schedules.splice(index, 0, schedule);
-                  update({ breaks: { ...current, schedules } });
-                },
-                undone: `Restored "${schedule.label}"`,
+              showToast({
+                message: `Deleted "${schedule.label}"`,
+                tone: "success",
               });
             }}
           />

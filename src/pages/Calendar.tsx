@@ -362,9 +362,10 @@ export function Calendar({ route, navigate }: CalendarProps) {
         const idToDelete = review.selectedId;
         void (async () => {
           try {
-            await confirmChange(() => api.deleteTimeEntry(idToDelete), {
-              message: "Entry deleted",
-            });
+            await confirmChange(
+              () => api.deleteTimeEntry(idToDelete),
+              "Entry deleted",
+            );
             if (reviewing) {
               await advanceFrom(idToDelete);
             } else {
@@ -546,7 +547,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
                         description: "Untitled session",
                         review: true,
                       }),
-                    { message: "Session added for review" },
+                    "Session added for review",
                   );
                   await refresh();
                 } catch (cause) {

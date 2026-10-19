@@ -16,7 +16,7 @@ use std::path::Path;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, Row};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::activity::DB_FILE;
 
@@ -62,7 +62,7 @@ pub struct Timer {
     pub created_at: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TimerSegment {
     pub id: i64,
@@ -73,7 +73,7 @@ pub struct TimerSegment {
 
 /// A snapshot of a timer taken on demand: what it read, under which name, and
 /// when. Saves only ever accumulate; they are removed with their timer.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TimerSavedState {
     pub id: i64,
@@ -84,23 +84,6 @@ pub struct TimerSavedState {
     /// Epoch milliseconds at which the state was saved.
     pub saved_at: u64,
 }
-
-/// Rows a delete, reset or segment delete removed, as the app held them, to
-/// put back verbatim when the change is undone.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TimerRestore {
-    pub id: String,
-    pub label: String,
-    /// The run a reset stopped, if any. A deleted timer comes back running
-    /// when it was; a reset one only when nothing has happened to it since.
-    pub started_at: Option<u64>,
-    pub created_at: u64,
-    pub segments: Vec<TimerSegment>,
-    pub saved_states: Vec<TimerSavedState>,
-}
-
-const CHANGED_SINCE: &str = "This tracker has changed since, so that can no longer be undone.";
 
 /// Selects a timer with its total computed from its segments.
 const TIMER_SELECT: &str = "SELECT id, label,
@@ -408,104 +391,6 @@ impl TimerStore {
         self.snapshot()
     }
 
-    /// Removes one saved state, the inverse of saving it.
-    pub fn delete_saved_state(&mut self, state_id: i64) -> Result<(), String> {
-        let changed = self
-            .conn
-            .execute(
-                "DELETE FROM timer_saved_states WHERE id = ?1",
-                params![state_id],
-            )
-            .map_err(|error| error.to_string())?;
-        if changed == 0 {
-            return Err(format!("no saved state with id {state_id}"));
-        }
-        Ok(())
-    }
-
-    /// Puts back what a delete, reset or segment delete removed, with the
-    /// same ids and times. Segment and saved-state ids are never reused, so a
-    /// row that is already there is the same row and is left alone; a run is
-    /// only restarted on a timer nothing has touched since, so undo never
-    /// counts the same time twice.
-    pub fn restore(&mut self, restore: &TimerRestore) -> Result<Vec<Timer>, String> {
-        let tx = self.conn.transaction().map_err(|error| error.to_string())?;
-        let existing: Option<Option<i64>> = tx
-            .query_row(
-                "SELECT started_at FROM timers WHERE id = ?1",
-                params![restore.id],
-                |row| row.get(0),
-            )
-            .map(Some)
-            .or_else(|error| match error {
-                rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                error => Err(error.to_string()),
-            })?;
-        match existing {
-            None => {
-                tx.execute(
-                    "INSERT INTO timers (id, label, accumulated_ms, started_at, created_at)
-                     VALUES (?1, ?2, 0, ?3, ?4)",
-                    params![
-                        restore.id,
-                        restore.label,
-                        restore.started_at.map(|at| at as i64),
-                        restore.created_at as i64
-                    ],
-                )
-                .map_err(|error| error.to_string())?;
-            }
-            Some(running) => {
-                if let Some(started_at) = restore.started_at {
-                    let segments: i64 = tx
-                        .query_row(
-                            "SELECT COUNT(*) FROM timer_segments WHERE timer_id = ?1",
-                            params![restore.id],
-                            |row| row.get(0),
-                        )
-                        .map_err(|error| error.to_string())?;
-                    if running.is_some() || segments > 0 {
-                        return Err(CHANGED_SINCE.to_string());
-                    }
-                    tx.execute(
-                        "UPDATE timers SET started_at = ?1 WHERE id = ?2",
-                        params![started_at as i64, restore.id],
-                    )
-                    .map_err(|error| error.to_string())?;
-                }
-            }
-        }
-        for segment in &restore.segments {
-            tx.execute(
-                "INSERT OR IGNORE INTO timer_segments (id, timer_id, duration_ms, recorded_at)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    segment.id,
-                    restore.id,
-                    segment.duration_ms as i64,
-                    segment.recorded_at as i64
-                ],
-            )
-            .map_err(|error| error.to_string())?;
-        }
-        for state in &restore.saved_states {
-            tx.execute(
-                "INSERT OR IGNORE INTO timer_saved_states (id, timer_id, label, elapsed_ms, saved_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
-                    state.id,
-                    restore.id,
-                    state.label,
-                    state.elapsed_ms as i64,
-                    state.saved_at as i64
-                ],
-            )
-            .map_err(|error| error.to_string())?;
-        }
-        tx.commit().map_err(|error| error.to_string())?;
-        self.snapshot()
-    }
-
     fn insert_segment(&self, id: &str, duration_ms: u64, now: u64) -> Result<(), String> {
         self.conn
             .execute(
@@ -793,86 +678,6 @@ mod tests {
         assert_eq!(timer.accumulated_ms, 0);
         assert_eq!(timer.started_at, None);
         assert!(!timer.is_running());
-    }
-
-    /// What the app holds for a timer just before it removes something.
-    fn held(store: &TimerStore, id: &str) -> TimerRestore {
-        let timer = store.find(id).unwrap();
-        TimerRestore {
-            id: timer.id,
-            label: timer.label,
-            started_at: timer.started_at,
-            created_at: timer.created_at,
-            segments: timer.segments,
-            saved_states: store.saved_states(id).unwrap(),
-        }
-    }
-
-    #[test]
-    fn undoing_a_delete_puts_the_timer_back_verbatim() {
-        let mut store = store("restore-delete");
-        let id = store.create_at("Client call", 10).unwrap()[0].id.clone();
-        store.add_segment_at(&id, 60_000, 100).unwrap();
-        store.start_at(&id, 200).unwrap();
-        store.save_state_at(&id, 300).unwrap();
-        let before = store.find(&id).unwrap();
-        let states = store.saved_states(&id).unwrap();
-        let removed = held(&store, &id);
-
-        store.delete(&id).unwrap();
-        store.restore(&removed).unwrap();
-
-        let after = store.find(&id).unwrap();
-        assert_eq!(after.label, before.label);
-        assert_eq!(after.started_at, Some(200));
-        assert_eq!(after.created_at, 10);
-        let ids = |timer: &Timer| {
-            timer
-                .segments
-                .iter()
-                .map(|s| (s.id, s.duration_ms, s.recorded_at))
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(ids(&after), ids(&before));
-        let saved = store.saved_states(&id).unwrap();
-        assert_eq!(saved.len(), 1);
-        assert_eq!(
-            (saved[0].id, saved[0].elapsed_ms),
-            (states[0].id, states[0].elapsed_ms)
-        );
-    }
-
-    #[test]
-    fn undoing_a_reset_brings_the_time_back_and_never_counts_it_twice() {
-        let mut store = store("restore-reset");
-        let id = store.create_at("Deep work", 0).unwrap()[0].id.clone();
-        store.add_segment_at(&id, 60_000, 100).unwrap();
-        store.start_at(&id, 1_000).unwrap();
-        let removed = held(&store, &id);
-
-        store.reset(&id).unwrap();
-        store.restore(&removed).unwrap();
-        let timer = store.find(&id).unwrap();
-        assert_eq!(timer.accumulated_ms, 60_000);
-        assert_eq!(timer.started_at, Some(1_000));
-
-        // Restarted since the reset: bringing the old run back would double it.
-        store.reset(&id).unwrap();
-        store.start_at(&id, 5_000).unwrap();
-        assert!(store.restore(&removed).is_err());
-        let timer = store.find(&id).unwrap();
-        assert_eq!(timer.accumulated_ms, 0);
-        assert_eq!(timer.started_at, Some(5_000));
-    }
-
-    #[test]
-    fn a_saved_state_can_be_taken_back() {
-        let mut store = store("delete-saved-state");
-        let id = store.create_at("Saved", 0).unwrap()[0].id.clone();
-        let saved = store.save_state_at(&id, 1_000).unwrap();
-        store.delete_saved_state(saved.id).unwrap();
-        assert!(store.saved_states(&id).unwrap().is_empty());
-        assert!(store.delete_saved_state(saved.id).is_err());
     }
 
     #[test]

@@ -1,14 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
-import {
-  formatDuration,
-  type Timer,
-  type TimerRestore,
-  type TimerSavedState,
-} from "../lib/timers";
-import { useInverseToast } from "./useChangeToast";
+import { formatDuration, type Timer } from "../lib/timers";
 import { useTauriEvent } from "./useTauriEvent";
+import { useToast } from "./useToast";
 
 export interface TimersApi {
   timers: Timer[];
@@ -31,21 +26,6 @@ export interface TimersApi {
 }
 
 let cachedTimers: Timer[] | null = null;
-
-/** The rows an undo puts back: `timer` as it was, plus its saved states. */
-function restoreOf(
-  timer: Timer,
-  savedStates: TimerSavedState[] = [],
-): TimerRestore {
-  return {
-    id: timer.id,
-    label: timer.label,
-    startedAt: timer.startedAt,
-    createdAt: timer.createdAt,
-    segments: timer.segments,
-    savedStates,
-  };
-}
 
 export function useTimers(): TimersApi {
   const [timers, setTimersState] = useState<Timer[]>(() => cachedTimers ?? []);
@@ -104,57 +84,23 @@ export function useTimers(): TimersApi {
     [setTimers],
   );
 
-  // An undo answers with the full list too; adopt it like any command's.
-  const confirmChange = useInverseToast();
+  const showToast = useToast();
   const confirm = useCallback(
-    (
-      message: string,
-      undo?: { run: () => Promise<Timer[] | undefined>; undone: string },
-    ): void =>
-      confirmChange(
-        message,
-        undo && {
-          run: () =>
-            undo.run().then((next) => {
-              if (next) setTimers(next);
-            }),
-          undone: undo.undone,
-        },
-      ),
-    [confirmChange, setTimers],
-  );
-
-  const find = useCallback(
-    (id: string): Timer | undefined =>
-      timersRef.current.find((timer) => timer.id === id),
-    [],
-  );
-
-  const create = useCallback(
-    (label: string) => {
-      const known = new Set(timersRef.current.map((timer) => timer.id));
-      void send(api.createTimer(label)).then((next) => {
-        const created = next?.find((timer) => !known.has(timer.id));
-        if (!created) return;
-        confirm(`Created "${created.label}"`, {
-          // Only an untouched tracker goes: one that has counted time stays.
-          run: () => {
-            const current = find(created.id);
-            if (
-              current &&
-              (current.startedAt !== null || current.segments.length > 0)
-            ) {
-              return Promise.reject(
-                new Error("it has counted time since, so it stays"),
-              );
-            }
-            return api.deleteTimer(created.id);
-          },
-          undone: `Removed "${created.label}"`,
-        });
+    (action: Promise<Timer[]>, message: string): void => {
+      void send(action).then((next) => {
+        if (next) showToast({ message, tone: "success" });
       });
     },
-    [send, confirm, find],
+    [send, showToast],
+  );
+  const labelOf = useCallback(
+    (id: string): string =>
+      timersRef.current.find((timer) => timer.id === id)?.label ?? "Timer",
+    [],
+  );
+  const create = useCallback(
+    (label: string) => confirm(api.createTimer(label), `Created "${label}"`),
+    [confirm],
   );
   // Starting and pausing show on the card itself; a toast would only repeat it.
   const start = useCallback(
@@ -166,140 +112,60 @@ export function useTimers(): TimersApi {
     [send],
   );
   const reset = useCallback(
-    (id: string) => {
-      const before = find(id);
-      void send(api.resetTimer(id)).then((next) => {
-        if (!next || !before) return;
-        confirm(`Reset "${before.label}"`, {
-          run: () => api.restoreTimer(restoreOf(before)),
-          undone: `Restored "${before.label}"`,
-        });
-      });
-    },
-    [send, confirm, find],
+    (id: string) => confirm(api.resetTimer(id), `Reset "${labelOf(id)}"`),
+    [confirm, labelOf],
   );
   const clear = useCallback(
     (id: string) => void send(api.resetTimer(id)),
     [send],
   );
   const rename = useCallback(
-    (id: string, label: string) => {
-      const previous = find(id)?.label;
-      void send(api.renameTimer(id, label)).then((next) => {
-        if (!next || previous === undefined) return;
-        confirm(`Renamed to "${label}"`, {
-          run: () => api.renameTimer(id, previous),
-          undone: `Renamed back to "${previous}"`,
-        });
-      });
-    },
-    [send, confirm, find],
+    (id: string, label: string) =>
+      confirm(api.renameTimer(id, label), `Renamed to "${label}"`),
+    [confirm],
   );
   const addSegment = useCallback(
-    (id: string, durationMs: number) => {
-      const known = new Set(find(id)?.segments.map((segment) => segment.id));
-      void send(api.addTimerSegment(id, durationMs)).then((next) => {
-        const timer = next?.find((candidate) => candidate.id === id);
-        const added = timer?.segments.find((segment) => !known.has(segment.id));
-        if (!timer || !added) return;
-        confirm(`Added ${formatDuration(durationMs)} to "${timer.label}"`, {
-          run: () => api.deleteTimerSegment(id, added.id),
-          undone: `Removed the added ${formatDuration(durationMs)}`,
-        });
-      });
-    },
-    [send, confirm, find],
+    (id: string, durationMs: number) =>
+      confirm(
+        api.addTimerSegment(id, durationMs),
+        `Added ${formatDuration(durationMs)} to "${labelOf(id)}"`,
+      ),
+    [confirm, labelOf],
   );
   const updateSegment = useCallback(
-    (id: string, segmentId: number, durationMs: number) => {
-      const timer = find(id);
-      const previous = timer?.segments.find(
-        (segment) => segment.id === segmentId,
-      );
-      void send(api.updateTimerSegment(id, segmentId, durationMs)).then(
-        (next) => {
-          if (!next || !timer || !previous) return;
-          confirm(
-            `Changed a segment of "${timer.label}" to ${formatDuration(durationMs)}`,
-            {
-              run: () =>
-                api.updateTimerSegment(id, segmentId, previous.durationMs),
-              undone: `Changed it back to ${formatDuration(previous.durationMs)}`,
-            },
-          );
-        },
-      );
-    },
-    [send, confirm, find],
+    (id: string, segmentId: number, durationMs: number) =>
+      confirm(
+        api.updateTimerSegment(id, segmentId, durationMs),
+        `Segment changed to ${formatDuration(durationMs)}`,
+      ),
+    [confirm],
   );
   const deleteSegment = useCallback(
-    (id: string, segmentId: number) => {
-      const timer = find(id);
-      const removed = timer?.segments.find(
-        (segment) => segment.id === segmentId,
-      );
-      void send(api.deleteTimerSegment(id, segmentId)).then((next) => {
-        if (!next || !timer || !removed) return;
-        confirm(
-          `Removed ${formatDuration(removed.durationMs)} from "${timer.label}"`,
-          {
-            // Only the segment: the run, if any, was never touched.
-            run: () =>
-              api.restoreTimer({
-                ...restoreOf(timer),
-                startedAt: null,
-                segments: [removed],
-              }),
-            undone: `Put back ${formatDuration(removed.durationMs)}`,
-          },
-        );
-      });
-    },
-    [send, confirm, find],
+    (id: string, segmentId: number) =>
+      confirm(
+        api.deleteTimerSegment(id, segmentId),
+        `Segment removed from "${labelOf(id)}"`,
+      ),
+    [confirm, labelOf],
   );
-  // A save changes nothing about the timers, so there is no list to adopt;
-  // it is read back through the Saved states sheet.
+  // A save changes nothing about the timers, so there is no list to adopt.
   const saveState = useCallback(
     (id: string) => {
       api
         .saveTimerState(id)
         .then((saved) =>
-          confirm(
-            `Saved "${saved.label}" at ${formatDuration(saved.elapsedMs)}`,
-            {
-              run: () =>
-                api.deleteTimerSavedState(saved.id).then(() => undefined),
-              undone: "Removed the saved state",
-            },
-          ),
+          showToast({
+            message: `Saved "${saved.label}" at ${formatDuration(saved.elapsedMs)}`,
+            tone: "success",
+          }),
         )
         .catch((cause: unknown) => setError(describeError(cause)));
     },
-    [confirm],
+    [showToast],
   );
   const remove = useCallback(
-    (id: string) => {
-      const before = find(id);
-      void (async () => {
-        // The card does not hold its saved states; without them an undo would
-        // bring the tracker back short, so then it offers none.
-        const savedStates = await api
-          .listTimerSavedStates(id)
-          .catch(() => null);
-        const next = await send(api.deleteTimer(id));
-        if (!next || !before) return;
-        confirm(
-          `Deleted "${before.label}"`,
-          savedStates === null
-            ? undefined
-            : {
-                run: () => api.restoreTimer(restoreOf(before, savedStates)),
-                undone: `Restored "${before.label}"`,
-              },
-        );
-      })();
-    },
-    [send, confirm, find],
+    (id: string) => confirm(api.deleteTimer(id), `Deleted "${labelOf(id)}"`),
+    [confirm, labelOf],
   );
 
   return {

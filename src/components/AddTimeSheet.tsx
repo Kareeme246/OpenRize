@@ -86,8 +86,6 @@ export function AddTimeSheet({
         projectId: projectId || undefined,
         billable,
       });
-      // No Undo: hand-made time is approved as made, and approved time is
-      // locked until unapproved.
       showToast({
         message: `Added ${formatDuration(endMs - startMs)} on ${formatShortDate(startMs)}`,
         tone: "success",

@@ -10,7 +10,7 @@ import {
 import { Picker } from "../../components/Picker";
 import { Tooltip } from "../../components/Tooltip";
 import type { Catalog } from "../../hooks/useCatalog";
-import { useInverseToast } from "../../hooks/useChangeToast";
+import { useToast } from "../../hooks/useToast";
 import * as api from "../../lib/api";
 import { describeError } from "../../lib/api";
 import type { ClientRollup } from "../../lib/clients";
@@ -67,6 +67,7 @@ export function ClientDetail({
   onInvoice,
   onChanged,
 }: ClientDetailProps) {
+  const showToast = useToast();
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Rust sends `null` for a client that is not archived.
@@ -74,27 +75,16 @@ export function ClientDetail({
   const currency = client.currency || "USD";
   const now = Date.now();
 
-  const confirm = useInverseToast();
-  /** Runs `action`, then confirms it with `message` (and Undo, given `inverse`). */
+  /** Runs `action`, then confirms it with `message`. */
   const run = async (
     action: () => Promise<unknown>,
     message: string,
-    inverse?: () => Promise<unknown>,
   ): Promise<boolean> => {
     try {
       await action();
       setActionError(null);
       onChanged();
-      confirm(
-        message,
-        inverse && {
-          run: async () => {
-            await inverse();
-            onChanged();
-          },
-          undone: "Change undone",
-        },
-      );
+      showToast({ message, tone: "success" });
       return true;
     } catch (cause) {
       setActionError(describeError(cause));
@@ -104,8 +94,7 @@ export function ClientDetail({
 
   const remove = async (): Promise<void> => {
     setConfirmDelete(false);
-    // No Undo: a client delete is outside the undo history and unlinks its
-    // projects, which nothing here could put back.
+
     if (
       await run(() => api.deleteClient(client.id), `Deleted "${client.name}"`)
     )
@@ -199,7 +188,6 @@ export function ClientDetail({
               void run(
                 () => api.updateClient(client.id, { archived: !archived }),
                 `"${client.name}" ${archived ? "restored" : "archived"}`,
-                () => api.updateClient(client.id, { archived }),
               )
             }
             className={BUTTON_SECONDARY}
@@ -317,10 +305,6 @@ export function ClientDetail({
                 void run(
                   () => api.updateProject(projectId, { clientId: client.id }),
                   `Attached "${project?.name ?? "project"}" to "${client.name}"`,
-                  () =>
-                    api.updateProject(projectId, {
-                      clientId: project?.clientId ?? null,
-                    }),
                 );
               }}
               variant="compact"
@@ -392,10 +376,6 @@ export function ClientDetail({
                             () =>
                               api.updateProject(project.id, { clientId: null }),
                             `Detached "${project.name}" from "${client.name}"`,
-                            () =>
-                              api.updateProject(project.id, {
-                                clientId: client.id,
-                              }),
                           )
                         }
                         className="justify-self-end text-[11.5px] text-fg-soft hover:text-danger"

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Tabs } from "../components/Page";
 import { Picker } from "../components/Picker";
 import { Tooltip } from "../components/Tooltip";
-import { useInverseToast } from "../hooks/useChangeToast";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import { useToast } from "../hooks/useToast";
 import * as api from "../lib/api";
@@ -50,7 +49,6 @@ export function Apps() {
   });
 
   const showToast = useToast();
-  const confirm = useInverseToast();
   const handleUpdate = async (
     app: AppRecord,
     changes: {
@@ -80,32 +78,7 @@ export function Apps() {
                 ? "set"
                 : "cleared"
             }`;
-      // Undo writes the previous value back. A default that was never set
-      // cannot be written back as unset, so that change offers no Undo.
-      const restorable =
-        (changes.defaultCategoryId === undefined ||
-          app.defaultCategoryId !== undefined) &&
-        (changes.defaultProjectId === undefined ||
-          app.defaultProjectId !== undefined);
-      confirm(
-        message,
-        restorable
-          ? {
-              run: async () => {
-                const restored = await api.updateApp(
-                  app.id,
-                  app.defaultCategoryId,
-                  app.defaultProjectId,
-                  app.excluded,
-                );
-                setApps((prev) =>
-                  prev.map((a) => (a.id === restored.id ? restored : a)),
-                );
-              },
-              undone: `"${name}" changed back`,
-            }
-          : undefined,
-      );
+      showToast({ message, tone: "success" });
     } catch (err) {
       showToast({
         message: `Couldn't update "${app.displayName}": ${api.describeError(err)}`,

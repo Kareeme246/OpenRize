@@ -160,9 +160,10 @@ export function Timesheets({
   const confirmChange = useChangeToast();
   const approve = async (entry: TimeEntry): Promise<void> => {
     try {
-      await confirmChange(() => api.approveTimeEntries([entry.id]), {
-        message: "Entry approved",
-      });
+      await confirmChange(
+        () => api.approveTimeEntries([entry.id]),
+        "Entry approved",
+      );
       setActionError(null);
       await refresh();
     } catch (cause) {

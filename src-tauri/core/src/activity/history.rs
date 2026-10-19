@@ -26,8 +26,6 @@ use crate::entry_builder::{describe, SegmentInput};
 use crate::models::TimeEntry;
 
 const CONFLICT: &str = "These entries have changed since; undo/redo cannot safely overwrite them.";
-pub(super) const SUPERSEDED: &str =
-    "Something else changed since, so this can no longer be undone here.";
 
 /// How many commands the undo stack keeps.
 const DEPTH: usize = 100;
@@ -215,13 +213,6 @@ fn insert(conn: &Connection, table: &str, columns: &[String], row: &[Value]) -> 
     .map_err(|e| e.to_string())
 }
 
-/// A command on the undo or redo stack, numbered in the order it was first
-/// made so an undo can name exactly the change it means.
-pub(super) struct Recorded {
-    seq: u64,
-    command: Command,
-}
-
 /// One undoable user action.
 pub(super) enum Command {
     Deletion(Deletion),
@@ -381,11 +372,7 @@ pub(super) struct Merge {
 
 impl ActivityStore {
     pub(super) fn record_undo(&mut self, command: Command) {
-        self.last_change += 1;
-        self.undo_stack.push(Recorded {
-            seq: self.last_change,
-            command,
-        });
+        self.undo_stack.push(command);
         self.redo_stack.clear();
         if self.undo_stack.len() > DEPTH {
             self.undo_stack.remove(0);
@@ -481,49 +468,31 @@ impl ActivityStore {
         self.step(false, now)
     }
 
-    /// The change an undo would take back next: its sequence number and
-    /// label. A confirmation reads it before and after a change to learn
-    /// whether that change was recorded, and which one it was.
-    pub fn undo_head(&self) -> Option<(u64, &'static str)> {
-        self.undo_stack
-            .last()
-            .map(|recorded| (recorded.seq, recorded.command.label()))
-    }
-
-    /// Undoes change `seq`, and only while it is still the latest one, so an
-    /// Undo button can never take back some other change made since.
-    pub fn undo_change(&mut self, seq: u64, now: u64) -> Result<&'static str, String> {
-        if self.undo_head().map(|(head, _)| head) != Some(seq) {
-            return Err(SUPERSEDED.to_string());
-        }
-        Ok(self.step(true, now)?.unwrap_or_default())
-    }
-
     fn step(&mut self, undo: bool, now: u64) -> Result<Option<&'static str>, String> {
         let stack = if undo {
             &mut self.undo_stack
         } else {
             &mut self.redo_stack
         };
-        let Some(mut recorded) = stack.pop() else {
+        let Some(mut command) = stack.pop() else {
             return Ok(None);
         };
-        let result = self.atomically(|store| store.apply(&mut recorded.command, undo, now));
-        let label = recorded.command.label();
+        let result = self.atomically(|store| store.apply(&mut command, undo, now));
+        let label = command.label();
         match result {
             Ok(()) => {
                 if undo {
-                    self.redo_stack.push(recorded);
+                    self.redo_stack.push(command);
                 } else {
-                    self.undo_stack.push(recorded);
+                    self.undo_stack.push(command);
                 }
                 Ok(Some(label))
             }
             Err(error) => {
                 if undo {
-                    self.undo_stack.push(recorded);
+                    self.undo_stack.push(command);
                 } else {
-                    self.redo_stack.push(recorded);
+                    self.redo_stack.push(command);
                 }
                 Err(error)
             }

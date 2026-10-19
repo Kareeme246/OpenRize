@@ -1,4 +1,3 @@
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useState } from "react";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import {
@@ -8,7 +7,6 @@ import {
   SkeletonRows,
 } from "../../components/Page";
 import { PdfViewer } from "../../components/PdfViewer";
-import { useInverseToast } from "../../hooks/useChangeToast";
 import { useToast } from "../../hooks/useToast";
 import * as api from "../../lib/api";
 import {
@@ -17,7 +15,6 @@ import {
   formatUsd,
   termsLabel,
 } from "../../lib/invoices";
-import { FILE_MANAGER } from "../../lib/platform";
 import type { Invoice } from "../../lib/types";
 import { StatusPill } from "./StatusPill";
 
@@ -60,12 +57,10 @@ export function InvoiceView({
     void load();
   }, [load]);
 
-  const confirm = useInverseToast();
-  /** Runs `action`, then confirms it with `message` (and Undo, given `inverse`). */
+  /** Runs `action`, then confirms it with `message`. */
   const act = async (
     action: () => Promise<void>,
     message: string,
-    inverse?: () => Promise<void>,
   ): Promise<void> => {
     setBusy(true);
     setError(null);
@@ -73,17 +68,7 @@ export function InvoiceView({
       await action();
       onChanged();
       await load();
-      confirm(
-        message,
-        inverse && {
-          run: async () => {
-            await inverse();
-            onChanged();
-            await load();
-          },
-          undone: "Change undone",
-        },
-      );
+      showToast({ message, tone: "success" });
     } catch (cause) {
       setError(api.describeError(cause));
     } finally {
@@ -97,14 +82,7 @@ export function InvoiceView({
     try {
       const path = await api.exportInvoicePdf({ id: invoiceId });
       if (path) {
-        showToast({
-          message: `PDF saved to ${path}`,
-          tone: "success",
-          action: {
-            label: `Show in ${FILE_MANAGER}`,
-            onAction: () => void revealItemInDir(path),
-          },
-        });
+        showToast({ message: `PDF saved to ${path}`, tone: "success" });
       }
     } catch (cause) {
       setError(api.describeError(cause));
@@ -118,7 +96,6 @@ export function InvoiceView({
     setError(null);
     try {
       await api.deleteVoidInvoice(invoiceId);
-      // No Undo: the archived PDF and its number go with it.
       showToast({
         message: `Deleted ${invoice?.number ?? "the invoice"}`,
         tone: "success",
@@ -231,7 +208,6 @@ export function InvoiceView({
                   void act(
                     () => api.setInvoicePaid(invoice.id, true),
                     `${invoice.number ?? "Invoice"} marked paid`,
-                    () => api.setInvoicePaid(invoice.id, false),
                   )
                 }
               >
@@ -244,8 +220,6 @@ export function InvoiceView({
                 className={BUTTON_SECONDARY}
                 disabled={busy}
                 onClick={() =>
-                  // No Undo: marking it paid again would stamp a new paid
-                  // date over the one it had.
                   void act(
                     () => api.setInvoicePaid(invoice.id, false),
                     `${invoice.number ?? "Invoice"} marked unpaid`,

@@ -112,8 +112,6 @@ export function Invoices({ route, navigate, replace }: InvoicesProps) {
           onDeleteDraft={async (id) => {
             try {
               await api.deleteDraftInvoice(id);
-              // No Undo: the list only holds the summary, not the draft's
-              // lines, so it could not be saved again as it was.
               showToast({ message: "Draft deleted", tone: "success" });
               await refresh();
             } catch (cause) {

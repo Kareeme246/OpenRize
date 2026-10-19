@@ -106,9 +106,7 @@ These app commands only serve what is on screen, so rize leaves them out:
 `resize_pulse_panel`, `hide_pulse_panel`, `resize_reminder_panel`, `expand_break_reminder`,
 `open_break_settings`, `render_invoice_preview`, `get_invoice_logo`, `preview_break_chime`,
 `dismiss_stopwatch_reminder`, `mark_segment_reviewed` and the debug-only `dev_sample_break_reminder`. Appearance preferences
-stay reachable through `rize settings set`. The undo behind a confirmation toast's Undo button
-(`undo_head`, `undo_change`, `restore_timer`, `delete_timer_saved_state`) only exists while that toast
-is on screen.
+stay reachable through `rize settings set`.
 
 ## Conventions
 

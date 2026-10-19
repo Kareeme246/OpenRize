@@ -360,12 +360,12 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
       .map((entry) => entry.id);
     if (ids.length === 0) return;
     void act(() =>
-      confirmChange(() => api.approveTimeEntries(ids), {
-        message:
-          ids.length === 1
-            ? "Entry approved"
-            : `Approved ${plural(ids.length, "entry", "entries")}`,
-      }),
+      confirmChange(
+        () => api.approveTimeEntries(ids),
+        ids.length === 1
+          ? "Entry approved"
+          : `Approved ${plural(ids.length, "entry", "entries")}`,
+      ),
     );
     setSelected(new Set());
   };
@@ -572,9 +572,10 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
               onApprove={() => approveIds(selectedEntries)}
               onUnapprove={(ids) => {
                 void act(() =>
-                  confirmChange(() => api.unapproveTimeEntries(ids), {
-                    message: `${plural(ids.length, "entry", "entries")} moved back to review`,
-                  }),
+                  confirmChange(
+                    () => api.unapproveTimeEntries(ids),
+                    `${plural(ids.length, "entry", "entries")} moved back to review`,
+                  ),
                 );
                 setSelected(new Set());
               }}
@@ -586,12 +587,7 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
                         selectedEntries.map((entry) => entry.id),
                         { categoryId },
                       ),
-                    {
-                      message: describeUpdate(
-                        { categoryId },
-                        selectedEntries.length,
-                      ),
-                    },
+                    describeUpdate({ categoryId }, selectedEntries.length),
                   ),
                 )
               }
@@ -603,12 +599,7 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
                         selectedEntries.map((entry) => entry.id),
                         { billable },
                       ),
-                    {
-                      message: describeUpdate(
-                        { billable },
-                        selectedEntries.length,
-                      ),
-                    },
+                    describeUpdate({ billable }, selectedEntries.length),
                   ),
                 )
               }
@@ -730,7 +721,7 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
                             void act(() =>
                               confirmChange(
                                 () => api.updateTimeEntry(entry.id, patch),
-                                { message: describeUpdate(patch) },
+                                describeUpdate(patch),
                               ),
                             )
                           }
@@ -739,7 +730,7 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
                             void act(() =>
                               confirmChange(
                                 () => api.unapproveTimeEntries([entry.id]),
-                                { message: "Entry moved back to review" },
+                                "Entry moved back to review",
                               ),
                             )
                           }
@@ -812,12 +803,12 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
               review.select(undefined);
             }
             void act(async () => {
-              await confirmChange(() => api.deleteTimeEntries(ids), {
-                message:
-                  ids.length === 1
-                    ? "Entry deleted"
-                    : `Deleted ${plural(ids.length, "entry", "entries")}`,
-              });
+              await confirmChange(
+                () => api.deleteTimeEntries(ids),
+                ids.length === 1
+                  ? "Entry deleted"
+                  : `Deleted ${plural(ids.length, "entry", "entries")}`,
+              );
               setSelected(new Set());
               await refresh();
               return undefined;

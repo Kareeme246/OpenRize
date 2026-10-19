@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { FIELD, TEXTAREA_FIELD } from "../../components/Page";
 import { Picker } from "../../components/Picker";
 import { Field, Sheet } from "../../components/Sheet";
-import { useInverseToast } from "../../hooks/useChangeToast";
+import { useToast } from "../../hooks/useToast";
 import * as api from "../../lib/api";
 import { TERMS_OPTIONS } from "../../lib/invoices";
 import { THIS_COMPUTER } from "../../lib/platform";
@@ -21,6 +21,7 @@ interface ProfileSheetProps {
  * keep their own copy, so editing this never rewrites an issued document.
  */
 export function ProfileSheet({ onClose, onSaved }: ProfileSheetProps) {
+  const showToast = useToast();
   const [profile, setProfile] = useState<InvoiceProfile | null>(null);
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
@@ -106,11 +107,9 @@ export function ProfileSheet({ onClose, onSaved }: ProfileSheetProps) {
   const numberValid =
     Number.isInteger(number) && number >= 1 && number <= 99_999;
 
-  const confirm = useInverseToast();
   const submit = async (): Promise<void> => {
     setBusy(true);
     setError(null);
-    const renumbered = profile !== null && number !== profile.nextNumber;
     try {
       const saved = await api.updateInvoiceProfile({
         name,
@@ -125,27 +124,7 @@ export function ProfileSheet({ onClose, onSaved }: ProfileSheetProps) {
       });
       onSaved(saved);
       onClose();
-      // Undo writes the details back as they were. Not after a renumber: an
-      // invoice finalized meanwhile would make the old number unsafe.
-      const previous = profile;
-      confirm(
-        "Invoice settings saved",
-        previous && !renumbered
-          ? {
-              run: () =>
-                api.updateInvoiceProfile({
-                  name: previous.name,
-                  address: previous.address,
-                  email: previous.email ?? "",
-                  phone: previous.phone ?? "",
-                  paymentInstructions: previous.paymentInstructions ?? "",
-                  defaultNotes: previous.defaultNotes ?? "",
-                  defaultTermsDays: previous.defaultTermsDays,
-                }),
-              undone: "Invoice settings restored",
-            }
-          : undefined,
-      );
+      showToast({ message: "Invoice settings saved", tone: "success" });
     } catch (cause) {
       setError(api.describeError(cause));
     } finally {

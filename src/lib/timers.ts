@@ -30,20 +30,6 @@ export interface Timer {
 }
 
 /**
- * Mirror of `TimerRestore` in src-tauri/core/src/timers.rs: the rows an undo
- * puts back. `startedAt` restarts the run a reset stopped; leave it null to
- * restore only segments.
- */
-export interface TimerRestore {
-  id: string;
-  label: string;
-  startedAt: number | null;
-  createdAt: number;
-  segments: TimerSegment[];
-  savedStates: TimerSavedState[];
-}
-
-/**
  * The frontend needs elapsed time to draw a number; Rust owns the timestamps
  * that make it correct. The equivalent clamp on the Rust side is the
  * `saturating_sub` in `TimerStore::pause_at` — keep the two consistent if this

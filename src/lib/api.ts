@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { BreakEntry, BreakState } from "./breaks";
 import type { LoginItemState, Settings, StoragePaths } from "./settings";
-import type { Timer, TimerRestore, TimerSavedState } from "./timers";
+import type { Timer, TimerSavedState } from "./timers";
 import type {
   ActivitySnapshot,
   AiMetrics,
@@ -120,24 +120,6 @@ export async function openMainWindow(
  */
 export async function undo(redo = false): Promise<string | null> {
   return await invoke<string | null>("undo", { redo });
-}
-
-/** The change an undo would take back next, numbered. */
-export interface UndoHead {
-  seq: number;
-  label: string;
-}
-
-export function undoHead(): Promise<UndoHead | null> {
-  return invoke<UndoHead | null>("undo_head");
-}
-
-/**
- * Undoes change `seq` only; refused when another change has been made since.
- * Resolves to its label.
- */
-export function undoChange(seq: number): Promise<string> {
-  return invoke<string>("undo_change", { seq });
 }
 
 // --- Break reminders ---
@@ -657,16 +639,6 @@ export function listTimerSavedStates(id: string): Promise<TimerSavedState[]> {
 
 export function deleteTimer(id: string): Promise<Timer[]> {
   return invoke<Timer[]>("delete_timer", { id });
-}
-
-/** Undoes Save state. */
-export function deleteTimerSavedState(stateId: number): Promise<void> {
-  return invoke<void>("delete_timer_saved_state", { stateId });
-}
-
-/** Undoes a delete, reset or segment delete from the rows it removed. */
-export function restoreTimer(restore: TimerRestore): Promise<Timer[]> {
-  return invoke<Timer[]>("restore_timer", { restore });
 }
 
 // --- Battery & Energy ---

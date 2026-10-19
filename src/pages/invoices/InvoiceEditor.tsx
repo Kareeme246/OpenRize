@@ -1,4 +1,3 @@
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import {
@@ -13,7 +12,6 @@ import { PdfViewer } from "../../components/PdfViewer";
 import { Picker } from "../../components/Picker";
 import { Field } from "../../components/Sheet";
 import type { Catalog } from "../../hooks/useCatalog";
-import { useInverseToast } from "../../hooks/useChangeToast";
 import { useInvoicePreview } from "../../hooks/useInvoicePreview";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useToast } from "../../hooks/useToast";
@@ -35,7 +33,6 @@ import {
   TERMS_OPTIONS,
   toDraftInput,
 } from "../../lib/invoices";
-import { FILE_MANAGER } from "../../lib/platform";
 import type { BillableEntry, InvoiceProfile } from "../../lib/types";
 import { EditorSection } from "./EditorSection";
 import { LineItems } from "./LineItems";
@@ -107,7 +104,6 @@ export function InvoiceEditor({
   const [ready, setReady] = useState<BillableEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const showToast = useToast();
-  const confirmInverse = useInverseToast();
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [picking, setPicking] = useState(false);
@@ -310,7 +306,6 @@ export function InvoiceEditor({
     run(async () => {
       const id = await store();
       const done = await api.finalizeInvoice(id);
-      // No Undo: finalizing spends the number and freezes the invoice.
       showToast({
         message: `Finalized ${done.number ?? "the invoice"}`,
         tone: "success",
@@ -323,14 +318,7 @@ export function InvoiceEditor({
       if (!input) throw new Error("Finish the draft before exporting");
       const path = await api.exportInvoicePdf({ draft: input });
       if (path) {
-        showToast({
-          message: `Draft PDF saved to ${path}`,
-          tone: "success",
-          action: {
-            label: `Show in ${FILE_MANAGER}`,
-            onAction: () => void revealItemInDir(path),
-          },
-        });
+        showToast({ message: `Draft PDF saved to ${path}`, tone: "success" });
       }
     });
 
@@ -338,18 +326,7 @@ export function InvoiceEditor({
     run(async () => {
       if (draftId) {
         await api.deleteDraftInvoice(draftId);
-        // The editor holds the whole draft, so Undo saves it again as a new
-        // draft; its time is checked afresh and a conflict is reported.
-        const held = input && savedKey !== null && !dirty ? input : null;
-        confirmInverse(
-          "Draft deleted",
-          held
-            ? {
-                run: () => api.saveInvoiceDraft({ ...held, id: undefined }),
-                undone: "Draft restored",
-              }
-            : undefined,
-        );
+        showToast({ message: "Draft deleted", tone: "success" });
       }
       onExit();
     });

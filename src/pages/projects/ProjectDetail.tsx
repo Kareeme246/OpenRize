@@ -13,9 +13,10 @@ import {
 } from "../../components/Page";
 import { Tooltip } from "../../components/Tooltip";
 import type { Catalog } from "../../hooks/useCatalog";
-import { useChangeToast, useInverseToast } from "../../hooks/useChangeToast";
+import { useChangeToast } from "../../hooks/useChangeToast";
 import { useEntryReview } from "../../hooks/useEntryReview";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
+import { useToast } from "../../hooks/useToast";
 import * as api from "../../lib/api";
 import { describeError } from "../../lib/api";
 import { addDays, bucketLabel, startOfWeek } from "../../lib/dates";
@@ -97,12 +98,12 @@ export function ProjectDetail({
   onChanged,
 }: ProjectDetailProps) {
   const review = useEntryReview();
+  const showToast = useToast();
   const [data, setData] = useState<DetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const confirmChange = useChangeToast();
-  const confirmInverse = useInverseToast();
   const client = project.clientId
     ? catalog.clientById.get(project.clientId)
     : undefined;
@@ -162,17 +163,13 @@ export function ProjectDetail({
   useTauriEvent(api.ENTRIES_CHANGED, () => void load());
 
   const setStatus = async (status: string): Promise<void> => {
-    const previous = project.status;
     try {
       await api.updateProject(project.id, { status });
       setActionError(null);
       onChanged();
-      confirmInverse(`"${project.name}" ${STATUS_DONE[status] ?? "updated"}`, {
-        run: async () => {
-          await api.updateProject(project.id, { status: previous });
-          onChanged();
-        },
-        undone: `"${project.name}" is ${previous} again`,
+      showToast({
+        message: `"${project.name}" ${STATUS_DONE[status] ?? "updated"}`,
+        tone: "success",
       });
     } catch (cause) {
       setActionError(describeError(cause));
@@ -182,9 +179,10 @@ export function ProjectDetail({
   const remove = async (): Promise<void> => {
     setConfirmDelete(false);
     try {
-      await confirmChange(() => api.deleteProject(project.id), {
-        message: `Deleted "${project.name}"`,
-      });
+      await confirmChange(
+        () => api.deleteProject(project.id),
+        `Deleted "${project.name}"`,
+      );
       onChanged();
       onBack();
     } catch (cause) {

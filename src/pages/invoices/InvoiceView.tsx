@@ -1,4 +1,3 @@
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useState } from "react";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import {
@@ -8,6 +7,7 @@ import {
   SkeletonRows,
 } from "../../components/Page";
 import { PdfViewer } from "../../components/PdfViewer";
+import { useToast } from "../../hooks/useToast";
 import * as api from "../../lib/api";
 import {
   displayStatus,
@@ -15,7 +15,6 @@ import {
   formatUsd,
   termsLabel,
 } from "../../lib/invoices";
-import { FILE_MANAGER } from "../../lib/platform";
 import type { Invoice } from "../../lib/types";
 import { StatusPill } from "./StatusPill";
 
@@ -38,9 +37,7 @@ export function InvoiceView({
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [pdf, setPdf] = useState<Uint8Array | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<{ text: string; path?: string } | null>(
-    null,
-  );
+  const showToast = useToast();
   const [busy, setBusy] = useState(false);
   const [confirmVoid, setConfirmVoid] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -60,13 +57,18 @@ export function InvoiceView({
     void load();
   }, [load]);
 
-  const act = async (action: () => Promise<void>): Promise<void> => {
+  /** Runs `action`, then confirms it with `message`. */
+  const act = async (
+    action: () => Promise<void>,
+    message: string,
+  ): Promise<void> => {
     setBusy(true);
     setError(null);
     try {
       await action();
       onChanged();
       await load();
+      showToast({ message, tone: "success" });
     } catch (cause) {
       setError(api.describeError(cause));
     } finally {
@@ -79,7 +81,9 @@ export function InvoiceView({
     setError(null);
     try {
       const path = await api.exportInvoicePdf({ id: invoiceId });
-      if (path) setNotice({ text: `PDF saved to ${path}`, path });
+      if (path) {
+        showToast({ message: `PDF saved to ${path}`, tone: "success" });
+      }
     } catch (cause) {
       setError(api.describeError(cause));
     } finally {
@@ -92,6 +96,10 @@ export function InvoiceView({
     setError(null);
     try {
       await api.deleteVoidInvoice(invoiceId);
+      showToast({
+        message: `Deleted ${invoice?.number ?? "the invoice"}`,
+        tone: "success",
+      });
       onChanged();
       onBack();
     } catch (cause) {
@@ -168,28 +176,6 @@ export function InvoiceView({
       <div className="grid min-h-0 flex-1 grid-cols-[300px_1fr] max-[900px]:grid-cols-1">
         <aside className="min-h-0 space-y-4 overflow-y-auto border-line border-r p-4 text-[12px]">
           {error && <InlineError message={error} />}
-          {notice && (
-            <p
-              role="status"
-              className="rounded-lg border border-line bg-panel px-3 py-2 text-[11.5px] text-fg-soft"
-            >
-              {notice.text}
-              {notice.path && (
-                <>
-                  {" "}
-                  <button
-                    type="button"
-                    className="text-fg underline"
-                    onClick={() =>
-                      notice.path && void revealItemInDir(notice.path)
-                    }
-                  >
-                    Show in {FILE_MANAGER}
-                  </button>
-                </>
-              )}
-            </p>
-          )}
           <div>
             <p className="text-fg-soft">Amount due</p>
             <p className="font-semibold text-[24px] text-fg-strong tabular-nums">
@@ -219,7 +205,10 @@ export function InvoiceView({
                 className={BUTTON_SECONDARY}
                 disabled={busy}
                 onClick={() =>
-                  void act(() => api.setInvoicePaid(invoice.id, true))
+                  void act(
+                    () => api.setInvoicePaid(invoice.id, true),
+                    `${invoice.number ?? "Invoice"} marked paid`,
+                  )
                 }
               >
                 Mark paid
@@ -231,7 +220,10 @@ export function InvoiceView({
                 className={BUTTON_SECONDARY}
                 disabled={busy}
                 onClick={() =>
-                  void act(() => api.setInvoicePaid(invoice.id, false))
+                  void act(
+                    () => api.setInvoicePaid(invoice.id, false),
+                    `${invoice.number ?? "Invoice"} marked unpaid`,
+                  )
                 }
               >
                 Mark unpaid
@@ -268,7 +260,10 @@ export function InvoiceView({
           confirmLabel="Void invoice"
           onConfirm={() => {
             setConfirmVoid(false);
-            void act(() => api.voidInvoice(invoice.id));
+            void act(
+              () => api.voidInvoice(invoice.id),
+              `${invoice.number ?? "Invoice"} voided`,
+            );
           }}
           onCancel={() => setConfirmVoid(false)}
         />

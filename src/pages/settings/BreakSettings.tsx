@@ -7,6 +7,7 @@ import {
 import { Tooltip } from "../../components/Tooltip";
 import { useBreaks } from "../../hooks/useBreaks";
 import { useSettings } from "../../hooks/useSettings";
+import { useToast } from "../../hooks/useToast";
 import * as api from "../../lib/api";
 import { SNOOZE_CHOICES } from "../../lib/breaks";
 import { formatTime } from "../../lib/format";
@@ -227,6 +228,7 @@ function newSchedule(): ScheduledBreak {
 
 /** Settings > Notifications: interval reminders and scheduled breaks. */
 export function BreakSettingsGroups() {
+  const showToast = useToast();
   const { settings, update } = useSettings();
   const breaks = settings.breaks;
   const { state } = useBreaks();
@@ -377,13 +379,17 @@ export function BreakSettingsGroups() {
             key={schedule.id || index}
             schedule={schedule}
             onChange={(patch) => changeSchedule(index, patch)}
-            onDelete={() =>
+            onDelete={() => {
               change({
                 schedules: breaks.schedules.filter(
                   (_, position) => position !== index,
                 ),
-              })
-            }
+              });
+              showToast({
+                message: `Deleted "${schedule.label}"`,
+                tone: "success",
+              });
+            }}
           />
         ))}
         <div className="px-4 py-3">

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { FIELD, TEXTAREA_FIELD } from "../../components/Page";
 import { Picker } from "../../components/Picker";
 import { Field, Sheet } from "../../components/Sheet";
+import { useToast } from "../../hooks/useToast";
 import * as api from "../../lib/api";
 import { describeError } from "../../lib/api";
 import { addDays, localDateString, parseLocalDate } from "../../lib/dates";
@@ -48,6 +49,7 @@ export function ProjectSheet({
   onClose,
   onSaved,
 }: ProjectSheetProps) {
+  const showToast = useToast();
   const [name, setName] = useState(project?.name ?? draft?.name ?? "");
   const [color, setColor] = useState(
     () =>
@@ -144,6 +146,10 @@ export function ProjectSheet({
           });
       onSaved(saved);
       onClose();
+      showToast({
+        message: project ? `Saved "${saved.name}"` : `Created "${saved.name}"`,
+        tone: "success",
+      });
     } catch (cause) {
       setError(describeError(cause));
     } finally {
@@ -217,7 +223,7 @@ export function ProjectSheet({
                 value: client.id,
                 label: client.name,
               })),
-              { value: "__new", label: "+ New client…" },
+              { value: "__new", label: "+ New client" },
             ]}
             variant="field"
           />

@@ -2,6 +2,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { ToastProvider } from "./hooks/useToast";
 import Pulse from "./Pulse";
 import Reminder from "./Reminder";
 import "./styles/app.css";
@@ -16,7 +17,11 @@ if (label === "reminder")
 function Root() {
   if (label === "pulse") return <Pulse />;
   if (label === "reminder") return <Reminder />;
-  return <App />;
+  return (
+    <ToastProvider>
+      <App />
+    </ToastProvider>
+  );
 }
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

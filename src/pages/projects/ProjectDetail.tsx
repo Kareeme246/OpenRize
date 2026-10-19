@@ -13,8 +13,10 @@ import {
 } from "../../components/Page";
 import { Tooltip } from "../../components/Tooltip";
 import type { Catalog } from "../../hooks/useCatalog";
+import { useChangeToast } from "../../hooks/useChangeToast";
 import { useEntryReview } from "../../hooks/useEntryReview";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
+import { useToast } from "../../hooks/useToast";
 import * as api from "../../lib/api";
 import { describeError } from "../../lib/api";
 import { addDays, bucketLabel, startOfWeek } from "../../lib/dates";
@@ -79,6 +81,13 @@ interface DetailData {
  * open the review panel), the apps and rules that feed it, and the
  * Complete / Archive / Delete actions.
  */
+/** What a status change did, for its toast. */
+const STATUS_DONE: Record<string, string> = {
+  completed: "marked complete",
+  active: "reopened",
+  archived: "archived",
+};
+
 export function ProjectDetail({
   project,
   stats,
@@ -89,10 +98,12 @@ export function ProjectDetail({
   onChanged,
 }: ProjectDetailProps) {
   const review = useEntryReview();
+  const showToast = useToast();
   const [data, setData] = useState<DetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const confirmChange = useChangeToast();
   const client = project.clientId
     ? catalog.clientById.get(project.clientId)
     : undefined;
@@ -156,6 +167,10 @@ export function ProjectDetail({
       await api.updateProject(project.id, { status });
       setActionError(null);
       onChanged();
+      showToast({
+        message: `"${project.name}" ${STATUS_DONE[status] ?? "updated"}`,
+        tone: "success",
+      });
     } catch (cause) {
       setActionError(describeError(cause));
     }
@@ -164,7 +179,10 @@ export function ProjectDetail({
   const remove = async (): Promise<void> => {
     setConfirmDelete(false);
     try {
-      await api.deleteProject(project.id);
+      await confirmChange(
+        () => api.deleteProject(project.id),
+        `Deleted "${project.name}"`,
+      );
       onChanged();
       onBack();
     } catch (cause) {

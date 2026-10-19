@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { FIELD, TEXTAREA_FIELD } from "../../components/Page";
 import { Field, Sheet } from "../../components/Sheet";
+import { useToast } from "../../hooks/useToast";
 import * as api from "../../lib/api";
 import { describeError } from "../../lib/api";
 import type { Client } from "../../lib/types";
@@ -20,6 +21,7 @@ const CURRENCY = /^[A-Za-z]{3}$/;
  * currency its projects fall back to, and a note.
  */
 export function ClientSheet({ client, onClose, onSaved }: ClientSheetProps) {
+  const showToast = useToast();
   const [name, setName] = useState(client?.name ?? "");
   const [email, setEmail] = useState(client?.email ?? "");
   const [address, setAddress] = useState(client?.address ?? "");
@@ -61,6 +63,10 @@ export function ClientSheet({ client, onClose, onSaved }: ClientSheetProps) {
           });
       onSaved(saved);
       onClose();
+      showToast({
+        message: client ? `Saved "${saved.name}"` : `Created "${saved.name}"`,
+        tone: "success",
+      });
     } catch (cause) {
       setError(describeError(cause));
     } finally {

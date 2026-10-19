@@ -3,6 +3,7 @@ import { Tabs } from "../components/Page";
 import { Picker } from "../components/Picker";
 import { Tooltip } from "../components/Tooltip";
 import { useTauriEvent } from "../hooks/useTauriEvent";
+import { useToast } from "../hooks/useToast";
 import * as api from "../lib/api";
 import type { AppRecord, Category, Project } from "../lib/types";
 import { AppsTimeline } from "./AppsTimeline";
@@ -47,6 +48,7 @@ export function Apps() {
       .catch((err: unknown) => console.error("Failed to refresh apps", err));
   });
 
+  const showToast = useToast();
   const handleUpdate = async (
     app: AppRecord,
     changes: {
@@ -67,8 +69,21 @@ export function Apps() {
         changes.excluded !== undefined ? changes.excluded : app.excluded,
       );
       setApps((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+      const name = app.displayName;
+      const message =
+        changes.excluded !== undefined
+          ? `"${name}" ${changes.excluded ? "excluded from tracking" : "tracked again"}`
+          : `Default ${changes.defaultCategoryId !== undefined ? "category" : "project"} for "${name}" ${
+              (changes.defaultCategoryId ?? changes.defaultProjectId)
+                ? "set"
+                : "cleared"
+            }`;
+      showToast({ message, tone: "success" });
     } catch (err) {
-      console.error("Failed to update app", err);
+      showToast({
+        message: `Couldn't update "${app.displayName}": ${api.describeError(err)}`,
+        tone: "error",
+      });
     }
   };
 

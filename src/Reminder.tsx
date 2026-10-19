@@ -337,7 +337,7 @@ function ReminderCard({
                 Pause reminders until tomorrow
               </MenuItem>
               <MenuItem onClick={() => act(api.openBreakSettings())}>
-                Reminder settings…
+                Reminder settings
               </MenuItem>
             </Menu>
           )}

@@ -21,6 +21,7 @@ import { Picker } from "../components/Picker";
 import { Tooltip } from "../components/Tooltip";
 import { type Catalog, useCatalog } from "../hooks/useCatalog";
 import { useTauriEvent } from "../hooks/useTauriEvent";
+import { useToast } from "../hooks/useToast";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
 import { assignableClients, clientLabel } from "../lib/clients";
@@ -70,6 +71,7 @@ export function Projects({ route, navigate, replace }: ProjectsProps) {
   const [editing, setEditing] = useState<Editing>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const showToast = useToast();
   const [loaded, setLoaded] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const now = Date.now();
@@ -173,6 +175,7 @@ export function Projects({ route, navigate, replace }: ProjectsProps) {
     setSuggestions((list) => list.filter((entry) => entry.key !== key));
     try {
       await api.dismissProjectSuggestion(key);
+      showToast({ message: "Suggestion dismissed", tone: "success" });
     } catch (cause) {
       setError(describeError(cause));
     }

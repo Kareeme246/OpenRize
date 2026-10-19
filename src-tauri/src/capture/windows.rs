@@ -2,8 +2,8 @@
 //! the executable's version resource, and a browser's URL read from its
 //! address bar through UI Automation.
 //!
-//! Everything here runs on the activity sampler thread, which owns the COM
-//! apartment and the per-thread caches below.
+//! Sampling runs on the activity sampler thread, which owns the COM apartment
+//! and per-thread caches. Power notifications have their own message loop.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -44,9 +44,120 @@ impl AppNapAssertion {
     }
 }
 
-/// Sleep needs no hook: the sampler thread is suspended with the machine,
-/// and the gap it sees on wake closes the open segment (activity.rs).
-pub fn register_sleep_listeners(_app: tauri::AppHandle) {}
+/// Message-only windows do not receive broadcasts implicitly. Explicitly
+/// register this HWND for suspend/resume, including automatic background wakes.
+pub fn register_sleep_listeners(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        if let Err(error) = power_message_loop(app) {
+            eprintln!("could not listen for system sleep: {error}");
+        }
+    });
+}
+
+fn power_message_loop(app: tauri::AppHandle) -> windows::core::Result<()> {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::System::Power::{
+        RegisterSuspendResumeNotification, UnregisterSuspendResumeNotification,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, DispatchMessageW, GetMessageW, RegisterClassW,
+        SetWindowLongPtrW, UnregisterClassW, DEVICE_NOTIFY_WINDOW_HANDLE, GWLP_USERDATA,
+        HWND_MESSAGE, MSG, WNDCLASSW,
+    };
+
+    // SAFETY: this thread owns the window and message pump. `app` stays at a
+    // stable stack address until after DestroyWindow; the callback only borrows
+    // it synchronously on this thread. No HWND or pointer escapes the loop.
+    unsafe {
+        let instance = GetModuleHandleW(None)?.into();
+        let class = w!("OpenRizeSystemPower");
+        let definition = WNDCLASSW {
+            lpfnWndProc: Some(power_window_proc),
+            hInstance: instance,
+            lpszClassName: class,
+            ..Default::default()
+        };
+        if RegisterClassW(&definition) == 0 {
+            return Err(windows::core::Error::from_win32());
+        }
+        let window = match CreateWindowExW(
+            Default::default(),
+            class,
+            w!(""),
+            Default::default(),
+            0,
+            0,
+            0,
+            0,
+            Some(HWND_MESSAGE),
+            None,
+            Some(instance),
+            None,
+        ) {
+            Ok(window) => window,
+            Err(error) => {
+                let _ = UnregisterClassW(class, Some(instance));
+                return Err(error);
+            }
+        };
+        SetWindowLongPtrW(
+            window,
+            GWLP_USERDATA,
+            (&app as *const tauri::AppHandle) as isize,
+        );
+        let result = (|| {
+            let registration =
+                RegisterSuspendResumeNotification(HANDLE(window.0), DEVICE_NOTIFY_WINDOW_HANDLE)?;
+            let mut message = MSG::default();
+            let result = loop {
+                match GetMessageW(&mut message, None, 0, 0).0 {
+                    -1 => break Err(windows::core::Error::from_win32()),
+                    0 => break Ok(()),
+                    _ => {
+                        DispatchMessageW(&message);
+                    }
+                }
+            };
+            let _ = UnregisterSuspendResumeNotification(registration);
+            result
+        })();
+        let _ = DestroyWindow(window);
+        let _ = UnregisterClassW(class, Some(instance));
+        result
+    }
+}
+
+unsafe extern "system" fn power_window_proc(
+    window: HWND,
+    message: u32,
+    wparam: windows::Win32::Foundation::WPARAM,
+    lparam: LPARAM,
+) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::Foundation::LRESULT;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        DefWindowProcW, GetWindowLongPtrW, GWLP_USERDATA, PBT_APMRESUMEAUTOMATIC, PBT_APMSUSPEND,
+        WM_POWERBROADCAST,
+    };
+
+    // SAFETY: Windows calls this on the window's owning thread. USERDATA is
+    // either null during creation or the live AppHandle in power_message_loop.
+    unsafe {
+        if message == WM_POWERBROADCAST {
+            let event = match wparam.0 as u32 {
+                PBT_APMSUSPEND => Some(super::PowerEvent::Suspend),
+                PBT_APMRESUMEAUTOMATIC => Some(super::PowerEvent::Resume),
+                _ => None,
+            };
+            let app = GetWindowLongPtrW(window, GWLP_USERDATA) as *const tauri::AppHandle;
+            if let (Some(event), Some(app)) = (event, app.as_ref()) {
+                super::power_event(app, event);
+                return LRESULT(1);
+            }
+        }
+        DefWindowProcW(window, message, wparam, lparam)
+    }
+}
 
 /// Hosts the windows of packaged (UWP) apps; the app itself is a child
 /// window owned by another process.

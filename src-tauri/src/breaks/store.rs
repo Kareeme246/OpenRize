@@ -63,19 +63,47 @@ pub fn set_planned(conn: &Connection, id: &str, planned_ms: u64, now: u64) -> Re
     .map_err(|error| error.to_string())
 }
 
-/// A break the app quit during has no end. Close it where its segment ended.
+/// Keep the Calendar's segment and break decision in agreement, atomically.
+pub(super) fn complete_sleep(
+    conn: &Connection,
+    id: &str,
+    ended_at: u64,
+    now: u64,
+) -> Result<(), String> {
+    let transaction = conn
+        .unchecked_transaction()
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "UPDATE segments SET ended_at = ?2
+         WHERE id = (SELECT segment_id FROM breaks WHERE id = ?1) AND kind = 'break'",
+            params![id, ended_at as i64],
+        )
+        .map_err(|error| error.to_string())?;
+    set_ended(&transaction, id, ended_at, now)?;
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+/// Normal quit stamps ended_at in on_exit. A still-open taken row means the
+/// app died without that callback: honor the active break's planned duration.
 pub fn close_orphans(conn: &Connection, now: u64) -> Result<(), String> {
-    conn.execute(
-        "UPDATE breaks
-         SET ended_at = COALESCE(
-               (SELECT ended_at FROM segments WHERE segments.id = breaks.segment_id),
-               started_at),
-             updated_at = ?1
+    let mut statement = conn
+        .prepare(
+            "SELECT id, started_at + planned_ms FROM breaks
          WHERE status = 'taken' AND started_at IS NOT NULL AND ended_at IS NULL",
-        params![now as i64],
-    )
-    .map(|_| ())
-    .map_err(|error| error.to_string())
+        )
+        .map_err(|error| error.to_string())?;
+    let unfinished = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    for (id, ended_at) in unfinished {
+        complete_sleep(conn, &id, ended_at, now)?;
+    }
+    Ok(())
 }
 
 /// Breaks that started (or, if never taken, came due) in `[since, until)`.
@@ -188,7 +216,7 @@ mod tests {
     }
 
     #[test]
-    fn an_orphaned_break_is_closed_where_its_segment_ended() {
+    fn an_unclean_shutdown_completes_the_break_at_its_planned_end() {
         let conn = conn();
         conn.execute(
             "INSERT INTO segments (id, app, title, kind, started_at, ended_at)
@@ -200,7 +228,88 @@ mod tests {
         conn.execute("UPDATE breaks SET segment_id = 7 WHERE id = 'a'", [])
             .unwrap();
         close_orphans(&conn, 100_000).unwrap();
-        assert_eq!(list(&conn, 0, 10_000).unwrap()[0].ended_at, Some(90_000));
+        close_orphans(&conn, 200_000).unwrap(); // Reconciliation is idempotent.
+        assert_eq!(list(&conn, 0, 10_000).unwrap()[0].ended_at, Some(302_000));
+        assert_eq!(
+            conn.query_row("SELECT ended_at FROM segments WHERE id = 7", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            302_000
+        );
+    }
+
+    #[test]
+    fn startup_repairs_an_open_segment_but_leaves_normal_quit_and_stop_alone() {
+        let conn = conn();
+        conn.execute(
+            "INSERT INTO segments (id, app, title, kind, started_at)
+             VALUES (7, 'Break', 'Break', 'break', 2000)",
+            [],
+        )
+        .unwrap();
+        let mut active = record("crash", STATUS_TAKEN, Some(2_000));
+        active.segment_id = Some(7);
+        insert(&conn, &active, 5).unwrap();
+        insert(&conn, &record("quit-or-stop", STATUS_TAKEN, Some(3_000)), 6).unwrap();
+        set_ended(&conn, "quit-or-stop", 90_000, 90_000).unwrap();
+        insert(&conn, &record("skipped", STATUS_SKIPPED, None), 7).unwrap();
+        // Exercise the actual startup order: ActivityStore first closes open
+        // segments at their start; breaks::init then reconciles decisions.
+        let activity = crate::activity::ActivityStore::from_conn(conn).unwrap();
+        close_orphans(activity.conn(), 600_000).unwrap();
+        let all = list(activity.conn(), 0, 1_000_000).unwrap();
+        assert_eq!(
+            all.iter().find(|row| row.id == "crash").unwrap().ended_at,
+            Some(302_000)
+        );
+        assert_eq!(
+            all.iter()
+                .find(|row| row.id == "quit-or-stop")
+                .unwrap()
+                .ended_at,
+            Some(90_000)
+        );
+        assert_eq!(
+            all.iter().find(|row| row.id == "skipped").unwrap().ended_at,
+            None
+        );
+        assert_eq!(
+            activity
+                .conn()
+                .query_row("SELECT ended_at FROM segments WHERE id = 7", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            302_000
+        );
+    }
+
+    #[test]
+    fn ordinary_sleep_leaves_the_gap_alone() {
+        let conn = conn();
+        conn.execute(
+            "INSERT INTO segments (app, title, kind, started_at, ended_at)
+             VALUES ('Code', 'Editor', 'activity', 2000, 90000)",
+            [],
+        )
+        .unwrap();
+        close_orphans(&conn, 600_000).unwrap();
+        assert!(list(&conn, 0, 1_000_000).unwrap().is_empty());
+        assert_eq!(
+            conn.query_row("SELECT ended_at FROM segments", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            90_000
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM segments", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            1
+        );
     }
 
     #[test]

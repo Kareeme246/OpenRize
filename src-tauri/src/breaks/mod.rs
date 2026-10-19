@@ -113,6 +113,22 @@ pub fn after_tick(app: &AppHandle, keeps_display_awake: bool, away: bool) {
     run(app, &settings, now, |engine| engine.step(&input));
 }
 
+/// Native suspend/resume notifications share the engine lock with ticks and commands.
+pub(crate) fn power_event(app: &AppHandle, event: crate::capture::PowerEvent) {
+    let now = now_epoch_ms();
+    let settings = app.state::<AppState>().settings_snapshot().breaks;
+    run(app, &settings, now, |engine| {
+        let segment_id = app
+            .state::<AppState>()
+            .activity
+            .lock()
+            .ok()
+            .and_then(|activity| activity.live_state(now).segment_info())
+            .map(|segment| segment.id);
+        engine.power_event(event, now, segment_id)
+    });
+}
+
 /// The frontend (or the tray) asks for a break action.
 pub fn command(app: &AppHandle, command: Command) -> Result<BreakState, String> {
     let now = now_epoch_ms();
@@ -311,6 +327,17 @@ fn apply(app: &AppHandle, engine: &mut Engine, effects: Vec<Effect>, now: u64) {
                     let _ = crate::commands::start_timer(app.clone(), timer);
                 }
             }
+            Effect::Sleep { id, ended_at } => {
+                let state = app.state::<AppState>();
+                let result = state
+                    .activity
+                    .lock()
+                    .map_err(|error| error.to_string())
+                    .and_then(|mut activity| checkpoint_sleep(&mut activity, &id, ended_at, now));
+                if let Err(error) = result {
+                    eprintln!("could not checkpoint the sleeping break: {error}");
+                }
+            }
             Effect::Record(record) => {
                 with_store(app, |conn| store::insert(conn, &record, now));
             }
@@ -320,6 +347,16 @@ fn apply(app: &AppHandle, engine: &mut Engine, effects: Vec<Effect>, now: u64) {
             Effect::Chime => chime(),
         }
     }
+}
+
+fn checkpoint_sleep(
+    activity: &mut crate::activity::ActivityStore,
+    id: &str,
+    ended_at: u64,
+    now: u64,
+) -> Result<(), String> {
+    activity.close_active_segment(now)?;
+    store::complete_sleep(activity.conn(), id, ended_at, now)
 }
 
 fn begin(
@@ -406,4 +443,68 @@ fn local_day_start(now: u64) -> u64 {
         .and_hms_opt(0, 0, 0)
         .and_then(|midnight| Local.from_local_datetime(&midnight).earliest())
         .map_or(0, |start| start.timestamp_millis().max(0) as u64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::capture::PowerEvent;
+
+    #[test]
+    fn suspend_checkpoints_the_decision_and_segment_before_wake_or_restart() {
+        let mut activity = crate::activity::ActivityStore::from_conn(
+            rusqlite::Connection::open_in_memory().unwrap(),
+        )
+        .unwrap();
+        let settings = BreakSettings::default();
+        let start = 1_000_000;
+        let mut engine = Engine::new(0, None);
+        let Effect::Begin {
+            mut record, label, ..
+        } = engine
+            .command(Command::StartBreak, start, &settings)
+            .remove(0)
+        else {
+            panic!("expected a taken break");
+        };
+        activity
+            .start_session("break", Some(&label), start)
+            .unwrap();
+        record.segment_id = activity
+            .live_state(start)
+            .segment_info()
+            .map(|segment| segment.id);
+        engine.attach_segment(record.segment_id);
+        store::insert(activity.conn(), &record, start).unwrap();
+        let sleep_at = start + 5_000;
+        let effects = engine.power_event(PowerEvent::Suspend, sleep_at, record.segment_id);
+        let [Effect::Sleep { id, ended_at }] = effects.as_slice() else {
+            panic!("expected the suspend checkpoint");
+        };
+        checkpoint_sleep(&mut activity, id, *ended_at, sleep_at).unwrap();
+        assert!(activity.live_state(sleep_at).segment_info().is_none());
+        let planned_end = start + record.planned_ms;
+        let saved = store::list(activity.conn(), 0, sleep_at + 1).unwrap();
+        assert_eq!(saved[0].ended_at, Some(planned_end));
+        assert_eq!(saved[0].status, "taken");
+        assert_eq!(
+            activity
+                .conn()
+                .query_row("SELECT ended_at FROM segments", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            planned_end as i64
+        );
+        // A crash after the suspend checkpoint cannot shorten it on launch.
+        store::close_orphans(activity.conn(), planned_end + 60_000).unwrap();
+        assert_eq!(
+            store::list(activity.conn(), 0, sleep_at + 1).unwrap(),
+            saved
+        );
+        assert!(
+            matches!(engine.power_event(PowerEvent::Resume, planned_end + 60_000, None).as_slice(),
+            [Effect::Finish { ended_at, close_segment: false, .. }] if *ended_at == planned_end)
+        );
+    }
 }

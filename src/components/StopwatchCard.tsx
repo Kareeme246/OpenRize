@@ -1,10 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  elapsedMs,
-  formatDuration,
-  type Timer,
-  type TimerSavedState,
-} from "../lib/timers";
+import { useCallback, useRef, useState } from "react";
+import { elapsedMs, formatDuration, type Timer } from "../lib/timers";
 import type { Category, Project } from "../lib/types";
 import { useDismiss } from "../pages/timesheets/useDismiss";
 import { AddTimeSheet } from "./AddTimeSheet";
@@ -24,7 +19,7 @@ interface StopwatchCardProps {
   onAddSegment: (id: string, durationMs: number) => void;
   onUpdateSegment: (id: string, segmentId: number, durationMs: number) => void;
   onDeleteSegment: (id: string, segmentId: number) => void;
-  onSaveState: (id: string) => Promise<TimerSavedState | null>;
+  onSaveState: (id: string) => void;
   onDelete: (id: string) => void;
   categories: Category[];
   projects: Project[];
@@ -54,8 +49,6 @@ export function StopwatchCard({
   const [dialog, setDialog] = useState<"time" | "calendar" | "saved" | null>(
     null,
   );
-  /** What the last save recorded, shown briefly as confirmation. */
-  const [savedMs, setSavedMs] = useState<number | null>(null);
   /** Frozen when "Add to calendar" opens, so the prefilled range holds still. */
   const [calendarRange, setCalendarRange] = useState<{
     start: number;
@@ -72,18 +65,6 @@ export function StopwatchCard({
   const startRename = (): void => {
     setDraft(timer.label);
     setEditing(true);
-  };
-
-  useEffect(() => {
-    if (savedMs === null) return;
-    const handle = window.setTimeout(() => setSavedMs(null), 2500);
-    return () => window.clearTimeout(handle);
-  }, [savedMs]);
-
-  const saveState = (): void => {
-    void onSaveState(timer.id).then((saved) => {
-      if (saved !== null) setSavedMs(saved.elapsedMs);
-    });
   };
 
   const openCalendar = (): void => {
@@ -103,7 +84,7 @@ export function StopwatchCard({
       <TimerMenu
         label={timer.label}
         canAddToCalendar={elapsed >= 60_000}
-        onSaveState={saveState}
+        onSaveState={() => onSaveState(timer.id)}
         onShowSavedStates={() => setDialog("saved")}
         onRename={startRename}
         onEditTime={() => setDialog("time")}
@@ -174,15 +155,6 @@ export function StopwatchCard({
           onDelete={(segmentId) => onDeleteSegment(timer.id, segmentId)}
           onClose={() => setDialog(null)}
         />
-      )}
-
-      {savedMs !== null && (
-        <div
-          role="status"
-          className="pointer-events-none absolute inset-x-0 bottom-1 text-center text-[10.5px] leading-none text-fg-faint"
-        >
-          Saved {formatDuration(savedMs)}
-        </div>
       )}
 
       {dialog === "saved" && (

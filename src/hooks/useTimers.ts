@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
-import type { Timer, TimerSavedState } from "../lib/timers";
+import type { Timer } from "../lib/timers";
 import { useTauriEvent } from "./useTauriEvent";
 
 export interface TimersApi {
@@ -18,8 +18,7 @@ export interface TimersApi {
   addSegment: (id: string, durationMs: number) => void;
   updateSegment: (id: string, segmentId: number, durationMs: number) => void;
   deleteSegment: (id: string, segmentId: number) => void;
-  /** Resolves with the saved state, or null when the save failed. */
-  saveState: (id: string) => Promise<TimerSavedState | null>;
+  saveState: (id: string) => void;
   remove: (id: string) => void;
 }
 
@@ -100,15 +99,12 @@ export function useTimers(): TimersApi {
       send(api.deleteTimerSegment(id, segmentId)),
     [send],
   );
-  // A save changes nothing about the timers, so unlike the rest it has no
-  // list to adopt; the caller gets the saved state back.
-  const saveState = useCallback(async (id: string) => {
-    try {
-      return await api.saveTimerState(id);
-    } catch (cause) {
-      setError(describeError(cause));
-      return null;
-    }
+  // A save changes nothing about the timers, so there is no list to adopt;
+  // it is read back through the Saved states sheet.
+  const saveState = useCallback((id: string) => {
+    api
+      .saveTimerState(id)
+      .catch((cause: unknown) => setError(describeError(cause)));
   }, []);
   const remove = useCallback((id: string) => send(api.deleteTimer(id)), [send]);
 

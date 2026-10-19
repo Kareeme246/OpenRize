@@ -110,6 +110,7 @@ export function Timers({ api: propApi, revealTimer }: TimersProps = {}) {
                 onAddSegment={api.addSegment}
                 onUpdateSegment={api.updateSegment}
                 onDeleteSegment={api.deleteSegment}
+                onSaveState={api.saveState}
                 onDelete={api.remove}
                 categories={catalog.categories}
                 projects={catalog.projects}

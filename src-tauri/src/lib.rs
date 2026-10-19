@@ -201,6 +201,8 @@ pub fn run() {
             commands::add_timer_segment,
             commands::update_timer_segment,
             commands::delete_timer_segment,
+            commands::save_timer_state,
+            commands::list_timer_saved_states,
             commands::delete_timer,
             commands::activity_snapshot,
             commands::set_capture_enabled,

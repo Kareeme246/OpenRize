@@ -9,6 +9,16 @@ export interface TimerSegment {
   recordedAt: number;
 }
 
+/** A snapshot taken on demand; `savedAt` is epoch milliseconds. */
+export interface TimerSavedState {
+  id: number;
+  timerId: string;
+  /** The timer's label when it was saved. */
+  label: string;
+  elapsedMs: number;
+  savedAt: number;
+}
+
 export interface Timer {
   id: string;
   label: string;

@@ -5,6 +5,7 @@ import { useDismiss } from "../pages/timesheets/useDismiss";
 import { AddTimeSheet } from "./AddTimeSheet";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { HourRing } from "./HourRing";
+import { TimerSavedStatesSheet } from "./TimerSavedStatesSheet";
 import { TimerSegmentsSheet } from "./TimerSegmentsSheet";
 import { Tooltip } from "./Tooltip";
 
@@ -18,6 +19,7 @@ interface StopwatchCardProps {
   onAddSegment: (id: string, durationMs: number) => void;
   onUpdateSegment: (id: string, segmentId: number, durationMs: number) => void;
   onDeleteSegment: (id: string, segmentId: number) => void;
+  onSaveState: (id: string) => void;
   onDelete: (id: string) => void;
   categories: Category[];
   projects: Project[];
@@ -33,6 +35,7 @@ export function StopwatchCard({
   onAddSegment,
   onUpdateSegment,
   onDeleteSegment,
+  onSaveState,
   onDelete,
   categories,
   projects,
@@ -43,7 +46,9 @@ export function StopwatchCard({
   const [draft, setDraft] = useState(timer.label);
   /** Which confirmation is up, if any. Both destroy real accumulated time. */
   const [pending, setPending] = useState<"reset" | "delete" | null>(null);
-  const [dialog, setDialog] = useState<"time" | "calendar" | null>(null);
+  const [dialog, setDialog] = useState<"time" | "calendar" | "saved" | null>(
+    null,
+  );
   /** Frozen when "Add to calendar" opens, so the prefilled range holds still. */
   const [calendarRange, setCalendarRange] = useState<{
     start: number;
@@ -79,6 +84,8 @@ export function StopwatchCard({
       <TimerMenu
         label={timer.label}
         canAddToCalendar={elapsed >= 60_000}
+        onSaveState={() => onSaveState(timer.id)}
+        onShowSavedStates={() => setDialog("saved")}
         onRename={startRename}
         onEditTime={() => setDialog("time")}
         onAddToCalendar={openCalendar}
@@ -150,6 +157,10 @@ export function StopwatchCard({
         />
       )}
 
+      {dialog === "saved" && (
+        <TimerSavedStatesSheet timer={timer} onClose={() => setDialog(null)} />
+      )}
+
       {dialog === "calendar" && calendarRange !== null && (
         <AddTimeSheet
           date={new Date(calendarRange.start)}
@@ -179,7 +190,7 @@ export function StopwatchCard({
       {pending === "delete" && (
         <ConfirmDialog
           title={`Delete "${timer.label}"?`}
-          body={`This tracker and its ${formatDuration(elapsed)} will be gone.`}
+          body={`This tracker, its ${formatDuration(elapsed)} and its saved states will be gone.`}
           confirmLabel="Delete"
           onConfirm={() => {
             setPending(null);
@@ -195,6 +206,8 @@ export function StopwatchCard({
 interface TimerMenuProps {
   label: string;
   canAddToCalendar: boolean;
+  onSaveState: () => void;
+  onShowSavedStates: () => void;
   onRename: () => void;
   onEditTime: () => void;
   onAddToCalendar: () => void;
@@ -206,6 +219,8 @@ interface TimerMenuProps {
 function TimerMenu({
   label,
   canAddToCalendar,
+  onSaveState,
+  onShowSavedStates,
   onRename,
   onEditTime,
   onAddToCalendar,
@@ -267,6 +282,9 @@ function TimerMenu({
           role="menu"
           className="absolute top-full right-0 z-30 mt-1 w-48 rounded-lg border border-line bg-panel p-1 shadow-black/40 shadow-xl"
         >
+          {item("Save state", onSaveState)}
+          {item("Saved states...", onShowSavedStates)}
+          <hr className="my-1 border-line" />
           {item("Rename", onRename)}
           {item("Edit time...", onEditTime)}
           {item("Add to calendar...", onAddToCalendar, {

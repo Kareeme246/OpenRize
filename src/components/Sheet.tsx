@@ -10,6 +10,8 @@ interface SheetProps {
   canSubmit?: boolean;
   error?: string | null;
   width?: "sm" | "md" | "lg";
+  /** False where changes apply as they are made, so there is nothing to cancel. */
+  cancellable?: boolean;
   children: ReactNode;
 }
 
@@ -28,6 +30,7 @@ export function Sheet({
   canSubmit = true,
   error,
   width = "md",
+  cancellable = true,
   children,
 }: SheetProps) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -88,9 +91,15 @@ export function Sheet({
           </div>
         )}
         <div className="flex justify-end gap-2 border-line border-t px-5 py-3">
-          <button type="button" onClick={onClose} className={BUTTON_SECONDARY}>
-            Cancel
-          </button>
+          {cancellable && (
+            <button
+              type="button"
+              onClick={onClose}
+              className={BUTTON_SECONDARY}
+            >
+              Cancel
+            </button>
+          )}
           <button
             type="submit"
             disabled={!canSubmit}

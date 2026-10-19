@@ -1,12 +1,11 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { elapsedMs, formatDuration, type Timer } from "../lib/timers";
 import type { Category, Project } from "../lib/types";
 import { useDismiss } from "../pages/timesheets/useDismiss";
 import { AddTimeSheet } from "./AddTimeSheet";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { HourRing } from "./HourRing";
-import { TimerSavedStatesSheet } from "./TimerSavedStatesSheet";
-import { TimerSegmentsSheet } from "./TimerSegmentsSheet";
+import { TimerInfoSheet } from "./TimerInfoSheet";
 import { Tooltip } from "./Tooltip";
 
 interface StopwatchCardProps {
@@ -49,9 +48,7 @@ export function StopwatchCard({
   const [draft, setDraft] = useState(timer.label);
   /** Which confirmation is up, if any. Both destroy real accumulated time. */
   const [pending, setPending] = useState<"reset" | "delete" | null>(null);
-  const [dialog, setDialog] = useState<"time" | "calendar" | "saved" | null>(
-    null,
-  );
+  const [dialog, setDialog] = useState<"info" | "calendar" | null>(null);
   /** Frozen when "Add to calendar" opens, so the prefilled range holds still. */
   const [calendarRange, setCalendarRange] = useState<{
     start: number;
@@ -88,9 +85,7 @@ export function StopwatchCard({
         label={timer.label}
         canAddToCalendar={elapsed >= 60_000}
         onSaveState={() => onSaveState(timer.id)}
-        onShowSavedStates={() => setDialog("saved")}
-        onRename={startRename}
-        onEditTime={() => setDialog("time")}
+        onInfo={() => setDialog("info")}
         onAddToCalendar={openCalendar}
         onReset={() => setPending("reset")}
         onDelete={() => setPending("delete")}
@@ -119,10 +114,7 @@ export function StopwatchCard({
             <Tooltip content="Double-click to rename">
               <button
                 type="button"
-                onDoubleClick={() => {
-                  setDraft(timer.label);
-                  setEditing(true);
-                }}
+                onDoubleClick={startRename}
                 className="min-w-0 truncate text-center text-[13px] font-semibold text-fg-strong hover:text-accent transition-colors"
               >
                 {timer.label}
@@ -146,11 +138,12 @@ export function StopwatchCard({
         {formatDuration(elapsed)}
       </div>
 
-      {dialog === "time" && (
-        <TimerSegmentsSheet
+      {dialog === "info" && (
+        <TimerInfoSheet
           timer={timer}
           total={elapsed}
           runningMs={elapsed - timer.accumulatedMs}
+          onRename={(label) => onRename(timer.id, label)}
           onAdd={(durationMs) => onAddSegment(timer.id, durationMs)}
           onUpdate={(segmentId, durationMs) =>
             onUpdateSegment(timer.id, segmentId, durationMs)
@@ -158,10 +151,6 @@ export function StopwatchCard({
           onDelete={(segmentId) => onDeleteSegment(timer.id, segmentId)}
           onClose={() => setDialog(null)}
         />
-      )}
-
-      {dialog === "saved" && (
-        <TimerSavedStatesSheet timer={timer} onClose={() => setDialog(null)} />
       )}
 
       {dialog === "calendar" && calendarRange !== null && (
@@ -210,9 +199,7 @@ interface TimerMenuProps {
   label: string;
   canAddToCalendar: boolean;
   onSaveState: () => void;
-  onShowSavedStates: () => void;
-  onRename: () => void;
-  onEditTime: () => void;
+  onInfo: () => void;
   onAddToCalendar: () => void;
   onReset: () => void;
   onDelete: () => void;
@@ -223,9 +210,7 @@ function TimerMenu({
   label,
   canAddToCalendar,
   onSaveState,
-  onShowSavedStates,
-  onRename,
-  onEditTime,
+  onInfo,
   onAddToCalendar,
   onReset,
   onDelete,
@@ -234,6 +219,27 @@ function TimerMenu({
   const ref = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
   useDismiss(open, ref, close);
+
+  // A card near the bottom of the window opens its menu upward instead of
+  // past the edge, measured before paint so it never flickers.
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [above, setAbove] = useState(false);
+  useLayoutEffect(() => {
+    if (!open) {
+      setAbove(false);
+      return;
+    }
+    const menu = menuRef.current;
+    if (menu === null) return;
+    const { top, bottom } = menu.getBoundingClientRect();
+    const height = bottom - top;
+    const button = menu.parentElement?.getBoundingClientRect();
+    setAbove(
+      bottom > window.innerHeight - 8 &&
+        button !== undefined &&
+        button.top - height > 8,
+    );
+  }, [open]);
 
   const item = (
     text: string,
@@ -282,15 +288,14 @@ function TimerMenu({
       </button>
       {open && (
         <div
+          ref={menuRef}
           role="menu"
-          className="absolute top-full right-0 z-30 mt-1 w-48 rounded-lg border border-line bg-panel p-1 shadow-black/40 shadow-xl"
+          className={`absolute right-0 z-30 ${above ? "bottom-full mb-1" : "top-full mt-1"} w-48 rounded-lg border border-line bg-panel p-1 shadow-black/40 shadow-xl`}
         >
-          {item("Save state", onSaveState)}
-          {item("Saved states...", onShowSavedStates)}
+          {item("Info", onInfo)}
           <hr className="my-1 border-line" />
-          {item("Rename", onRename)}
-          {item("Edit time...", onEditTime)}
-          {item("Add to calendar...", onAddToCalendar, {
+          {item("Save state", onSaveState)}
+          {item("Add to calendar", onAddToCalendar, {
             disabled: !canAddToCalendar,
             hint: "Needs at least a minute of tracked time",
           })}

@@ -9,6 +9,7 @@ import { Sidebar } from "./components/Sidebar";
 import { Toaster } from "./components/Toaster";
 import { TopBar } from "./components/TopBar";
 import { useBreaks } from "./hooks/useBreaks";
+import { HISTORY_LANE } from "./hooks/useChangeToast";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { SettingsProvider } from "./hooks/useSettings";
 import { useTauriEvent } from "./hooks/useTauriEvent";
@@ -167,6 +168,7 @@ export default function App() {
             label
               ? {
                   message: `${redo ? "Redid" : "Undid"} ${label.toLowerCase()}`,
+                  lane: HISTORY_LANE,
                   action: {
                     label: redo ? "Undo" : "Redo",
                     onAction: () => run(!redo),
@@ -277,7 +279,7 @@ export default function App() {
     setCalendarMount((count) => count + 1);
   });
 
-  // The break reminder's "Reminder settings…".
+  // The break reminder's "Reminder settings".
   useTauriEvent(api.OPEN_BREAK_SETTINGS, () => {
     navigate({ name: "settings", section: "notifications" });
   });

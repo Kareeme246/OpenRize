@@ -31,6 +31,11 @@ export interface ToastOptions {
   action?: ToastAction;
   /** Milliseconds on screen while not paused. Defaults depend on the toast. */
   duration?: number;
+  /**
+   * Toasts about one ordered history, like entry undo: a newer toast in the
+   * lane takes the action off older ones, which could no longer run in order.
+   */
+  lane?: string;
 }
 
 export interface Toast {
@@ -39,6 +44,7 @@ export interface Toast {
   tone: ToastTone;
   action?: ToastAction;
   duration: number;
+  lane?: string;
 }
 
 const BASE_MS = 4000;
@@ -58,28 +64,39 @@ function defaultDuration({ tone, action }: ToastOptions): number {
 export type ShowToast = (options: ToastOptions) => void;
 
 interface ToastState {
-  /** What the toast shows. */
-  current: Toast | null;
+  /** Newest first. `<Toaster />` shows the first few; the rest wait their turn. */
+  stack: Toast[];
   /**
-   * The newest toast raised while `current` was held under the pointer or
-   * focus. Only one waits: anything newer replaces it, so toasts never pile up.
+   * Raised while the stack was held under the pointer or focus, newest first.
+   * They join the front once it is let go, so nothing shifts under a click.
    */
-  next: Toast | null;
+  pending: Toast[];
 }
 
 export interface ToasterApi {
-  current: Toast | null;
+  /** Newest first. */
+  toasts: Toast[];
   dismiss: (id: number) => void;
-  /** The viewer is reading or reaching for `current`: don't swap it out. */
+  /** The viewer is reading or reaching into the stack: don't add to it. */
   hold: (held: boolean) => void;
 }
 
 const ShowContext = createContext<ShowToast>(() => undefined);
 const ToasterContext = createContext<ToasterApi>({
-  current: null,
+  toasts: [],
   dismiss: () => undefined,
   hold: () => undefined,
 });
+
+/** `toasts` without the action of any in `lane`. */
+function retire(toasts: Toast[], lane: string | undefined): Toast[] {
+  if (lane === undefined) return toasts;
+  return toasts.map((toast) =>
+    toast.lane === lane && toast.action
+      ? { ...toast, action: undefined }
+      : toast,
+  );
+}
 
 /** Raises a toast from anywhere under `ToastProvider`. Stable across renders. */
 export function useToast(): ShowToast {
@@ -92,7 +109,7 @@ export function useToaster(): ToasterApi {
 }
 
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<ToastState>({ current: null, next: null });
+  const [state, setState] = useState<ToastState>({ stack: [], pending: [] });
   const nextId = useRef(1);
   const held = useRef(false);
 
@@ -103,34 +120,37 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       tone: options.tone ?? "neutral",
       action: options.action,
       duration: options.duration ?? defaultDuration(options),
+      lane: options.lane,
     };
-    // A new result replaces the old one, unless the viewer is on it right now.
-    setState((previous) =>
-      held.current && previous.current
-        ? { ...previous, next: toast }
-        : { current: toast, next: null },
-    );
+    setState((previous) => {
+      const stack = retire(previous.stack, toast.lane);
+      const pending = retire(previous.pending, toast.lane);
+      return held.current && stack.length > 0
+        ? { stack, pending: [toast, ...pending] }
+        : { stack: [toast, ...pending, ...stack], pending: [] };
+    });
   }, []);
 
   const dismiss = useCallback((id: number): void => {
-    setState((previous) =>
-      previous.current?.id === id
-        ? { current: previous.next, next: null }
-        : previous,
-    );
+    setState((previous) => ({
+      stack: previous.stack.filter((toast) => toast.id !== id),
+      pending: previous.pending.filter((toast) => toast.id !== id),
+    }));
   }, []);
 
   const hold = useCallback((next: boolean): void => {
     held.current = next;
     if (next) return;
     setState((previous) =>
-      previous.next ? { current: previous.next, next: null } : previous,
+      previous.pending.length > 0
+        ? { stack: [...previous.pending, ...previous.stack], pending: [] }
+        : previous,
     );
   }, []);
 
   const toaster = useMemo<ToasterApi>(
-    () => ({ current: state.current, dismiss, hold }),
-    [state.current, dismiss, hold],
+    () => ({ toasts: state.stack, dismiss, hold }),
+    [state.stack, dismiss, hold],
   );
 
   return (

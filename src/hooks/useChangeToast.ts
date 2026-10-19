@@ -4,6 +4,12 @@ import { plural } from "../lib/format";
 import type { UpdateTimeEntry } from "../lib/types";
 import { useToast } from "./useToast";
 
+/**
+ * Entry history runs newest first, so only the newest toast about it offers
+ * Undo (or ⌘Z's Redo): an older one's could no longer apply.
+ */
+export const HISTORY_LANE = "history";
+
 export interface ChangeToast {
   message: string;
   /** False where the store refuses the inverse, e.g. removing approved time. */
@@ -62,6 +68,7 @@ export function useChangeToast(): <T>(
       showToast({
         message,
         tone: "success",
+        lane: HISTORY_LANE,
         action:
           seq === null
             ? undefined
@@ -71,7 +78,10 @@ export function useChangeToast(): <T>(
                   api
                     .undoChange(seq)
                     .then((label) =>
-                      showToast({ message: `Undid ${label.toLowerCase()}` }),
+                      showToast({
+                        message: `Undid ${label.toLowerCase()}`,
+                        lane: HISTORY_LANE,
+                      }),
                     )
                     .catch((cause: unknown) =>
                       showToast({

@@ -250,7 +250,7 @@ export function ProjectSheet({
                 value: client.id,
                 label: client.name,
               })),
-              { value: "__new", label: "+ New client…" },
+              { value: "__new", label: "+ New client" },
             ]}
             variant="field"
           />

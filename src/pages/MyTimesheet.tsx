@@ -20,6 +20,7 @@ import {
 import { Picker, type PickerOption } from "../components/Picker";
 import { Tooltip } from "../components/Tooltip";
 import { useCatalog } from "../hooks/useCatalog";
+import { describeUpdate, useChangeToast } from "../hooks/useChangeToast";
 import { useEntryReview } from "../hooks/useEntryReview";
 import { useSettings } from "../hooks/useSettings";
 import { useTauriEvent } from "../hooks/useTauriEvent";
@@ -335,6 +336,7 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
     navigate({ ...route, ...patch });
   };
 
+  const confirmChange = useChangeToast();
   const act = useCallback(
     async (action: () => Promise<TimeEntry[] | TimeEntry | undefined>) => {
       try {
@@ -357,7 +359,14 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
       .filter((entry) => entry.categoryId && !isInFlight(entry))
       .map((entry) => entry.id);
     if (ids.length === 0) return;
-    void act(() => api.approveTimeEntries(ids));
+    void act(() =>
+      confirmChange(
+        () => api.approveTimeEntries(ids),
+        ids.length === 1
+          ? "Entry approved"
+          : `Approved ${plural(ids.length, "entry", "entries")}`,
+      ),
+    );
     setSelected(new Set());
   };
 
@@ -562,22 +571,35 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
               categories={catalog.categories}
               onApprove={() => approveIds(selectedEntries)}
               onUnapprove={(ids) => {
-                void act(() => api.unapproveTimeEntries(ids));
+                void act(() =>
+                  confirmChange(
+                    () => api.unapproveTimeEntries(ids),
+                    `${plural(ids.length, "entry", "entries")} moved back to review`,
+                  ),
+                );
                 setSelected(new Set());
               }}
               onSetCategory={(categoryId) =>
                 void act(() =>
-                  api.updateTimeEntries(
-                    selectedEntries.map((entry) => entry.id),
-                    { categoryId },
+                  confirmChange(
+                    () =>
+                      api.updateTimeEntries(
+                        selectedEntries.map((entry) => entry.id),
+                        { categoryId },
+                      ),
+                    describeUpdate({ categoryId }, selectedEntries.length),
                   ),
                 )
               }
               onSetBillable={(billable) =>
                 void act(() =>
-                  api.updateTimeEntries(
-                    selectedEntries.map((entry) => entry.id),
-                    { billable },
+                  confirmChange(
+                    () =>
+                      api.updateTimeEntries(
+                        selectedEntries.map((entry) => entry.id),
+                        { billable },
+                      ),
+                    describeUpdate({ billable }, selectedEntries.length),
                   ),
                 )
               }
@@ -696,11 +718,21 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
                           onCheck={() => toggleSelected(entry.id)}
                           onOpen={() => review.select(entry.id)}
                           onUpdate={(patch) =>
-                            void act(() => api.updateTimeEntry(entry.id, patch))
+                            void act(() =>
+                              confirmChange(
+                                () => api.updateTimeEntry(entry.id, patch),
+                                describeUpdate(patch),
+                              ),
+                            )
                           }
                           onAccept={() => approveIds([entry])}
                           onUnapprove={() =>
-                            void act(() => api.unapproveTimeEntries([entry.id]))
+                            void act(() =>
+                              confirmChange(
+                                () => api.unapproveTimeEntries([entry.id]),
+                                "Entry moved back to review",
+                              ),
+                            )
                           }
                           onOpenInCalendar={() =>
                             navigate({
@@ -771,7 +803,12 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
               review.select(undefined);
             }
             void act(async () => {
-              await api.deleteTimeEntries(ids);
+              await confirmChange(
+                () => api.deleteTimeEntries(ids),
+                ids.length === 1
+                  ? "Entry deleted"
+                  : `Deleted ${plural(ids.length, "entry", "entries")}`,
+              );
               setSelected(new Set());
               await refresh();
               return undefined;

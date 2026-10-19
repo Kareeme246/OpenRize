@@ -910,47 +910,49 @@ function FieldSection({
         </span>
       </button>
 
-      {value && !locked && (
+      <div className="mt-1.5 flex items-start gap-2">
         <button
           type="button"
-          onClick={onDelete}
-          aria-label={`Delete ${label.toLowerCase()}`}
-          className="mt-1 float-right rounded px-1.5 text-[12px] text-fg-faint hover:bg-danger/10 hover:text-danger"
+          onClick={() => {
+            if (!locked && current) onPick(current.valueId);
+            else onActivate();
+          }}
+          title={
+            current && !locked ? `Deselect ${label.toLowerCase()}` : undefined
+          }
+          className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-left"
         >
-          ×
+          {current ? (
+            <Chip option={current} strong />
+          ) : isProjectEmpty ? (
+            <span className="text-[12px] text-fg-faint">No projects yet</span>
+          ) : (
+            <span className="text-[12px] text-fg-faint italic">
+              {field === "category" ? "No category yet" : "No project"}
+            </span>
+          )}
+          {changed && (
+            <span className="text-[10.5px] text-fg-faint">
+              AI suggested {nameOf(suggested ?? undefined)}
+            </span>
+          )}
+          {suggestion && !changed && value !== null && (
+            <span className="text-[10.5px] text-fg-faint">
+              {suggestion.outcome === "auto" ? "auto-approved" : "suggested"}
+            </span>
+          )}
         </button>
-      )}
-      <button
-        type="button"
-        onClick={() => {
-          if (!locked && current) onPick(current.valueId);
-          else onActivate();
-        }}
-        title={
-          current && !locked ? `Deselect ${label.toLowerCase()}` : undefined
-        }
-        className="mt-1.5 flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-left"
-      >
-        {current ? (
-          <Chip option={current} strong />
-        ) : isProjectEmpty ? (
-          <span className="text-[12px] text-fg-faint">No projects yet</span>
-        ) : (
-          <span className="text-[12px] text-fg-faint italic">
-            {field === "category" ? "No category yet" : "No project"}
-          </span>
+        {value && !locked && (
+          <button
+            type="button"
+            onClick={onDelete}
+            aria-label={`Delete ${label.toLowerCase()}`}
+            className="shrink-0 rounded px-1.5 text-[12px] text-fg-faint hover:bg-danger/10 hover:text-danger"
+          >
+            ×
+          </button>
         )}
-        {changed && (
-          <span className="text-[10.5px] text-fg-faint">
-            AI suggested {nameOf(suggested ?? undefined)}
-          </span>
-        )}
-        {suggestion && !changed && value !== null && (
-          <span className="text-[10.5px] text-fg-faint">
-            {suggestion.outcome === "auto" ? "auto-approved" : "suggested"}
-          </span>
-        )}
-      </button>
+      </div>
 
       {active &&
         !locked &&

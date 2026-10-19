@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { FIELD, TEXTAREA_FIELD } from "../../components/Page";
 import { Picker } from "../../components/Picker";
 import { Field, Sheet } from "../../components/Sheet";
+import { useToast } from "../../hooks/useToast";
 import * as api from "../../lib/api";
 import { TERMS_OPTIONS } from "../../lib/invoices";
 import { THIS_COMPUTER } from "../../lib/platform";
@@ -20,6 +21,7 @@ interface ProfileSheetProps {
  * keep their own copy, so editing this never rewrites an issued document.
  */
 export function ProfileSheet({ onClose, onSaved }: ProfileSheetProps) {
+  const showToast = useToast();
   const [profile, setProfile] = useState<InvoiceProfile | null>(null);
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
@@ -122,6 +124,7 @@ export function ProfileSheet({ onClose, onSaved }: ProfileSheetProps) {
       });
       onSaved(saved);
       onClose();
+      showToast({ message: "Invoice settings saved", tone: "success" });
     } catch (cause) {
       setError(api.describeError(cause));
     } finally {

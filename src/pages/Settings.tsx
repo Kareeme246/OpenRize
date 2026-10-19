@@ -18,6 +18,7 @@ import { useAiMetrics } from "../hooks/useAiMetrics";
 import { llmUnavailableReason, useAiStatus } from "../hooks/useAiStatus";
 import { useEnergy } from "../hooks/useEnergy";
 import { useSettings } from "../hooks/useSettings";
+import { useToast } from "../hooks/useToast";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
 import { formatShortDate } from "../lib/format";
@@ -952,12 +953,18 @@ export function Settings({
     api.aiRetrain().catch((cause: unknown) => setAiError(describeError(cause)));
   };
 
+  // Both resets are confirmed first and cannot be taken back: their toasts
+  // only report that they happened.
+  const showToast = useToast();
   const resetLearned = (): void => {
     setConfirmReset(false);
     setAiError(null);
     api
       .aiResetLearned(metricDays)
-      .then(adopt)
+      .then((next) => {
+        adopt(next);
+        showToast({ message: "Learned data reset", tone: "success" });
+      })
       .catch((cause: unknown) => setAiError(describeError(cause)));
   };
 
@@ -1633,7 +1640,14 @@ export function Settings({
                 loading={energyLoading}
                 selectedDays={energyDays}
                 onRangeChange={setEnergyDays}
-                onReset={resetEnergyHistory}
+                onReset={() =>
+                  resetEnergyHistory().then(() =>
+                    showToast({
+                      message: "Energy benchmark reset",
+                      tone: "success",
+                    }),
+                  )
+                }
               />
             </SettingGroup>
           </section>

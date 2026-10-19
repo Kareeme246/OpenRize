@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
-import type { Timer } from "../lib/timers";
+import { formatDuration, type Timer } from "../lib/timers";
 import { useTauriEvent } from "./useTauriEvent";
+import { useToast } from "./useToast";
 
 export interface TimersApi {
   timers: Timer[];
@@ -14,6 +15,8 @@ export interface TimersApi {
   start: (id: string) => void;
   pause: (id: string) => void;
   reset: (id: string) => void;
+  /** Resets without a toast, once the time has been logged elsewhere. */
+  clear: (id: string) => void;
   rename: (id: string, label: string) => void;
   addSegment: (id: string, durationMs: number) => void;
   updateSegment: (id: string, segmentId: number, durationMs: number) => void;
@@ -29,6 +32,8 @@ export function useTimers(): TimersApi {
   const [loading, setLoading] = useState<boolean>(cachedTimers === null);
   const [now, setNow] = useState<number>(() => Date.now());
   const [error, setError] = useState<string | null>(null);
+  const timersRef = useRef(timers);
+  timersRef.current = timers;
 
   const setTimers = useCallback((next: Timer[]) => {
     cachedTimers = next;
@@ -63,50 +68,105 @@ export function useTimers(): TimersApi {
   });
 
   // Every command answers with the full list, so state is replaced, never
-  // patched — the UI cannot invent a timer that is not on disk.
+  // patched — the UI cannot invent a timer that is not on disk. Resolves to
+  // that list, or null when the command failed.
   const send = useCallback(
-    (action: Promise<Timer[]>): void => {
+    (action: Promise<Timer[]>): Promise<Timer[] | null> =>
       action
-        .then(setTimers)
-        .catch((cause: unknown) => setError(describeError(cause)));
-    },
+        .then((next) => {
+          setTimers(next);
+          return next;
+        })
+        .catch((cause: unknown) => {
+          setError(describeError(cause));
+          return null;
+        }),
     [setTimers],
   );
 
+  const showToast = useToast();
+  const confirm = useCallback(
+    (action: Promise<Timer[]>, message: string): void => {
+      void send(action).then((next) => {
+        if (next) showToast({ message, tone: "success" });
+      });
+    },
+    [send, showToast],
+  );
+  const labelOf = useCallback(
+    (id: string): string =>
+      timersRef.current.find((timer) => timer.id === id)?.label ?? "Timer",
+    [],
+  );
   const create = useCallback(
-    (label: string) => send(api.createTimer(label)),
+    (label: string) => confirm(api.createTimer(label), `Created "${label}"`),
+    [confirm],
+  );
+  // Starting and pausing show on the card itself; a toast would only repeat it.
+  const start = useCallback(
+    (id: string) => void send(api.startTimer(id)),
     [send],
   );
-  const start = useCallback((id: string) => send(api.startTimer(id)), [send]);
-  const pause = useCallback((id: string) => send(api.pauseTimer(id)), [send]);
-  const reset = useCallback((id: string) => send(api.resetTimer(id)), [send]);
-  const rename = useCallback(
-    (id: string, label: string) => send(api.renameTimer(id, label)),
+  const pause = useCallback(
+    (id: string) => void send(api.pauseTimer(id)),
     [send],
+  );
+  const reset = useCallback(
+    (id: string) => confirm(api.resetTimer(id), `Reset "${labelOf(id)}"`),
+    [confirm, labelOf],
+  );
+  const clear = useCallback(
+    (id: string) => void send(api.resetTimer(id)),
+    [send],
+  );
+  const rename = useCallback(
+    (id: string, label: string) =>
+      confirm(api.renameTimer(id, label), `Renamed to "${label}"`),
+    [confirm],
   );
   const addSegment = useCallback(
     (id: string, durationMs: number) =>
-      send(api.addTimerSegment(id, durationMs)),
-    [send],
+      confirm(
+        api.addTimerSegment(id, durationMs),
+        `Added ${formatDuration(durationMs)} to "${labelOf(id)}"`,
+      ),
+    [confirm, labelOf],
   );
   const updateSegment = useCallback(
     (id: string, segmentId: number, durationMs: number) =>
-      send(api.updateTimerSegment(id, segmentId, durationMs)),
-    [send],
+      confirm(
+        api.updateTimerSegment(id, segmentId, durationMs),
+        `Segment changed to ${formatDuration(durationMs)}`,
+      ),
+    [confirm],
   );
   const deleteSegment = useCallback(
     (id: string, segmentId: number) =>
-      send(api.deleteTimerSegment(id, segmentId)),
-    [send],
+      confirm(
+        api.deleteTimerSegment(id, segmentId),
+        `Segment removed from "${labelOf(id)}"`,
+      ),
+    [confirm, labelOf],
   );
-  // A save changes nothing about the timers, so there is no list to adopt;
-  // it is read back through the Saved states sheet.
-  const saveState = useCallback((id: string) => {
-    api
-      .saveTimerState(id)
-      .catch((cause: unknown) => setError(describeError(cause)));
-  }, []);
-  const remove = useCallback((id: string) => send(api.deleteTimer(id)), [send]);
+  // A save changes nothing about the timers, so there is no list to adopt.
+  const saveState = useCallback(
+    (id: string) => {
+      api
+        .saveTimerState(id)
+        .then((saved) =>
+          showToast({
+            message: `Saved "${saved.label}" at ${formatDuration(saved.elapsedMs)}`,
+            tone: "success",
+          }),
+        )
+        .catch((cause: unknown) => setError(describeError(cause)));
+    },
+    [showToast],
+  );
+  const remove = useCallback(
+    (id: string) => confirm(api.deleteTimer(id), `Deleted "${labelOf(id)}"`),
+    [confirm, labelOf],
+  );
 
   return {
     timers,
@@ -117,6 +177,7 @@ export function useTimers(): TimersApi {
     start,
     pause,
     reset,
+    clear,
     rename,
     addSegment,
     updateSegment,

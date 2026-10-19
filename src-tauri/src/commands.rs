@@ -18,10 +18,11 @@ use crate::models::{
 use crate::projects::{HintPreview, ImportSummary, ProjectRule, ProjectStats, ProjectSuggestion};
 use crate::reports::{self, EntryFilter, ExportFormat, ExportResult, GroupBy, RollupCell};
 use crate::settings::Settings;
-use crate::timers::{now_epoch_ms, Timer, TimerSavedState};
+use crate::timers::{now_epoch_ms, Timer, TimerRestore, TimerSavedState};
 use crate::tray;
 use crate::updater::{self, UpdateStatus, UpdaterState};
 use crate::AppState;
+use serde::Serialize;
 
 type Timers = Result<Vec<Timer>, String>;
 
@@ -149,6 +150,26 @@ pub fn list_timer_saved_states(app: AppHandle, id: String) -> Result<Vec<TimerSa
     let state = app.state::<AppState>();
     let store = state.store.lock().map_err(|error| error.to_string())?;
     store.saved_states(&id)
+}
+
+/// Undoes a saved state: the toast's Undo after Save state.
+#[tauri::command]
+pub fn delete_timer_saved_state(app: AppHandle, state_id: i64) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let mut store = state.store.lock().map_err(|error| error.to_string())?;
+    store.delete_saved_state(state_id)
+}
+
+/// Undoes a timer delete, reset or segment delete from what the app held.
+#[tauri::command]
+pub fn restore_timer(app: AppHandle, restore: TimerRestore) -> Timers {
+    let timers = {
+        let state = app.state::<AppState>();
+        let mut store = state.store.lock().map_err(|error| error.to_string())?;
+        store.restore(&restore)?
+    };
+    refresh_tray(&app, &timers);
+    Ok(timers)
 }
 
 #[tauri::command]
@@ -702,6 +723,35 @@ pub fn undo(app: AppHandle, redo: bool) -> Result<Option<String>, String> {
         entries_changed(&app);
     }
     Ok(step.map(str::to_string))
+}
+
+/// The change an undo would take back next, so a confirmation can offer Undo
+/// for exactly the change it reports.
+#[derive(Serialize)]
+pub struct UndoHead {
+    seq: u64,
+    label: &'static str,
+}
+
+#[tauri::command]
+pub fn undo_head(app: AppHandle) -> Result<Option<UndoHead>, String> {
+    let state = app.state::<AppState>();
+    let store = state.activity.lock().map_err(|error| error.to_string())?;
+    Ok(store
+        .undo_head()
+        .map(|(seq, label)| UndoHead { seq, label }))
+}
+
+/// Undoes change `seq`, refusing when another change has been made since.
+#[tauri::command]
+pub fn undo_change(app: AppHandle, seq: u64) -> Result<String, String> {
+    let label = {
+        let state = app.state::<AppState>();
+        let mut store = state.activity.lock().map_err(|error| error.to_string())?;
+        store.undo_change(seq, now_epoch_ms())?
+    };
+    entries_changed(&app);
+    Ok(label.to_string())
 }
 
 #[tauri::command]

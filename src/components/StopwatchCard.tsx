@@ -15,6 +15,8 @@ interface StopwatchCardProps {
   onStart: (id: string) => void;
   onPause: (id: string) => void;
   onReset: (id: string) => void;
+  /** Resets quietly once "Add to calendar" has logged the time. */
+  onClear: (id: string) => void;
   onRename: (id: string, label: string) => void;
   onAddSegment: (id: string, durationMs: number) => void;
   onUpdateSegment: (id: string, segmentId: number, durationMs: number) => void;
@@ -31,6 +33,7 @@ export function StopwatchCard({
   onStart,
   onPause,
   onReset,
+  onClear,
   onRename,
   onAddSegment,
   onUpdateSegment,
@@ -170,7 +173,7 @@ export function StopwatchCard({
           categories={categories}
           projects={projects}
           onClose={() => setDialog(null)}
-          onCreated={() => onReset(timer.id)}
+          onCreated={() => onClear(timer.id)}
         />
       )}
 

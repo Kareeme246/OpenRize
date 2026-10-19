@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { useToast } from "../hooks/useToast";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
 import { localDateString, parseLocalDate } from "../lib/dates";
+import { formatDuration, formatShortDate } from "../lib/format";
 import type { Category, Project } from "../lib/types";
 import { FIELD } from "./Page";
 import { Picker } from "./Picker";
@@ -56,6 +58,7 @@ export function AddTimeSheet({
   const [billable, setBillable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const showToast = useToast();
 
   const startMs = at(day, start);
   const endMs = at(day, end);
@@ -82,6 +85,12 @@ export function AddTimeSheet({
         categoryId,
         projectId: projectId || undefined,
         billable,
+      });
+      // No Undo: hand-made time is approved as made, and approved time is
+      // locked until unapproved.
+      showToast({
+        message: `Added ${formatDuration(endMs - startMs)} on ${formatShortDate(startMs)}`,
+        tone: "success",
       });
       onCreated();
       onClose();

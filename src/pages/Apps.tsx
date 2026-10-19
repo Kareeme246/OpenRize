@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Tabs } from "../components/Page";
 import { Picker } from "../components/Picker";
 import { Tooltip } from "../components/Tooltip";
+import { useInverseToast } from "../hooks/useChangeToast";
 import { useTauriEvent } from "../hooks/useTauriEvent";
+import { useToast } from "../hooks/useToast";
 import * as api from "../lib/api";
 import type { AppRecord, Category, Project } from "../lib/types";
 import { AppsTimeline } from "./AppsTimeline";
@@ -47,6 +49,8 @@ export function Apps() {
       .catch((err: unknown) => console.error("Failed to refresh apps", err));
   });
 
+  const showToast = useToast();
+  const confirm = useInverseToast();
   const handleUpdate = async (
     app: AppRecord,
     changes: {
@@ -67,8 +71,46 @@ export function Apps() {
         changes.excluded !== undefined ? changes.excluded : app.excluded,
       );
       setApps((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+      const name = app.displayName;
+      const message =
+        changes.excluded !== undefined
+          ? `"${name}" ${changes.excluded ? "excluded from tracking" : "tracked again"}`
+          : `Default ${changes.defaultCategoryId !== undefined ? "category" : "project"} for "${name}" ${
+              (changes.defaultCategoryId ?? changes.defaultProjectId)
+                ? "set"
+                : "cleared"
+            }`;
+      // Undo writes the previous value back. A default that was never set
+      // cannot be written back as unset, so that change offers no Undo.
+      const restorable =
+        (changes.defaultCategoryId === undefined ||
+          app.defaultCategoryId !== undefined) &&
+        (changes.defaultProjectId === undefined ||
+          app.defaultProjectId !== undefined);
+      confirm(
+        message,
+        restorable
+          ? {
+              run: async () => {
+                const restored = await api.updateApp(
+                  app.id,
+                  app.defaultCategoryId,
+                  app.defaultProjectId,
+                  app.excluded,
+                );
+                setApps((prev) =>
+                  prev.map((a) => (a.id === restored.id ? restored : a)),
+                );
+              },
+              undone: `"${name}" changed back`,
+            }
+          : undefined,
+      );
     } catch (err) {
-      console.error("Failed to update app", err);
+      showToast({
+        message: `Couldn't update "${app.displayName}": ${api.describeError(err)}`,
+        tone: "error",
+      });
     }
   };
 

@@ -13,8 +13,10 @@ import { PdfViewer } from "../../components/PdfViewer";
 import { Picker } from "../../components/Picker";
 import { Field } from "../../components/Sheet";
 import type { Catalog } from "../../hooks/useCatalog";
+import { useInverseToast } from "../../hooks/useChangeToast";
 import { useInvoicePreview } from "../../hooks/useInvoicePreview";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { useToast } from "../../hooks/useToast";
 import * as api from "../../lib/api";
 import { assignableClients } from "../../lib/clients";
 import { addDays, localDateString, startOfDay } from "../../lib/dates";
@@ -104,9 +106,8 @@ export function InvoiceEditor({
   const [profile, setProfile] = useState<InvoiceProfile | null>(null);
   const [ready, setReady] = useState<BillableEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<{ text: string; path?: string } | null>(
-    null,
-  );
+  const showToast = useToast();
+  const confirmInverse = useInverseToast();
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [picking, setPicking] = useState(false);
@@ -235,7 +236,6 @@ export function InvoiceEditor({
 
   const update = useCallback((patch: Partial<DraftForm>): void => {
     setForm((previous) => (previous ? { ...previous, ...patch } : previous));
-    setNotice(null);
   }, []);
 
   const updateLine = (key: string, patch: Partial<DraftLine>): void =>
@@ -302,7 +302,7 @@ export function InvoiceEditor({
   const save = (): Promise<void> =>
     run(async () => {
       const id = await store();
-      setNotice({ text: "Draft saved." });
+      showToast({ message: "Draft saved", tone: "success" });
       onSaved(id);
     });
 
@@ -310,6 +310,11 @@ export function InvoiceEditor({
     run(async () => {
       const id = await store();
       const done = await api.finalizeInvoice(id);
+      // No Undo: finalizing spends the number and freezes the invoice.
+      showToast({
+        message: `Finalized ${done.number ?? "the invoice"}`,
+        tone: "success",
+      });
       onFinalized(done.id);
     });
 
@@ -317,12 +322,35 @@ export function InvoiceEditor({
     run(async () => {
       if (!input) throw new Error("Finish the draft before exporting");
       const path = await api.exportInvoicePdf({ draft: input });
-      if (path) setNotice({ text: `Draft PDF saved to ${path}`, path });
+      if (path) {
+        showToast({
+          message: `Draft PDF saved to ${path}`,
+          tone: "success",
+          action: {
+            label: `Show in ${FILE_MANAGER}`,
+            onAction: () => void revealItemInDir(path),
+          },
+        });
+      }
     });
 
   const remove = (): Promise<void> =>
     run(async () => {
-      if (draftId) await api.deleteDraftInvoice(draftId);
+      if (draftId) {
+        await api.deleteDraftInvoice(draftId);
+        // The editor holds the whole draft, so Undo saves it again as a new
+        // draft; its time is checked afresh and a conflict is reported.
+        const held = input && savedKey !== null && !dirty ? input : null;
+        confirmInverse(
+          "Draft deleted",
+          held
+            ? {
+                run: () => api.saveInvoiceDraft({ ...held, id: undefined }),
+                undone: "Draft restored",
+              }
+            : undefined,
+        );
+      }
       onExit();
     });
 
@@ -383,23 +411,6 @@ export function InvoiceEditor({
     <div className="flex h-full min-h-0 flex-col">
       <div className="shape-stack min-h-0 flex-1 space-y-3 overflow-y-auto p-4 [--gutter:1rem]">
         {error && <InlineError message={error} />}
-        {notice?.path && (
-          <p
-            role="status"
-            className="flex items-center gap-2 rounded-lg border border-line bg-panel px-3 py-2 text-[11.5px] text-fg-soft"
-          >
-            <span className="min-w-0 flex-1 truncate">{notice.text}</span>
-            {notice.path && (
-              <button
-                type="button"
-                className="shrink-0 text-fg underline"
-                onClick={() => notice.path && void revealItemInDir(notice.path)}
-              >
-                Show in {FILE_MANAGER}
-              </button>
-            )}
-          </p>
-        )}
 
         <EditorSection title="Client" defaultOpen summary={client?.name}>
           <Field label="Client" htmlFor="invoice-client">
@@ -666,9 +677,9 @@ export function InvoiceEditor({
         <h2 className="font-semibold text-[13px] text-fg-strong">
           {draftId ? "Edit draft invoice" : "Create draft invoice"}
         </h2>
-        {(dirty || (notice && !notice.path)) && (
+        {dirty && (
           <span role="status" className="text-[11px] text-fg-faint">
-            {dirty ? "Unsaved changes" : notice?.text}
+            Unsaved changes
           </span>
         )}
         <span className="flex-1" />

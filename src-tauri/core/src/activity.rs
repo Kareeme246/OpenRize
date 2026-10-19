@@ -185,11 +185,15 @@ mod deletions;
 mod history;
 #[cfg(test)]
 mod split_regressions;
+#[cfg(test)]
+mod undo_change;
 
 pub struct ActivityStore {
     conn: Connection,
-    undo_stack: Vec<history::Command>,
-    redo_stack: Vec<history::Command>,
+    undo_stack: Vec<history::Recorded>,
+    redo_stack: Vec<history::Recorded>,
+    /// The sequence number of the last recorded change.
+    last_change: u64,
     current: Option<Current>,
     pending_switch: Option<PendingSwitch>,
     capture_enabled: bool,
@@ -230,6 +234,7 @@ impl ActivityStore {
             conn,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            last_change: 0,
             current: None,
             pending_switch: None,
             capture_enabled: true,

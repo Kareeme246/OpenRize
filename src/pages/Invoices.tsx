@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { InlineError, PageHeader } from "../components/Page";
 import { useCatalog } from "../hooks/useCatalog";
 import { useTauriEvent } from "../hooks/useTauriEvent";
+import { useToast } from "../hooks/useToast";
 import * as api from "../lib/api";
 import type { InvoiceSummary, Route } from "../lib/types";
 import { InvoiceEditor } from "./invoices/InvoiceEditor";
@@ -25,6 +26,7 @@ interface InvoicesProps {
 export function Invoices({ route, navigate, replace }: InvoicesProps) {
   const catalog = useCatalog();
   const [invoices, setInvoices] = useState<InvoiceSummary[]>([]);
+  const showToast = useToast();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [settings, setSettings] = useState(false);
@@ -110,6 +112,9 @@ export function Invoices({ route, navigate, replace }: InvoicesProps) {
           onDeleteDraft={async (id) => {
             try {
               await api.deleteDraftInvoice(id);
+              // No Undo: the list only holds the summary, not the draft's
+              // lines, so it could not be saved again as it was.
+              showToast({ message: "Draft deleted", tone: "success" });
               await refresh();
             } catch (cause) {
               setError(api.describeError(cause));

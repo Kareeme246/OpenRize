@@ -11,6 +11,7 @@ import {
   type SegmentedOption,
 } from "../components/SegmentedControl";
 import { useCatalog } from "../hooks/useCatalog";
+import { useChangeToast } from "../hooks/useChangeToast";
 import { useSettings } from "../hooks/useSettings";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import * as api from "../lib/api";
@@ -156,9 +157,12 @@ export function Timesheets({
   const go = (patch: Partial<TimesheetsRoute>): void =>
     navigate({ ...route, ...patch });
 
+  const confirmChange = useChangeToast();
   const approve = async (entry: TimeEntry): Promise<void> => {
     try {
-      await api.approveTimeEntries([entry.id]);
+      await confirmChange(() => api.approveTimeEntries([entry.id]), {
+        message: "Entry approved",
+      });
       setActionError(null);
       await refresh();
     } catch (cause) {

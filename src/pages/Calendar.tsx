@@ -10,6 +10,7 @@ import {
 } from "../components/Page";
 import { useAiStatus } from "../hooks/useAiStatus";
 import { useCatalog } from "../hooks/useCatalog";
+import { useChangeToast } from "../hooks/useChangeToast";
 import { useEntryReview } from "../hooks/useEntryReview";
 import { useSettings } from "../hooks/useSettings";
 import { useTauriEvent } from "../hooks/useTauriEvent";
@@ -88,6 +89,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
   const catalog = useCatalog();
   const { categoryById, projectById } = catalog;
   const review = useEntryReview(route.entryId);
+  const confirmChange = useChangeToast();
 
   const scale: CalendarScale = route.scale ?? "day";
   const date = useMemo(
@@ -360,7 +362,9 @@ export function Calendar({ route, navigate }: CalendarProps) {
         const idToDelete = review.selectedId;
         void (async () => {
           try {
-            await api.deleteTimeEntry(idToDelete);
+            await confirmChange(() => api.deleteTimeEntry(idToDelete), {
+              message: "Entry deleted",
+            });
             if (reviewing) {
               await advanceFrom(idToDelete);
             } else {
@@ -384,6 +388,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
     select,
     startReviewMode,
     advanceFrom,
+    confirmChange,
   ]);
 
   const daysInRange =
@@ -533,12 +538,16 @@ export function Calendar({ route, navigate }: CalendarProps) {
               }}
               onCreate={async (startedAt, endedAt) => {
                 try {
-                  await api.createTimeEntry({
-                    startedAt,
-                    endedAt,
-                    description: "Untitled session",
-                    review: true,
-                  });
+                  await confirmChange(
+                    () =>
+                      api.createTimeEntry({
+                        startedAt,
+                        endedAt,
+                        description: "Untitled session",
+                        review: true,
+                      }),
+                    { message: "Session added for review" },
+                  );
                   await refresh();
                 } catch (cause) {
                   setError(describeError(cause));

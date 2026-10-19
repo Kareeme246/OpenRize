@@ -6,11 +6,13 @@ import {
   useState,
 } from "react";
 import { Sidebar } from "./components/Sidebar";
+import { Toaster } from "./components/Toaster";
 import { TopBar } from "./components/TopBar";
 import { useBreaks } from "./hooks/useBreaks";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { SettingsProvider } from "./hooks/useSettings";
 import { useTauriEvent } from "./hooks/useTauriEvent";
+import { useToast } from "./hooks/useToast";
 import { useUpdates } from "./hooks/useUpdates";
 import * as api from "./lib/api";
 import { currentCalendarDay, localDateString } from "./lib/dates";
@@ -70,13 +72,7 @@ export default function App() {
     };
   }
   const [revealTimer, setRevealTimer] = useState<{ id: string }>();
-  const [undoError, setUndoError] = useState<string | null>(null);
-  // A fresh id per ⌘Z, so repeating the same undo restarts the notice.
-  const [undoNotice, setUndoNotice] = useState<{
-    id: number;
-    text: string;
-  } | null>(null);
-  const clearUndoNotice = useCallback(() => setUndoNotice(null), []);
+  const showToast = useToast();
   const undoBusy = useRef(false);
 
   const [captureEnabled, setCaptureEnabledState] = useState(true);
@@ -159,6 +155,39 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [navigate]);
 
+  // The toast offers the opposite step, so a slip of ⌘Z is one click to fix.
+  const runUndo = useCallback(
+    function run(redo: boolean): void {
+      if (undoBusy.current) return;
+      undoBusy.current = true;
+      void api
+        .undo(redo)
+        .then((label) =>
+          showToast(
+            label
+              ? {
+                  message: `${redo ? "Redid" : "Undid"} ${label.toLowerCase()}`,
+                  action: {
+                    label: redo ? "Undo" : "Redo",
+                    onAction: () => run(!redo),
+                  },
+                }
+              : { message: `Nothing to ${redo ? "redo" : "undo"}` },
+          ),
+        )
+        .catch((cause: unknown) =>
+          showToast({
+            message: `${redo ? "Redo" : "Undo"} failed: ${api.describeError(cause)}`,
+            tone: "error",
+          }),
+        )
+        .finally(() => {
+          undoBusy.current = false;
+        });
+    },
+    [showToast],
+  );
+
   // Leave native text undo alone. Entry history belongs to the app, so it
   // remains available after navigating away from the page that made it.
   useEffect(() => {
@@ -171,28 +200,11 @@ export default function App() {
       )
         return;
       event.preventDefault();
-      if (undoBusy.current) return;
-      undoBusy.current = true;
-      const redo = event.shiftKey;
-      void api
-        .undo(redo)
-        .then((label) => {
-          setUndoError(null);
-          setUndoNotice({
-            id: Date.now(),
-            text: label
-              ? `${redo ? "Redid" : "Undid"} ${label.toLowerCase()}`
-              : `Nothing to ${redo ? "redo" : "undo"}`,
-          });
-        })
-        .catch((cause: unknown) => setUndoError(api.describeError(cause)))
-        .finally(() => {
-          undoBusy.current = false;
-        });
+      runUndo(event.shiftKey);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [runUndo]);
 
   useTauriEvent<string>("open-timer", (id) => {
     setRevealTimer({ id });
@@ -363,21 +375,6 @@ export default function App() {
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={toggleSidebar}
         />
-        {undoError && (
-          <div
-            role="alert"
-            className="bg-danger-soft px-4 py-2 text-[12px] text-danger"
-          >
-            {undoError}
-          </div>
-        )}
-        {undoNotice && (
-          <UndoNotice
-            key={undoNotice.id}
-            text={undoNotice.text}
-            onDone={clearUndoNotice}
-          />
-        )}
         <div
           className={`grid min-h-0 flex-1 overflow-hidden transition-[grid-template-columns] duration-150 ${
             sidebarCollapsed
@@ -416,19 +413,7 @@ export default function App() {
           </div>
         </div>
       </div>
+      <Toaster />
     </SettingsProvider>
-  );
-}
-
-/** "Undid split": a brief pill confirming what ⌘Z did, then gone. */
-function UndoNotice({ text, onDone }: { text: string; onDone: () => void }) {
-  useEffect(() => {
-    const timer = window.setTimeout(onDone, 1800);
-    return () => window.clearTimeout(timer);
-  }, [onDone]);
-  return (
-    <output className="pointer-events-none fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-full border border-line-strong bg-surface-strong px-3.5 py-1.5 font-medium text-[12px] text-fg shadow-lg">
-      {text}
-    </output>
   );
 }

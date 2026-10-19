@@ -10,6 +10,7 @@ import {
 import { Picker } from "../../components/Picker";
 import { Tooltip } from "../../components/Tooltip";
 import type { Catalog } from "../../hooks/useCatalog";
+import { useInverseToast } from "../../hooks/useChangeToast";
 import * as api from "../../lib/api";
 import { describeError } from "../../lib/api";
 import type { ClientRollup } from "../../lib/clients";
@@ -73,11 +74,27 @@ export function ClientDetail({
   const currency = client.currency || "USD";
   const now = Date.now();
 
-  const run = async (action: () => Promise<unknown>): Promise<boolean> => {
+  const confirm = useInverseToast();
+  /** Runs `action`, then confirms it with `message` (and Undo, given `inverse`). */
+  const run = async (
+    action: () => Promise<unknown>,
+    message: string,
+    inverse?: () => Promise<unknown>,
+  ): Promise<boolean> => {
     try {
       await action();
       setActionError(null);
       onChanged();
+      confirm(
+        message,
+        inverse && {
+          run: async () => {
+            await inverse();
+            onChanged();
+          },
+          undone: "Change undone",
+        },
+      );
       return true;
     } catch (cause) {
       setActionError(describeError(cause));
@@ -87,7 +104,12 @@ export function ClientDetail({
 
   const remove = async (): Promise<void> => {
     setConfirmDelete(false);
-    if (await run(() => api.deleteClient(client.id))) onBack();
+    // No Undo: a client delete is outside the undo history and unlinks its
+    // projects, which nothing here could put back.
+    if (
+      await run(() => api.deleteClient(client.id), `Deleted "${client.name}"`)
+    )
+      onBack();
   };
 
   const attachable = useMemo(
@@ -174,8 +196,10 @@ export function ClientDetail({
           <button
             type="button"
             onClick={() =>
-              void run(() =>
-                api.updateClient(client.id, { archived: !archived }),
+              void run(
+                () => api.updateClient(client.id, { archived: !archived }),
+                `"${client.name}" ${archived ? "restored" : "archived"}`,
+                () => api.updateClient(client.id, { archived }),
               )
             }
             className={BUTTON_SECONDARY}
@@ -286,11 +310,19 @@ export function ClientDetail({
               placeholder="+ Attach project"
               disabled={archived || attachable.length === 0}
               options={attachable}
-              onChange={(projectId) =>
-                void run(() =>
-                  api.updateProject(projectId, { clientId: client.id }),
-                )
-              }
+              onChange={(projectId) => {
+                const project = catalog.projects.find(
+                  (candidate) => candidate.id === projectId,
+                );
+                void run(
+                  () => api.updateProject(projectId, { clientId: client.id }),
+                  `Attached "${project?.name ?? "project"}" to "${client.name}"`,
+                  () =>
+                    api.updateProject(projectId, {
+                      clientId: project?.clientId ?? null,
+                    }),
+                );
+              }}
               variant="compact"
             />
           </div>
@@ -356,8 +388,14 @@ export function ClientDetail({
                       <button
                         type="button"
                         onClick={() =>
-                          void run(() =>
-                            api.updateProject(project.id, { clientId: null }),
+                          void run(
+                            () =>
+                              api.updateProject(project.id, { clientId: null }),
+                            `Detached "${project.name}" from "${client.name}"`,
+                            () =>
+                              api.updateProject(project.id, {
+                                clientId: client.id,
+                              }),
                           )
                         }
                         className="justify-self-end text-[11.5px] text-fg-soft hover:text-danger"

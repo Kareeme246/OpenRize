@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { FIELD, TEXTAREA_FIELD } from "../../components/Page";
 import { Field, Sheet } from "../../components/Sheet";
+import { useInverseToast } from "../../hooks/useChangeToast";
 import * as api from "../../lib/api";
 import { describeError } from "../../lib/api";
 import type { Client } from "../../lib/types";
@@ -32,6 +33,7 @@ export function ClientSheet({ client, onClose, onSaved }: ClientSheetProps) {
   const [notes, setNotes] = useState(client?.notes ?? "");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const confirm = useInverseToast();
 
   const valid =
     name.trim() !== "" &&
@@ -61,6 +63,28 @@ export function ClientSheet({ client, onClose, onSaved }: ClientSheetProps) {
           });
       onSaved(saved);
       onClose();
+      // A new client has nothing linked yet, so removing it loses nothing; an
+      // edit is taken back by writing every field as it was.
+      confirm(
+        client ? `Saved "${saved.name}"` : `Created "${saved.name}"`,
+        client
+          ? {
+              run: () =>
+                api.updateClient(client.id, {
+                  name: client.name,
+                  email: client.email ?? null,
+                  address: client.address ?? null,
+                  defaultRate: client.defaultRate ?? null,
+                  currency: client.currency ?? null,
+                  notes: client.notes ?? null,
+                }),
+              undone: `Changes to "${client.name}" undone`,
+            }
+          : {
+              run: () => api.deleteClient(saved.id),
+              undone: `Removed "${saved.name}"`,
+            },
+      );
     } catch (cause) {
       setError(describeError(cause));
     } finally {

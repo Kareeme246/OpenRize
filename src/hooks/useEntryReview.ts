@@ -7,6 +7,7 @@ import type {
   RuleSuggestion,
   SuggestionField,
 } from "../lib/types";
+import { useChangeToast } from "./useChangeToast";
 import { useTauriEvent } from "./useTauriEvent";
 
 /**
@@ -22,7 +23,8 @@ export interface SplitStage {
  * The one entry review panel's state and commands, shared by every view that
  * opens it (Calendar, My Timesheet, Time Entries, a project's recent
  * entries). Each command goes to Rust and re-reads the panel; the views'
- * lists refresh from the `entries-changed` event those commands emit.
+ * lists refresh from the `entries-changed` event those commands emit. Each
+ * one that changes something is confirmed by a toast with Undo.
  */
 export interface EntryReview {
   selectedId?: string;
@@ -73,6 +75,7 @@ export function useEntryReview(initialId?: string): EntryReview {
   const pendingSplit = useRef<{ id: string; pick: boolean } | null>(null);
   const selectedRef = useRef(selectedId);
   selectedRef.current = selectedId;
+  const confirmChange = useChangeToast();
 
   const load = useCallback(async (id: string | undefined): Promise<void> => {
     if (!id) {
@@ -140,75 +143,113 @@ export function useEntryReview(initialId?: string): EntryReview {
   );
 
   const accept = useCallback(
-    (id: string) => run(() => api.approveTimeEntries([id])),
-    [run],
+    (id: string) =>
+      run(() =>
+        confirmChange(() => api.approveTimeEntries([id]), {
+          message: "Entry approved",
+        }),
+      ),
+    [run, confirmChange],
   );
   const reject = useCallback(
-    (id: string) => run(() => api.rejectTimeEntry(id)),
-    [run],
+    (id: string) =>
+      run(() =>
+        confirmChange(() => api.rejectTimeEntry(id), {
+          message: "Suggestion rejected",
+        }),
+      ),
+    [run, confirmChange],
   );
 
   const unapprove = useCallback(async (): Promise<void> => {
     if (!detail) return;
-    await run(() => api.unapproveTimeEntries([detail.entry.id]));
-  }, [detail, run]);
+    await run(() =>
+      confirmChange(() => api.unapproveTimeEntries([detail.entry.id]), {
+        message: "Entry moved back to review",
+      }),
+    );
+  }, [detail, run, confirmChange]);
 
   const setField = useCallback(
     async (field: SuggestionField, valueId: string | null): Promise<void> => {
       const id = selectedRef.current;
       if (!id) return;
+      const current =
+        field === "category"
+          ? detail?.entry.categoryId
+          : detail?.entry.projectId;
+      const cleared = valueId === current || !valueId;
       await run(() =>
-        api.updateTimeEntry(
-          id,
-          field === "category"
-            ? {
-                categoryId:
-                  valueId === detail?.entry.categoryId ? "" : (valueId ?? ""),
-              }
-            : {
-                projectId:
-                  valueId === detail?.entry.projectId ? "" : (valueId ?? ""),
-              },
+        confirmChange(
+          () =>
+            api.updateTimeEntry(
+              id,
+              field === "category"
+                ? { categoryId: cleared ? "" : valueId }
+                : { projectId: cleared ? "" : valueId },
+            ),
+          {
+            message: `${field === "category" ? "Category" : "Project"} ${
+              cleared ? "cleared" : "set"
+            }`,
+          },
         ),
       );
     },
-    [run, detail],
+    [run, detail, confirmChange],
   );
 
   const removeField = useCallback(
     async (field: SuggestionField, id: string): Promise<void> => {
       await run(() =>
-        field === "category" ? api.deleteCategory(id) : api.deleteProject(id),
+        confirmChange(
+          () =>
+            field === "category"
+              ? api.deleteCategory(id)
+              : api.deleteProject(id),
+          {
+            message: `${field === "category" ? "Category" : "Project"} deleted`,
+          },
+        ),
       );
     },
-    [run],
+    [run, confirmChange],
   );
 
   const toggleBillable = useCallback(async (): Promise<void> => {
     if (!detail) return;
+    const billable = !detail.entry.billable;
     await run(() =>
-      api.updateTimeEntry(detail.entry.id, {
-        billable: !detail.entry.billable,
+      confirmChange(() => api.updateTimeEntry(detail.entry.id, { billable }), {
+        message: billable ? "Marked billable" : "Marked non-billable",
       }),
     );
-  }, [detail, run]);
+  }, [detail, run, confirmChange]);
 
   const saveDescription = useCallback(
     async (description: string): Promise<void> => {
       if (!detail || description === "") return;
-      await run(() => api.updateTimeEntry(detail.entry.id, { description }));
+      await run(() =>
+        confirmChange(
+          () => api.updateTimeEntry(detail.entry.id, { description }),
+          { message: "Description saved" },
+        ),
+      );
     },
-    [detail, run],
+    [detail, run, confirmChange],
   );
 
   const setTimes = useCallback(
     async (startedAt: number, endedAt: number): Promise<void> => {
       if (!detail) return;
       await run(() =>
-        api.updateTimeEntry(detail.entry.id, { startedAt, endedAt }),
+        confirmChange(
+          () => api.updateTimeEntry(detail.entry.id, { startedAt, endedAt }),
+          { message: "Times updated" },
+        ),
       );
     },
-    [detail, run],
+    [detail, run, confirmChange],
   );
 
   const beginSplit = useCallback(
@@ -250,7 +291,10 @@ export function useEntryReview(initialId?: string): EntryReview {
         return false;
       }
       try {
-        const [first] = await api.splitTimeEntry(detail.entry.id, at);
+        const [first] = await confirmChange(
+          () => api.splitTimeEntry(detail.entry.id, at),
+          { message: "Entry split in two" },
+        );
         setError(null);
         setSplitting(null);
         setSelectedId(first.id);
@@ -261,14 +305,17 @@ export function useEntryReview(initialId?: string): EntryReview {
         return false;
       }
     },
-    [detail, load],
+    [detail, load, confirmChange],
   );
 
   const merge = useCallback(
     async (otherId: string): Promise<void> => {
       if (!detail) return;
       try {
-        const merged = await api.mergeTimeEntries(detail.entry.id, otherId);
+        const merged = await confirmChange(
+          () => api.mergeTimeEntries(detail.entry.id, otherId),
+          { message: "Entries merged" },
+        );
         setError(null);
         setSelectedId(merged.id);
         await load(merged.id);
@@ -276,19 +323,21 @@ export function useEntryReview(initialId?: string): EntryReview {
         setError(describeError(cause));
       }
     },
-    [detail, load],
+    [detail, load, confirmChange],
   );
 
   const remove = useCallback(async (): Promise<void> => {
     if (!detail) return;
     try {
-      await api.deleteTimeEntry(detail.entry.id);
+      await confirmChange(() => api.deleteTimeEntry(detail.entry.id), {
+        message: "Entry deleted",
+      });
       setError(null);
       setSelectedId(undefined);
     } catch (cause) {
       setError(describeError(cause));
     }
-  }, [detail]);
+  }, [detail, confirmChange]);
 
   const retry = useCallback(async (): Promise<void> => {
     if (!detail) return;

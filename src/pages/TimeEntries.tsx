@@ -22,7 +22,9 @@ import {
 } from "../components/Page";
 import { Picker } from "../components/Picker";
 import { type Catalog, useCatalog } from "../hooks/useCatalog";
+import { useInverseToast } from "../hooks/useChangeToast";
 import { useTauriEvent } from "../hooks/useTauriEvent";
+import { useToast } from "../hooks/useToast";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
 import {
@@ -249,9 +251,7 @@ export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
   const [appKeys, setAppKeys] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [notice, setNotice] = useState<{ text: string; path?: string } | null>(
-    null,
-  );
+  const showToast = useToast();
   const [views, setViews] = useState<SavedView[]>(readViews);
 
   const setRoute = useCallback(
@@ -327,27 +327,59 @@ export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
   const exportAs = async (format: "csv" | "json"): Promise<void> => {
     try {
       const result = await api.exportTimeEntries(query, format);
-      setNotice({
-        text: `Exported ${plural(result.count, "entry", "entries")} to ${result.path}`,
-        path: result.path,
+      showToast({
+        message: `Exported ${plural(result.count, "entry", "entries")} to ${result.path}`,
+        tone: "success",
+        action: {
+          label: `Show in ${FILE_MANAGER}`,
+          onAction: () => void revealItemInDir(result.path),
+        },
       });
     } catch (cause) {
-      setNotice({ text: `Export failed: ${describeError(cause)}` });
+      showToast({
+        message: `Export failed: ${describeError(cause)}`,
+        tone: "error",
+      });
     }
   };
 
-  const saveView = (name: string): void => {
-    const next = [
-      ...views.filter((saved) => saved.name !== name),
-      { name, route },
-    ];
+  const confirmView = useInverseToast();
+  /** Rewrites the saved views from what is stored now, then shows them. */
+  const rewriteViews = (change: (stored: SavedView[]) => SavedView[]): void => {
+    const next = change(readViews());
     setViews(next);
     writeViews(next);
   };
+  const saveView = (name: string): void => {
+    const replaced = views.find((saved) => saved.name === name);
+    const added = { name, route };
+    rewriteViews((stored) => [
+      ...stored.filter((saved) => saved.name !== name),
+      added,
+    ]);
+    confirmView(`Saved view "${name}"`, {
+      run: async () =>
+        rewriteViews((stored) => [
+          ...stored.filter((saved) => saved.name !== name),
+          ...(replaced ? [replaced] : []),
+        ]),
+      undone: replaced ? `"${name}" changed back` : `Removed "${name}"`,
+    });
+  };
   const deleteView = (name: string): void => {
-    const next = views.filter((saved) => saved.name !== name);
-    setViews(next);
-    writeViews(next);
+    const index = views.findIndex((saved) => saved.name === name);
+    const removed = views[index];
+    rewriteViews((stored) => stored.filter((saved) => saved.name !== name));
+    if (!removed) return;
+    confirmView(`Deleted view "${name}"`, {
+      run: async () =>
+        rewriteViews((stored) => {
+          const next = stored.filter((saved) => saved.name !== name);
+          next.splice(Math.min(index, next.length), 0, removed);
+          return next;
+        }),
+      undone: `Restored "${name}"`,
+    });
   };
 
   const totalMs = totals?.ms ?? 0;
@@ -521,29 +553,6 @@ export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
           </Menu>
         </div>
       </div>
-
-      {notice && (
-        <div className="flex shrink-0 items-center gap-3 border-line border-b bg-accent-soft px-5 py-2 text-[12px]">
-          <span className="min-w-0 flex-1 truncate text-fg">{notice.text}</span>
-          {notice.path && (
-            <button
-              type="button"
-              onClick={() => notice.path && void revealItemInDir(notice.path)}
-              className="shrink-0 font-semibold text-accent hover:underline"
-            >
-              Show in {FILE_MANAGER}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setNotice(null)}
-            aria-label="Dismiss"
-            className="shrink-0 text-fg-soft hover:text-fg"
-          >
-            ✕
-          </button>
-        </div>
-      )}
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-5 py-4">

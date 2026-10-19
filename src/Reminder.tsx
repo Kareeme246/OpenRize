@@ -48,11 +48,10 @@ function ReminderPanel() {
     id: string | null;
     value: boolean;
   }>({ id: null, value: false });
-  const currentId = state.current?.id ?? null;
-  const compact =
-    state.current?.endedAt === null &&
-    collapsed.id === currentId &&
-    collapsed.value;
+  // Keyed by start time: a welcome card has no break id, and it keeps the
+  // choice made while its break ran.
+  const currentId = state.current ? String(state.current.startedAt) : null;
+  const compact = collapsed.id === currentId && collapsed.value;
 
   // A menu belongs to the reminder that opened it.
   useEffect(() => {
@@ -159,7 +158,11 @@ function PanelBody({
     case "over":
       return state.current ? (
         state.current.endedAt !== null ? (
-          <WelcomeCard current={state.current} />
+          <WelcomeCard
+            current={state.current}
+            expanded={expanded}
+            onToggle={onToggle}
+          />
         ) : (
           <BreakCard
             current={state.current}
@@ -538,7 +541,16 @@ function BreakCard({
   );
 }
 
-function WelcomeCard({ current }: { current: BreakView }) {
+/** Collapses to the same corner pill as a running break, and back. */
+function WelcomeCard({
+  current,
+  expanded,
+  onToggle,
+}: {
+  current: BreakView;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
   const took = Math.max(
     1,
     Math.round(
@@ -546,17 +558,33 @@ function WelcomeCard({ current }: { current: BreakView }) {
     ),
   );
   return (
-    <div className="w-[300px] px-4 py-3">
-      <div className="flex items-center gap-2.5">
+    <div className={expanded ? "w-[300px] px-4 py-3" : "max-w-[220px]"}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        aria-label={expanded ? "Collapse welcome card" : "Expand welcome card"}
+        className={
+          expanded
+            ? "flex w-full items-center gap-2.5 text-left"
+            : "flex min-h-[38px] w-full items-center gap-2 rounded-full px-4 py-2 text-left hover:bg-surface"
+        }
+      >
         <span className="size-2 shrink-0 rounded-full bg-success" />
-        <div className="font-semibold text-[13.5px] text-fg-strong">
+        <span
+          className={
+            expanded
+              ? "font-semibold text-[13.5px] text-fg-strong"
+              : "min-w-0 flex-1 truncate font-semibold text-[12px] text-fg-strong"
+          }
+        >
           Welcome back · {took}m break
-        </div>
-      </div>
-      {current.note && (
+        </span>
+      </button>
+      {expanded && current.note && (
         <div className="mt-1 text-[11.5px] text-fg-muted">{current.note}</div>
       )}
-      {current.resumedTimers.length > 0 && (
+      {expanded && current.resumedTimers.length > 0 && (
         <div className="mt-1 text-[11.5px] text-fg-muted">
           Resumed {current.resumedTimers.join(", ")}
         </div>

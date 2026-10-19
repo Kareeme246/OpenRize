@@ -295,30 +295,34 @@ impl Drop for AppNapAssertion {
 }
 
 pub fn register_sleep_listeners(app: tauri::AppHandle) {
+    use super::PowerEvent;
     use block2::RcBlock;
-    use objc2_app_kit::{NSWorkspace, NSWorkspaceWillSleepNotification};
+    use objc2_app_kit::{
+        NSWorkspace, NSWorkspaceDidWakeNotification, NSWorkspaceWillSleepNotification,
+    };
     use objc2_foundation::NSNotification;
-    use tauri::Manager;
 
     let workspace = NSWorkspace::sharedWorkspace();
     let center = workspace.notificationCenter();
 
-    let app_handle = app.clone();
-    let block = RcBlock::new(move |_notif: std::ptr::NonNull<NSNotification>| {
-        let now = crate::timers::now_epoch_ms();
-        let state = app_handle.state::<crate::AppState>();
-        if let Ok(mut store) = state.activity.lock() {
-            let _ = store.close_active_segment(now);
-        };
-    });
-
-    unsafe {
-        let _ = center.addObserverForName_object_queue_usingBlock(
-            Some(NSWorkspaceWillSleepNotification),
-            None,
-            None,
-            &block,
-        );
+    // These are system transitions, not NSWorkspaceScreensDidSleep/Wake:
+    // display sleep and dark wakes must not be inferred from user_is_away.
+    for (name, event) in unsafe {
+        [
+            (NSWorkspaceWillSleepNotification, PowerEvent::Suspend),
+            (NSWorkspaceDidWakeNotification, PowerEvent::Resume),
+        ]
+    } {
+        let app = app.clone();
+        let block = RcBlock::new(move |_notif: std::ptr::NonNull<NSNotification>| {
+            super::power_event(&app, event);
+        });
+        // The notification center retains the observer and block for the
+        // process lifetime. A nil queue delivers synchronously before sleep.
+        unsafe {
+            let _ =
+                center.addObserverForName_object_queue_usingBlock(Some(name), None, None, &block);
+        }
     }
 }
 

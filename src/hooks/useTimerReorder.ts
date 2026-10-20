@@ -17,6 +17,7 @@ export function useTimerReorder(api: TimersApi) {
   const cardElements = useRef(new Map<string, HTMLElement>());
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [indicator, setIndicator] = useState<TimerInsertion | null>(null);
+  const [announcement, setAnnouncement] = useState("");
   const activeId = useRef<string | null>(null);
   const slot = useRef<number | null>(null);
   const pointer = useRef<{ x: number; y: number } | null>(null);
@@ -110,6 +111,8 @@ export function useTimerReorder(api: TimersApi) {
     const from = ids.indexOf(id);
     const to = from + delta;
     if (from < 0 || to < 0 || to >= ids.length) return;
+    const timer = api.timers.find((t) => t.id === id);
+    const label = timer?.label ?? "Tracker";
     clearDrag();
     const previous = new Map<string, DOMRect>();
     for (const affected of [ids[from], ids[to]]) {
@@ -121,6 +124,7 @@ export function useTimerReorder(api: TimersApi) {
     beforeMove.current = previous;
     [ids[from], ids[to]] = [ids[to], ids[from]];
     api.reorder(ids);
+    setAnnouncement(`${label} moved to position ${to + 1} of ${ids.length}`);
   };
 
   const updateTarget = (x: number, y: number) => {
@@ -239,9 +243,13 @@ export function useTimerReorder(api: TimersApi) {
     const ids = api.timers.map((timer) => timer.id);
     const from = ids.indexOf(id);
     if (from < 0 || targetSlot === from || targetSlot === from + 1) return;
+    const timer = api.timers.find((t) => t.id === id);
+    const label = timer?.label ?? "Tracker";
+    const to = targetSlot > from ? targetSlot - 1 : targetSlot;
     ids.splice(from, 1);
-    ids.splice(targetSlot > from ? targetSlot - 1 : targetSlot, 0, id);
+    ids.splice(to, 0, id);
     api.reorder(ids);
+    setAnnouncement(`${label} moved to position ${to + 1} of ${ids.length}`);
   };
 
   return {
@@ -250,6 +258,7 @@ export function useTimerReorder(api: TimersApi) {
     cardElements,
     draggingId,
     indicator,
+    announcement,
     move,
     onDragStart,
     onDragOver,

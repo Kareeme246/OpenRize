@@ -20,34 +20,6 @@ use serde::Serialize;
 
 use crate::activity::DB_FILE;
 
-const SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS timers (
-  id             TEXT PRIMARY KEY,
-  label          TEXT NOT NULL,
-  accumulated_ms INTEGER NOT NULL,
-  started_at     INTEGER,
-  created_at     INTEGER NOT NULL,
-  ordinal        INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS timer_segments (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  timer_id    TEXT NOT NULL,
-  duration_ms INTEGER NOT NULL,
-  recorded_at INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS timer_saved_states (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  timer_id   TEXT NOT NULL,
-  label      TEXT NOT NULL,
-  elapsed_ms INTEGER NOT NULL,
-  saved_at   INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS settings (
-  key   TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
-";
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Timer {
@@ -138,58 +110,20 @@ pub struct TimerStore {
 }
 
 impl TimerStore {
-    /// Opens the shared database and creates the `timers` table if needed.
+    /// Opens the shared database and migrates timer state if needed.
     pub fn load(dir: &Path) -> Result<Self, String> {
         fs::create_dir_all(dir).map_err(|error| format!("could not create data dir: {error}"))?;
         let path = dir.join(DB_FILE);
         let mut conn = Connection::open(&path).map_err(|error| error.to_string())?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(|error| error.to_string())?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
             .map_err(|error| error.to_string())?;
-        conn.execute_batch(SCHEMA)
-            .map_err(|error| error.to_string())?;
-        Self::migrate(&mut conn)?;
+        crate::migrations::run_migrations(&mut conn).map_err(|error| error.to_string())?;
         Ok(Self {
             clock: Clock::new(),
             conn,
         })
-    }
-
-    fn migrate(conn: &mut Connection) -> Result<(), String> {
-        let mut stmt = conn
-            .prepare("PRAGMA table_info(timers)")
-            .map_err(|error| error.to_string())?;
-        let has_ordinal = stmt
-            .query_map([], |row| row.get::<_, String>(1))
-            .map_err(|error| error.to_string())?
-            .filter_map(Result::ok)
-            .any(|col| col == "ordinal");
-        drop(stmt);
-
-        if !has_ordinal {
-            let tx = conn.transaction().map_err(|error| error.to_string())?;
-            tx.execute_batch("ALTER TABLE timers ADD COLUMN ordinal INTEGER NOT NULL DEFAULT 0;")
-                .map_err(|error| error.to_string())?;
-
-            let mut stmt = tx
-                .prepare("SELECT id FROM timers ORDER BY created_at ASC, id ASC")
-                .map_err(|error| error.to_string())?;
-            let ids: Vec<String> = stmt
-                .query_map([], |row| row.get(0))
-                .map_err(|error| error.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| error.to_string())?;
-            drop(stmt);
-
-            for (index, id) in ids.iter().enumerate() {
-                tx.execute(
-                    "UPDATE timers SET ordinal = ?1 WHERE id = ?2",
-                    params![index as i64, id],
-                )
-                .map_err(|error| error.to_string())?;
-            }
-            tx.commit().map_err(|error| error.to_string())?;
-        }
-        Ok(())
     }
 
     pub fn snapshot(&self) -> Result<Vec<Timer>, String> {
@@ -919,5 +853,141 @@ mod tests {
         assert_eq!(res[0].id, id1);
         assert_eq!(res[1].id, id2);
         assert_eq!(res[2].id, id3);
+    }
+
+    #[test]
+    fn upgrade_from_0_9_19_preserves_every_timer_segment_and_saved_state() {
+        let dir = temp_dir("0-9-19-upgrade");
+        {
+            // Exactly the 0.9.19 database shape: user_version at 10,
+            // timers table predates ordinal column, timer_segments and
+            // timer_saved_states both present with rows across running and paused timers.
+            let mut conn = Connection::open(dir.join(DB_FILE)).unwrap();
+            crate::migrations::run_migrations(&mut conn).unwrap();
+            conn.execute_batch(
+                "DROP TABLE timer_saved_states;
+                 DROP TABLE timer_segments;
+                 DROP TABLE timers;
+                 CREATE TABLE timers (
+                   id             TEXT PRIMARY KEY,
+                   label          TEXT NOT NULL,
+                   accumulated_ms INTEGER NOT NULL,
+                   started_at     INTEGER,
+                   created_at     INTEGER NOT NULL
+                 );
+                 CREATE TABLE timer_segments (
+                   id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                   timer_id    TEXT NOT NULL,
+                   duration_ms INTEGER NOT NULL,
+                   recorded_at INTEGER NOT NULL
+                 );
+                 CREATE TABLE timer_saved_states (
+                   id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                   timer_id   TEXT NOT NULL,
+                   label      TEXT NOT NULL,
+                   elapsed_ms INTEGER NOT NULL,
+                   saved_at   INTEGER NOT NULL
+                 );
+                 -- Running timer: has started_at and 2 segments and 1 saved state
+                 INSERT INTO timers VALUES ('t1', 'Running Project', 0, 1700000050000, 1700000000000);
+                 INSERT INTO timer_segments (id, timer_id, duration_ms, recorded_at)
+                   VALUES (1, 't1', 60000, 1700000010000), (2, 't1', 120000, 1700000020000);
+                 INSERT INTO timer_saved_states (id, timer_id, label, elapsed_ms, saved_at)
+                   VALUES (1, 't1', 'Checkpoint 1', 180000, 1700000030000);
+
+                 -- Paused timer: started_at is NULL, 1 segment and 1 saved state, created after t3
+                 INSERT INTO timers VALUES ('t2', 'Paused Project', 0, NULL, 1700000020000);
+                 INSERT INTO timer_segments (id, timer_id, duration_ms, recorded_at)
+                   VALUES (3, 't2', 300000, 1700000025000);
+                 INSERT INTO timer_saved_states (id, timer_id, label, elapsed_ms, saved_at)
+                   VALUES (2, 't2', 'Saved state for t2', 300000, 1700000035000);
+
+                 -- Third timer created after t1 but before t2
+                 INSERT INTO timers VALUES ('t3', 'Third Project', 0, NULL, 1700000010000);
+                 INSERT INTO timer_segments (id, timer_id, duration_ms, recorded_at)
+                   VALUES (4, 't3', 45000, 1700000022000);
+                 INSERT INTO timer_saved_states (id, timer_id, label, elapsed_ms, saved_at)
+                   VALUES (3, 't3', 'Saved state for t3', 45000, 1700000033000);
+                 PRAGMA user_version = 10;",
+            )
+            .unwrap();
+        }
+
+        // Open with the updated TimerStore (which runs migration 11)
+        let store = TimerStore::load(&dir).expect("timer store load");
+        let timers = store.snapshot().expect("snapshot");
+        assert_eq!(timers.len(), 3);
+
+        // Order is stable by created_at: t1 (0000), t3 (0010), t2 (0020)
+        assert_eq!(timers[0].id, "t1");
+        assert_eq!(timers[0].label, "Running Project");
+        assert_eq!(timers[0].ordinal, 0);
+        assert_eq!(timers[0].accumulated_ms, 180000);
+        assert_eq!(timers[0].started_at, Some(1700000050000));
+        assert!(timers[0].is_running());
+        assert_eq!(timers[0].segments.len(), 2);
+        assert_eq!(timers[0].segments[0].duration_ms, 60000);
+        assert_eq!(timers[0].segments[1].duration_ms, 120000);
+        let s1 = store.saved_states("t1").expect("saved states t1");
+        assert_eq!(s1.len(), 1);
+        assert_eq!(s1[0].label, "Checkpoint 1");
+        assert_eq!(s1[0].elapsed_ms, 180000);
+
+        assert_eq!(timers[1].id, "t3");
+        assert_eq!(timers[1].label, "Third Project");
+        assert_eq!(timers[1].ordinal, 1);
+        assert_eq!(timers[1].accumulated_ms, 45000);
+        assert_eq!(timers[1].started_at, None);
+        assert!(!timers[1].is_running());
+        assert_eq!(timers[1].segments.len(), 1);
+
+        assert_eq!(timers[2].id, "t2");
+        assert_eq!(timers[2].label, "Paused Project");
+        assert_eq!(timers[2].ordinal, 2);
+        assert_eq!(timers[2].accumulated_ms, 300000);
+        assert_eq!(timers[2].started_at, None);
+        assert!(!timers[2].is_running());
+        assert_eq!(timers[2].segments.len(), 1);
+
+        // Also verify PRAGMA user_version is 11
+        let conn = Connection::open(dir.join(DB_FILE)).unwrap();
+        let version: i32 = conn
+            .query_row("PRAGMA user_version;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 11);
+    }
+
+    #[test]
+    fn upgrade_from_database_predating_timer_segments_preserves_accumulated_time() {
+        let dir = temp_dir("pre-segments-upgrade");
+        {
+            let mut conn = Connection::open(dir.join(DB_FILE)).unwrap();
+            crate::migrations::run_migrations(&mut conn).unwrap();
+            conn.execute_batch(
+                "DROP TABLE timer_saved_states;
+                 DROP TABLE timer_segments;
+                 DROP TABLE timers;
+                 CREATE TABLE timers (
+                   id             TEXT PRIMARY KEY,
+                   label          TEXT NOT NULL,
+                   accumulated_ms INTEGER NOT NULL,
+                   started_at     INTEGER,
+                   created_at     INTEGER NOT NULL
+                 );
+                 INSERT INTO timers VALUES ('t1', 'Pre-segment timer', 3600000, NULL, 1000);
+                 PRAGMA user_version = 10;",
+            )
+            .unwrap();
+        }
+
+        let store = TimerStore::load(&dir).expect("timer store load");
+        let timers = store.snapshot().expect("snapshot");
+        assert_eq!(timers.len(), 1);
+        assert_eq!(timers[0].id, "t1");
+        assert_eq!(timers[0].label, "Pre-segment timer");
+        assert_eq!(timers[0].accumulated_ms, 3600000);
+        assert_eq!(timers[0].segments.len(), 1);
+        assert_eq!(timers[0].segments[0].duration_ms, 3600000);
+        assert_eq!(timers[0].segments[0].recorded_at, 1000);
     }
 }

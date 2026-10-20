@@ -1,7 +1,7 @@
-use rusqlite::{Connection, Result};
+use rusqlite::{params, Connection, Result};
 
 /// The `user_version` `run_migrations` leaves a database at.
-pub const SCHEMA_VERSION: i32 = 10;
+pub const SCHEMA_VERSION: i32 = 11;
 
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     let current_version: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
@@ -372,6 +372,42 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
     }
 
+    if current_version < 11 {
+        let tx = conn.transaction()?;
+        tx.execute_batch(TIMERS_V11)?;
+
+        let has_ordinal = {
+            let mut stmt = tx.prepare("PRAGMA table_info(timers)")?;
+            let mut cols = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            cols.any(|col| col.as_deref() == Ok("ordinal"))
+        };
+        if !has_ordinal {
+            tx.execute_batch("ALTER TABLE timers ADD COLUMN ordinal INTEGER NOT NULL DEFAULT 0;")?;
+            let mut stmt = tx.prepare("SELECT id FROM timers ORDER BY created_at ASC, id ASC")?;
+            let ids: Vec<String> = stmt
+                .query_map([], |row| row.get(0))?
+                .collect::<Result<Vec<_>>>()?;
+            for (index, id) in ids.iter().enumerate() {
+                tx.execute(
+                    "UPDATE timers SET ordinal = ?1 WHERE id = ?2",
+                    params![index as i64, id],
+                )?;
+            }
+        }
+
+        tx.execute(
+            "INSERT INTO timer_segments (timer_id, duration_ms, recorded_at)
+             SELECT id, accumulated_ms, created_at
+             FROM timers
+             WHERE accumulated_ms > 0
+               AND id NOT IN (SELECT DISTINCT timer_id FROM timer_segments);",
+            [],
+        )?;
+
+        tx.execute("PRAGMA user_version = 11;", [])?;
+        tx.commit()?;
+    }
+
     Ok(())
 }
 
@@ -466,6 +502,33 @@ ALTER TABLE time_entries DROP COLUMN agent_job_id;
 DROP TABLE agent_transitions;
 DROP TABLE agent_jobs;
 DROP TABLE agent_focus;
+";
+
+/// Timer persistence: stopwatch trackers (`timers`), their completed stretches of
+/// time (`timer_segments`), and on-demand snapshots (`timer_saved_states`).
+/// Purely additive, reconciling timer state into the versioned migration track.
+const TIMERS_V11: &str = "
+CREATE TABLE IF NOT EXISTS timers (
+  id             TEXT PRIMARY KEY,
+  label          TEXT NOT NULL,
+  accumulated_ms INTEGER NOT NULL,
+  started_at     INTEGER,
+  created_at     INTEGER NOT NULL,
+  ordinal        INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS timer_segments (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  timer_id    TEXT NOT NULL,
+  duration_ms INTEGER NOT NULL,
+  recorded_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS timer_saved_states (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  timer_id   TEXT NOT NULL,
+  label      TEXT NOT NULL,
+  elapsed_ms INTEGER NOT NULL,
+  saved_at   INTEGER NOT NULL
+);
 ";
 
 /// Break reminders: one row per break decision (taken, skipped, missed, or
@@ -820,7 +883,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 10);
+        assert_eq!(v, SCHEMA_VERSION);
 
         let cat_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM categories;", [], |r| r.get(0))
@@ -919,7 +982,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 10);
+        assert_eq!(v, SCHEMA_VERSION);
 
         let ids: Vec<String> = conn
             .prepare("SELECT id FROM invoices ORDER BY id")
@@ -1123,7 +1186,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 10);
+        assert_eq!(v, SCHEMA_VERSION);
     }
 
     /// A database the v5 migration already ran on (with `legacy` rows kept) loses
@@ -1243,7 +1306,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 10);
+        assert_eq!(v, SCHEMA_VERSION);
     }
 
     /// A database as v6 shipped it: the fresh schema without the client
@@ -1284,7 +1347,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 10);
+        assert_eq!(v, SCHEMA_VERSION);
 
         type Row = (
             String,
@@ -1380,7 +1443,7 @@ mod tests {
         let v: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 10);
+        assert_eq!(v, SCHEMA_VERSION);
         let mut fresh = Connection::open_in_memory().unwrap();
         run_migrations(&mut fresh).unwrap();
         assert_eq!(schema_snapshot(&fresh), schema_snapshot(&conn));
@@ -1463,7 +1526,7 @@ mod tests {
         let version: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 10);
+        assert_eq!(version, SCHEMA_VERSION);
         for table in ["agent_jobs", "agent_transitions", "agent_focus"] {
             assert!(conn.prepare(&format!("SELECT 1 FROM {table}")).is_err());
         }
@@ -1505,6 +1568,111 @@ mod tests {
             )
             .unwrap();
         assert_eq!(totals, 15_000);
+    }
+
+    /// A database as v10 shipped it in 0.9.19: timers existed without an ordinal
+    /// column, timer_segments held completed stretches, and timer_saved_states
+    /// held user checkpoints. Upgrade must assign ordinals stably, keep every
+    /// timer, segment, and saved state with its values intact, and match a fresh
+    /// schema snapshot.
+    #[test]
+    fn a_v10_database_with_0_9_19_timers_upgrades_to_v11() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+
+        // Reset to v10 shape: drop timer tables and recreate them without ordinal
+        conn.execute_batch(
+            "DROP TABLE timer_saved_states;
+             DROP TABLE timer_segments;
+             DROP TABLE timers;
+             CREATE TABLE timers (
+               id             TEXT PRIMARY KEY,
+               label          TEXT NOT NULL,
+               accumulated_ms INTEGER NOT NULL,
+               started_at     INTEGER,
+               created_at     INTEGER NOT NULL
+             );
+             CREATE TABLE timer_segments (
+               id          INTEGER PRIMARY KEY AUTOINCREMENT,
+               timer_id    TEXT NOT NULL,
+               duration_ms INTEGER NOT NULL,
+               recorded_at INTEGER NOT NULL
+             );
+             CREATE TABLE timer_saved_states (
+               id         INTEGER PRIMARY KEY AUTOINCREMENT,
+               timer_id   TEXT NOT NULL,
+               label      TEXT NOT NULL,
+               elapsed_ms INTEGER NOT NULL,
+               saved_at   INTEGER NOT NULL
+             );
+             -- Timer t1: running, 2 segments, 1 saved state
+             INSERT INTO timers VALUES ('t1', 'Running Timer', 0, 1000500, 1000000);
+             INSERT INTO timer_segments (id, timer_id, duration_ms, recorded_at)
+               VALUES (1, 't1', 60000, 1000100), (2, 't1', 120000, 1000200);
+             INSERT INTO timer_saved_states (id, timer_id, label, elapsed_ms, saved_at)
+               VALUES (1, 't1', 'Checkpoint 1', 180000, 1000300);
+
+             -- Timer t2: paused, 1 segment, 1 saved state, created after t3
+             INSERT INTO timers VALUES ('t2', 'Paused Timer', 0, NULL, 1000020);
+             INSERT INTO timer_segments (id, timer_id, duration_ms, recorded_at)
+               VALUES (3, 't2', 300000, 1000150);
+             INSERT INTO timer_saved_states (id, timer_id, label, elapsed_ms, saved_at)
+               VALUES (2, 't2', 'Saved t2', 300000, 1000250);
+
+             -- Timer t3: paused, created before t2
+             INSERT INTO timers VALUES ('t3', 'Third Timer', 0, NULL, 1000010);
+             INSERT INTO timer_segments (id, timer_id, duration_ms, recorded_at)
+               VALUES (4, 't3', 45000, 1000120);
+
+             PRAGMA user_version = 10;",
+        )
+        .unwrap();
+
+        run_migrations(&mut conn).unwrap();
+
+        let mut fresh = Connection::open_in_memory().unwrap();
+        run_migrations(&mut fresh).unwrap();
+        assert_eq!(schema_snapshot(&fresh), schema_snapshot(&conn));
+
+        let version: i32 = conn
+            .query_row("PRAGMA user_version;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+
+        // Verify ordinals assigned stably by created_at: t1 (000), t3 (010), t2 (020)
+        let timers: Vec<(String, String, i64, Option<i64>, i64)> = conn
+            .prepare("SELECT id, label, ordinal, started_at, created_at FROM timers ORDER BY ordinal ASC")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+            .unwrap()
+            .collect::<Result<_>>()
+            .unwrap();
+        assert_eq!(
+            timers,
+            [
+                (
+                    "t1".into(),
+                    "Running Timer".into(),
+                    0,
+                    Some(1000500),
+                    1000000
+                ),
+                ("t3".into(), "Third Timer".into(), 1, None, 1000010),
+                ("t2".into(), "Paused Timer".into(), 2, None, 1000020),
+            ]
+        );
+
+        // Verify all segments preserved
+        let segment_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM timer_segments", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(segment_count, 4);
+
+        // Verify saved states preserved
+        let saved_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM timer_saved_states", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(saved_count, 2);
     }
 
     #[test]

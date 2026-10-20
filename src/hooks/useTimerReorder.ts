@@ -6,14 +6,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { type TimerInsertion, timerInsertion } from "../lib/timerInsertion";
 import type { TimersApi } from "./useTimers";
-
-interface InsertionIndicator {
-  slot: number;
-  left: number;
-  top: number;
-  width: number;
-}
 
 /** Native grip dragging keeps the layout still until drop. Menu moves use FLIP
  * once the authoritative order arrives, so both neighbours visibly swap. */
@@ -22,7 +16,7 @@ export function useTimerReorder(api: TimersApi) {
   const scrollRef = useRef<HTMLElement>(null);
   const cardElements = useRef(new Map<string, HTMLElement>());
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [indicator, setIndicator] = useState<InsertionIndicator | null>(null);
+  const [indicator, setIndicator] = useState<TimerInsertion | null>(null);
   const activeId = useRef<string | null>(null);
   const slot = useRef<number | null>(null);
   const pointer = useRef<{ x: number; y: number } | null>(null);
@@ -132,42 +126,34 @@ export function useTimerReorder(api: TimersApi) {
   const updateTarget = (x: number, y: number) => {
     const container = containerRef.current;
     if (!container || activeId.current === null) return;
-    const items = api.timers.flatMap((timer, index) => {
-      const element = cardElements.current.get(timer.id);
-      return element ? [{ index, rect: element.getBoundingClientRect() }] : [];
-    });
-    if (items.length === 0) return;
-    // Nearest rectangle also handles gaps and the padded space above/below
-    // the grid. Within a card, its upper/lower half selects before/after.
-    const first = items[0];
-    const last = items[items.length - 1];
-    let target = first;
-    let distance = Number.POSITIVE_INFINITY;
-    for (const item of items) {
-      const dx = Math.max(item.rect.left - x, 0, x - item.rect.right);
-      const dy = Math.max(item.rect.top - y, 0, y - item.rect.bottom);
-      const nextDistance = dx * dx + dy * dy;
-      if (nextDistance < distance) {
-        distance = nextDistance;
-        target = item;
-      }
+    const bounds = container.getBoundingClientRect();
+    // Keep the padded drop zones above/below the list, but clear immediately
+    // when the pointer leaves the grid sideways, even inside the scroll area.
+    if (x < bounds.left || x > bounds.right) {
+      clearTarget();
+      return;
     }
-    if (y < first.rect.top) target = first;
-    if (y > last.rect.bottom) target = last;
-    const after = y >= target.rect.top + target.rect.height / 2;
-    const nextSlot = target.index + (after ? 1 : 0);
+    const cards: DOMRect[] = [];
+    for (const timer of api.timers) {
+      const element = cardElements.current.get(timer.id);
+      if (!element) return;
+      cards.push(element.getBoundingClientRect());
+    }
+    const style = getComputedStyle(container);
+    const next = timerInsertion(
+      cards,
+      bounds,
+      x,
+      y,
+      Number.parseFloat(style.columnGap),
+      Number.parseFloat(style.rowGap),
+    );
+    if (next === null) return;
     // No DOM movement during dragging and no state update for an unchanged
     // slot, including child dragenter events and the 1 Hz timer refresh.
-    if (slot.current === nextSlot) return;
-    slot.current = nextSlot;
-    const bounds = container.getBoundingClientRect();
-    setIndicator({
-      slot: nextSlot,
-      left: target.rect.left - bounds.left,
-      top:
-        (after ? target.rect.bottom + 6 : target.rect.top - 6) - bounds.top - 1,
-      width: target.rect.width,
-    });
+    if (slot.current === next.slot) return;
+    slot.current = next.slot;
+    setIndicator(next);
   };
 
   const scroll = () => {

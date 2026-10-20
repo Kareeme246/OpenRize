@@ -53,7 +53,7 @@ over `src-tauri/src/rpc.rs`, and otherwise opens the data itself through `openri
 CLI asset. `src-tauri/cli/COMMANDS.md`
 lists every current and planned CLI command and the Tauri command behind it; a PR that adds,
 changes or removes either side updates it.
-Windows is deliberately not released: it is built from source only, and its updater stays off.
+Windows installer builds can be released on demand via the release workflow, with in-app updates enabled.
 Klock (`../klock`) is the enterprise fork of this app, and the products diverge: changes move
 between them by hand in both directions through git-ignored port inboxes, never by merging. After a
 shared-foundation fix or product change merges here, record it for Klock; see the `sync-klock` skill.
@@ -62,7 +62,7 @@ Commit subject; see `RELEASING.md` for the release and changelog procedure.
 
 ## Platforms
 
-macOS is supported; Windows is experimental (CI-checked, built from source, never released);
+macOS is supported; Windows is experimental (CI-checked, built from source, released on demand);
 Linux is not yet. A module with substantial OS-specific code keeps its shared types in the parent
 file and selects one implementation file per platform, all exposing the same items:
 

@@ -23,6 +23,8 @@ export interface TimersApi {
   deleteSegment: (id: string, segmentId: number) => void;
   saveState: (id: string) => void;
   remove: (id: string) => void;
+  reorder: (ids: string[]) => void;
+  moveTimer: (id: string, direction: "up" | "down") => void;
 }
 
 let cachedTimers: Timer[] | null = null;
@@ -167,6 +169,15 @@ export function useTimers(): TimersApi {
     (id: string) => confirm(api.deleteTimer(id), `Deleted "${labelOf(id)}"`),
     [confirm, labelOf],
   );
+  const reorder = useCallback(
+    (ids: string[]) => send(api.reorderTimers(ids)),
+    [send],
+  );
+  const moveTimer = useCallback(
+    (id: string, direction: "up" | "down") =>
+      send(api.moveTimer(id, direction === "up" ? -1 : 1)),
+    [send],
+  );
 
   return {
     timers,
@@ -184,5 +195,7 @@ export function useTimers(): TimersApi {
     deleteSegment,
     saveState,
     remove,
+    reorder,
+    moveTimer,
   };
 }

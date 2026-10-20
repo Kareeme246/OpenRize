@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS timers (
   label          TEXT NOT NULL,
   accumulated_ms INTEGER NOT NULL,
   started_at     INTEGER,
-  created_at     INTEGER NOT NULL
+  created_at     INTEGER NOT NULL,
+  ordinal        INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS timer_segments (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,6 +61,7 @@ pub struct Timer {
     /// Epoch milliseconds at which the current run started, or `None` if paused.
     pub started_at: Option<u64>,
     pub created_at: u64,
+    pub ordinal: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -88,7 +90,7 @@ pub struct TimerSavedState {
 /// Selects a timer with its total computed from its segments.
 const TIMER_SELECT: &str = "SELECT id, label,
        COALESCE((SELECT SUM(duration_ms) FROM timer_segments WHERE timer_id = timers.id), 0),
-       started_at, created_at
+       started_at, created_at, ordinal
      FROM timers";
 
 impl Timer {
@@ -140,21 +142,62 @@ impl TimerStore {
     pub fn load(dir: &Path) -> Result<Self, String> {
         fs::create_dir_all(dir).map_err(|error| format!("could not create data dir: {error}"))?;
         let path = dir.join(DB_FILE);
-        let conn = Connection::open(&path).map_err(|error| error.to_string())?;
+        let mut conn = Connection::open(&path).map_err(|error| error.to_string())?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
             .map_err(|error| error.to_string())?;
         conn.execute_batch(SCHEMA)
             .map_err(|error| error.to_string())?;
+        Self::migrate(&mut conn)?;
         Ok(Self {
             clock: Clock::new(),
             conn,
         })
     }
 
+    fn migrate(conn: &mut Connection) -> Result<(), String> {
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(timers)")
+            .map_err(|error| error.to_string())?;
+        let has_ordinal = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(|error| error.to_string())?
+            .filter_map(Result::ok)
+            .any(|col| col == "ordinal");
+        drop(stmt);
+
+        if !has_ordinal {
+            let tx = conn.transaction().map_err(|error| error.to_string())?;
+            tx.execute_batch("ALTER TABLE timers ADD COLUMN ordinal INTEGER NOT NULL DEFAULT 0;")
+                .map_err(|error| error.to_string())?;
+
+            let mut stmt = tx
+                .prepare("SELECT id FROM timers ORDER BY created_at ASC, id ASC")
+                .map_err(|error| error.to_string())?;
+            let ids: Vec<String> = stmt
+                .query_map([], |row| row.get(0))
+                .map_err(|error| error.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| error.to_string())?;
+            drop(stmt);
+
+            for (index, id) in ids.iter().enumerate() {
+                tx.execute(
+                    "UPDATE timers SET ordinal = ?1 WHERE id = ?2",
+                    params![index as i64, id],
+                )
+                .map_err(|error| error.to_string())?;
+            }
+            tx.commit().map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+
     pub fn snapshot(&self) -> Result<Vec<Timer>, String> {
         let mut statement = self
             .conn
-            .prepare(&format!("{TIMER_SELECT} ORDER BY created_at ASC, id ASC"))
+            .prepare(&format!(
+                "{TIMER_SELECT} ORDER BY ordinal ASC, created_at ASC, id ASC"
+            ))
             .map_err(|error| error.to_string())?;
         let mut timers = statement
             .query_map([], timer_from_row)
@@ -183,13 +226,21 @@ impl TimerStore {
         }
         let next = self.take_next_id()?;
         let id = format!("t{next}");
+        let next_ordinal: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(ordinal) + 1, 0) FROM timers",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
         // Created idle: naming a tracker is not the same as deciding to bill
         // time to it, so the card waits for an explicit Start.
         self.conn
             .execute(
-                "INSERT INTO timers (id, label, accumulated_ms, started_at, created_at)
-                 VALUES (?1, ?2, 0, NULL, ?3)", // accumulated_ms is a retired column
-                params![id, label, now as i64],
+                "INSERT INTO timers (id, label, accumulated_ms, started_at, created_at, ordinal)
+                 VALUES (?1, ?2, 0, NULL, ?3, ?4)", // accumulated_ms is a retired column
+                params![id, label, now as i64, next_ordinal],
             )
             .map_err(|error| error.to_string())?;
         self.snapshot()
@@ -262,6 +313,41 @@ impl TimerStore {
             )
             .map_err(|error| error.to_string())?;
         self.snapshot()
+    }
+
+    /// Updates the display order of timers to match the given list of IDs.
+    pub fn reorder(&mut self, ids: &[String]) -> Result<Vec<Timer>, String> {
+        let tx = self.conn.transaction().map_err(|error| error.to_string())?;
+        for (index, id) in ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE timers SET ordinal = ?1 WHERE id = ?2",
+                params![index as i64, id],
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        tx.commit().map_err(|error| error.to_string())?;
+        self.snapshot()
+    }
+
+    /// Moves a timer up (negative delta) or down (positive delta) in the list.
+    pub fn move_timer(&mut self, id: &str, delta: i32) -> Result<Vec<Timer>, String> {
+        let timers = self.snapshot()?;
+        let pos = timers
+            .iter()
+            .position(|t| t.id == id)
+            .ok_or_else(|| unknown(id))?;
+        let target = if delta < 0 {
+            pos.saturating_sub((-delta) as usize)
+        } else {
+            (pos + (delta as usize)).min(timers.len().saturating_sub(1))
+        };
+        if target == pos {
+            return Ok(timers);
+        }
+        let mut ids: Vec<String> = timers.into_iter().map(|t| t.id).collect();
+        let item = ids.remove(pos);
+        ids.insert(target, item);
+        self.reorder(&ids)
     }
 
     /// Adds a stretch of time to the total.
@@ -462,10 +548,27 @@ impl TimerStore {
     /// delete, so the counter lives in `settings` rather than being derived
     /// from the current row set.
     fn take_next_id(&self) -> Result<u64, String> {
-        let next = self
+        let stored_next = self
             .read_setting("timer_next_id")
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(1u64);
+            .and_then(|value| value.parse().ok());
+        let next = match stored_next {
+            Some(n) => n,
+            None => {
+                let mut max_id = 0u64;
+                if let Ok(mut stmt) = self.conn.prepare("SELECT id FROM timers") {
+                    if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+                        for row in rows.flatten() {
+                            if let Some(suffix) = row.strip_prefix('t') {
+                                if let Ok(val) = suffix.parse::<u64>() {
+                                    max_id = max_id.max(val);
+                                }
+                            }
+                        }
+                    }
+                }
+                max_id + 1
+            }
+        };
         self.write_setting("timer_next_id", &(next + 1).to_string())?;
         Ok(next)
     }
@@ -479,6 +582,7 @@ fn timer_from_row(row: &Row<'_>) -> rusqlite::Result<Timer> {
         segments: Vec::new(),
         started_at: row.get::<_, Option<i64>>(3)?.map(|value| value as u64),
         created_at: row.get::<_, i64>(4)? as u64,
+        ordinal: row.get::<_, i64>(5)?,
     })
 }
 
@@ -713,5 +817,107 @@ mod tests {
         assert_eq!(timers[0].label, "Survive a restart");
         assert_eq!(timers[0].accumulated_ms, 3_000);
         assert_eq!(timers.len(), 1);
+    }
+
+    #[test]
+    fn ordinal_column_is_added_to_an_existing_database_with_stable_default_order() {
+        let dir = temp_dir("ordinal-migration");
+        {
+            // A database from before the ordinal column:
+            let conn = Connection::open(dir.join(DB_FILE)).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE timers (
+                   id TEXT PRIMARY KEY, label TEXT NOT NULL, accumulated_ms INTEGER NOT NULL,
+                   started_at INTEGER, created_at INTEGER NOT NULL);
+                 INSERT INTO timers VALUES ('t1', 'First', 0, NULL, 1000);
+                 INSERT INTO timers VALUES ('t2', 'Third', 0, NULL, 3000);
+                 INSERT INTO timers VALUES ('t3', 'Second', 0, NULL, 2000);",
+            )
+            .unwrap();
+        }
+
+        let mut store = TimerStore::load(&dir).expect("timer store");
+        let timers = store.snapshot().unwrap();
+        assert_eq!(timers.len(), 3);
+        // Default order matches historical order: ORDER BY created_at ASC, id ASC
+        assert_eq!(timers[0].label, "First");
+        assert_eq!(timers[0].ordinal, 0);
+        assert_eq!(timers[1].label, "Second");
+        assert_eq!(timers[1].ordinal, 1);
+        assert_eq!(timers[2].label, "Third");
+        assert_eq!(timers[2].ordinal, 2);
+
+        // A new timer lands at the end
+        let timers = store.create_at("Fourth", 4000).unwrap();
+        assert_eq!(timers.len(), 4);
+        assert_eq!(timers[3].label, "Fourth");
+        assert_eq!(timers[3].ordinal, 3);
+    }
+
+    #[test]
+    fn order_persists_across_reorder_and_reload() {
+        let dir = temp_dir("reorder-persistence");
+        let id_a;
+        let id_b;
+        let id_c;
+        {
+            let mut store = TimerStore::load(&dir).expect("timer store");
+            let t = store.create_at("Alpha", 1000).unwrap();
+            id_a = t[0].id.clone();
+            let t = store.create_at("Beta", 2000).unwrap();
+            id_b = t[1].id.clone();
+            let t = store.create_at("Gamma", 3000).unwrap();
+            id_c = t[2].id.clone();
+
+            // Reorder to Gamma, Alpha, Beta
+            let reordered = store
+                .reorder(&[id_c.clone(), id_a.clone(), id_b.clone()])
+                .unwrap();
+            assert_eq!(reordered[0].label, "Gamma");
+            assert_eq!(reordered[1].label, "Alpha");
+            assert_eq!(reordered[2].label, "Beta");
+        }
+
+        // Reload the store from disk
+        let store = TimerStore::load(&dir).expect("timer store");
+        let timers = store.snapshot().unwrap();
+        assert_eq!(timers.len(), 3);
+        assert_eq!(timers[0].id, id_c);
+        assert_eq!(timers[0].label, "Gamma");
+        assert_eq!(timers[1].id, id_a);
+        assert_eq!(timers[1].label, "Alpha");
+        assert_eq!(timers[2].id, id_b);
+        assert_eq!(timers[2].label, "Beta");
+    }
+
+    #[test]
+    fn move_timer_shifts_position_and_clamps_at_boundaries() {
+        let mut store = store("move-timer");
+        let t = store.create_at("One", 1000).unwrap();
+        let id1 = t[0].id.clone();
+        let t = store.create_at("Two", 2000).unwrap();
+        let id2 = t[1].id.clone();
+        let t = store.create_at("Three", 3000).unwrap();
+        let id3 = t[2].id.clone();
+
+        // Moving the first item up is a no-op
+        let res = store.move_timer(&id1, -1).unwrap();
+        assert_eq!(res[0].id, id1);
+
+        // Moving the third item down is a no-op
+        let res = store.move_timer(&id3, 1).unwrap();
+        assert_eq!(res[2].id, id3);
+
+        // Move "Two" up
+        let res = store.move_timer(&id2, -1).unwrap();
+        assert_eq!(res[0].id, id2);
+        assert_eq!(res[1].id, id1);
+        assert_eq!(res[2].id, id3);
+
+        // Move "Two" down
+        let res = store.move_timer(&id2, 1).unwrap();
+        assert_eq!(res[0].id, id1);
+        assert_eq!(res[1].id, id2);
+        assert_eq!(res[2].id, id3);
     }
 }

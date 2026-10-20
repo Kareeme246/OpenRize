@@ -7,6 +7,7 @@ import {
 } from "../components/Page";
 import { StopwatchCard } from "../components/StopwatchCard";
 import { useCatalog } from "../hooks/useCatalog";
+import { useTimerReorder } from "../hooks/useTimerReorder";
 import { type TimersApi, useTimers } from "../hooks/useTimers";
 import { elapsedMs, formatDuration } from "../lib/timers";
 
@@ -21,6 +22,8 @@ export function Timers({ api: propApi, revealTimer }: TimersProps = {}) {
   const catalog = useCatalog();
   const [label, setLabel] = useState("");
   const trimmed = label.trim();
+
+  const reorder = useTimerReorder(api);
 
   // Wait for the timer list before revealing a request from the hidden app.
   useEffect(() => {
@@ -63,7 +66,14 @@ export function Timers({ api: propApi, revealTimer }: TimersProps = {}) {
 
       {/* The end padding lets the last row of cards scroll clear of a toast
           in the bottom-right corner. */}
-      <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pt-4 pb-32">
+      <main
+        ref={reorder.scrollRef}
+        onDragEnter={reorder.onDragOver}
+        onDragOver={reorder.onDragOver}
+        onDragLeave={reorder.onDragLeave}
+        onDrop={reorder.onDrop}
+        className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pt-4 pb-32"
+      >
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -99,26 +109,58 @@ export function Timers({ api: propApi, revealTimer }: TimersProps = {}) {
             />
           </div>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
-            {api.timers.map((timer) => (
-              <StopwatchCard
-                key={timer.id}
-                timer={timer}
-                now={api.now}
-                onStart={api.start}
-                onPause={api.pause}
-                onReset={api.reset}
-                onClear={api.clear}
-                onRename={api.rename}
-                onAddSegment={api.addSegment}
-                onUpdateSegment={api.updateSegment}
-                onDeleteSegment={api.deleteSegment}
-                onSaveState={api.saveState}
-                onDelete={api.remove}
-                categories={catalog.categories}
-                projects={catalog.projects}
+          <div
+            ref={reorder.containerRef}
+            className="relative grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3 py-2"
+          >
+            {reorder.indicator !== null && (
+              <div
+                aria-hidden="true"
+                data-timer-insertion={reorder.indicator.slot}
+                style={{
+                  position: "absolute",
+                  left: `${reorder.indicator.left}px`,
+                  top: `${reorder.indicator.top}px`,
+                  width: `${reorder.indicator.width}px`,
+                  height: "2px",
+                }}
+                className="pointer-events-none z-20 rounded-full bg-accent shadow-[0_0_8px_var(--accent)]"
               />
-            ))}
+            )}
+            {api.timers.map((timer, index) => {
+              const isDragging = reorder.draggingId === timer.id;
+
+              return (
+                <StopwatchCard
+                  key={timer.id}
+                  timer={timer}
+                  now={api.now}
+                  isFirst={index === 0}
+                  isLast={index === api.timers.length - 1}
+                  isDragging={isDragging}
+                  cardRef={(el) => {
+                    if (el) reorder.cardElements.current.set(timer.id, el);
+                    else reorder.cardElements.current.delete(timer.id);
+                  }}
+                  onDragStart={reorder.onDragStart}
+                  onDragEnd={reorder.clearDrag}
+                  onMoveUp={(id) => reorder.move(id, -1)}
+                  onMoveDown={(id) => reorder.move(id, 1)}
+                  onStart={api.start}
+                  onPause={api.pause}
+                  onReset={api.reset}
+                  onClear={api.clear}
+                  onRename={api.rename}
+                  onAddSegment={api.addSegment}
+                  onUpdateSegment={api.updateSegment}
+                  onDeleteSegment={api.deleteSegment}
+                  onSaveState={api.saveState}
+                  onDelete={api.remove}
+                  categories={catalog.categories}
+                  projects={catalog.projects}
+                />
+              );
+            })}
           </div>
         )}
       </main>

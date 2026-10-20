@@ -653,3 +653,23 @@ html.reminder-window body {
 :root[data-shape="sharper"] .shape-cell[aria-pressed="true"] {
   box-shadow: inset 0 -2px 0 var(--accent);
 }
+
+/* Only the grip starts a timer drag, including in WebKit. Keep text fields
+   editable without letting text, links or SVG descendants become the source. */
+.timer-card,
+.timer-card * {
+  -webkit-user-drag: none;
+}
+
+.timer-card {
+  user-select: none;
+}
+
+.timer-card input,
+.timer-card textarea {
+  user-select: text;
+}
+
+.timer-card .timer-drag-handle {
+  -webkit-user-drag: element;
+}

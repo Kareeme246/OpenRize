@@ -122,7 +122,7 @@ export function Timers({ api: propApi, revealTimer }: TimersProps = {}) {
                   left: `${reorder.indicator.left}px`,
                   top: `${reorder.indicator.top}px`,
                   width: `${reorder.indicator.width}px`,
-                  height: "2px",
+                  height: `${reorder.indicator.height}px`,
                 }}
                 className="pointer-events-none z-20 rounded-full bg-accent shadow-[0_0_8px_var(--accent)]"
               />

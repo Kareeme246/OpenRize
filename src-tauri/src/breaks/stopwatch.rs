@@ -156,6 +156,7 @@ mod tests {
             segments: Vec::new(),
             started_at,
             created_at: 0,
+            ordinal: 0,
         }
     }
 

@@ -11,6 +11,11 @@ import { Tooltip } from "./Tooltip";
 interface StopwatchCardProps {
   timer: Timer;
   now: number;
+  isFirst?: boolean;
+  isLast?: boolean;
+  isDragging?: boolean;
+  canDrag?: boolean;
+  cardRef?: (el: HTMLElement | null) => void;
   onStart: (id: string) => void;
   onPause: (id: string) => void;
   onReset: (id: string) => void;
@@ -22,6 +27,12 @@ interface StopwatchCardProps {
   onDeleteSegment: (id: string, segmentId: number) => void;
   onSaveState: (id: string) => void;
   onDelete: (id: string) => void;
+  onMoveUp?: (id: string) => void;
+  onMoveDown?: (id: string) => void;
+  onArmDrag?: (id: string) => void;
+  onDisarmDrag?: () => void;
+  onDragStart?: (event: React.DragEvent, id: string) => void;
+  onDragEnd?: () => void;
   categories: Category[];
   projects: Project[];
 }
@@ -29,6 +40,11 @@ interface StopwatchCardProps {
 export function StopwatchCard({
   timer,
   now,
+  isFirst = false,
+  isLast = false,
+  isDragging = false,
+  canDrag = false,
+  cardRef,
   onStart,
   onPause,
   onReset,
@@ -39,9 +55,16 @@ export function StopwatchCard({
   onDeleteSegment,
   onSaveState,
   onDelete,
+  onMoveUp,
+  onMoveDown,
+  onArmDrag,
+  onDisarmDrag,
+  onDragStart,
+  onDragEnd,
   categories,
   projects,
 }: StopwatchCardProps) {
+  const sectionRef = useRef<HTMLElement | null>(null);
   const running = timer.startedAt !== null;
   const elapsed = elapsedMs(timer, now);
   const [editing, setEditing] = useState(false);
@@ -76,14 +99,77 @@ export function StopwatchCard({
 
   return (
     <section
+      ref={(el) => {
+        sectionRef.current = el;
+        cardRef?.(el);
+      }}
       id={`timer-${timer.id}`}
       tabIndex={-1}
       aria-label={`Stopwatch ${timer.label}`}
-      className={`shape-bleed-table relative flex min-w-0 flex-col items-center gap-3 rounded-xl border border-settings-card-border bg-settings-card p-4 outline-hidden focus:ring-2 focus:ring-accent ${running ? "border-l-4 border-l-accent" : ""}`}
+      draggable={canDrag}
+      onDragStart={(event) => {
+        onDragStart?.(event, timer.id);
+      }}
+      onDragEnd={() => {
+        onDragEnd?.();
+      }}
+      className={`shape-bleed-table relative flex min-w-0 flex-col items-center gap-3 rounded-xl border border-settings-card-border bg-settings-card p-4 outline-hidden focus:ring-2 focus:ring-accent ${
+        running ? "border-l-4 border-l-accent" : ""
+      } ${isDragging ? "opacity-40" : ""}`}
     >
+      <button
+        type="button"
+        draggable
+        aria-label={`Reorder ${timer.label}`}
+        title="Drag to reorder"
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          onArmDrag?.(timer.id);
+        }}
+        onPointerUp={() => onDisarmDrag?.()}
+        onDragStart={(event) => {
+          onDragStart?.(event, timer.id);
+        }}
+        onDragEnd={() => {
+          onDragEnd?.();
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+            if (!isFirst) {
+              event.preventDefault();
+              onMoveUp?.(timer.id);
+            }
+          } else if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+            if (!isLast) {
+              event.preventDefault();
+              onMoveDown?.(timer.id);
+            }
+          }
+        }}
+        className="absolute top-2 left-2 grid size-7 place-items-center rounded-md text-fg-faint/60 hover:text-fg hover:bg-surface cursor-grab active:cursor-grabbing select-none transition-colors"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          className="size-4"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <circle cx="9" cy="6" r="1.5" />
+          <circle cx="15" cy="6" r="1.5" />
+          <circle cx="9" cy="12" r="1.5" />
+          <circle cx="15" cy="12" r="1.5" />
+          <circle cx="9" cy="18" r="1.5" />
+          <circle cx="15" cy="18" r="1.5" />
+        </svg>
+      </button>
+
       <TimerMenu
         label={timer.label}
         canAddToCalendar={elapsed >= 60_000}
+        isFirst={isFirst}
+        isLast={isLast}
+        onMoveUp={() => onMoveUp?.(timer.id)}
+        onMoveDown={() => onMoveDown?.(timer.id)}
         onSaveState={() => onSaveState(timer.id)}
         onInfo={() => setDialog("info")}
         onAddToCalendar={openCalendar}
@@ -198,6 +284,10 @@ export function StopwatchCard({
 interface TimerMenuProps {
   label: string;
   canAddToCalendar: boolean;
+  isFirst: boolean;
+  isLast: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
   onSaveState: () => void;
   onInfo: () => void;
   onAddToCalendar: () => void;
@@ -209,6 +299,10 @@ interface TimerMenuProps {
 function TimerMenu({
   label,
   canAddToCalendar,
+  isFirst,
+  isLast,
+  onMoveUp,
+  onMoveDown,
   onSaveState,
   onInfo,
   onAddToCalendar,
@@ -298,6 +392,15 @@ function TimerMenu({
           {item("Add to calendar", onAddToCalendar, {
             disabled: !canAddToCalendar,
             hint: "Needs at least a minute of tracked time",
+          })}
+          <hr className="my-1 border-line" />
+          {item("Move up", onMoveUp, {
+            disabled: isFirst,
+            hint: isFirst ? "Already first" : undefined,
+          })}
+          {item("Move down", onMoveDown, {
+            disabled: isLast,
+            hint: isLast ? "Already last" : undefined,
           })}
           <hr className="my-1 border-line" />
           {item("Reset to zero", onReset)}

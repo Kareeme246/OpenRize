@@ -204,6 +204,8 @@ pub fn run() {
             commands::save_timer_state,
             commands::list_timer_saved_states,
             commands::delete_timer,
+            commands::reorder_timers,
+            commands::move_timer,
             commands::activity_snapshot,
             commands::set_capture_enabled,
             commands::set_idle_threshold,

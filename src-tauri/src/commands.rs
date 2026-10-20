@@ -162,6 +162,28 @@ pub fn delete_timer(app: AppHandle, id: String) -> Timers {
     Ok(timers)
 }
 
+#[tauri::command]
+pub fn reorder_timers(app: AppHandle, ids: Vec<String>) -> Timers {
+    let timers = {
+        let state = app.state::<AppState>();
+        let mut store = state.store.lock().map_err(|error| error.to_string())?;
+        store.reorder(&ids)?
+    };
+    refresh_tray(&app, &timers);
+    Ok(timers)
+}
+
+#[tauri::command]
+pub fn move_timer(app: AppHandle, id: String, delta: i32) -> Timers {
+    let timers = {
+        let state = app.state::<AppState>();
+        let mut store = state.store.lock().map_err(|error| error.to_string())?;
+        store.move_timer(&id, delta)?
+    };
+    refresh_tray(&app, &timers);
+    Ok(timers)
+}
+
 // --- Activity capture ---------------------------------------------------
 
 #[tauri::command]

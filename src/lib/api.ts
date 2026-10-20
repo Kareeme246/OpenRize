@@ -641,6 +641,14 @@ export function deleteTimer(id: string): Promise<Timer[]> {
   return invoke<Timer[]>("delete_timer", { id });
 }
 
+export function reorderTimers(ids: string[]): Promise<Timer[]> {
+  return invoke<Timer[]>("reorder_timers", { ids });
+}
+
+export function moveTimer(id: string, delta: number): Promise<Timer[]> {
+  return invoke<Timer[]>("move_timer", { id, delta });
+}
+
 // --- Battery & Energy ---
 
 export function getEnergySummary(days?: number): Promise<EnergySummary> {

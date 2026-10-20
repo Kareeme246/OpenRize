@@ -52,6 +52,7 @@ installed.
 | `rize timers list` | All timers with elapsed time and state. | `list_timers` | Yes | Shipped |
 | `rize timers new <label>` | Create a timer. | `create_timer` | Yes | Shipped |
 | `rize timers start` / `pause` / `reset` / `rm <timer>` | Control or delete a timer by id or label; reset and rm are confirmed. | `start_timer`, `pause_timer`, `reset_timer`, `delete_timer` | Yes | Shipped |
+| Timer reordering (CLI not yet exposed) | Persist the complete timer order or move one timer up/down; available in the Stopwatches UI. | `reorder_timers`, `move_timer` | Not yet exposed by CLI | Planned |
 | `rize timers rename <timer> <label>` | Rename a timer. | `rename_timer` | Yes | Shipped |
 | `rize timers segments <timer>` / `segments add` / `edit` / `rm` | List, add, edit or remove the time segments that make up a timer's total. | `add_timer_segment`, `update_timer_segment`, `delete_timer_segment` | Yes | Planned |
 | `rize timers saves <timer>` / `saves add` | List a timer's saved states (label, elapsed time and when each was saved), or record one now. | `list_timer_saved_states`, `save_timer_state` | Yes | Planned |

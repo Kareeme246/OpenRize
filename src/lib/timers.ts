@@ -27,6 +27,7 @@ export interface Timer {
   segments: TimerSegment[];
   startedAt: number | null;
   createdAt: number;
+  ordinal: number;
 }
 
 /**

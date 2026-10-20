@@ -15,6 +15,7 @@
       {
         "title": "OpenRize",
         "visible": false,
+        "dragDropEnabled": false,
         "width": 1160,
         "height": 780,
         "minWidth": 720,

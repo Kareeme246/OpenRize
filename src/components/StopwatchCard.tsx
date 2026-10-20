@@ -14,7 +14,6 @@ interface StopwatchCardProps {
   isFirst?: boolean;
   isLast?: boolean;
   isDragging?: boolean;
-  canDrag?: boolean;
   cardRef?: (el: HTMLElement | null) => void;
   onStart: (id: string) => void;
   onPause: (id: string) => void;
@@ -29,8 +28,6 @@ interface StopwatchCardProps {
   onDelete: (id: string) => void;
   onMoveUp?: (id: string) => void;
   onMoveDown?: (id: string) => void;
-  onArmDrag?: (id: string) => void;
-  onDisarmDrag?: () => void;
   onDragStart?: (event: React.DragEvent, id: string) => void;
   onDragEnd?: () => void;
   categories: Category[];
@@ -43,7 +40,6 @@ export function StopwatchCard({
   isFirst = false,
   isLast = false,
   isDragging = false,
-  canDrag = false,
   cardRef,
   onStart,
   onPause,
@@ -57,14 +53,11 @@ export function StopwatchCard({
   onDelete,
   onMoveUp,
   onMoveDown,
-  onArmDrag,
-  onDisarmDrag,
   onDragStart,
   onDragEnd,
   categories,
   projects,
 }: StopwatchCardProps) {
-  const sectionRef = useRef<HTMLElement | null>(null);
   const running = timer.startedAt !== null;
   const elapsed = elapsedMs(timer, now);
   const [editing, setEditing] = useState(false);
@@ -99,35 +92,23 @@ export function StopwatchCard({
 
   return (
     <section
-      ref={(el) => {
-        sectionRef.current = el;
-        cardRef?.(el);
-      }}
+      ref={cardRef}
       id={`timer-${timer.id}`}
       tabIndex={-1}
       aria-label={`Stopwatch ${timer.label}`}
-      draggable={canDrag}
-      onDragStart={(event) => {
-        onDragStart?.(event, timer.id);
-      }}
-      onDragEnd={() => {
-        onDragEnd?.();
-      }}
-      className={`shape-bleed-table relative flex min-w-0 flex-col items-center gap-3 rounded-xl border border-settings-card-border bg-settings-card p-4 outline-hidden focus:ring-2 focus:ring-accent ${
+      draggable={false}
+      onDragStart={(event) => event.preventDefault()}
+      className={`timer-card shape-bleed-table relative flex min-w-0 flex-col items-center gap-3 rounded-xl border border-settings-card-border bg-settings-card p-4 outline-hidden focus:ring-2 focus:ring-accent ${
         running ? "border-l-4 border-l-accent" : ""
-      } ${isDragging ? "opacity-40" : ""}`}
+      } ${isDragging ? "opacity-50 ring-2 ring-accent shadow-lg" : ""}`}
     >
       <button
         type="button"
         draggable
         aria-label={`Reorder ${timer.label}`}
         title="Drag to reorder"
-        onPointerDown={(event) => {
-          if (event.button !== 0) return;
-          onArmDrag?.(timer.id);
-        }}
-        onPointerUp={() => onDisarmDrag?.()}
         onDragStart={(event) => {
+          event.stopPropagation();
           onDragStart?.(event, timer.id);
         }}
         onDragEnd={() => {
@@ -146,11 +127,11 @@ export function StopwatchCard({
             }
           }
         }}
-        className="absolute top-2 left-2 grid size-7 place-items-center rounded-md text-fg-faint/60 hover:text-fg hover:bg-surface cursor-grab active:cursor-grabbing select-none transition-colors"
+        className="timer-drag-handle absolute top-2 left-2 grid size-7 place-items-center rounded-md text-fg-faint/60 hover:text-fg hover:bg-surface cursor-move select-none transition-colors"
       >
         <svg
           viewBox="0 0 24 24"
-          className="size-4"
+          className="pointer-events-none size-4"
           fill="currentColor"
           aria-hidden="true"
         >

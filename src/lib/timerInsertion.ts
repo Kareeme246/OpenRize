@@ -67,11 +67,14 @@ export function timerInsertion(
         ? (before.bottom + after.top) / 2
         : before.bottom + rowGap / 2
       : after.top - rowGap / 2;
+    const width = singleColumn ? edge.width : bounds.width;
+    const left = singleColumn ? edge.left - bounds.left : 0;
+    const top = center - bounds.top - 1;
     return {
       slot,
-      left: singleColumn ? edge.left - bounds.left : 0,
-      top: center - bounds.top - 1,
-      width: singleColumn ? edge.width : bounds.width,
+      left: Math.max(0, Math.min(bounds.width - width, left)),
+      top: Math.max(0, Math.min(bounds.height - 2, top)),
+      width,
       height: 2,
     };
   }
@@ -84,8 +87,11 @@ export function timerInsertion(
     : after.left - columnGap / 2;
   return {
     slot,
-    left: center - bounds.left - 1,
-    top: edge.top - bounds.top,
+    left: Math.max(0, Math.min(bounds.width - 2, center - bounds.left - 1)),
+    top: Math.max(
+      0,
+      Math.min(bounds.height - edge.height, edge.top - bounds.top),
+    ),
     width: 2,
     height: edge.height,
   };

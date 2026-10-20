@@ -98,6 +98,18 @@ export function StopwatchCard({
       aria-label={`Stopwatch ${timer.label}`}
       draggable={false}
       onDragStart={(event) => event.preventDefault()}
+      onKeyDown={(event) => {
+        if (event.target === event.currentTarget) {
+          if (
+            (isFirst &&
+              (event.key === "ArrowUp" || event.key === "ArrowLeft")) ||
+            (isLast &&
+              (event.key === "ArrowDown" || event.key === "ArrowRight"))
+          ) {
+            event.preventDefault();
+          }
+        }
+      }}
       className={`timer-card shape-bleed-table relative flex min-w-0 flex-col items-center gap-3 rounded-xl border border-settings-card-border bg-settings-card p-4 outline-hidden focus:ring-2 focus:ring-accent ${
         running ? "border-l-4 border-l-accent" : ""
       } ${isDragging ? "opacity-50 ring-2 ring-accent shadow-lg" : ""}`}
@@ -116,13 +128,13 @@ export function StopwatchCard({
         }}
         onKeyDown={(event) => {
           if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+            event.preventDefault();
             if (!isFirst) {
-              event.preventDefault();
               onMoveUp?.(timer.id);
             }
           } else if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+            event.preventDefault();
             if (!isLast) {
-              event.preventDefault();
               onMoveDown?.(timer.id);
             }
           }

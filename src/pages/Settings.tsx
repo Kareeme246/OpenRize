@@ -14,6 +14,7 @@ import {
   Toggle,
 } from "../components/SegmentedControl";
 import { Tooltip } from "../components/Tooltip";
+import { useAccounts } from "../hooks/useAccounts";
 import { useAiMetrics } from "../hooks/useAiMetrics";
 import { llmUnavailableReason, useAiStatus } from "../hooks/useAiStatus";
 import { useEnergy } from "../hooks/useEnergy";
@@ -53,6 +54,7 @@ import type {
   Route,
   UpdateStatus,
 } from "../lib/types";
+import { AccountsSetting } from "./settings/AccountsSetting";
 import { BreakSettingsGroups } from "./settings/BreakSettings";
 import {
   Select,
@@ -926,6 +928,7 @@ export function Settings({
   revealUpdates: number;
 }) {
   const { settings, storage, error, update } = useSettings();
+  const { current: currentAccount } = useAccounts();
   const [openError, setOpenError] = useState<string | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
@@ -1427,6 +1430,7 @@ export function Settings({
               title="Data & storage"
               description="Review where OpenRize stores local information and how long automatic activity is retained."
             />
+            <AccountsSetting />
             <SettingGroup title="Local data">
               <SettingBlock
                 title="Storage location"
@@ -1436,7 +1440,14 @@ export function Settings({
                   <p className="text-[12px] text-fg-muted">Locating…</p>
                 ) : (
                   <div className="flex flex-col gap-3">
-                    <PathLine label="Data folder" path={storage.dataDir} />
+                    <PathLine
+                      label={
+                        currentAccount
+                          ? `${currentAccount.name}'s data folder`
+                          : "Data folder"
+                      }
+                      path={storage.dataDir}
+                    />
                     <div className="flex flex-col gap-1.5">
                       <FileLine label="Database" path={storage.databaseFile} />
                       <FileLine label="Preferences" path={storage.configFile} />

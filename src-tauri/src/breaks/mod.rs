@@ -203,6 +203,50 @@ pub fn on_exit(app: &AppHandle) {
     }
 }
 
+/// The running break as an account switch would record it, without ending it.
+pub fn running_break(app: &AppHandle) -> Option<engine::SwitchedBreak> {
+    let runtime = app.try_state::<BreakRuntime>()?;
+    let engine = runtime.engine.lock().ok()?;
+    engine.switched_break(now_epoch_ms())
+}
+
+/// The user is switching accounts: ends a running break now, keeping the
+/// stopwatches it paused paused. Returns it for the account to offer back.
+pub fn pause_for_switch(app: &AppHandle) -> Option<engine::SwitchedBreak> {
+    let runtime = app.try_state::<BreakRuntime>()?;
+    let now = now_epoch_ms();
+    let mut engine = runtime.engine.lock().ok()?;
+    let (effects, ended) = engine.end_for_switch(now);
+    apply(app, &mut engine, effects, now);
+    let settings = app.state::<AppState>().settings_snapshot().breaks;
+    let view = engine.view(now, &settings, local_time(now));
+    drop(engine);
+    publish(app, &runtime, &view);
+    ended
+}
+
+/// Starts the rest of a break that a switch ended, from now.
+pub fn resume_switched_break(app: &AppHandle, ended: &engine::SwitchedBreak) -> Result<(), String> {
+    let now = now_epoch_ms();
+    let settings = app.state::<AppState>().settings_snapshot().breaks;
+    if current_state(app)?
+        .current
+        .is_some_and(|current| current.ended_at.is_none())
+    {
+        return Err("You are already on a break.".to_string());
+    }
+    run(app, &settings, now, |engine| {
+        engine.resume_break(now, ended)
+    })
+    .map(|_| ())
+    .ok_or_else(|| "break state is unavailable".to_string())
+}
+
+/// Whether two instants fall on the same local calendar day.
+pub fn same_local_day(a: u64, b: u64) -> bool {
+    local_time(a).day_key == local_time(b).day_key
+}
+
 /// Raises a sample reminder so the panel can be looked at without waiting an
 /// hour. Dev builds only.
 #[cfg(debug_assertions)]
@@ -392,7 +436,7 @@ fn begin(
 }
 
 /// Pauses every running stopwatch and returns the ones it paused.
-fn pause_running_timers(app: &AppHandle) -> Vec<(String, String)> {
+pub(crate) fn pause_running_timers(app: &AppHandle) -> Vec<(String, String)> {
     let running: Vec<(String, String)> = app
         .state::<AppState>()
         .store

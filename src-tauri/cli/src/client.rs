@@ -8,6 +8,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use openrize_core::accounts;
 use openrize_core::ipc::{self, Endpoint};
 use openrize_core::paths;
 use openrize_core::protocol::{code, Hello, Operation, Request, Response};
@@ -28,9 +29,16 @@ pub struct Client {
 
 impl Client {
     pub fn new(data_dir: Option<&Path>) -> Result<Self, String> {
+        Self::in_root(data_dir, paths::app_data_dir())
+    }
+
+    /// `root` is the installed app's data directory, if the OS has one.
+    fn in_root(data_dir: Option<&Path>, root: Option<PathBuf>) -> Result<Self, String> {
         let data_dir = match data_dir {
             Some(dir) => std::path::absolute(dir).map_err(|e| e.to_string())?,
-            None => paths::app_data_dir().ok_or("no home directory; pass --data-dir")?,
+            // The folder the app has open: the account it remembers, or the
+            // data directory itself for No account.
+            None => accounts::resolve(&root.ok_or("no home directory; pass --data-dir")?).dir,
         };
         let endpoint = Endpoint::new(&data_dir)?;
         Ok(Self { data_dir, endpoint })
@@ -299,4 +307,36 @@ fn detach(command: &mut Command) {
     const DETACHED_PROCESS: u32 = 0x0000_0008;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
     command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn without_a_data_dir_rize_reaches_the_account_the_app_remembers() {
+        let root = std::env::temp_dir().join(format!("rize-client-account-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        // Before any account, and with one chosen, the folder is the app's.
+        let before = Client::in_root(None, Some(root.clone())).unwrap();
+        assert_eq!(before.data_dir, root);
+
+        let account = accounts::create(&root, "Kareem").unwrap();
+        accounts::set_current(&root, Some(&account.id)).unwrap();
+        let open = Client::in_root(None, Some(root.clone())).unwrap();
+        assert_eq!(open.data_dir, accounts::data_dir(&root, Some(&account.id)));
+
+        // Signed out again, and an explicit directory always wins.
+        accounts::set_current(&root, None).unwrap();
+        assert_eq!(
+            Client::in_root(None, Some(root.clone())).unwrap().data_dir,
+            root
+        );
+        let other = root.join("elsewhere");
+        let explicit = Client::in_root(Some(&other), Some(root.clone())).unwrap();
+        assert_eq!(explicit.data_dir, other);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

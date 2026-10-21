@@ -5,9 +5,13 @@ import {
   useRef,
   useState,
 } from "react";
+import { MissingAccountDialog } from "./components/MissingAccountDialog";
+import { PausedOnSwitchBanner } from "./components/PausedOnSwitchBanner";
 import { Sidebar } from "./components/Sidebar";
+import { SwitchingOverlay } from "./components/SwitchingOverlay";
 import { Toaster } from "./components/Toaster";
 import { TopBar } from "./components/TopBar";
+import { AccountsProvider } from "./hooks/useAccounts";
 import { useBreaks } from "./hooks/useBreaks";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { SettingsProvider } from "./hooks/useSettings";
@@ -353,54 +357,59 @@ export default function App() {
 
   return (
     <SettingsProvider>
-      <div className="flex h-full min-h-0 flex-col overflow-hidden">
-        <TopBar
-          canGoBack={nav.cursor > 0}
-          canGoForward={nav.cursor < nav.entries.length - 1}
-          onBack={back}
-          onForward={forward}
-          sidebarCollapsed={sidebarCollapsed}
-          onToggleSidebar={toggleSidebar}
-        />
-        <div
-          className={`grid min-h-0 flex-1 overflow-hidden transition-[grid-template-columns] duration-150 ${
-            sidebarCollapsed
-              ? "grid-cols-[56px_minmax(0,1fr)]"
-              : "grid-cols-[224px_minmax(0,1fr)]"
-          }`}
-        >
-          <Sidebar
-            currentRoute={currentRoute}
-            onNavigate={navigate}
-            pendingCount={pendingCount}
-            currentApp={currentApp}
-            collapsed={sidebarCollapsed}
-            captureEnabled={captureEnabled}
-            trackingActive={trackingActive}
-            onToggleCapture={handleToggleCapture}
-            onBreak={
-              breaks.state.current && breaks.state.current.endedAt === null
-                ? {
-                    label: breaks.state.current.label,
-                    remainingMs:
-                      breaks.state.current.startedAt +
-                      breaks.state.current.plannedMs -
-                      breaks.now,
-                  }
-                : undefined
-            }
-            updateVersion={updates?.available?.version}
-            onOpenUpdate={() => {
-              navigate({ name: "settings", section: "updates" });
-              setRevealUpdates((count) => count + 1);
-            }}
+      <AccountsProvider>
+        <div className="flex h-full min-h-0 flex-col overflow-hidden">
+          <TopBar
+            canGoBack={nav.cursor > 0}
+            canGoForward={nav.cursor < nav.entries.length - 1}
+            onBack={back}
+            onForward={forward}
+            sidebarCollapsed={sidebarCollapsed}
+            onToggleSidebar={toggleSidebar}
           />
-          <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
-            {renderView()}
+          <div
+            className={`grid min-h-0 flex-1 overflow-hidden transition-[grid-template-columns] duration-150 ${
+              sidebarCollapsed
+                ? "grid-cols-[56px_minmax(0,1fr)]"
+                : "grid-cols-[224px_minmax(0,1fr)]"
+            }`}
+          >
+            <Sidebar
+              currentRoute={currentRoute}
+              onNavigate={navigate}
+              pendingCount={pendingCount}
+              currentApp={currentApp}
+              collapsed={sidebarCollapsed}
+              captureEnabled={captureEnabled}
+              trackingActive={trackingActive}
+              onToggleCapture={handleToggleCapture}
+              onBreak={
+                breaks.state.current && breaks.state.current.endedAt === null
+                  ? {
+                      label: breaks.state.current.label,
+                      remainingMs:
+                        breaks.state.current.startedAt +
+                        breaks.state.current.plannedMs -
+                        breaks.now,
+                    }
+                  : undefined
+              }
+              updateVersion={updates?.available?.version}
+              onOpenUpdate={() => {
+                navigate({ name: "settings", section: "updates" });
+                setRevealUpdates((count) => count + 1);
+              }}
+            />
+            <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+              <PausedOnSwitchBanner />
+              {renderView()}
+            </div>
           </div>
         </div>
-      </div>
-      <Toaster />
+        <MissingAccountDialog />
+        <SwitchingOverlay />
+        <Toaster />
+      </AccountsProvider>
     </SettingsProvider>
   );
 }

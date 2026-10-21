@@ -59,6 +59,18 @@ impl Source {
             Source::Idle => "idle",
         }
     }
+
+    /// The inverse of `as_str`, for a break kept across a restart.
+    pub fn parse(text: &str) -> Option<Self> {
+        [
+            Source::Interval,
+            Source::Scheduled,
+            Source::Manual,
+            Source::Idle,
+        ]
+        .into_iter()
+        .find(|source| source.as_str() == text)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -186,6 +198,7 @@ struct Reminder {
 struct ActiveBreak {
     id: String,
     source: Source,
+    schedule_id: Option<String>,
     label: String,
     planned_ms: u64,
     started_at: u64,
@@ -204,6 +217,18 @@ struct Welcome {
     /// Set when the engine, not the user, ended the break.
     note: Option<String>,
     until: u64,
+}
+
+/// A break in progress as an account switch records it, so the account it
+/// belongs to can offer to take it up again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwitchedBreak {
+    pub label: String,
+    pub source: Source,
+    pub schedule_id: Option<String>,
+    pub remaining_ms: u64,
+    /// The stopwatches (id, label) the break had paused.
+    pub paused: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -824,6 +849,7 @@ impl Engine {
         self.active = Some(ActiveBreak {
             id: id.clone(),
             source,
+            schedule_id: schedule_id.clone(),
             label: label.clone(),
             planned_ms,
             started_at: now,
@@ -942,6 +968,75 @@ impl Engine {
             });
         self.finish(ended_at, true, None, &mut effects);
         effects
+    }
+
+    /// The running break as a switch would record it, or `None`.
+    pub fn switched_break(&self, now: u64) -> Option<SwitchedBreak> {
+        let active = self.active.as_ref()?;
+        Some(SwitchedBreak {
+            label: active.label.clone(),
+            source: active.source,
+            schedule_id: active.schedule_id.clone(),
+            remaining_ms: (active.started_at + active.planned_ms).saturating_sub(now),
+            paused: active.paused.clone(),
+        })
+    }
+
+    /// The user switched accounts: the break ends now, in its own account. Its
+    /// stopwatches stay paused (unlike a break that ends by itself), because
+    /// the account offers to resume them together with the break.
+    pub fn end_for_switch(&mut self, now: u64) -> (Vec<Effect>, Option<SwitchedBreak>) {
+        let Some(ended) = self.switched_break(now) else {
+            return (Vec::new(), None);
+        };
+        let mut effects = Vec::new();
+        self.finish(now, true, None, &mut effects);
+        for effect in &mut effects {
+            if let Effect::Finish { resume_timers, .. } = effect {
+                resume_timers.clear();
+            }
+        }
+        (effects, Some(ended))
+    }
+
+    /// Starts the rest of a break that a switch ended. Its stopwatches are
+    /// already paused, so it carries them to resume at its end instead of
+    /// pausing any others.
+    pub fn resume_break(&mut self, now: u64, resumed: &SwitchedBreak) -> Vec<Effect> {
+        if self.active.is_some() {
+            return Vec::new();
+        }
+        let id = uuid::Uuid::now_v7().to_string();
+        self.active = Some(ActiveBreak {
+            id: id.clone(),
+            source: resumed.source,
+            schedule_id: resumed.schedule_id.clone(),
+            label: resumed.label.clone(),
+            planned_ms: resumed.remaining_ms,
+            started_at: now,
+            segment_id: None,
+            paused: resumed.paused.clone(),
+        });
+        self.reminder = None;
+        self.welcome = None;
+        self.streak_ms = 0;
+        self.deferred_since = None;
+        vec![Effect::Begin {
+            record: BreakRecord {
+                id,
+                source: resumed.source,
+                schedule_id: resumed.schedule_id.clone(),
+                due_at: None,
+                planned_ms: resumed.remaining_ms,
+                status: STATUS_TAKEN,
+                snoozes: 0,
+                started_at: Some(now),
+                ended_at: None,
+                segment_id: None,
+            },
+            label: resumed.label.clone(),
+            pause_timers: false,
+        }]
     }
 
     /// A sample interval reminder, for looking at the panel in a dev build.
@@ -1362,6 +1457,75 @@ mod tests {
         assert_eq!(resume_timers, &["t1".to_string()]);
         let welcome = sim.state().current.unwrap();
         assert_eq!(welcome.resumed_timers, ["Acme site"]);
+    }
+
+    #[test]
+    fn switching_accounts_ends_the_break_and_keeps_its_stopwatches_paused() {
+        let mut sim = Sim::new();
+        sim.settings.pause_stopwatches = true;
+        let effects = sim.command(Command::StartBreak);
+        sim.begin(&effects);
+        sim.engine
+            .attach_paused_timers(vec![("t1".into(), "Acme site".into())]);
+        sim.now += 2 * MIN;
+
+        let (effects, ended) = sim.engine.end_for_switch(sim.now);
+        let ended = ended.expect("a break was running");
+        assert_eq!(ended.label, "Break");
+        assert_eq!(ended.source, Source::Manual);
+        assert_eq!(ended.remaining_ms, 3 * MIN);
+        assert_eq!(ended.paused, [("t1".to_string(), "Acme site".to_string())]);
+        let [Effect::Finish {
+            ended_at,
+            close_segment: true,
+            resume_timers,
+            ..
+        }] = effects.as_slice()
+        else {
+            panic!("expected the break to end, got {effects:?}");
+        };
+        assert_eq!(*ended_at, sim.now);
+        assert!(resume_timers.is_empty(), "the stopwatches stay paused");
+        assert_ne!(sim.state().phase, Phase::OnBreak);
+        // Nothing is left to end a second time.
+        assert_eq!(sim.engine.end_for_switch(sim.now), (Vec::new(), None));
+    }
+
+    #[test]
+    fn a_resumed_break_runs_its_remaining_time_and_resumes_the_same_stopwatches() {
+        let mut sim = Sim::new();
+        let ended = SwitchedBreak {
+            label: "Lunch".into(),
+            source: Source::Scheduled,
+            schedule_id: Some("lunch".into()),
+            remaining_ms: 8 * MIN,
+            paused: vec![("t1".into(), "Acme site".into())],
+        };
+        let effects = sim.engine.resume_break(sim.now, &ended);
+        let [Effect::Begin {
+            record,
+            label,
+            pause_timers: false,
+        }] = effects.as_slice()
+        else {
+            panic!("expected a break that pauses nothing more, got {effects:?}");
+        };
+        assert_eq!(label, "Lunch");
+        assert_eq!(record.planned_ms, 8 * MIN);
+        assert_eq!(record.source, Source::Scheduled);
+        assert_eq!(record.schedule_id.as_deref(), Some("lunch"));
+        sim.begin(&effects);
+        let current = sim.state().current.unwrap();
+        assert_eq!(current.planned_ms, 8 * MIN);
+        assert_eq!(current.paused_timers, ["Acme site"]);
+        // Only one break at a time.
+        assert!(sim.engine.resume_break(sim.now, &ended).is_empty());
+
+        let finish = sim.command(Command::EndBreak);
+        let Some(Effect::Finish { resume_timers, .. }) = finish.first() else {
+            panic!("expected Finish");
+        };
+        assert_eq!(resume_timers, &["t1".to_string()]);
     }
 
     #[test]

@@ -22,6 +22,16 @@ pub const DATABASE_FILE: &str = "activity.db";
 /// its whole life, or `rize` while it edits them with the app closed.
 pub const LOCK_FILE: &str = "app.lock";
 
+/// Local accounts, beside the data of No account (the data directory itself).
+/// The registry lists them; see `accounts.rs`.
+pub const ACCOUNTS_FILE: &str = "accounts.json";
+
+/// The restart handoff a switch leaves for the next launch; deleted once read.
+pub const SWITCH_FILE: &str = "switch.json";
+
+/// One folder per account, named by its id.
+pub const ACCOUNTS_DIR: &str = "accounts";
+
 /// The installed app's data directory, or `None` when the OS has no home.
 pub fn app_data_dir() -> Option<PathBuf> {
     dirs::data_dir().map(|dir| dir.join(APP_IDENTIFIER))

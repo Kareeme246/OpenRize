@@ -11,6 +11,7 @@ use std::sync::Mutex;
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 
+use crate::accounts;
 use crate::activity::{ActivityStore, DB_FILE};
 use crate::paths;
 use crate::protocol::{code, ApiError};
@@ -132,11 +133,14 @@ pub struct StoragePaths {
     pub config_file: String,
     pub data_dir: String,
     pub database_file: String,
+    /// The account whose folder `data_dir` is, or `None` for No account.
+    pub account: Option<String>,
 }
 
 impl StoragePaths {
     pub fn new(data_dir: &Path) -> Self {
         Self {
+            account: accounts::account_for_dir(data_dir).map(|account| account.name),
             config_file: settings::config_dir()
                 .join("settings.json")
                 .display()

@@ -224,6 +224,8 @@ pub fn show(command: Option<&Command>, data: &Value, full: bool) {
             }
         },
         Some(Command::Paths) => {
+            let account = data["account"].as_str().unwrap_or("No account");
+            println!("Account:  {account}");
             println!("Settings: {}", text(&data["configFile"]));
             println!("Data:     {}", text(&data["dataDir"]));
             println!("Database: {}", text(&data["databaseFile"]));

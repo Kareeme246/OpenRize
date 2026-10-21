@@ -79,6 +79,9 @@
   --cat-10: #9b87df;
   --cat-11: #e97e7b;
   --cat-12: #64748b;
+  /* Letters set on a category colour: dark ink on this theme's light colours,
+     white on the light theme's dark ones. */
+  --cat-ink: #101312;
 
   /* Decision tiers (Settings → AI effectiveness), fixed order rule →
      personal → model. Validated with the dataviz palette checks. */
@@ -181,6 +184,7 @@
   --cat-10: #6b52c0;
   --cat-11: #c83d39;
   --cat-12: #475569;
+  --cat-ink: #ffffff;
 
   --tier-rule: #366acb;
   --tier-personal: #1f7e72;
@@ -222,6 +226,7 @@
   --color-accent-dim: var(--accent-dim);
   --color-accent-soft: var(--accent-soft);
   --color-accent-fg: var(--accent-fg);
+  --color-cat-ink: var(--cat-ink);
 
   --color-tier-rule: var(--tier-rule);
   --color-tier-personal: var(--tier-personal);

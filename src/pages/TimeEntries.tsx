@@ -20,9 +20,11 @@ import {
   Tabs,
 } from "../components/Page";
 import { Picker } from "../components/Picker";
+import { useAccounts } from "../hooks/useAccounts";
 import { type Catalog, useCatalog } from "../hooks/useCatalog";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import { useToast } from "../hooks/useToast";
+import { entriesViewsKey } from "../lib/accounts";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
 import {
@@ -122,18 +124,16 @@ function rangeTitle(range: EntriesRange, date: Date, span: DateRange): string {
   )}`;
 }
 
-// --- Saved views (a named Route, per viewer) --------------------------------
+// --- Saved views (a named Route, per viewer and account) ---------------------
 
 interface SavedView {
   name: string;
   route: EntriesRoute;
 }
 
-const VIEWS_KEY = "openrize.entries.views";
-
-function readViews(): SavedView[] {
+function readViews(key: string): SavedView[] {
   try {
-    const raw = window.localStorage.getItem(VIEWS_KEY);
+    const raw = window.localStorage.getItem(key);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed)
       ? parsed.filter(
@@ -146,9 +146,9 @@ function readViews(): SavedView[] {
   }
 }
 
-function writeViews(views: SavedView[]): void {
+function writeViews(key: string, views: SavedView[]): void {
   try {
-    window.localStorage.setItem(VIEWS_KEY, JSON.stringify(views));
+    window.localStorage.setItem(key, JSON.stringify(views));
   } catch {
     // Storage can be unavailable; the view just won't persist.
   }
@@ -249,7 +249,11 @@ export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const showToast = useToast();
-  const [views, setViews] = useState<SavedView[]>(readViews);
+  const { accounts, current } = useAccounts();
+  const viewsKey = entriesViewsKey(current?.id ?? null);
+  const [views, setViews] = useState<SavedView[]>(() => readViews(viewsKey));
+  // The open account is known a moment after launch; its views follow it.
+  useEffect(() => setViews(readViews(viewsKey)), [viewsKey]);
 
   const setRoute = useCallback(
     (patch: Partial<EntriesRoute>): void => replace({ ...route, ...patch }),
@@ -338,9 +342,11 @@ export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
 
   /** Rewrites the saved views from what is stored now, then shows them. */
   const rewriteViews = (change: (stored: SavedView[]) => SavedView[]): void => {
-    const next = change(readViews());
+    // Until the open account is known, the key could be another account's.
+    if (accounts === null) return;
+    const next = change(readViews(viewsKey));
     setViews(next);
-    writeViews(next);
+    writeViews(viewsKey, next);
   };
   const saveView = (name: string): void => {
     const added = { name, route };

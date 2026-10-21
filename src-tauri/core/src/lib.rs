@@ -4,6 +4,7 @@
 //! for its windows and tracker; `rize` links it to read and edit the same data
 //! while the app is closed.
 
+pub mod accounts;
 pub mod activity;
 pub mod ai;
 pub mod capture;

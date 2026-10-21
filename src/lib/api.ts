@@ -1,4 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
+import type {
+  Account,
+  AccountsState,
+  DataSummary,
+  PausedOnSwitch,
+  SwitchPreview,
+} from "./accounts";
 import type { BreakEntry, BreakState } from "./breaks";
 import type { LoginItemState, Settings, StoragePaths } from "./settings";
 import type { Timer, TimerSavedState } from "./timers";
@@ -57,6 +64,8 @@ export const UPDATE_STATUS = "update-status";
 export const OPEN_BREAK_SETTINGS = "open-break-settings";
 /** Payload: `BreakState`. */
 export const BREAK_STATE_CHANGED = "break-state-changed";
+/** The accounts list changed without a restart (a rename or a delete). */
+export const ACCOUNTS_CHANGED = "accounts-changed";
 
 /** Tauri rejects with a string; React errors are Error objects. Handle both. */
 export function describeError(error: unknown): string {
@@ -93,6 +102,69 @@ export async function setLaunchAtLogin(
 /** Reads authorization status of system permissions (Accessibility, Automation, etc.). */
 export async function checkPermissions(): Promise<PermissionInfo[]> {
   return await invoke<PermissionInfo[]>("check_permissions");
+}
+
+// --- Accounts ---
+
+export async function accountsState(): Promise<AccountsState> {
+  return await invoke<AccountsState>("accounts_state");
+}
+
+/** What No account holds, or null when an account is open or it is empty. */
+export async function existingDataSummary(): Promise<DataSummary | null> {
+  return await invoke<DataSummary | null>("existing_data_summary");
+}
+
+/** What switching accounts right now would pause. */
+export async function switchPreview(): Promise<SwitchPreview> {
+  return await invoke<SwitchPreview>("switch_preview");
+}
+
+/**
+ * Opens another account, or No account for null, by restarting the app.
+ * Resolves at once; the restart follows after at least three seconds.
+ */
+export async function switchAccount(to: string | null): Promise<void> {
+  await invoke("switch_account", { to });
+}
+
+/**
+ * Adds an account and opens it by restarting. `moveExisting` moves the data
+ * that belongs to No account into it.
+ */
+export async function createAccount(
+  name: string,
+  moveExisting: boolean,
+): Promise<Account> {
+  return await invoke<Account>("create_account", { name, moveExisting });
+}
+
+export async function renameAccount(
+  id: string,
+  name: string,
+): Promise<Account> {
+  return await invoke<Account>("rename_account", { id, name });
+}
+
+/** Moves the account's folder to the Trash and forgets it. */
+export async function deleteAccount(id: string): Promise<void> {
+  await invoke("delete_account", { id });
+}
+
+export async function dismissMissingAccount(): Promise<void> {
+  await invoke("dismiss_missing_account");
+}
+
+export async function pausedOnSwitch(): Promise<PausedOnSwitch | null> {
+  return await invoke<PausedOnSwitch | null>("paused_on_switch");
+}
+
+export async function resumePaused(): Promise<void> {
+  await invoke("resume_paused");
+}
+
+export async function dismissPaused(): Promise<void> {
+  await invoke("dismiss_paused");
 }
 
 // --- Pulse panel ---

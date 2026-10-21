@@ -53,12 +53,19 @@ pub fn create_timer(app: AppHandle, label: String) -> Timers {
 
 #[tauri::command]
 pub fn start_timer(app: AppHandle, id: String) -> Timers {
+    let timers = start_timer_by_id(&app, &id)?;
+    // Started by hand, so no longer work an account switch left paused.
+    crate::accounts::forget_paused_stopwatch(&app, &id);
+    Ok(timers)
+}
+
+pub fn start_timer_by_id(app: &AppHandle, id: &str) -> Timers {
     let timers = {
         let state = app.state::<AppState>();
         let mut store = state.store.lock().map_err(|error| error.to_string())?;
-        store.start(&id)?
+        store.start(id)?
     };
-    refresh_tray(&app, &timers);
+    refresh_tray(app, &timers);
     Ok(timers)
 }
 
@@ -1089,11 +1096,8 @@ pub fn check_permissions() -> Vec<crate::permissions::PermissionInfo> {
 
 #[tauri::command]
 pub fn storage_paths(app: AppHandle) -> Result<StoragePaths, String> {
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?;
-    Ok(StoragePaths::new(&data_dir))
+    // The open account's folder, not always the app's data directory.
+    Ok(StoragePaths::new(&crate::accounts::data_dir(&app)))
 }
 
 #[tauri::command]

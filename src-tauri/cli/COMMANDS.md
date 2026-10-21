@@ -24,6 +24,10 @@ installed app only to launch it (`rize app start`, `rize track start`).
 `rize app start` only launches the app (in the background, no window). Tracking is its own
 command: `rize track start`, or `rize app start --track` to do both.
 
+Without `--data-dir`, rize reaches the folder the app has open: the account it remembers, or the
+data directory itself for No account (`openrize_core::accounts::resolve`). Switching accounts is
+not a CLI command.
+
 ## Status
 
 - **Shipped:** in the current binary.
@@ -75,7 +79,8 @@ installed.
 | `rize clients list` / `show` / `add` / `edit` / `rm` | Manage clients; show lists their projects; rm is confirmed. | `list_clients`, `create_client`, `update_client`, `delete_client` | Yes | Shipped |
 | `rize categories list` / `add` / `edit` / `rm` | Manage categories; rm is confirmed and refused when it would change approved entries. | `list_categories`, `create_category`, `update_category`, `delete_category` | Yes | Shipped |
 | `rize settings list` / `get <key>` / `set <key> <value>` | Every preference by dotted key, such as `tracking-hours.start` or `breaks.enabled`. Writes one field at a time. | `get_settings`, `SettingsStore::patch` | Yes (applies on next launch) | Shipped |
-| `rize paths` | Settings file, data directory and database path. | `storage_paths` | Yes | Shipped |
+| `rize paths` | The open account, the settings file, the data directory and the database path. | `storage_paths` | Yes | Shipped |
+| `rize account` / `rize account list` | The account the app opens (or No account) and every account. Switching accounts stays in the app. | `accounts_state` | Yes | Planned |
 | `rize install-path` | Put `rize` on PATH: a symlink on macOS, the user PATH on Windows. | client only | Yes | Shipped |
 | `rize uninstall-path` | Remove the installed command from `~/.local/bin`, even if the app is gone. | client only | Yes | Shipped |
 | `rize completions bash\|zsh\|fish\|powershell\|elvish` | Print a shell completion script. | client only | Yes | Shipped |

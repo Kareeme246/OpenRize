@@ -1,0 +1,156 @@
+name: Publish website installers (R2)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing GitHub release version (X.Y.Z, without v)
+        required: true
+        type: string
+      macos_arm:
+        description: Publish macOS ARM installer
+        type: boolean
+        default: true
+      windows:
+        description: Publish Windows x64 installer
+        type: boolean
+        default: false
+      r2:
+        description: Publish selected installers to R2 and update the website
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      macos_arm:
+        type: boolean
+        default: true
+      windows:
+        type: boolean
+        default: false
+      r2:
+        type: boolean
+        default: false
+    secrets:
+      OFFLINE_STUDIOS_READ_TOKEN:
+        required: true
+      CLOUDFLARE_API_TOKEN:
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish-r2:
+    if: inputs.r2
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # current.json is shared across versions. Never race two promotions.
+    concurrency:
+      group: openrize-r2-publish
+      cancel-in-progress: false
+    steps:
+      # Stage ALL selected installers before the publisher can touch R2. Its
+      # default GitHub download path permits missing platforms; do not use it.
+      - name: Require the public release and download every selected installer
+        id: installers
+        # v7.0.1
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea
+        env:
+          VERSION: ${{ inputs.version }}
+          MACOS_ARM: ${{ inputs.macos_arm }}
+          WINDOWS: ${{ inputs.windows }}
+        with:
+          script: |
+            const fs = require('node:fs/promises');
+            const path = require('node:path');
+            if (!/^\d+\.\d+\.\d+$/.test(process.env.VERSION)) {
+              throw new Error('Version must be X.Y.Z without v');
+            }
+            const tag = `v${process.env.VERSION}`;
+            const { owner, repo } = context.repo;
+            const { data: release } = await github.rest.repos.getReleaseByTag({
+              owner, repo, tag,
+            });
+            if (release.draft || release.prerelease ||
+                release.tag_name !== tag) {
+              throw new Error('R2 requires a published stable GitHub release');
+            }
+            const names = [];
+            if (process.env.MACOS_ARM === 'true') {
+              names.push(`openrize_${process.env.VERSION}_aarch64.dmg`);
+            }
+            if (process.env.WINDOWS === 'true') {
+              names.push(`openrize_${process.env.VERSION}_x64-setup.exe`);
+            }
+            if (!names.length) throw new Error('No installers selected for R2');
+            const assets = names.map(name => {
+              const matches = release.assets.filter(a => a.name === name);
+              if (matches.length !== 1 || matches[0].state !== 'uploaded' ||
+                  matches[0].size <= 0) {
+                throw new Error(`Missing/incomplete GitHub installer: ${name}`);
+              }
+              return matches[0];
+            });
+            const dir = await fs.mkdtemp(
+              path.join(process.env.RUNNER_TEMP, 'r2-installers-'),
+            );
+            for (const asset of assets) {
+              const response = await fetch(asset.browser_download_url);
+              if (!response.ok) {
+                throw new Error(`Download ${asset.name}: ${response.status}`);
+              }
+              const bytes = Buffer.from(await response.arrayBuffer());
+              if (bytes.length !== asset.size) {
+                throw new Error(`Truncated download: ${asset.name}`);
+              }
+              await fs.writeFile(path.join(dir, asset.name), bytes);
+            }
+            core.setOutput('dir', dir);
+
+      # One publisher implementation, pinned and reviewed alongside this job.
+      # The default GITHUB_TOKEN cannot read this private repository.
+      - name: Check out the website publisher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Kareeme246/offline-studios
+          ref: 29842622a70b13350251c4e026ab98198692c9b5
+          token: ${{ secrets.OFFLINE_STUDIOS_READ_TOKEN }}
+          persist-credentials: false
+          path: website-publisher
+      # v6.1.0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          version: 12.5.1
+      # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Install the pinned publisher dependencies
+        working-directory: website-publisher
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Upload, verify, then make the website release current
+        working-directory: website-publisher
+        env:
+          VERSION: ${{ inputs.version }}
+          INSTALLER_DIR: ${{ steps.installers.outputs.dir }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: 'false'
+          # Do not auto-install or run dependency hooks with credentials set.
+          PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: 'false'
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || {
+            echo 'Missing CLOUDFLARE_API_TOKEN' >&2; exit 1;
+          }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || {
+            echo 'Missing CLOUDFLARE_ACCOUNT_ID' >&2; exit 1;
+          }
+          pnpm publish-openrize --version "$VERSION" --remote \
+            --bucket offline-studios-downloads --dir "$INSTALLER_DIR"

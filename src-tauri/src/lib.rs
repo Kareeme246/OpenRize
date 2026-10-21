@@ -1,3 +1,4 @@
+mod accounts;
 mod activity;
 mod ai;
 mod breaks;
@@ -40,6 +41,10 @@ pub const EVENT_SETTINGS_CHANGED: &str = "settings-changed";
 
 /// Emitted whenever time entries are modified or rebuilt.
 pub const EVENT_ENTRIES_CHANGED: &str = "entries-changed";
+
+/// Emitted after the accounts list changes without a restart (a rename or a
+/// delete), so every open view re-reads it.
+pub const EVENT_ACCOUNTS_CHANGED: &str = "accounts-changed";
 
 /// Sent to the main window when the break reminder asks for its settings.
 pub const EVENT_OPEN_BREAK_SETTINGS: &str = "open-break-settings";
@@ -102,7 +107,14 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
             install_bundled_cli();
-            let dir = app.path().app_data_dir()?;
+            let root = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&root)?;
+            // Before any store opens: repairs the account list, finishes a
+            // requested move of existing data, and says which folder to open.
+            let launch = openrize_core::accounts::launch(&root);
+            let dir = launch.resolved.dir.clone();
+            let handoff = launch.handoff.clone();
+            app.manage(accounts::ActiveAccount::new(root, &launch));
             // Waits out a `rize` edit made while the app was closed, then
             // keeps the stores for as long as the app runs.
             std::fs::create_dir_all(&dir)?;
@@ -140,9 +152,15 @@ pub fn run() {
                 eprintln!("retention sweep failed: {error}");
             }
             rpc::serve(app.handle().clone(), dir);
+            // A switch restarts with the original arguments, so a window that was
+            // showing must come back even if this copy began in the background.
+            if let Some(bounds) = handoff.as_ref().and_then(|handoff| handoff.window) {
+                accounts::restore_window(app.handle(), bounds);
+            }
+            let show = handoff.is_some_and(|handoff| handoff.show);
             // The window is created hidden (tauri.conf.json), so a background
             // launch never flashes it.
-            if background {
+            if background && !show {
                 #[cfg(target_os = "macos")]
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             } else {
@@ -304,6 +322,17 @@ pub fn run() {
             commands::update_status,
             commands::check_for_updates,
             commands::install_update,
+            accounts::accounts_state,
+            accounts::existing_data_summary,
+            accounts::switch_preview,
+            accounts::switch_account,
+            accounts::create_account,
+            accounts::rename_account,
+            accounts::delete_account,
+            accounts::dismiss_missing_account,
+            accounts::paused_on_switch,
+            accounts::resume_paused,
+            accounts::dismiss_paused,
         ])
         .build(tauri::generate_context!())
         .expect("error while building OpenRize")

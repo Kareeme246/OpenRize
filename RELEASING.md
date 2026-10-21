@@ -14,28 +14,95 @@ To cut a release:
    git commit -m "docs: update changelog for vX.Y.Z"
    ```
    `CHANGELOG.md` is generated from git history; do not edit it by hand.
-2. Tag and push the version already recorded in `package.json`,
-   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`,
+2. Push the release commit to `main`. In GitHub Actions, run the `Release`
+   workflow on that commit with `version` set to `X.Y.Z` (without `v`). It must
+   match `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`,
    `src-tauri/cli/Cargo.toml`, and `src-tauri/core/Cargo.toml`
-   (`./scripts/bump-version.sh` updates them all):
-   ```sh
-   git tag vX.Y.Z
-   git push origin main vX.Y.Z
-   ```
-   The release workflow rejects a tag unless all five versions match. It uses
-   the same `cliff.toml` to generate GitHub Release notes and builds a signed,
-   notarized macOS `.dmg`/`.app` with `pnpm tauri build`. The `rize` CLI ships
-   inside that app as a sidecar.
-3. Watch the `Release` workflow. When it finishes, it publishes the GitHub
-   Release with the `.dmg` and zipped `.app` attached, plus the in-app
-   updater's `openrize.app.tar.gz` and `latest.json`. `install.sh` installs the
-   CLI on its own by extracting it from that same `openrize.app.tar.gz`, so
-   there is no separate CLI download.
+   (`./scripts/bump-version.sh` updates them all). The workflow creates the tag
+   or verifies an existing tag points at that commit, and refuses an existing
+   GitHub release to avoid mixing asset sets.
+3. Select `macos_arm` (default on), `windows` (default off), and `scope`
+   (`standard` by default; `comprehensive` also includes the zipped macOS
+   `.app`). At least one platform must be selected. Leave `r2` off for the
+   existing GitHub-releases-only path, or turn it on to also update the
+   website's installers after the GitHub release is published (setup below).
+4. Watch the `Release` workflow. It uses `cliff.toml` for release notes and
+   publishes precisely the selected platforms' assets and `latest.json`.
+   macOS includes the signed, notarized `.dmg` and updater's
+   `openrize.app.tar.gz`; Windows includes the unsigned NSIS installer. Both
+   updater artifacts have minisign signatures. `install.sh` installs the CLI
+   from that same `openrize.app.tar.gz`, so there is no separate CLI download.
 
 Publishing a release ships it to every installed copy: the app checks
 `releases/latest/download/latest.json` hourly (see `src-tauri/src/updater.rs`)
 and offers the update in the sidebar and Settings. Drafts and pre-releases are
 never offered, because `releases/latest` skips them.
+
+## Optional website publishing (R2)
+
+The `r2` dispatch checkbox defaults to **false**. Turning it on publishes to
+**GitHub Releases and R2**, using the same platform selection. Select both
+platforms if both should be available on the website: the new website manifest
+lists only the selected platforms, not installers from an older version.
+The app's in-app updater still uses GitHub, regardless of this checkbox.
+
+Both entry points use the single `publish-r2.yml` workflow. During a normal
+release it runs only after GitHub publishing succeeds. To publish an existing
+release without rebuilding, run **Publish website installers (R2)** in GitHub
+Actions, enter its version (for example `0.9.20`), select the platforms, and
+explicitly turn `r2` on. This standalone dispatch does not create a tag, build
+installers, or change the GitHub release. Leaving `r2` off does nothing.
+
+Both entry points require a published stable release and every selected
+installer. They download the installers into an isolated directory and fail
+on missing assets, HTTP errors, or truncated downloads before invoking the
+publisher. This is important because the publisher's own
+default GitHub-download mode permits missing platforms; the workflow instead
+passes the complete staged directory with `--dir`.
+
+Uploads use the existing `publish-openrize` script from a pinned commit of
+`Kareeme246/offline-studios`, not a second implementation here. That script
+validates installer formats, uploads under `openrize/releases/<version>/`, and
+reads every installer back to verify its size and SHA-256 before publishing the
+version manifest and finally `openrize/current.json`. A failed installer upload
+or verification cannot advance the current pointer. R2 jobs serialize across
+versions, and the publisher refuses accidental downgrades. No Worker deployment
+or deletion of previous releases is involved.
+
+Add these **OpenRize repository Actions secrets** in Settings > Secrets and
+variables > Actions before opting in:
+
+| Secret | Value and minimum access |
+| --- | --- |
+| `OFFLINE_STUDIOS_READ_TOKEN` | Fine-grained GitHub personal access token limited to `Kareeme246/offline-studios`, with **Contents: read** (and GitHub's required Metadata read). No write or workflow permission. Needed because that repository is private; OpenRize's `GITHUB_TOKEN` cannot read it. |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API token with **Account > Workers R2 Storage > Edit** (`Workers R2 Storage Write`), scoped to only the account owning `offline-studios-downloads`. This includes object read-back and write access. No Workers Scripts, DNS, or zone permissions are needed. |
+| `CLOUDFLARE_ACCOUNT_ID` | The Cloudflare account ID owning that bucket. It is an identifier, not a credential, but this workflow reads it from an Actions secret for consistent configuration. |
+
+The bucket name is fixed to `offline-studios-downloads`; there is no additional
+bucket ID, S3 access key, or S3 secret to configure. Wrangler uses Cloudflare's
+REST API. Its account-scoped R2 Edit permission is broader than one bucket;
+R2's bucket-scoped **Object Read & Write** tokens are S3-only and do not work
+with this publisher. See Cloudflare's [R2 token permissions][r2-tokens] and
+[Wrangler environment variables][wrangler-env].
+
+This keeps the upload logic with the website and bucket, but deliberately adds
+a private-repository read token and R2 credentials to OpenRize so the opt-in
+lives beside the existing platform flags. Review the pinned publisher commit
+when updating it, especially its upload/verification/promotion ordering.
+Credentials are provided only to their checkout or publish step and are not
+needed when `r2` is off.
+
+If R2 fails, the GitHub release remains published. Failures before promotion
+leave the old website pointer unchanged; an error reading the pointer back
+could happen after promotion, so inspect the logs before retrying. Fix the
+cause and use Actions' **Re-run failed jobs** or the standalone R2 dispatch,
+not a fresh `Release` dispatch (which correctly refuses an existing GitHub
+release). Versions with a published R2 manifest are immutable; if a failure
+occurred after writing that manifest, deliberate promotion/recovery is an
+operator action in offline-studios, not an option in this workflow.
+
+[r2-tokens]: https://developers.cloudflare.com/r2/api/tokens/#permissions
+[wrangler-env]: https://developers.cloudflare.com/workers/wrangler/system-environment-variables/
 
 ## Signing and notarization secrets
 

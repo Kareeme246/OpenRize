@@ -15,6 +15,10 @@ on:
         description: Build Windows x64 (unsigned NSIS installer)
         type: boolean
         default: false
+      r2:
+        description: Also publish selected installers to the website's R2 bucket
+        type: boolean
+        default: false
       scope:
         description: Artifact scope
         type: choice
@@ -351,3 +355,20 @@ jobs:
           files: release-assets/*
           fail_on_unmatched_files: true
           body_path: release-notes.md
+
+  publish-r2:
+    needs: publish
+    if: >-
+      always() && !cancelled() && inputs.r2 && needs.publish.result == 'success'
+    # Reusable local calls resolve at the caller commit without a checkout.
+    # Keep ./ compatibility with actionlint until it supports $/ references.
+    uses: ./.github/workflows/publish-r2.yml # zizmor: ignore[self-repository]
+    with:
+      version: ${{ inputs.version }}
+      macos_arm: ${{ inputs.macos_arm }}
+      windows: ${{ inputs.windows }}
+      r2: true
+    secrets:
+      OFFLINE_STUDIOS_READ_TOKEN: ${{ secrets.OFFLINE_STUDIOS_READ_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

@@ -33,3 +33,6 @@ src-tauri/binaries
 
 # Klock changes to port here (sync-klock skill)
 FROM_KLOCK.md
+
+# Local R2 publisher rehearsal bucket (publish-r2 --local)
+.r2-local/

@@ -11,6 +11,8 @@
       "src/**/*.tsx",
       "*.ts",
       "*.tsx",
+      "scripts/publish-r2/**/*.ts",
+      "scripts/publish-r2/tsconfig.json",
       "package.json",
       "tsconfig.json",
       "tsconfig.node.json",

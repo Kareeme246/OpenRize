@@ -20,6 +20,9 @@ fi
 echo "==> tsc (typecheck)"
 pnpm exec tsc --noEmit
 
+echo "==> tsc (R2 publisher)"
+pnpm exec tsc -p scripts/publish-r2
+
 echo "==> cargo fmt (backend)"
 if $FIX; then
   cargo fmt --manifest-path src-tauri/Cargo.toml --all

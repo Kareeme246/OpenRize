@@ -60,37 +60,41 @@ publisher. This is important because the publisher's own
 default GitHub-download mode permits missing platforms; the workflow instead
 passes the complete staged directory with `--dir`.
 
-Uploads use the existing `publish-openrize` script from a pinned commit of
-`Kareeme246/offline-studios`, not a second implementation here. That script
+Uploads use the publisher in `scripts/publish-r2/` (`pnpm publish-r2`, or
+`node scripts/publish-r2/cli.ts`), which has no dependencies beyond Node. It
 validates installer formats, uploads under `openrize/releases/<version>/`, and
 reads every installer back to verify its size and SHA-256 before publishing the
 version manifest and finally `openrize/current.json`. A failed installer upload
 or verification cannot advance the current pointer. R2 jobs serialize across
 versions, and the publisher refuses accidental downgrades. No Worker deployment
-or deletion of previous releases is involved.
+or deletion of previous releases is involved by default. Flags: `--version`,
+`--dir`, `--remote` or `--local` (plain files under `--persist-to`, default
+`.r2-local`), `--no-current` (stage without promoting), `--promote` (make an
+already published version current, for rollback), `--purge` (delete the
+previous release once the new one is current) and `--bucket`.
 
-Add these **OpenRize repository Actions secrets** in Settings > Secrets and
+The manifest format is byte-compatible with what the website already parses
+(`manifest.ts` is a straight port of the website's reader); do not change it
+without changing the website too.
+
+Add these two **OpenRize repository Actions secrets** in Settings > Secrets and
 variables > Actions before opting in:
 
 | Secret | Value and minimum access |
 | --- | --- |
-| `OFFLINE_STUDIOS_READ_TOKEN` | Fine-grained GitHub personal access token limited to `Kareeme246/offline-studios`, with **Contents: read** (and GitHub's required Metadata read). No write or workflow permission. Needed because that repository is private; OpenRize's `GITHUB_TOKEN` cannot read it. |
 | `CLOUDFLARE_API_TOKEN` | Cloudflare API token with **Account > Workers R2 Storage > Edit** (`Workers R2 Storage Write`), scoped to only the account owning `offline-studios-downloads`. This includes object read-back and write access. No Workers Scripts, DNS, or zone permissions are needed. |
 | `CLOUDFLARE_ACCOUNT_ID` | The Cloudflare account ID owning that bucket. It is an identifier, not a credential, but this workflow reads it from an Actions secret for consistent configuration. |
 
 The bucket name is fixed to `offline-studios-downloads`; there is no additional
-bucket ID, S3 access key, or S3 secret to configure. Wrangler uses Cloudflare's
-REST API. Its account-scoped R2 Edit permission is broader than one bucket;
+bucket ID, S3 access key, or S3 secret to configure. The publisher calls
+Cloudflare's REST API directly (the same object endpoints `wrangler r2 object`
+uses). Its account-scoped R2 Edit permission is broader than one bucket;
 R2's bucket-scoped **Object Read & Write** tokens are S3-only and do not work
-with this publisher. See Cloudflare's [R2 token permissions][r2-tokens] and
-[Wrangler environment variables][wrangler-env].
+with this publisher. See Cloudflare's [R2 token permissions][r2-tokens].
 
-This keeps the upload logic with the website and bucket, but deliberately adds
-a private-repository read token and R2 credentials to OpenRize so the opt-in
-lives beside the existing platform flags. Review the pinned publisher commit
-when updating it, especially its upload/verification/promotion ordering.
-Credentials are provided only to their checkout or publish step and are not
-needed when `r2` is off.
+Nothing is installed in the R2 job, so no dependency code runs beside the
+credentials, which are provided only to the publish step and are not needed
+when `r2` is off.
 
 If R2 fails, the GitHub release remains published. Failures before promotion
 leave the old website pointer unchanged; an error reading the pointer back
@@ -99,10 +103,9 @@ cause and use Actions' **Re-run failed jobs** or the standalone R2 dispatch,
 not a fresh `Release` dispatch (which correctly refuses an existing GitHub
 release). Versions with a published R2 manifest are immutable; if a failure
 occurred after writing that manifest, deliberate promotion/recovery is an
-operator action in offline-studios, not an option in this workflow.
+operator action with `--promote` (or a fresh `--no-current` stage) from `scripts/publish-r2/`, not an option in this workflow.
 
 [r2-tokens]: https://developers.cloudflare.com/r2/api/tokens/#permissions
-[wrangler-env]: https://developers.cloudflare.com/workers/wrangler/system-environment-variables/
 
 ## Signing and notarization secrets
 

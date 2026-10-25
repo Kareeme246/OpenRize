@@ -17,18 +17,18 @@ import { type Toast, type ToastTone, useToaster } from "../hooks/useToast";
  * Behaviour is Radix Toast's (`@radix-ui/react-toast`), not ours: it counts
  * each toast down and pauses them all while the pointer or focus is in the
  * stack or the window is in the background, dismisses on a swipe toward the
- * anchored side and on Escape, moves focus to the stack
+ * anchored side, on Escape and on its close button, moves focus to the stack
  * on F8 and back to it when a focused toast closes, and announces each one
  * (assertively for an error, politely otherwise). This file only lays the
  * stack out and moves it.
  *
  * The default corner, bottom-right, keeps clear of the sidebar and its
  * tracking pill, of every page's header controls, and of the break panel and
- * its corner pill (separate windows at the top of the screen). It sits on
+ * its corner pill (separate windows at the top of the screen). The stack
+ * always sits in its corner of the window, floating over whatever page
+ * content is there (a docked side panel included) while it shows. It sits on
  * `z-40`, above page menus (`z-30`) and below pickers and tooltips; modal
- * sheets and dialogs are on the top layer, so a toast never covers one. A
- * side panel that must stay readable, like the entry review sheet, carries
- * `data-toast-avoid`, and the stack steps beside it (or above, without room).
+ * sheets and dialogs are on the top layer, so a toast never covers one.
  * Reduced motion keeps only the fades.
  */
 
@@ -44,7 +44,7 @@ export type ToastMotion = "slide" | "fade";
  */
 export type ToastPresentation = "card" | "pill";
 
-/** Space from the window's edge and from a panel it avoids, in rem. */
+/** Space from the window's edge, in rem. */
 const EDGE_REM = 1;
 /** Top corners clear the title bar (`h-11`). */
 const TOP_REM = 3.5;
@@ -56,59 +56,13 @@ interface Insets {
 
 /**
  * The stack's distance from its corner's two edges: `EDGE` from the window,
- * moved sideways past any `avoid` panel it would cover, or above or below it
- * when there is no room beside it. It always stays whole inside the window,
- * clear of the title bar; with no room anywhere it keeps to its corner.
+ * and a top corner clears the title bar.
  */
-export function placeToast(
-  corner: ToastCorner,
-  width: number,
-  height: number,
-  avoid: DOMRect[],
-  viewportWidth: number,
-  viewportHeight: number,
-  rem: number,
-): Insets {
-  const right = corner.endsWith("right");
-  const bottom = corner.startsWith("bottom");
-  const edge = EDGE_REM * rem;
-  const titleBar = TOP_REM * rem;
-  // The range of `y` that keeps it between the title bar and the window's
-  // bottom edge, measured from its own edge.
-  const nearest = bottom ? edge : titleBar;
-  const farthest = Math.max(
-    nearest,
-    viewportHeight - height - (bottom ? titleBar : edge),
-  );
-  const insets = { x: edge, y: nearest };
-  const box = (): { left: number; top: number } => ({
-    left: right ? viewportWidth - insets.x - width : insets.x,
-    top: bottom ? viewportHeight - insets.y - height : insets.y,
-  });
-  for (const panel of avoid) {
-    const { left, top } = box();
-    const overlaps =
-      left < panel.right &&
-      left + width > panel.left &&
-      top < panel.bottom &&
-      top + height > panel.top;
-    if (!overlaps) continue;
-    const beside = right
-      ? viewportWidth - panel.left + edge
-      : panel.right + edge;
-    if (beside + width + edge <= viewportWidth) {
-      insets.x = beside;
-      continue;
-    }
-    const clear = bottom
-      ? viewportHeight - panel.top + edge
-      : panel.bottom + edge;
-    // Past a panel as tall as the window it would leave the window; then
-    // there is no room anywhere, and it stays in its corner over the panel.
-    if (clear <= farthest) insets.y = clear;
-  }
-  insets.y = Math.min(Math.max(insets.y, nearest), farthest);
-  return insets;
+export function placeToast(corner: ToastCorner, rem: number): Insets {
+  return {
+    x: EDGE_REM * rem,
+    y: (corner.startsWith("bottom") ? EDGE_REM : TOP_REM) * rem,
+  };
 }
 
 /** Toasts on show; newer ones wait in the queue until one of these goes. */
@@ -299,7 +253,7 @@ export function Toaster({
     };
   };
 
-  // Radix has closed it (timer, swipe or Escape); it
+  // Radix has closed it (timer, swipe, Escape or its close button); it
   // stays on screen while it leaves, then goes from the queue.
   const close = (toast: Toast, swiped: boolean): void => {
     const index = shown.findIndex((candidate) => candidate.id === toast.id);
@@ -319,41 +273,20 @@ export function Toaster({
     dismiss(toast.id);
   };
 
-  // Placed before paint, and again whenever the page under it changes, so it
-  // steps aside as soon as a panel it must not cover opens. It is placed for
-  // its fanned-out size, so fanning out never moves it.
+  // Placed before paint, in its corner whatever page is under it. It is
+  // anchored by that corner and grows away from it, so fanning out never
+  // moves it.
   const [insets, setInsets] = useState<Insets | null>(null);
   useLayoutEffect(() => {
-    const list = listRef.current;
-    if (list === null || empty) return;
-    const place = (): void => {
-      const avoid = [
-        ...document.querySelectorAll<HTMLElement>("[data-toast-avoid]"),
-      ]
-        .map((element) => element.getBoundingClientRect())
-        .filter((rect) => rect.width > 0 && rect.height > 0);
-      const next = placeToast(
-        corner,
-        stackWidth,
-        fannedExtent,
-        avoid,
-        document.documentElement.clientWidth,
-        document.documentElement.clientHeight,
-        Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
-      );
-      setInsets((previous) =>
-        previous?.x === next.x && previous.y === next.y ? previous : next,
-      );
-    };
-    place();
-    const observer = new MutationObserver(place);
-    observer.observe(document.body, { childList: true, subtree: true });
-    window.addEventListener("resize", place);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", place);
-    };
-  }, [corner, empty, fannedExtent, stackWidth]);
+    if (empty) return;
+    const next = placeToast(
+      corner,
+      Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
+    );
+    setInsets((previous) =>
+      previous?.x === next.x && previous.y === next.y ? previous : next,
+    );
+  }, [corner, empty]);
   /** How far the anchored edge is from the stack, to travel in from past it. */
   const edgeGap = insets?.y ?? 0;
 
@@ -526,7 +459,7 @@ function ToastItem({
   const content = (
     <div
       ref={contentRef}
-      className="flex w-max max-w-[min(15rem,calc(100vw-2rem))] items-center gap-2 py-2 pr-3 pl-2"
+      className="flex w-max max-w-[min(15rem,calc(100vw-2rem))] items-center gap-2 py-2 pr-1.5 pl-2"
     >
       <ToneGlyph tone={toast.tone} round={pill} />
       <RadixToast.Title
@@ -535,6 +468,22 @@ function ToastItem({
       >
         {toast.message}
       </RadixToast.Title>
+      <RadixToast.Close
+        aria-label="Dismiss notification"
+        className={`grid size-5 shrink-0 cursor-pointer place-items-center text-fg-faint transition-colors hover:bg-surface-strong hover:text-fg focus-visible:outline-2 focus-visible:outline-accent ${pill ? "rounded-full" : "rounded-md"} sharper:rounded`}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          className="size-3"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2.4}
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <path d="M7 7l10 10M17 7L7 17" />
+        </svg>
+      </RadixToast.Close>
     </div>
   );
 
@@ -556,7 +505,8 @@ function ToastItem({
       onSwipeEnd={() => {
         swiped.current = true;
       }}
-      // Reading or swiping a notification never steals focus from the page.
+      // Reading, swiping or closing a notification never steals focus from
+      // the page.
       onMouseDown={(event) => event.preventDefault()}
       inert={exit !== null}
       style={style}

@@ -11,8 +11,9 @@ import {
 /**
  * The app's one way to confirm a short-lived result ("Entry deleted",
  * "Exported 12 entries"). Any component raises one with `useToast()`;
- * `<Toaster />` shows it. A toast only informs: it carries no buttons, and
- * errors that need fixing stay inline (InlineError, a Sheet's error row).
+ * `<Toaster />` shows it. A toast only informs: it carries no action buttons
+ * (only a control to close it), and errors that need fixing stay inline
+ * (InlineError, a Sheet's error row).
  */
 
 /** `neutral` for plain facts, `success` for a finished job, `error` for a failed one. */

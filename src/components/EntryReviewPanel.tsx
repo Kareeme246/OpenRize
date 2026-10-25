@@ -16,7 +16,7 @@ import {
   percent,
 } from "../lib/confidence";
 import { entryEnd, isTyping, LOCKED_HINT } from "../lib/entries";
-import { shortcutLabel } from "../lib/platform";
+import { PLATFORM, type Platform, shortcutLabel } from "../lib/platform";
 import type {
   Category,
   EntryDetail,
@@ -51,6 +51,16 @@ interface FieldModel {
 const KEYED_OPTIONS = 3;
 /** Options shown as full rows (with their confidence) before the chips. */
 const ROW_OPTIONS = 4;
+/**
+ * Hides an action button's inline shortcut where the action row is too narrow
+ * for even its compact form beside the other buttons ("Ctrl+⌫" is wider than
+ * "⌘⌫"); the tooltip still carries it.
+ */
+const INLINE_SHORTCUT: Record<Platform, string> = {
+  macos: "@max-[16rem]:hidden",
+  windows: "@max-[20.5rem]:hidden",
+  linux: "@max-[20.5rem]:hidden",
+};
 
 const EVENT_LABELS: Record<string, string> = {
   created: "Created",
@@ -532,8 +542,8 @@ export function EntryReviewPanel({
           />
         )}
 
-        <div className="space-y-1.5 border-line border-t pt-3">
-          <div className="flex items-center gap-1.5">
+        <div className="@container space-y-1.5 border-line border-t pt-3">
+          <div className="flex flex-wrap items-center gap-1.5">
             <Tooltip
               content={
                 approved
@@ -542,7 +552,7 @@ export function EntryReviewPanel({
                     ? `Accept (${shortcutLabel("Enter")})`
                     : "Pick a category first (1–9)"
               }
-              wrapperClassName="flex min-w-0 flex-1"
+              wrapperClassName="flex flex-auto"
             >
               <button
                 type="button"
@@ -550,10 +560,12 @@ export function EntryReviewPanel({
                 disabled={!entry.categoryId || approved}
                 className="whitespace-nowrap flex-1 rounded-md bg-accent px-3 py-1.5 font-semibold text-[12px] text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {approved ? "Approved ✓" : "Accept"}{" "}
+                {approved ? "Approved ✓" : "Accept"}
                 {!approved && (
-                  <span className="text-[10px] opacity-70">
-                    {shortcutLabel("Enter")}
+                  <span
+                    className={`ml-1 text-[10px] opacity-70 ${INLINE_SHORTCUT[PLATFORM]}`}
+                  >
+                    {shortcutLabel("Enter", { compact: true })}
                   </span>
                 )}
               </button>
@@ -577,16 +589,20 @@ export function EntryReviewPanel({
                 </button>
               </Tooltip>
             ) : (
-              <button
-                type="button"
-                onClick={onReject}
-                className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
-              >
-                Reject{" "}
-                <span className="text-[10px] opacity-70">
-                  {shortcutLabel("Backspace")}
-                </span>
-              </button>
+              <Tooltip content={`Reject (${shortcutLabel("Backspace")})`}>
+                <button
+                  type="button"
+                  onClick={onReject}
+                  className="whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg"
+                >
+                  Reject
+                  <span
+                    className={`ml-1 text-[10px] opacity-70 ${INLINE_SHORTCUT[PLATFORM]}`}
+                  >
+                    {shortcutLabel("Backspace", { compact: true })}
+                  </span>
+                </button>
+              </Tooltip>
             )}
             <Tooltip content={lockedHint ?? "Split in two (S)"}>
               <button
@@ -611,12 +627,12 @@ export function EntryReviewPanel({
             </Tooltip>
           </div>
           {onMergePrev && onMergeNext ? (
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
               <Tooltip
                 content={
                   mergePrevBlocked ?? "Merge with earlier adjacent entry (M)"
                 }
-                wrapperClassName="flex min-w-0 flex-1"
+                wrapperClassName="flex flex-auto"
               >
                 <button
                   type="button"
@@ -629,7 +645,7 @@ export function EntryReviewPanel({
               </Tooltip>
               <Tooltip
                 content={mergeNextBlocked ?? "Merge with later adjacent entry"}
-                wrapperClassName="flex min-w-0 flex-1"
+                wrapperClassName="flex flex-auto"
               >
                 <button
                   type="button"
@@ -649,7 +665,7 @@ export function EntryReviewPanel({
                   mergeNextBlocked ??
                   "Merge adjacent entries (M)"
                 }
-                wrapperClassName="flex min-w-0 flex-1"
+                wrapperClassName="flex flex-auto"
               >
                 <button
                   type="button"

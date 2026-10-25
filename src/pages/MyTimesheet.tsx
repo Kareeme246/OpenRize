@@ -558,7 +558,7 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
                 >
                   Approve all{" "}
                   <span className="text-[10px] opacity-70">
-                    {shortcutLabel("Enter", { shift: true })}
+                    {shortcutLabel("Enter", { shift: true, compact: true })}
                   </span>
                 </button>
               </Tooltip>

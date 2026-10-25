@@ -124,7 +124,7 @@ export function EntryReviewSheet({
 
   if (!detail) return null;
   return (
-    <div data-toast-avoid className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       {review.error && (
         <div
           role="alert"

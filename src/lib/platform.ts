@@ -61,16 +61,29 @@ export function hasPrimaryModifier(event: KeyboardEvent): boolean {
   });
 }
 
-const MAC_KEYS: Record<string, string> = { Enter: "↵", Backspace: "⌫" };
+/** Keys with a symbol, which macOS always writes and a compact label uses. */
+const KEY_SYMBOLS: Record<string, string> = { Enter: "↵", Backspace: "⌫" };
 
-/** A shortcut as the platform writes it: "⌘⇧↵" or "Ctrl+Shift+Enter". */
+/**
+ * A shortcut as the platform writes it: "⌘⇧↵" or "Ctrl+Shift+Enter".
+ * `compact` writes a key as its symbol where it has one ("Ctrl+⌫"), for a
+ * label inside a button; tooltips and prose keep the full name.
+ */
 export function shortcutLabel(
   key: string,
-  { shift = false }: { shift?: boolean } = {},
+  {
+    shift = false,
+    compact = false,
+  }: { shift?: boolean; compact?: boolean } = {},
 ): string {
-  const ctrl = ["Ctrl", ...(shift ? ["Shift"] : []), key].join("+");
+  const symbol = KEY_SYMBOLS[key] ?? key;
+  const ctrl = [
+    "Ctrl",
+    ...(shift ? ["Shift"] : []),
+    compact ? symbol : key,
+  ].join("+");
   return byPlatform({
-    macos: `⌘${shift ? "⇧" : ""}${MAC_KEYS[key] ?? key}`,
+    macos: `⌘${shift ? "⇧" : ""}${symbol}`,
     windows: ctrl,
     linux: ctrl,
   });

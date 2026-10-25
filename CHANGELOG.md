@@ -4,11 +4,62 @@ All notable changes are documented here. Entries are generated from commit histo
 
 ## [unreleased]
 
+### Features
+- Add local accounts with separate data per name (#126)
+
+### Bug Fixes
+- Draw timer drop indicator in the gap between cards (#123)
+- Polish timer drag reorder geometry, a11y announcements, and arrow containment (#125)
+- Preserve manual timers across upgrades with versioned migration (#124)
+- Keep toasts in the corner, add a close button, and stop review actions overlapping (#129)
+
+### Maintenance
+- **release:** Add opt-in verified R2 publishing (#127)
+- **release:** Publish website installers from an in-repo script (#128)
+## [0.9.20] - 2026-10-20
+
+### Features
+- Timer card menu with editable time segments and add to calendar (#114)
+- Save a timer's state on demand and browse saved states (#119)
+- App-wide compact toast on Radix primitives (#120)
+- Reorder stopwatches with native dragging and animated menu moves (#121)
+
+### Bug Fixes
+- Deleting an entry no longer deletes its category, project, rules or app defaults (#111)
+- Offer unapprove in one tap where deleting an approved entry is refused (#112)
+- Keep single-row timesheet menu visible (#113)
+- Soften shared donut segment corners (#115)
+- **breaks:** Let the welcome card collapse to the corner pill (#118)
+- Preserve breaks across sleep on macOS and Windows (#117)
+
+### Documentation
+- Correct Windows release and updater status in AGENTS.md (#122)
+## [0.9.12] - 2026-10-13
+
+### Features
+- Freeze approved time entries until they are unapproved (#104)
+- **release:** Opt-in platforms and artifact scope, and Windows in-app updates (#109)
+
+### Bug Fixes
+- Check frontend files from Claude worktrees (#105)
+- Require unapproval before changing approved time (#106)
+- **release:** Detect missing tags via refs API (#110)
+
+### Documentation
+- Add a seeded day and capture script for the website screenshots (#107)
+
+### Maintenance
+- Sync Klock by porting through inboxes instead of merging (#103)
+## [0.9.10] - 2026-10-12
+
 ### Bug Fixes
 - Keep the menu bar panel out of tiling window managers and open reminder menus upward (#98)
 - **settings:** Show the app version next to up to date (#99)
 - **settings:** Show the installed version when up to date (#100)
 - Keep the live entry's second half after a split, and make every entry change undoable (#101)
+
+### Documentation
+- Update changelog for v0.9.10
 
 ### Maintenance
 - Add the sync-klock skill and expose agent skills to Claude Code (#102)

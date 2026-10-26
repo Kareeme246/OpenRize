@@ -1607,6 +1607,16 @@ impl ActivityStore {
             return Err(LOCKED.to_string());
         }
 
+        let title_draft = if let Some(ref desc) = patch.description {
+            if *desc != entry.description && entry.description_origin == "ai" {
+                Some((entry.description.clone(), desc.clone()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         if let Some(desc) = patch.description {
             if desc != entry.description {
                 entry.description_origin = "user".to_string();
@@ -1672,7 +1682,14 @@ impl ActivityStore {
             self.describe_closed(id)?;
         }
 
-        self.log_event(id, "edited", "user", None, now);
+        let edit_payload = title_draft.map(|(draft, final_title)| {
+            serde_json::json!({
+                "draft": draft,
+                "final": final_title,
+            })
+            .to_string()
+        });
+        self.log_event(id, "edited", "user", edit_payload.as_deref(), now);
 
         self.time_entry(id)
     }
@@ -2660,6 +2677,73 @@ mod tests {
             .rebuild_time_entries_in_range(0, SHOW_END + 10 * MIN, SHOW_END + 10 * MIN)
             .unwrap();
         assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn title_edit_on_ai_entry_captures_draft_and_final() {
+        let mut store = store();
+        let entry = store
+            .create_manual_entry(
+                NewTimeEntry {
+                    started_at: 1000,
+                    ended_at: 2000,
+                    description: "AI Title Draft".to_string(),
+                    category_id: None,
+                    project_id: None,
+                    billable: None,
+                    review: true,
+                },
+                2000,
+            )
+            .unwrap();
+
+        // Mark the entry as AI origin
+        store
+            .conn
+            .execute(
+                "UPDATE time_entries SET description_origin = 'ai' WHERE id = ?1;",
+                params![entry.id],
+            )
+            .unwrap();
+
+        // Update the description
+        let patch = UpdateTimeEntry {
+            description: Some("Final User Title".to_string()),
+            category_id: None,
+            project_id: None,
+            started_at: None,
+            ended_at: None,
+            status: None,
+            billable: None,
+        };
+        store.update_time_entry(&entry.id, patch, 3000).unwrap();
+
+        let detail = store.get_entry_detail(&entry.id).unwrap();
+        let edited_event = detail
+            .events
+            .iter()
+            .find(|e| e.kind == "edited")
+            .expect("edited event");
+        let payload = edited_event.payload.as_deref().expect("payload");
+        let parsed: serde_json::Value = serde_json::from_str(payload).unwrap();
+        assert_eq!(parsed["draft"], "AI Title Draft");
+        assert_eq!(parsed["final"], "Final User Title");
+
+        // Subsequent edit on 'user' origin entry should not record draft/final payload
+        let patch2 = UpdateTimeEntry {
+            description: Some("Another Title".to_string()),
+            category_id: None,
+            project_id: None,
+            started_at: None,
+            ended_at: None,
+            status: None,
+            billable: None,
+        };
+        store.update_time_entry(&entry.id, patch2, 4000).unwrap();
+        let detail2 = store.get_entry_detail(&entry.id).unwrap();
+        let second_edit = &detail2.events[detail2.events.len() - 1];
+        assert_eq!(second_edit.kind, "edited");
+        assert_eq!(second_edit.payload, None);
     }
 
     #[test]

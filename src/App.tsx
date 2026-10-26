@@ -25,6 +25,7 @@ import { hasPrimaryModifier } from "./lib/platform";
 import type { ActivitySnapshot, ActivityTick, Route } from "./lib/types";
 import { Apps } from "./pages/Apps";
 import { Calendar } from "./pages/Calendar";
+import { Categories } from "./pages/Categories";
 import { Clients } from "./pages/Clients";
 import { Invoices } from "./pages/Invoices";
 import { MyTimesheet } from "./pages/MyTimesheet";
@@ -332,6 +333,14 @@ export default function App() {
             replace={replace}
           />
         );
+      case "categories":
+        return (
+          <Categories
+            route={currentRoute}
+            navigate={navigate}
+            replace={replace}
+          />
+        );
       case "clients":
         return (
           <Clients route={currentRoute} navigate={navigate} replace={replace} />
@@ -350,6 +359,7 @@ export default function App() {
             route={currentRoute}
             updates={updates}
             revealUpdates={revealUpdates}
+            navigate={navigate}
           />
         );
     }

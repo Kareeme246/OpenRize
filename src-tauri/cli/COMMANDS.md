@@ -77,7 +77,8 @@ installed.
 | `rize projects list` / `show <project>` | Projects; one with this month's time, budget and rules. | `list_projects`, `project_stats`, `project_rules` | Yes | Shipped |
 | `rize projects add` / `edit` / `rm` | Manage projects; rm is confirmed and refused when it would change approved entries. | `create_project`, `update_project`, `delete_project` | Yes | Shipped |
 | `rize clients list` / `show` / `add` / `edit` / `rm` | Manage clients; show lists their projects; rm is confirmed. | `list_clients`, `create_client`, `update_client`, `delete_client` | Yes | Shipped |
-| `rize categories list` / `add` / `edit` / `rm` | Manage categories; rm is confirmed and refused when it would change approved entries. | `list_categories`, `create_category`, `update_category`, `delete_category` | Yes | Shipped |
+| `rize categories list` / `add` / `edit` / `rm` | Manage categories; rm is confirmed and archives a category that has entries or deletes an unused one. | `list_categories`, `create_category`, `update_category`, `delete_category`, `remove_category` | Yes | Shipped |
+| Category reordering (CLI not yet exposed) | Persist the complete category order; available on the Categories page. | `reorder_categories` | Not yet exposed by CLI | Planned |
 | `rize settings list` / `get <key>` / `set <key> <value>` | Every preference by dotted key, such as `tracking-hours.start` or `breaks.enabled`. Writes one field at a time. | `get_settings`, `SettingsStore::patch` | Yes (applies on next launch) | Shipped |
 | `rize paths` | The open account, the settings file, the data directory and the database path. | `storage_paths` | Yes | Shipped |
 | `rize account` / `rize account list` | The account the app opens (or No account) and every account. Switching accounts stays in the app. | `accounts_state` | Yes | Planned |

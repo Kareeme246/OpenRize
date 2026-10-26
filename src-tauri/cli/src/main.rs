@@ -1020,6 +1020,7 @@ fn run(args: &Args) -> Result<Outcome, Response> {
                         .unwrap_or_else(|| render::color_for(name)),
                     description: fields.description.clone(),
                     ai_prompt: None,
+                    ai_hints: None,
                     billable_default: fields.billable,
                     counts_as_work: fields.work,
                     sort: None,
@@ -1035,8 +1036,9 @@ fn run(args: &Args) -> Result<Outcome, Response> {
                 patch: UpdateCategory {
                     name: name.clone(),
                     color: fields.color.clone(),
-                    description: fields.description.clone(),
+                    description: fields.description.clone().map(Some),
                     ai_prompt: None,
+                    ai_hints: None,
                     billable_default: fields.billable,
                     counts_as_work: fields.work,
                     archived: *archived,

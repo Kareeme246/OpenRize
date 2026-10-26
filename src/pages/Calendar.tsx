@@ -319,7 +319,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
   );
 
   // Page shortcuts. The review sheet owns ⌘↵, ⌘⌫, S, and Esc; the panel
-  // owns 1–9, C, P, and E.
+  // owns 1–3, C, P, and E.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (isTyping(event.target)) return;
@@ -605,6 +605,7 @@ export function Calendar({ route, navigate }: CalendarProps) {
               mergeCandidates={mergeCandidates}
               onAccept={(id) => void accept(id)}
               onReject={(id) => void reject(id)}
+              onManageCategories={() => navigate({ name: "categories" })}
               pickSplitOnTimeline={
                 scale !== "month" &&
                 visible.some((entry) => entry.id === review.selectedId)

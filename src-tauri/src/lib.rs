@@ -13,7 +13,7 @@ mod rpc;
 mod tray;
 mod updater;
 
-use openrize_core::{models, projects, reports, settings, timers};
+use openrize_core::{categories, models, projects, reports, settings, timers};
 
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -240,6 +240,9 @@ pub fn run() {
             commands::create_category,
             commands::update_category,
             commands::delete_category,
+            commands::remove_category,
+            commands::reorder_categories,
+            commands::category_stats,
             commands::list_projects,
             commands::create_project,
             commands::update_project,

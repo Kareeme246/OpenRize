@@ -90,7 +90,7 @@ struct FoundationClassifier {
             if let temperature = params.temperature {
                 options = GenerationOptions(temperature: temperature, maximumResponseTokens: 200)
             } else {
-                options = GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 200)
+                options = GenerationOptions(sampling: .greedy, maximumResponseTokens: 200)
             }
             let response = try await session.respond(to: prompt(), schema: schema, options: options)
             let content = response.content

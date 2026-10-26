@@ -27,10 +27,10 @@
   <img width="1604" height="1050" alt="OpenRize app screenshot" src="docs/assets/readme/openrize-app.png" />
 </p>
 
-OpenRize is the free, private, and local-first answer to Rize.io: time tracking that
+OpenRize is the free, private, and local-first answer for automatic time tracking that
 watches what you're actually working on and sorts it into categories and projects - without
-logging a single keystroke, taking a single screenshot, or shipping a byte of your data anywhere.
-The categorizing is done by AI that runs entirely on your Mac and learns from every entry you review.
+logging a single keystroke, taking a single screenshot, or shipping your data anywhere.
+The categorizing is done by local AI that runs entirely on your Mac and learns from every entry you review.
 
 ---
 
@@ -41,7 +41,7 @@ into reviewable time entries, suggests a category and project for each one with 
 and learns from what you accept and correct. You can review your day on a calendar, approve a whole
 timesheet, slice your time in reports, manage projects and clients, and even automatically generate invoices.
 
-It is still early. It runs on macOS, and there is an experimental Windows build you can compile yourself.
+It is still early. It runs on macOS, and there is an experimental Windows build.
 
 ## Where it stands
 
@@ -81,13 +81,12 @@ to your rules and a personal model it trains on your own reviews and keeps categ
 ## Privacy
 
 - **No account.** There is nothing to sign up for and nobody to sign up with.
-- **No telemetry.** OpenRize makes no network calls. Not "anonymized" - none.
+- **No telemetry.** OpenRize makes no network calls.
 - **On-device AI.** Categorization runs on your Mac through Apple's Foundation Models,
   NaturalLanguage, and Create ML. Your activity never leaves the machine to be classified.
 - **No keystroke logging, no screenshots, no screen recording.** Tracking is metadata about
   *what app you're in*, not a recording of what you typed.
-- **No surveillance posture.** OpenRize is a personal/agency tool for billing your own honest hours,
-  not a way to watch employees.
+- **No surveillance posture.** OpenRize is a personal/agency tool for tracking/billing your own hours not a way to watch employees.
 
 ## Under the hood
 
@@ -233,11 +232,7 @@ Contributions are welcome - issues, focused PRs, or opinions about the roadmap.
 
 Before you start, a few things in this repo will save you time:
 
-- **[`AGENTS.md`](AGENTS.md)** - project conventions. Notably: always agree on whether a feature
-  lives in `src-tauri`, `src`, or both *before* writing code, ground Tauri work in the
-  [Tauri docs](https://docs.rs/tauri/2.11.5/tauri), and run `pnpm fix` then `pnpm verify` before
-  calling a change done. It also explains `pnpm dev:screenshot` and `pnpm dev:drive` for seeing a
-  change in an isolated instance of the real app.
+- **[`AGENTS.md`](AGENTS.md)** - project conventions. 
 
 **Roadmap.** OpenRize is being built in phases:
 
@@ -259,6 +254,3 @@ AGPL-3.0 is deliberately strong copyleft: if you run a modified OpenRize as a ne
 must offer its source to the people using it. Derivatives stay open, which is the point - the
 tracking engine should never become something you can't audit.
 
----
-
-Built on [Tauri](https://tauri.app), [React](https://react.dev), and [Tailwind CSS](https://tailwindcss.com).

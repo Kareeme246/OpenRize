@@ -463,10 +463,13 @@ function ToastItem({
       // `TOAST_WIDTH` less the Root's 1px border on each side, so the card
       // itself is exactly that wide.
       style={{ width: `calc(${TOAST_WIDTH} - 2px)` }}
-      className="flex items-center gap-2 py-2 pr-1.5 pl-2"
+      className="flex items-start gap-2 py-2 pr-1.5 pl-2"
     >
       <ToneGlyph tone={toast.tone} round={pill} />
-      <RadixToast.Title className="max-h-[8lh] min-w-0 flex-1 overflow-y-auto font-medium text-[12.5px] text-fg-strong leading-snug [overflow-wrap:anywhere]">
+      {/* Padded so its first line is centred on the glyph and close button
+          (`size-5`) beside it, however many lines follow; up to 12 lines, then
+          it scrolls. */}
+      <RadixToast.Title className="max-h-[calc(11lh+1.25rem)] min-w-0 flex-1 overflow-y-auto font-medium text-[12.5px] text-fg-strong leading-snug [overflow-wrap:anywhere] py-[calc((1.25rem-1lh)/2)]">
         {toast.message}
       </RadixToast.Title>
       <RadixToast.Close

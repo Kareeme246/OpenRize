@@ -46,6 +46,12 @@ export type ToastPresentation = "card" | "pill";
 
 /** Space from the window's edge, in rem. */
 const EDGE_REM = 1;
+/**
+ * Every toast is this wide, whatever it says, so the stack keeps one width; a
+ * longer message wraps onto more lines instead. It narrows with a small
+ * window, keeping `EDGE_REM` clear on both sides.
+ */
+const TOAST_WIDTH = "min(20rem, calc(100vw - 2rem))";
 /** Top corners clear the title bar (`h-11`). */
 const TOP_REM = 3.5;
 
@@ -224,11 +230,6 @@ export function Toaster({
   }
   const fannedExtent = Math.max(0, fanned - GAP_PX);
   const stackedExtent = front + Math.max(0, shown.length - 1) * PEEK_PX;
-  // Each card is intrinsic; the viewport spans the widest visible card.
-  const stackWidth = Math.max(
-    0,
-    ...shown.map((toast) => sizes[toast.id]?.width ?? 0),
-  );
 
   const spotOf = (toast: Toast, index: number): Spot => {
     if (expanded) {
@@ -337,9 +338,9 @@ export function Toaster({
           [bottom ? "bottom" : "top"]:
             insets?.y ?? `${bottom ? EDGE_REM : TOP_REM}rem`,
           height: empty ? 0 : expanded ? fannedExtent : stackedExtent,
-          width: stackWidth,
+          width: TOAST_WIDTH,
         }}
-        className="fixed z-40 m-0 max-w-[calc(100vw-2rem)] list-none p-0 outline-none"
+        className="fixed z-40 m-0 list-none p-0 outline-none"
       />
     </RadixToast.Provider>
   );
@@ -459,13 +460,16 @@ function ToastItem({
   const content = (
     <div
       ref={contentRef}
-      className="flex w-max max-w-[min(15rem,calc(100vw-2rem))] items-center gap-2 py-2 pr-1.5 pl-2"
+      // `TOAST_WIDTH` less the Root's 1px border on each side, so the card
+      // itself is exactly that wide.
+      style={{ width: `calc(${TOAST_WIDTH} - 2px)` }}
+      className="flex items-start gap-2 py-2 pr-1.5 pl-2"
     >
       <ToneGlyph tone={toast.tone} round={pill} />
-      <RadixToast.Title
-        title={toast.message}
-        className="line-clamp-2 min-w-0 font-medium text-[12.5px] text-fg-strong leading-snug [overflow-wrap:anywhere]"
-      >
+      {/* Padded so its first line is centred on the glyph and close button
+          (`size-5`) beside it, however many lines follow; up to 12 lines, then
+          it scrolls. */}
+      <RadixToast.Title className="max-h-[calc(11lh+1.25rem)] min-w-0 flex-1 overflow-y-auto font-medium text-[12.5px] text-fg-strong leading-snug [overflow-wrap:anywhere] py-[calc((1.25rem-1lh)/2)]">
         {toast.message}
       </RadixToast.Title>
       <RadixToast.Close

@@ -51,7 +51,7 @@ const EDGE_REM = 1;
  * longer message wraps onto more lines instead. It narrows with a small
  * window, keeping `EDGE_REM` clear on both sides.
  */
-const TOAST_WIDTH = "min(20rem, calc(100vw - 2rem))";
+const TOAST_WIDTH = "min(16rem, calc(100vw - 2rem))";
 /** Top corners clear the title bar (`h-11`). */
 const TOP_REM = 3.5;
 

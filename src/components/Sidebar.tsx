@@ -1,7 +1,6 @@
 import { createContext, type ReactNode, useContext } from "react";
 import { formatCountdown } from "../lib/breaks";
 import type { Route } from "../lib/types";
-import { AccountSwitcher } from "./AccountSwitcher";
 import { Tooltip } from "./Tooltip";
 
 interface SidebarProps {
@@ -126,9 +125,6 @@ export function Sidebar({
           collapsed ? "px-2" : "px-3"
         }`}
       >
-        <div className="mb-3 shrink-0">
-          <AccountSwitcher collapsed={collapsed} onNavigate={onNavigate} />
-        </div>
         <nav
           className={`flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto ${
             collapsed ? "" : "pr-1"

@@ -711,19 +711,30 @@ pub fn labeled_pool(conn: &Connection, since: u64, exclude: &str) -> Result<Vec<
 
 // --- Rules ----------------------------------------------------------------
 
+/// A rule's category, or NULL when the category is archived or deleted: the
+/// AI only suggests live categories.
+const LIVE_CATEGORY: &str = "CASE WHEN category_id IN (
+    SELECT id FROM categories WHERE deleted_at IS NULL AND archived = 0
+  ) THEN category_id END";
+const LIVE_DEFAULT_CATEGORY: &str = "CASE WHEN default_category_id IN (
+    SELECT id FROM categories WHERE deleted_at IS NULL AND archived = 0
+  ) THEN default_category_id END";
+
 /// Enabled rules plus the Apps page defaults, which act as app/domain rules.
+/// A rule's category is dropped when that category is archived or deleted,
+/// so it stops deciding categories but can still assign its project.
 pub fn load_rules(conn: &Connection) -> Result<Vec<Rule>> {
     let mut rules: Vec<Rule> = {
         let mut stmt = conn
-            .prepare(
+            .prepare(&format!(
                 // Only active projects are offered to the AI, so a rule that
                 // names a completed or archived project sits out.
-                "SELECT id, match_kind, pattern, category_id, project_id, priority, origin FROM rules
+                "SELECT id, match_kind, pattern, {LIVE_CATEGORY}, project_id, priority, origin FROM rules
                  WHERE deleted_at IS NULL AND enabled = 1
                    AND (project_id IS NULL OR project_id IN (
                      SELECT id FROM projects WHERE deleted_at IS NULL AND status = 'active'
-                   ));",
-            )
+                   ));"
+            ))
             .map_err(err)?;
         let rows = stmt
             .query_map([], |row| {
@@ -742,11 +753,11 @@ pub fn load_rules(conn: &Connection) -> Result<Vec<Rule>> {
     };
 
     let mut stmt = conn
-        .prepare(
-            "SELECT id, kind, identifier, default_category_id, default_project_id FROM apps
+        .prepare(&format!(
+            "SELECT id, kind, identifier, {LIVE_DEFAULT_CATEGORY}, default_project_id FROM apps
              WHERE deleted_at IS NULL AND excluded = 0
-               AND (default_category_id IS NOT NULL OR default_project_id IS NOT NULL);",
-        )
+               AND (default_category_id IS NOT NULL OR default_project_id IS NOT NULL);"
+        ))
         .map_err(err)?;
     let rows = stmt
         .query_map([], |row| {

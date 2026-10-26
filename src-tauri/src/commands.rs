@@ -8,11 +8,12 @@ use crate::activity::{self, ActivitySnapshot};
 use crate::ai::metrics::AiMetrics;
 use crate::ai::{self, AiRuntime, AiStatus};
 use crate::breaks;
+use crate::categories::CategoryStats;
 use crate::invoices::{self, profile, BillableEntry, DraftInput, Invoice, InvoiceSummary};
 use crate::login_item::{self, LoginItemState};
 use crate::models::{
-    AppRecord, Category, Client, EntryDetail, NewCategory, NewClient, NewProject, NewTimeEntry,
-    Project, RuleSuggestion, TimeEntry, UpdateCategory, UpdateClient, UpdateProject,
+    AppRecord, Category, CategoryRemoval, Client, EntryDetail, NewCategory, NewClient, NewProject,
+    NewTimeEntry, Project, RuleSuggestion, TimeEntry, UpdateCategory, UpdateClient, UpdateProject,
     UpdateTimeEntry,
 };
 use crate::projects::{HintPreview, ImportSummary, ProjectRule, ProjectStats, ProjectSuggestion};
@@ -287,7 +288,10 @@ pub fn create_category(app: AppHandle, category: NewCategory) -> Result<Category
     let now = now_epoch_ms();
     let state = app.state::<AppState>();
     let mut store = state.activity.lock().map_err(|e| e.to_string())?;
-    store.create_category(category, now)
+    let created = store.create_category(category, now)?;
+    drop(store);
+    entries_changed(&app);
+    Ok(created)
 }
 
 #[tauri::command]
@@ -299,7 +303,10 @@ pub fn update_category(
     let now = now_epoch_ms();
     let state = app.state::<AppState>();
     let mut store = state.activity.lock().map_err(|e| e.to_string())?;
-    store.update_category(&id, patch, now)
+    let updated = store.update_category(&id, patch, now)?;
+    drop(store);
+    entries_changed(&app);
+    Ok(updated)
 }
 
 #[tauri::command]
@@ -311,6 +318,39 @@ pub fn delete_category(app: AppHandle, id: String) -> Result<(), String> {
     drop(store);
     entries_changed(&app);
     Ok(())
+}
+
+#[tauri::command]
+pub fn remove_category(app: AppHandle, id: String) -> Result<CategoryRemoval, String> {
+    let now = now_epoch_ms();
+    let state = app.state::<AppState>();
+    let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+    let removal = store.remove_category(&id, now)?;
+    drop(store);
+    entries_changed(&app);
+    Ok(removal)
+}
+
+#[tauri::command]
+pub fn reorder_categories(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    let now = now_epoch_ms();
+    let state = app.state::<AppState>();
+    let mut store = state.activity.lock().map_err(|e| e.to_string())?;
+    store.reorder_categories(&ids, now)?;
+    drop(store);
+    entries_changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn category_stats(
+    app: AppHandle,
+    range_start: u64,
+    range_end: u64,
+) -> Result<Vec<CategoryStats>, String> {
+    with_reader(&app, |conn| {
+        crate::categories::category_stats(conn, range_start, range_end)
+    })
 }
 
 // --- P1: Projects -------------------------------------------------------

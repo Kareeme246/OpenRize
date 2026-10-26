@@ -759,6 +759,7 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
               review={review}
               categories={catalog.categories}
               projects={catalog.projects}
+              onManageCategories={() => navigate({ name: "categories" })}
             />
           </aside>
         )}

@@ -4,12 +4,7 @@ import { useSettings } from "../hooks/useSettings";
 import { entryEnd, isLocked, isTyping } from "../lib/entries";
 import { formatDuration, formatTime } from "../lib/format";
 import { shortcutLabel } from "../lib/platform";
-import type {
-  Category,
-  Project,
-  SuggestionField,
-  TimeEntry,
-} from "../lib/types";
+import type { Category, Project, TimeEntry } from "../lib/types";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { EntryReviewPanel } from "./EntryReviewPanel";
 import { SplitDialog } from "./SplitDialog";
@@ -26,6 +21,7 @@ interface EntryReviewSheetProps {
   onAccept?: (id: string) => void;
   onReject?: (id: string) => void;
   onClose?: () => void;
+  onManageCategories?: () => void;
   /**
    * The view draws entries on a timeline, so a split starts by picking the
    * cut there (see `useEntryReview`'s `splitting`) instead of in the dialog.
@@ -40,7 +36,7 @@ const NEIGHBOUR_LOCKED =
  * The entry review panel bound to `useEntryReview`, with its keyboard
  * contract: ⌘↵ accepts, ⌘⌫ rejects, S splits, M merges, Esc closes (or leaves
  * a split in progress). The panel itself
- * owns 1–9, C, P, and E. Renders nothing while no entry is open.
+ * owns 1–3, C, P, and E. Renders nothing while no entry is open.
  */
 export function EntryReviewSheet({
   review,
@@ -51,13 +47,12 @@ export function EntryReviewSheet({
   onAccept,
   onReject,
   onClose,
+  onManageCategories,
   pickSplitOnTimeline = false,
 }: EntryReviewSheetProps) {
   const { settings } = useSettings();
   const { detail } = review;
-  const [deleting, setDeleting] = useState<
-    "entry" | { field: SuggestionField; id: string } | null
-  >(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const accept = onAccept ?? ((id: string) => void review.accept(id));
   const reject = onReject ?? ((id: string) => void review.reject(id));
   const close = onClose ?? (() => review.select(undefined));
@@ -160,8 +155,7 @@ export function EntryReviewSheet({
             prevId && nextId ? () => void review.merge(nextId) : undefined
           }
           mergeBlocked={mergeBlocked}
-          onDelete={() => setDeleting("entry")}
-          onDeleteField={(field, id) => setDeleting({ field, id })}
+          onDelete={() => setConfirmDelete(true)}
           onRetry={() => void review.retry()}
           onSetField={(field, valueId) => void review.setField(field, valueId)}
           onToggleBillable={() => void review.toggleBillable()}
@@ -172,6 +166,7 @@ export function EntryReviewSheet({
           onResolveRule={(suggestion, acceptRule) =>
             void review.resolveRule(suggestion, acceptRule)
           }
+          onManageCategories={onManageCategories}
           formatTime={formatTime}
           formatDuration={formatDuration}
         />
@@ -187,20 +182,15 @@ export function EntryReviewSheet({
           onSplit={(at) => void review.split(at)}
         />
       )}
-      {deleting && (
+      {confirmDelete && (
         <ConfirmDialog
-          title={`Delete ${deleting === "entry" ? "time entry" : deleting.field}?`}
-          body={
-            deleting === "entry"
-              ? `This entry, its captured activity, and its assigned category and project will be removed together. Other entries keep their time but lose these links. Undo with ${shortcutLabel("Z")}.`
-              : `This ${deleting.field} and its rules will be removed. Other entries keep their time but lose this link. Undo with ${shortcutLabel("Z")}.`
-          }
+          title="Delete time entry?"
+          body={`This entry, its captured activity, and its assigned category and project will be removed together. Other entries keep their time but lose these links. Undo with ${shortcutLabel("Z")}.`}
           confirmLabel="Delete"
-          onCancel={() => setDeleting(null)}
+          onCancel={() => setConfirmDelete(false)}
           onConfirm={() => {
-            if (deleting === "entry") void review.remove();
-            else void review.removeField(deleting.field, deleting.id);
-            setDeleting(null);
+            void review.remove();
+            setConfirmDelete(false);
           }}
         />
       )}

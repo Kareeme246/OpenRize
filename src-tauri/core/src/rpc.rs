@@ -396,10 +396,10 @@ impl Context<'_> {
             }
             O::CategoryDelete { category } => {
                 let id = self.category(&category)?;
-                lock(&self.state.activity)?
-                    .delete_category(&id, now)
+                let removal = lock(&self.state.activity)?
+                    .remove_category(&id, now)
                     .map_err(fail)?;
-                Ok(json!({ "id": id }))
+                Ok(json!({ "id": id, "removal": removal }))
             }
             O::SettingsGet {} => to_value(self.state.settings_snapshot()),
             O::SettingsSet { key, value } => {

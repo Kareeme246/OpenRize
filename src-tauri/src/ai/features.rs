@@ -14,6 +14,7 @@
 //! kNN, and the personal classifier.
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use chrono::{Local, TimeZone};
 
@@ -48,6 +49,76 @@ struct AppUsage {
     domains: Vec<(String, u64)>,
 }
 
+fn local_hostname() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        let mut buf = [0u8; 256];
+        if libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) == 0 {
+            let nul = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+            std::str::from_utf8(&buf[..nul]).ok().map(str::to_string)
+        } else {
+            None
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        std::env::var("COMPUTERNAME")
+            .or_else(|_| std::env::var("HOSTNAME"))
+            .ok()
+    }
+}
+
+pub fn strip_host_prefix(title: &str) -> &str {
+    static HOSTNAME: OnceLock<Option<String>> = OnceLock::new();
+    let host = HOSTNAME.get_or_init(local_hostname);
+    strip_host_prefix_with(title, host.as_deref())
+}
+
+pub fn strip_host_prefix_with<'a>(title: &'a str, host: Option<&str>) -> &'a str {
+    match host {
+        Some(h) if !h.is_empty() => {
+            let mut prefix = String::with_capacity(h.len() + 2);
+            prefix.push_str(h);
+            prefix.push_str(": ");
+            title.strip_prefix(&prefix).unwrap_or(title)
+        }
+        _ => title,
+    }
+}
+
+pub fn is_tracker_bundle_id(bundle_id: &str) -> bool {
+    bundle_id == openrize_core::APP_IDENTIFIER
+        || bundle_id.starts_with("com.offlinestudios.openrize")
+}
+
+pub fn is_tracker_segment(segment: &ActivitySegment) -> bool {
+    segment
+        .bundle_id
+        .as_deref()
+        .is_some_and(is_tracker_bundle_id)
+        || segment.app.eq_ignore_ascii_case("openrize")
+}
+
+/// A block has meaningful titles when it holds at least one non-tracker
+/// segment with a domain or a window title other than its app name (including
+/// after stripping a terminal host prefix).
+pub fn has_titles(segments: &[ActivitySegment]) -> bool {
+    segments.iter().any(|segment| {
+        if segment.kind == KIND_BREAK || is_tracker_segment(segment) {
+            return false;
+        }
+        if segment
+            .domain
+            .as_deref()
+            .is_some_and(|d| !d.trim().is_empty())
+        {
+            return true;
+        }
+        let title = strip_host_prefix(segment.title.trim());
+        !title.is_empty() && title != segment.app
+    })
+}
+
 pub fn extract(
     started_at: u64,
     ended_at: u64,
@@ -58,7 +129,10 @@ pub fn extract(
     let mut keys: HashMap<(String, String), (String, u64)> = HashMap::new();
     let mut active_ms = 0u64;
 
-    for segment in segments.iter().filter(|s| s.kind != KIND_BREAK) {
+    for segment in segments
+        .iter()
+        .filter(|s| s.kind != KIND_BREAK && !is_tracker_segment(s))
+    {
         let end = segment.ended_at.unwrap_or(ended_at).min(ended_at);
         let ms = end.saturating_sub(segment.started_at.max(started_at));
         if ms == 0 {
@@ -80,7 +154,7 @@ pub fn extract(
         };
         let app = &mut apps[index];
         app.ms += ms;
-        let title = segment.title.trim();
+        let title = strip_host_prefix(segment.title.trim());
         if !title.is_empty() && title != segment.app {
             add_ms(&mut app.titles, title, ms);
         }
@@ -268,5 +342,60 @@ mod tests {
         let features = extract(0, 900_000, &segments, None);
         assert_eq!(features.active_ms, 300_000);
         assert!(features.content.starts_with("Slack 100%"));
+    }
+
+    #[test]
+    fn strips_terminal_host_prefix() {
+        assert_eq!(
+            strip_host_prefix_with("Mac.lan: flow-state", Some("Mac.lan")),
+            "flow-state"
+        );
+        assert_eq!(
+            strip_host_prefix_with("Mac.lan: WezTerm", Some("Mac.lan")),
+            "WezTerm"
+        );
+        // Does not touch arbitrary prefixes or words like Note:
+        assert_eq!(
+            strip_host_prefix_with("Note: important task", Some("Mac.lan")),
+            "Note: important task"
+        );
+        assert_eq!(
+            strip_host_prefix_with("flow-state", Some("Mac.lan")),
+            "flow-state"
+        );
+    }
+
+    #[test]
+    fn drops_tracker_own_window() {
+        let mut tracker_seg = seg("openrize", "OpenRize", None, 900_000, 1_000_000);
+        tracker_seg.bundle_id = Some(openrize_core::APP_IDENTIFIER.to_string());
+        let segments = vec![seg("WezTerm", "flow-state", None, 0, 900_000), tracker_seg];
+        let features = extract(0, 1_000_000, &segments, None);
+        assert_eq!(features.active_ms, 900_000);
+        assert!(!features.content.contains("openrize"));
+        assert!(!features.content.contains("OpenRize"));
+        assert!(features.content.starts_with("WezTerm 100%"));
+    }
+
+    #[test]
+    fn has_titles_evaluation() {
+        // Tracker only -> false
+        let mut tracker = seg("openrize", "OpenRize", None, 0, 100_000);
+        tracker.bundle_id = Some(openrize_core::APP_IDENTIFIER.to_string());
+        assert!(!has_titles(&[tracker]));
+
+        // Non-tracker with empty title or title == app -> false
+        let wezterm_empty = seg("WezTerm", "", None, 0, 100_000);
+        assert!(!has_titles(&[wezterm_empty]));
+        let wezterm_same = seg("WezTerm", "WezTerm", None, 0, 100_000);
+        assert!(!has_titles(&[wezterm_same]));
+
+        // Domain present -> true
+        let safari_domain = seg("Safari", "Safari", Some("docs.rs"), 0, 100_000);
+        assert!(has_titles(&[safari_domain]));
+
+        // Non-app title present -> true
+        let wezterm_title = seg("WezTerm", "cargo build", None, 0, 100_000);
+        assert!(has_titles(&[wezterm_title]));
     }
 }

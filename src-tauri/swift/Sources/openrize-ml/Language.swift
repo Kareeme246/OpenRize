@@ -90,7 +90,7 @@ struct FoundationClassifier {
             if let temperature = params.temperature {
                 options = GenerationOptions(temperature: temperature, maximumResponseTokens: 200)
             } else {
-                options = GenerationOptions(sampling: .greedy, maximumResponseTokens: 200)
+                options = GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 200)
             }
             let response = try await session.respond(to: prompt(), schema: schema, options: options)
             let content = response.content
@@ -122,7 +122,7 @@ struct FoundationClassifier {
         var properties: [DynamicGenerationSchema.Property] = [
             .init(
                 name: "description",
-                description: "One short past-tense sentence, at most 12 words, saying what the person worked on.",
+                description: "A short name for the block, 3 to 15 words, starting with a past-tense verb and naming one specific thing, optionally with what it was for. The form, not the content, of names like: \"Prepared the 2.4 release\", \"Researched standing desk options\", \"Wrote the onboarding guide\", \"Answered client email\", \"Watched YouTube\".",
                 schema: DynamicGenerationSchema(type: String.self)
             ),
             .init(
@@ -146,17 +146,28 @@ struct FoundationClassifier {
 
     private func instructions() -> String {
         var text = """
-            You label blocks of computer activity for a private, on-device time tracker. \
-            Each block lists the apps used, their share of the time, and window titles or sites.
-            Choose the category that best describes the work in the block.
+            You name and file blocks of computer time for a private, on-device time tracker. \
+            The person reads these names later to recall their day, so a name says what the block \
+            was for, the way they would say it to a colleague.
+            Each block lists the apps used and their share of the time, then window titles or sites.
+            Find the one thread of work that the block was for and name only that. Leave out brief \
+            or incidental things: a quick look at email, a stray tab, the time tracker itself. \
+            Mention a second thing only when it took about as much time as the first.
+            Work comes before background media. When a terminal or editor shows a project for a \
+            real part of the block while videos or streams fill the browser, the project is the \
+            work: name it. Name the kind of activity, like "Watched YouTube", only when the block \
+            is mostly videos or browsing with no project work, and never list video topics.
+            Be specific: name the project, feature, document, or site, not the app. Never write \
+            "Used Safari and Terminal". Never mention a computer name, a folder path, or what came \
+            before the block. Only use details that appear in the block.
+            Choose the category that fits that main thread.
             """
         if projects != nil {
             text += """
                 \nChoose the project the work belongs to. Answer "\(noProjectLabel)" unless the \
-                activity clearly matches one of the listed projects.
+                main thread clearly matches one of the listed projects.
                 """
         }
-        text += "\nWrite a description that only uses details present in the activity."
         text += "\n\nCategories:"
         for (choice, unique) in zip(params.categories, categories) {
             text += "\n- \(unique.name)" + detail(choice)

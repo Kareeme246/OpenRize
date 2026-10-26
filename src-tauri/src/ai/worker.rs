@@ -713,11 +713,12 @@ impl Worker {
         };
 
         let model_version = model_version(caps.as_ref(), &self.conn);
+        let has_titles = features::has_titles(&segments);
         let outcome = Outcome {
             category: category_decision,
             project: project_decision,
             want_project,
-            description,
+            description: if has_titles { description } else { None },
             rule_category: rule_category.is_some(),
             rule_project: rule_project.is_some(),
         };
@@ -1531,5 +1532,32 @@ mod tests {
             &[seg("activity.rs - OpenRize", 750), seg("Inbox", 250)],
         );
         assert_eq!(found.get(&Some("p1".to_string())), Some(&0.75));
+    }
+
+    #[test]
+    fn no_title_guard_keeps_template_description() {
+        let conn = db();
+        let mut no_title_outcome = outcome(0.95);
+        no_title_outcome.description = None;
+        persist(
+            &conn,
+            "e1",
+            &no_title_outcome,
+            None,
+            "v",
+            &Settings::default(),
+            5,
+        )
+        .unwrap();
+        let (_, _, _, description) = entry(&conn);
+        assert_eq!(description, "Xcode: main.rs");
+        let origin: String = conn
+            .query_row(
+                "SELECT description_origin FROM time_entries WHERE id = 'e1';",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(origin, "template");
     }
 }

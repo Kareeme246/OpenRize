@@ -124,13 +124,13 @@ export interface EntryReviewPanelProps {
   /** Why merging with an adjacent entry is refused (it is approved). */
   mergeBlocked?: { prev?: string; next?: string };
   onDelete: () => void;
-  onDeleteField: (field: SuggestionField, id: string) => void;
   onRetry: () => void;
   onSetField: (field: SuggestionField, valueId: string | null) => void;
   onToggleBillable: () => void;
   onSaveDescription: (description: string) => void;
   onSetTimes: (startedAt: number, endedAt: number) => void;
   onResolveRule: (suggestion: RuleSuggestion, accept: boolean) => void;
+  onManageCategories?: () => void;
   formatTime: (epochMs: number) => string;
   formatDuration: (ms: number) => string;
 }
@@ -222,13 +222,13 @@ export function EntryReviewPanel({
   onMergeNext,
   mergeBlocked,
   onDelete,
-  onDeleteField,
   onRetry,
   onSetField,
   onToggleBillable,
   onSaveDescription,
   onSetTimes,
   onResolveRule,
+  onManageCategories,
   formatTime,
   formatDuration,
 }: EntryReviewPanelProps) {
@@ -500,10 +500,10 @@ export function EntryReviewPanel({
               )
             }
             onPick={(valueId) => onSetField(model.field, valueId)}
-            onDelete={() => {
-              if (model.value) onDeleteField(model.field, model.value);
-            }}
             nameOf={(valueId) => nameOf(model.field, valueId)}
+            onManageCategories={
+              model.field === "category" ? onManageCategories : undefined
+            }
           />
         ))}
 
@@ -550,7 +550,7 @@ export function EntryReviewPanel({
                   ? "Already approved"
                   : entry.categoryId
                     ? `Accept (${shortcutLabel("Enter")})`
-                    : "Pick a category first (1–9)"
+                    : "Pick a category first (1–3)"
               }
               wrapperClassName="flex flex-auto"
             >
@@ -685,7 +685,7 @@ export function EntryReviewPanel({
           </p>
         ) : (
           <p className="text-[10.5px] text-fg-faint">
-            <Kbd>1–9</Kbd> pick · <Kbd>C</Kbd>
+            <Kbd>1–3</Kbd> pick · <Kbd>C</Kbd>
             {suggestProjects && (
               <>
                 /<Kbd>P</Kbd>
@@ -869,8 +869,8 @@ function FieldSection({
   locked,
   onActivate,
   onPick,
-  onDelete,
   nameOf,
+  onManageCategories,
 }: {
   model: FieldModel;
   active: boolean;
@@ -878,8 +878,8 @@ function FieldSection({
   locked: boolean;
   onActivate: () => void;
   onPick: (valueId: string | null) => void;
-  onDelete: () => void;
   nameOf: (valueId?: string) => string;
+  onManageCategories?: () => void;
 }) {
   const { field, suggestion, value, options } = model;
   const current = options.find((option) => option.valueId === value);
@@ -958,16 +958,6 @@ function FieldSection({
             </span>
           )}
         </button>
-        {value && !locked && (
-          <button
-            type="button"
-            onClick={onDelete}
-            aria-label={`Delete ${label.toLowerCase()}`}
-            className="shrink-0 rounded px-1.5 text-[12px] text-fg-faint hover:bg-danger/10 hover:text-danger"
-          >
-            ×
-          </button>
-        )}
       </div>
 
       {active &&
@@ -1009,12 +999,19 @@ function FieldSection({
                 ))}
               </div>
             )}
-            {overflow.length > 0 && (
+            {(overflow.length > 0 ||
+              (field === "category" && onManageCategories)) && (
               <Picker
                 ariaLabel={`More ${plural}`}
                 value=""
                 placeholder={`More ${plural}…`}
-                onChange={(val) => onPick(val === "" ? null : val)}
+                onChange={(val) => {
+                  if (val === "__manage__") {
+                    onManageCategories?.();
+                  } else {
+                    onPick(val === "" ? null : val);
+                  }
+                }}
                 options={[
                   {
                     value: "",
@@ -1026,6 +1023,14 @@ function FieldSection({
                     label: option.name,
                     color: option.color,
                   })),
+                  ...(field === "category" && onManageCategories
+                    ? [
+                        {
+                          value: "__manage__",
+                          label: "Manage categories…",
+                        },
+                      ]
+                    : []),
                 ]}
                 variant="compact"
                 className="mt-1 w-full"

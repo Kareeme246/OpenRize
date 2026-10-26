@@ -33,31 +33,65 @@ pub struct Category {
     pub created_at: u64,
     pub updated_at: u64,
     pub deleted_at: Option<u64>,
+    /// The category's "Apps & sites": its hint rules' patterns, comma
+    /// separated. Not a column: the rules are the source of truth.
+    #[serde(default)]
+    pub ai_hints: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewCategory {
     pub name: String,
     pub color: String,
     pub description: Option<String>,
     pub ai_prompt: Option<String>,
+    /// Keywords, folders, URLs and domains; each becomes a hint rule.
+    pub ai_hints: Option<String>,
     pub billable_default: Option<bool>,
     pub counts_as_work: Option<bool>,
+    /// Defaults to after the last category.
     pub sort: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A patch: an absent field is left alone; the optional ones take `null` to
+/// clear. `archived` archives or restores.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateCategory {
     pub name: Option<String>,
     pub color: Option<String>,
-    pub description: Option<String>,
-    pub ai_prompt: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub description: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub ai_prompt: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub ai_hints: Option<Option<String>>,
     pub billable_default: Option<bool>,
     pub counts_as_work: Option<bool>,
     pub archived: Option<bool>,
     pub sort: Option<i64>,
+}
+
+/// What removing a category did: a category with time entries is archived
+/// (its history keeps it), one without is deleted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CategoryRemoval {
+    Archived,
+    Deleted,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

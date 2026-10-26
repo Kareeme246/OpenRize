@@ -87,18 +87,32 @@ pub fn parse_hints(text: &str) -> Vec<Hint> {
         .collect()
 }
 
-/// Replaces a project's hint rules with the ones its hints describe. `None`
+/// What a hint rule assigns: a project, or a category (the Categories
+/// page's "Apps & sites" are hints too).
+#[derive(Debug, Clone, Copy)]
+pub enum HintOwner<'a> {
+    Project(&'a str),
+    Category(&'a str),
+}
+
+/// Replaces an owner's hint rules with the ones its hints describe. `None`
 /// (a cleared field, or a deleted project) just removes them.
 pub fn sync_hint_rules(
     conn: &Connection,
-    project_id: &str,
+    owner: HintOwner<'_>,
     hints: Option<&str>,
     now: u64,
 ) -> Result<(), String> {
+    let (column, id, category_id, project_id) = match owner {
+        HintOwner::Project(id) => ("project_id", id, None, Some(id)),
+        HintOwner::Category(id) => ("category_id", id, Some(id), None),
+    };
     conn.execute(
-        "UPDATE rules SET deleted_at = ?1, updated_at = ?1
-         WHERE project_id = ?2 AND origin = ?3 AND deleted_at IS NULL;",
-        params![now as i64, project_id, ORIGIN_HINT],
+        &format!(
+            "UPDATE rules SET deleted_at = ?1, updated_at = ?1
+             WHERE {column} = ?2 AND origin = ?3 AND deleted_at IS NULL;"
+        ),
+        params![now as i64, id, ORIGIN_HINT],
     )
     .map_err(err)?;
     for hint in parse_hints(hints.unwrap_or("")) {
@@ -107,8 +121,8 @@ pub fn sync_hint_rules(
                 conn,
                 kind,
                 &pattern,
-                None,
-                Some(project_id),
+                category_id,
+                project_id,
                 ORIGIN_HINT,
                 true,
                 now,

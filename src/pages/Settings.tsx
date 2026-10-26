@@ -921,11 +921,13 @@ export function Settings({
   route,
   updates,
   revealUpdates,
+  navigate,
 }: {
   route: Extract<Route, { name: "settings" }>;
   updates: UpdateStatus | null;
   /** Bumped each time the sidebar asks for the Updates section. */
   revealUpdates: number;
+  navigate?: (route: Route) => void;
 }) {
   const { settings, storage, error, update } = useSettings();
   const { current: currentAccount } = useAccounts();
@@ -1350,8 +1352,17 @@ export function Settings({
               <SettingRow
                 title="Count toward Work Hours"
                 description="Choose which categories count as work rather than personal time"
-                status="not-implemented"
-              />
+              >
+                {navigate ? (
+                  <button
+                    type="button"
+                    onClick={() => navigate({ name: "categories" })}
+                    className="text-[12px] font-medium text-accent hover:underline"
+                  >
+                    Manage categories →
+                  </button>
+                ) : null}
+              </SettingRow>
             </SettingGroup>
           </section>
 

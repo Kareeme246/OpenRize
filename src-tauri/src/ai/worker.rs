@@ -55,7 +55,6 @@ const CALIBRATION_REFIT_AFTER: u32 = 10;
 /// the model, to stay inside its 4,096-token context.
 const MAX_LLM_CATEGORIES: usize = 16;
 const MAX_LLM_PROJECTS: usize = 15;
-const LLM_SHORTLIST: usize = 8;
 const FEW_SHOT_EXAMPLES: usize = 4;
 /// A previous entry this close before the current one is context.
 const CONTEXT_GAP_MS: u64 = 15 * 60 * 1000;
@@ -596,22 +595,57 @@ impl Worker {
             .as_deref()
             .map(|v| knn::nearest(v, &pool, knn::K))
             .unwrap_or_default();
+        let live_category_ids: HashSet<&str> = categories.iter().map(|c| c.id.as_str()).collect();
         let category_neighbors: Vec<(Label, f32)> = neighbors
             .iter()
-            .filter(|n| n.item.category_id.is_some())
+            .filter(|n| {
+                n.item
+                    .category_id
+                    .as_deref()
+                    .is_some_and(|id| live_category_ids.contains(id))
+            })
             .map(|n| (n.item.category_id.clone(), n.similarity))
             .collect();
+
+        let live_project_ids: HashSet<&str> = projects.iter().map(|c| c.id.as_str()).collect();
         let project_neighbors: Vec<(Label, f32)> = neighbors
             .iter()
+            .filter(|n| {
+                n.item
+                    .project_id
+                    .as_deref()
+                    .is_some_and(|id| live_project_ids.contains(id))
+            })
             .map(|n| (n.item.project_id.clone(), n.similarity))
             .collect();
+
         let personal_category = caps
             .is_some()
             .then(|| self.personal_predict(Field::Category, &features.content))
-            .flatten();
+            .flatten()
+            .map(|dist| {
+                dist.into_iter()
+                    .filter(|(label, _)| {
+                        label
+                            .as_deref()
+                            .is_some_and(|id| live_category_ids.contains(id))
+                    })
+                    .collect::<HashMap<Label, f64>>()
+            })
+            .filter(|dist| !dist.is_empty());
         let personal_project = (caps.is_some() && want_project)
             .then(|| self.personal_predict(Field::Project, &features.content))
-            .flatten();
+            .flatten()
+            .map(|dist| {
+                dist.into_iter()
+                    .filter(|(label, _)| {
+                        label
+                            .as_deref()
+                            .is_some_and(|id| live_project_ids.contains(id))
+                    })
+                    .collect::<HashMap<Label, f64>>()
+            })
+            .filter(|dist| !dist.is_empty());
         let labeled = store::labeled_count(&self.conn)?;
         let calibrator = store::active_calibration(&self.conn)?;
 
@@ -622,11 +656,43 @@ impl Worker {
         let mut llm_project: Option<Votes> = None;
         let mut description: Option<String> = None;
         if caps.as_ref().is_some_and(|c| c.llm == "available") {
+            let mut cat_counts: HashMap<&str, usize> = HashMap::new();
+            let mut proj_counts: HashMap<&str, usize> = HashMap::new();
+            for item in &pool {
+                if let Some(id) = item.category_id.as_deref() {
+                    *cat_counts.entry(id).or_default() += 1;
+                }
+                if let Some(id) = item.project_id.as_deref() {
+                    *proj_counts.entry(id).or_default() += 1;
+                }
+            }
+            let cold_categories: HashSet<&str> = categories
+                .iter()
+                .filter(|c| cat_counts.get(c.id.as_str()).copied().unwrap_or(0) < 5)
+                .map(|c| c.id.as_str())
+                .collect();
+            let cold_projects: HashSet<&str> = projects
+                .iter()
+                .filter(|p| proj_counts.get(p.id.as_str()).copied().unwrap_or(0) < 5)
+                .map(|p| p.id.as_str())
+                .collect();
+
             let request = LlmRequest {
                 features: &features.text,
-                categories: shortlist(&categories, MAX_LLM_CATEGORIES, &category_neighbors),
-                projects: want_project
-                    .then(|| shortlist(&projects, MAX_LLM_PROJECTS, &project_neighbors)),
+                categories: shortlist(
+                    &categories,
+                    MAX_LLM_CATEGORIES,
+                    &category_neighbors,
+                    &cold_categories,
+                ),
+                projects: want_project.then(|| {
+                    shortlist(
+                        &projects,
+                        MAX_LLM_PROJECTS,
+                        &project_neighbors,
+                        &cold_projects,
+                    )
+                }),
                 examples: few_shot(&neighbors, &categories, &projects, want_project),
                 custom: &settings.ai_custom_prompt,
             };
@@ -1212,9 +1278,14 @@ fn persist(
     tx.commit().map_err(|e| e.to_string())
 }
 
-/// With too many choices for the model's context, keep the fast tiers' top
-/// picks (in list order), padded with the rest of the list.
-fn shortlist<'a>(choices: &'a [Choice], max: usize, neighbors: &[(Label, f32)]) -> Vec<&'a Choice> {
+/// With too many choices for the model's context, keep cold choices (so new
+/// categories get a chance) and the fast tiers' top picks, truncated to `max`.
+fn shortlist<'a>(
+    choices: &'a [Choice],
+    max: usize,
+    neighbors: &[(Label, f32)],
+    cold: &HashSet<&str>,
+) -> Vec<&'a Choice> {
     if choices.len() <= max {
         return choices.iter().collect();
     }
@@ -1226,11 +1297,16 @@ fn shortlist<'a>(choices: &'a [Choice], max: usize, neighbors: &[(Label, f32)]) 
     }
     let mut ranked: Vec<&Choice> = choices.iter().collect();
     ranked.sort_by(|a, b| {
-        let a = score.get(a.id.as_str()).copied().unwrap_or(0.0);
-        let b = score.get(b.id.as_str()).copied().unwrap_or(0.0);
-        b.total_cmp(&a)
+        let a_cold = cold.contains(a.id.as_str());
+        let b_cold = cold.contains(b.id.as_str());
+        if a_cold != b_cold {
+            return b_cold.cmp(&a_cold);
+        }
+        let a_score = score.get(a.id.as_str()).copied().unwrap_or(0.0);
+        let b_score = score.get(b.id.as_str()).copied().unwrap_or(0.0);
+        b_score.total_cmp(&a_score)
     });
-    ranked.truncate(LLM_SHORTLIST);
+    ranked.truncate(max);
     ranked
 }
 

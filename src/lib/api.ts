@@ -16,6 +16,8 @@ import type {
   AppRecord,
   BillableEntry,
   Category,
+  CategoryRemoval,
+  CategoryStats,
   Client,
   EnergySummary,
   EntryDetail,
@@ -28,6 +30,7 @@ import type {
   InvoiceProfile,
   InvoiceProfileInput,
   InvoiceSummary,
+  NewCategory,
   NewClient,
   NewProject,
   NewTimeEntry,
@@ -40,6 +43,7 @@ import type {
   RollupGroup,
   RuleSuggestion,
   TimeEntry,
+  UpdateCategory,
   UpdateClient,
   UpdateProject,
   UpdateStatus,
@@ -291,8 +295,37 @@ export async function listCategories(): Promise<Category[]> {
   return await invoke<Category[]>("list_categories");
 }
 
+export async function createCategory(category: NewCategory): Promise<Category> {
+  return await invoke<Category>("create_category", { category });
+}
+
+export async function updateCategory(
+  id: string,
+  patch: UpdateCategory,
+): Promise<Category> {
+  return await invoke<Category>("update_category", { id, patch });
+}
+
 export async function deleteCategory(id: string): Promise<void> {
   await invoke("delete_category", { id });
+}
+
+export async function removeCategory(id: string): Promise<CategoryRemoval> {
+  return await invoke<CategoryRemoval>("remove_category", { id });
+}
+
+export async function reorderCategories(ids: string[]): Promise<void> {
+  await invoke("reorder_categories", { ids });
+}
+
+export async function categoryStats(
+  rangeStart: number,
+  rangeEnd: number,
+): Promise<CategoryStats[]> {
+  return await invoke<CategoryStats[]>("category_stats", {
+    rangeStart,
+    rangeEnd,
+  });
 }
 
 // --- Projects ---

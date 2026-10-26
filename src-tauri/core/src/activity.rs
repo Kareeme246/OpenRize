@@ -12,9 +12,9 @@ use serde::Serialize;
 
 use crate::capture::WindowSample;
 use crate::models::{
-    AppContribution, AppRecord, Category, Client, EntryDetail, EntryEvent, NewCategory, NewClient,
-    NewProject, NewTimeEntry, Project, TimeEntry, TitleItem, UpdateCategory, UpdateClient,
-    UpdateProject, UpdateTimeEntry,
+    AppContribution, AppRecord, Category, CategoryRemoval, Client, EntryDetail, EntryEvent,
+    NewCategory, NewClient, NewProject, NewTimeEntry, Project, TimeEntry, TitleItem,
+    UpdateCategory, UpdateClient, UpdateProject, UpdateTimeEntry,
 };
 use crate::timers::now_epoch_ms;
 
@@ -801,71 +801,56 @@ impl ActivityStore {
 
     // --- P1: Categories CRUD --------------------------------------------
 
+    /// Every category that is not deleted, archived ones included (past
+    /// entries still show them), in the user's order.
     pub fn list_categories(&self) -> Result<Vec<Category>, String> {
         let mut stmt = self
             .conn
-            .prepare(
-                "SELECT id, name, color, description, ai_prompt, billable_default, counts_as_work, archived, sort, created_at, updated_at, deleted_at
-                 FROM categories
-                 WHERE deleted_at IS NULL
-                 ORDER BY sort ASC, name ASC;",
-            )
+            .prepare(&format!(
+                "SELECT {CATEGORY_COLUMNS} FROM categories c
+                 WHERE c.deleted_at IS NULL
+                 ORDER BY c.sort ASC, c.name ASC;"
+            ))
             .map_err(|e| e.to_string())?;
-
         let rows = stmt
-            .query_map([], |row| {
-                Ok(Category {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    color: row.get(2)?,
-                    description: row.get(3)?,
-                    ai_prompt: row.get(4)?,
-                    billable_default: row.get::<_, i64>(5)? != 0,
-                    counts_as_work: row.get::<_, i64>(6)? != 0,
-                    archived: row.get::<_, i64>(7)? != 0,
-                    sort: row.get(8)?,
-                    created_at: row.get::<_, i64>(9)? as u64,
-                    updated_at: row.get::<_, i64>(10)? as u64,
-                    deleted_at: row.get::<_, Option<i64>>(11)?.map(|v| v as u64),
-                })
-            })
+            .query_map([], category_from_row)
             .map_err(|e| e.to_string())?;
-
-        let mut list = Vec::new();
-        for cat in rows {
-            list.push(cat.map_err(|e| e.to_string())?);
-        }
-        Ok(list)
+        rows.collect::<rusqlite::Result<_>>()
+            .map_err(|e| e.to_string())
     }
 
+    /// Creates a category after the last one, with its hint rules.
     pub fn create_category(&mut self, cat: NewCategory, now: u64) -> Result<Category, String> {
+        let name = self.category_name(&cat.name, None)?;
         let id = uuid::Uuid::now_v7().to_string();
         let billable = cat.billable_default.unwrap_or(false) as i64;
         let counts = cat.counts_as_work.unwrap_or(true) as i64;
-        let sort = cat.sort.unwrap_or(0);
 
-        self.conn
-            .execute(
-                "INSERT INTO categories (id, name, color, description, ai_prompt, billable_default, counts_as_work, archived, sort, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9, ?9);",
-                params![id, cat.name, cat.color, cat.description, cat.ai_prompt, billable, counts, sort, now as i64],
-            )
-            .map_err(|e| e.to_string())?;
-
-        Ok(Category {
-            id,
-            name: cat.name,
-            color: cat.color,
-            description: cat.description,
-            ai_prompt: cat.ai_prompt,
-            billable_default: billable != 0,
-            counts_as_work: counts != 0,
-            archived: false,
-            sort,
-            created_at: now,
-            updated_at: now,
-            deleted_at: None,
-        })
+        let tx = self.conn.transaction().map_err(|e| e.to_string())?;
+        let sort = match cat.sort {
+            Some(sort) => sort,
+            None => tx
+                .query_row(
+                    "SELECT COALESCE(MAX(sort), 0) + 1 FROM categories WHERE deleted_at IS NULL;",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())?,
+        };
+        tx.execute(
+            "INSERT INTO categories (id, name, color, description, ai_prompt, billable_default, counts_as_work, archived, sort, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9, ?9);",
+            params![id, name, cat.color, cat.description, cat.ai_prompt, billable, counts, sort, now as i64],
+        )
+        .map_err(|e| e.to_string())?;
+        crate::projects::sync_hint_rules(
+            &tx,
+            crate::projects::HintOwner::Category(&id),
+            cat.ai_hints.as_deref(),
+            now,
+        )?;
+        tx.commit().map_err(|e| e.to_string())?;
+        self.get_category(&id)
     }
 
     pub fn update_category(
@@ -876,16 +861,16 @@ impl ActivityStore {
     ) -> Result<Category, String> {
         let mut cat = self.get_category(id)?;
         if let Some(name) = patch.name {
-            cat.name = name;
+            cat.name = self.category_name(&name, Some(id))?;
         }
         if let Some(color) = patch.color {
             cat.color = color;
         }
         if let Some(desc) = patch.description {
-            cat.description = Some(desc);
+            cat.description = desc;
         }
         if let Some(prompt) = patch.ai_prompt {
-            cat.ai_prompt = Some(prompt);
+            cat.ai_prompt = prompt;
         }
         if let Some(b) = patch.billable_default {
             cat.billable_default = b;
@@ -899,56 +884,119 @@ impl ActivityStore {
         if let Some(s) = patch.sort {
             cat.sort = s;
         }
-        cat.updated_at = now;
 
-        self.conn
-            .execute(
-                "UPDATE categories SET name = ?1, color = ?2, description = ?3, ai_prompt = ?4, billable_default = ?5, counts_as_work = ?6, archived = ?7, sort = ?8, updated_at = ?9
-                 WHERE id = ?10;",
-                params![
-                    cat.name,
-                    cat.color,
-                    cat.description,
-                    cat.ai_prompt,
-                    cat.billable_default as i64,
-                    cat.counts_as_work as i64,
-                    cat.archived as i64,
-                    cat.sort,
-                    now as i64,
-                    id,
-                ],
-            )
-            .map_err(|e| e.to_string())?;
-
-        Ok(cat)
+        let tx = self.conn.transaction().map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE categories SET name = ?1, color = ?2, description = ?3, ai_prompt = ?4, billable_default = ?5, counts_as_work = ?6, archived = ?7, sort = ?8, updated_at = ?9
+             WHERE id = ?10;",
+            params![
+                cat.name,
+                cat.color,
+                cat.description,
+                cat.ai_prompt,
+                cat.billable_default as i64,
+                cat.counts_as_work as i64,
+                cat.archived as i64,
+                cat.sort,
+                now as i64,
+                id,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        if let Some(hints) = patch.ai_hints.filter(|hints| *hints != cat.ai_hints) {
+            crate::projects::sync_hint_rules(
+                &tx,
+                crate::projects::HintOwner::Category(id),
+                hints.as_deref(),
+                now,
+            )?;
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+        self.get_category(id)
     }
 
     pub fn delete_category(&mut self, id: &str, now: u64) -> Result<(), String> {
         self.delete_undoable(&[], Some(id), None, now)
     }
 
+    /// Removes a category the way the Categories page's Delete does. One that
+    /// any time entry uses is archived: approved entries are frozen and
+    /// reports group by category, so its history keeps it, while pickers and
+    /// suggestions drop it. One nobody used is deleted (undoably).
+    pub fn remove_category(&mut self, id: &str, now: u64) -> Result<CategoryRemoval, String> {
+        let used: bool = self
+            .conn
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM time_entries WHERE category_id = ?1 AND deleted_at IS NULL);",
+                params![id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if used {
+            let patch = UpdateCategory {
+                archived: Some(true),
+                ..UpdateCategory::default()
+            };
+            self.update_category(id, patch, now)?;
+            Ok(CategoryRemoval::Archived)
+        } else {
+            self.delete_category(id, now)?;
+            Ok(CategoryRemoval::Deleted)
+        }
+    }
+
+    /// Puts `ids` first, in that order, and the rest after them in their
+    /// current order. Order decides which categories hold the review panel's
+    /// number keys.
+    pub fn reorder_categories(&mut self, ids: &[String], now: u64) -> Result<(), String> {
+        let current = self.list_categories()?;
+        if let Some(missing) = ids.iter().find(|id| !current.iter().any(|c| &c.id == *id)) {
+            return Err(format!("No category {missing}"));
+        }
+        let rest = current
+            .iter()
+            .map(|cat| &cat.id)
+            .filter(|id| !ids.contains(id));
+        let tx = self.conn.transaction().map_err(|e| e.to_string())?;
+        for (index, id) in ids.iter().chain(rest).enumerate() {
+            tx.execute(
+                "UPDATE categories SET sort = ?1, updated_at = ?2 WHERE id = ?3;",
+                params![index as i64 + 1, now as i64, id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        tx.commit().map_err(|e| e.to_string())
+    }
+
+    /// A trimmed, unique (case-insensitively, among categories that are not
+    /// deleted) name, or why it can't be one. `except` is the category being
+    /// renamed.
+    fn category_name(&self, name: &str, except: Option<&str>) -> Result<String, String> {
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return Err("A category needs a name".to_string());
+        }
+        let wanted = name.to_lowercase();
+        let clash = self
+            .list_categories()?
+            .into_iter()
+            .find(|cat| Some(cat.id.as_str()) != except && cat.name.to_lowercase() == wanted);
+        match clash {
+            Some(cat) if cat.archived => Err(format!(
+                "{} is archived. Restore it instead of adding another.",
+                cat.name
+            )),
+            Some(cat) => Err(format!("A category named {} already exists", cat.name)),
+            None => Ok(name),
+        }
+    }
+
     fn get_category(&self, id: &str) -> Result<Category, String> {
         self.conn
             .query_row(
-                "SELECT id, name, color, description, ai_prompt, billable_default, counts_as_work, archived, sort, created_at, updated_at, deleted_at
-                 FROM categories WHERE id = ?1;",
+                &format!("SELECT {CATEGORY_COLUMNS} FROM categories c WHERE c.id = ?1;"),
                 params![id],
-                |row| {
-                    Ok(Category {
-                        id: row.get(0)?,
-                        name: row.get(1)?,
-                        color: row.get(2)?,
-                        description: row.get(3)?,
-                        ai_prompt: row.get(4)?,
-                        billable_default: row.get::<_, i64>(5)? != 0,
-                        counts_as_work: row.get::<_, i64>(6)? != 0,
-                        archived: row.get::<_, i64>(7)? != 0,
-                        sort: row.get(8)?,
-                        created_at: row.get::<_, i64>(9)? as u64,
-                        updated_at: row.get::<_, i64>(10)? as u64,
-                        deleted_at: row.get::<_, Option<i64>>(11)?.map(|v| v as u64),
-                    })
-                },
+                category_from_row,
             )
             .map_err(|e| e.to_string())
     }
@@ -1023,7 +1071,12 @@ impl ActivityStore {
                 now as i64,
             ],
         ).map_err(|e| e.to_string())?;
-        crate::projects::sync_hint_rules(&self.conn, &id, proj.ai_hints.as_deref(), now)?;
+        crate::projects::sync_hint_rules(
+            &self.conn,
+            crate::projects::HintOwner::Project(&id),
+            proj.ai_hints.as_deref(),
+            now,
+        )?;
 
         Ok(Project {
             id,
@@ -1136,7 +1189,12 @@ impl ActivityStore {
         ).map_err(|e| e.to_string())?;
 
         if hints_changed {
-            crate::projects::sync_hint_rules(&self.conn, id, proj.ai_hints.as_deref(), now)?;
+            crate::projects::sync_hint_rules(
+                &self.conn,
+                crate::projects::HintOwner::Project(id),
+                proj.ai_hints.as_deref(),
+                now,
+            )?;
         }
         Ok(proj)
     }
@@ -2202,6 +2260,30 @@ pub fn segment_from_row(row: &Row<'_>) -> rusqlite::Result<ActivitySegment> {
     })
 }
 
+/// The `categories c` columns `category_from_row` reads, in its order. The
+/// last is the category's hint rules, in the order they were written.
+const CATEGORY_COLUMNS: &str = "c.id, c.name, c.color, c.description, c.ai_prompt, c.billable_default, c.counts_as_work, c.archived, c.sort, c.created_at, c.updated_at, c.deleted_at,
+     (SELECT group_concat(r.pattern, ', ' ORDER BY r.created_at, r.rowid) FROM rules r
+      WHERE r.category_id = c.id AND r.origin = 'hint' AND r.deleted_at IS NULL)";
+
+fn category_from_row(row: &Row<'_>) -> rusqlite::Result<Category> {
+    Ok(Category {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        color: row.get(2)?,
+        description: row.get(3)?,
+        ai_prompt: row.get(4)?,
+        billable_default: row.get::<_, i64>(5)? != 0,
+        counts_as_work: row.get::<_, i64>(6)? != 0,
+        archived: row.get::<_, i64>(7)? != 0,
+        sort: row.get(8)?,
+        created_at: row.get::<_, i64>(9)? as u64,
+        updated_at: row.get::<_, i64>(10)? as u64,
+        deleted_at: row.get::<_, Option<i64>>(11)?.map(|v| v as u64),
+        ai_hints: row.get(12)?,
+    })
+}
+
 /// The `clients` columns `client_from_row` reads, in its order.
 const CLIENT_COLUMNS: &str =
     "id, name, email, address, default_rate, currency, notes, archived_at, created_at, updated_at, deleted_at";
@@ -2699,6 +2781,7 @@ mod tests {
                     color: "#123456".to_string(),
                     description: Some("Custom desc".to_string()),
                     ai_prompt: None,
+                    ai_hints: None,
                     billable_default: Some(true),
                     counts_as_work: Some(true),
                     sort: Some(13),
@@ -2716,6 +2799,7 @@ mod tests {
                     color: None,
                     description: None,
                     ai_prompt: None,
+                    ai_hints: None,
                     billable_default: None,
                     counts_as_work: None,
                     archived: None,
@@ -2729,6 +2813,125 @@ mod tests {
         store.delete_category(&created.id, 3_000).unwrap();
         let remaining = store.list_categories().unwrap();
         assert_eq!(remaining.len(), 11);
+    }
+
+    #[test]
+    fn categories_name_validation() {
+        let mut store = store();
+        // Empty name rejected
+        assert!(store
+            .create_category(
+                NewCategory {
+                    name: "   ".to_string(),
+                    color: "#123456".to_string(),
+                    ..Default::default()
+                },
+                1_000,
+            )
+            .is_err());
+
+        // Duplicate name rejected (case-insensitive)
+        let err = store
+            .create_category(
+                NewCategory {
+                    name: "coding".to_string(),
+                    color: "#123456".to_string(),
+                    ..Default::default()
+                },
+                1_000,
+            )
+            .unwrap_err();
+        assert!(err.contains("already exists"));
+
+        // If archived, suggests restoring
+        let coding = store
+            .list_categories()
+            .unwrap()
+            .into_iter()
+            .find(|c| c.name == "Coding")
+            .unwrap();
+        store
+            .update_category(
+                &coding.id,
+                UpdateCategory {
+                    archived: Some(true),
+                    ..Default::default()
+                },
+                2_000,
+            )
+            .unwrap();
+        let err = store
+            .create_category(
+                NewCategory {
+                    name: "Coding".to_string(),
+                    color: "#123456".to_string(),
+                    ..Default::default()
+                },
+                3_000,
+            )
+            .unwrap_err();
+        assert!(err.contains("is archived. Restore it instead"));
+    }
+
+    #[test]
+    fn categories_smart_delete_and_reorder() {
+        let mut store = store();
+        let unused = store
+            .create_category(
+                NewCategory {
+                    name: "Unused Cat".to_string(),
+                    color: "#123456".to_string(),
+                    ..Default::default()
+                },
+                1_000,
+            )
+            .unwrap();
+        // Unused category is really deleted
+        let removal = store.remove_category(&unused.id, 2_000).unwrap();
+        assert_eq!(removal, CategoryRemoval::Deleted);
+
+        let used = store
+            .create_category(
+                NewCategory {
+                    name: "Used Cat".to_string(),
+                    color: "#123456".to_string(),
+                    ..Default::default()
+                },
+                3_000,
+            )
+            .unwrap();
+        // Add an entry with this category
+        store
+            .create_manual_entry(
+                NewTimeEntry {
+                    started_at: 4_000,
+                    ended_at: 5_000,
+                    description: "Task".to_string(),
+                    category_id: Some(used.id.clone()),
+                    project_id: None,
+                    billable: None,
+                    review: true,
+                },
+                4_000,
+            )
+            .unwrap();
+
+        // Used category is archived, not deleted
+        let removal = store.remove_category(&used.id, 5_000).unwrap();
+        assert_eq!(removal, CategoryRemoval::Archived);
+        let cat = store.get_category(&used.id).unwrap();
+        assert!(cat.archived);
+        assert!(cat.deleted_at.is_none());
+
+        // Reorder categories
+        let cats = store.list_categories().unwrap();
+        let mut ids: Vec<String> = cats.iter().map(|c| c.id.clone()).collect();
+        ids.reverse();
+        store.reorder_categories(&ids[0..3], 6_000).unwrap();
+        let reordered = store.list_categories().unwrap();
+        assert_eq!(reordered[0].id, ids[0]);
+        assert_eq!(reordered[1].id, ids[1]);
+        assert_eq!(reordered[2].id, ids[2]);
     }
 
     #[test]
@@ -3119,6 +3322,7 @@ mod tests {
                     color: "#64748b".to_string(),
                     description: None,
                     ai_prompt: None,
+                    ai_hints: None,
                     billable_default: Some(false),
                     counts_as_work: Some(false),
                     sort: None,

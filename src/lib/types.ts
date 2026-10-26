@@ -4,6 +4,7 @@ export interface Category {
   color: string;
   description?: string;
   aiPrompt?: string;
+  aiHints?: string;
   billableDefault: boolean;
   countsAsWork: boolean;
   archived: boolean;
@@ -12,6 +13,42 @@ export interface Category {
   updatedAt: number;
   deletedAt?: number;
 }
+
+export interface NewCategory {
+  name: string;
+  color: string;
+  description?: string;
+  aiPrompt?: string;
+  aiHints?: string;
+  billableDefault?: boolean;
+  countsAsWork?: boolean;
+  sort?: number;
+}
+
+export interface UpdateCategory {
+  name?: string;
+  color?: string;
+  description?: string | null;
+  aiPrompt?: string | null;
+  aiHints?: string | null;
+  billableDefault?: boolean;
+  countsAsWork?: boolean;
+  archived?: boolean;
+  sort?: number;
+}
+
+export type CategoryRemoval = "archived" | "deleted";
+
+export interface CategoryStats {
+  categoryId: string;
+  entries: number;
+  approved: number;
+  totalMs: number;
+  rangeMs: number;
+  lastActivity?: number;
+}
+
+export type CategoriesTab = "active" | "archived";
 
 export interface Client {
   id: string;
@@ -585,6 +622,12 @@ export type Route =
       name: "projects";
       tab?: ProjectsTab;
       projectId?: string;
+      range?: ProjectsRange;
+    }
+  | {
+      name: "categories";
+      tab?: CategoriesTab;
+      categoryId?: string;
       range?: ProjectsRange;
     }
   | {

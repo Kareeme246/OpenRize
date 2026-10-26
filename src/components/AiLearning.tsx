@@ -10,6 +10,7 @@
 import { useEffect, useId, useState } from "react";
 import { percent } from "../lib/confidence";
 import { plural } from "../lib/format";
+import { POWER_SAVING_MODE, THIS_COMPUTER } from "../lib/platform";
 import type {
   AiMetrics,
   AiStatus,
@@ -556,9 +557,9 @@ export function PersonalModels({
       </div>
       <p className="text-[12px] leading-relaxed text-fg-muted">
         Retrains in the background after {retrainAfter} new reviews or nightly,
-        only while the Mac is idle, on power, and not in Low Power Mode. A new
-        model replaces the old one only if it does at least as well on held-out
-        entries.{" "}
+        only while {THIS_COMPUTER} is idle, on power, and not in{" "}
+        {POWER_SAVING_MODE}. A new model replaces the old one only if it does at
+        least as well on held-out entries.{" "}
         <span className="text-fg-muted">
           {plural(newLabels, "new review")} since the last training.
         </span>

@@ -629,7 +629,7 @@ fn move_data(root: &Path, target: &Path) -> Result<Adopted, String> {
         }
         let _ = fs::remove_file(&wal);
         let _ = fs::remove_file(&shm);
-        fs::rename(&source_db, &target_db).map_err(|e| fail("move the database", e))?;
+        rename_when_free(&source_db, &target_db).map_err(|e| fail("move the database", e))?;
         moved = true;
     }
 
@@ -641,7 +641,7 @@ fn move_data(root: &Path, target: &Path) -> Result<Adopted, String> {
             let _ = fs::remove_dir(&target_ml);
         }
         if !target_ml.exists() {
-            fs::rename(&source_ml, &target_ml).map_err(|e| fail("move the models", e))?;
+            rename_when_free(&source_ml, &target_ml).map_err(|e| fail("move the models", e))?;
             moved = true;
         }
     }
@@ -650,6 +650,43 @@ fn move_data(root: &Path, target: &Path) -> Result<Adopted, String> {
     } else {
         Adopted::Nothing
     })
+}
+
+/// How long a rename waits for a file another program has open.
+const RENAME_ATTEMPTS: u32 = 20;
+const RENAME_PAUSE: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// `fs::rename`, retried for a couple of seconds when Windows refuses because
+/// something has the file open. The lock held across a move keeps every
+/// OpenRize process out, so what is left is brief: the previous process still
+/// tearing down (the OS can release `app.lock` before it closes the database)
+/// or a virus scanner or indexer reading the file. Other platforms rename an
+/// open file without complaint, so they never retry. A failure leaves
+/// everything where it was and `switch.json` in place, so the next launch
+/// tries again.
+fn rename_when_free(from: &Path, to: &Path) -> io::Result<()> {
+    rename_retrying(from, to, RENAME_ATTEMPTS, RENAME_PAUSE)
+}
+
+fn rename_retrying(
+    from: &Path,
+    to: &Path,
+    attempts: u32,
+    pause: std::time::Duration,
+) -> io::Result<()> {
+    // ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION.
+    let in_use =
+        |error: &io::Error| cfg!(windows) && matches!(error.raw_os_error(), Some(5 | 32 | 33));
+    let mut tries = 1;
+    loop {
+        match fs::rename(from, to) {
+            Err(error) if in_use(&error) && tries < attempts => {
+                tries += 1;
+                std::thread::sleep(pause);
+            }
+            result => return result,
+        }
+    }
 }
 
 fn sibling(db: &Path, suffix: &str) -> PathBuf {
@@ -1026,29 +1063,68 @@ mod tests {
     #[test]
     fn adopt_folds_the_write_ahead_log_into_the_database_before_moving() {
         let root = root("wal");
-        with_data(&root);
-        // Keep the writer open with auto-checkpointing off, so the rows are
-        // still in the log when the move starts.
-        let writer = Connection::open(root.join(DATABASE_FILE)).unwrap();
+        let live = root.join("live");
+        with_data(&live);
+        // Keep a writer open with auto-checkpointing off, so its rows are only
+        // in the log. Closing the last connection would checkpoint them, so
+        // copy the files while it is open: that is what a process that died
+        // leaves behind, and it needs no open handle during the move (Windows
+        // cannot rename an open database).
+        let writer = Connection::open(live.join(DATABASE_FILE)).unwrap();
         writer
             .execute_batch(
                 "PRAGMA wal_autocheckpoint = 0;
                  INSERT INTO clients (id, name, created_at, updated_at) VALUES ('c2', 'Beta', 1, 1);",
             )
             .unwrap();
-        assert!(
-            fs::metadata(wal_path(&root.join(DATABASE_FILE)))
-                .unwrap()
-                .len()
-                > 0
-        );
+        let db = root.join(DATABASE_FILE);
+        fs::copy(live.join(DATABASE_FILE), &db).unwrap();
+        fs::copy(wal_path(&live.join(DATABASE_FILE)), wal_path(&db)).unwrap();
+        drop(writer);
+        assert!(fs::metadata(wal_path(&db)).unwrap().len() > 0);
         let account = register(&root, "Kareem").unwrap();
 
         assert_eq!(adopt(&root, &account.id).unwrap(), Adopted::Moved);
         let dir = data_dir(&root, Some(&account.id));
         assert_eq!(clients(&dir.join(DATABASE_FILE)), 2);
-        assert!(!wal_path(&root.join(DATABASE_FILE)).exists());
-        drop(writer);
+        assert!(!wal_path(&db).exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_file_another_program_holds_is_waited_for_and_then_reported() {
+        use std::time::Duration;
+        let root = root("busy");
+        let from = root.join("from");
+        let to = root.join("to");
+        fs::write(&from, b"data").unwrap();
+
+        // Windows refuses to rename a file opened without delete sharing.
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            let hold = || {
+                fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(1) // FILE_SHARE_READ only
+                    .open(&from)
+                    .unwrap()
+            };
+            let held = hold();
+            let error = rename_retrying(&from, &to, 3, Duration::from_millis(5)).unwrap_err();
+            assert_eq!(error.raw_os_error(), Some(32));
+            assert!(from.is_file() && !to.exists());
+
+            let releaser = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(150));
+                drop(held);
+            });
+            rename_retrying(&from, &to, 50, Duration::from_millis(20)).unwrap();
+            releaser.join().unwrap();
+        }
+        #[cfg(not(windows))]
+        rename_retrying(&from, &to, 3, Duration::from_millis(5)).unwrap();
+        assert_eq!(fs::read(&to).unwrap(), b"data");
         let _ = fs::remove_dir_all(&root);
     }
 

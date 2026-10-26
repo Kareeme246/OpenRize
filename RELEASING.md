@@ -33,6 +33,8 @@ To cut a release:
    updater artifacts have minisign signatures. `install.sh` installs the CLI
    from that same `openrize.app.tar.gz`, so there is no separate CLI download.
 
+After a release, run `pnpm downloads` (see `scripts/download-stats/cli.ts`) to print the website and GitHub download counts and add them to its local ledger, which keeps history past Cloudflare's 31 days.
+
 Publishing a release ships it to every installed copy: the app checks
 `releases/latest/download/latest.json` hourly (see `src-tauri/src/updater.rs`)
 and offers the update in the sidebar and Settings. Drafts and pre-releases are

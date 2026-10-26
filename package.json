@@ -20,7 +20,9 @@
     "dev:screenshot": "bash scripts/dev-screenshot.sh",
     "dev:drive": "bash scripts/app-drive.sh",
     "publish-r2": "node scripts/publish-r2/cli.ts",
-    "test:publisher": "node --test \"scripts/publish-r2/*.test.ts\""
+    "test:publisher": "node --test \"scripts/publish-r2/*.test.ts\"",
+    "downloads": "node scripts/download-stats/cli.ts",
+    "test:downloads": "node --test \"scripts/download-stats/*.test.ts\""
   },
   "dependencies": {
     "@radix-ui/react-toast": "^1.3.1",

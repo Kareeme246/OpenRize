@@ -23,6 +23,9 @@ pnpm exec tsc --noEmit
 echo "==> tsc (R2 publisher)"
 pnpm exec tsc -p scripts/publish-r2
 
+echo "==> tsc (download stats)"
+pnpm exec tsc -p scripts/download-stats
+
 echo "==> cargo fmt (backend)"
 if $FIX; then
   cargo fmt --manifest-path src-tauri/Cargo.toml --all

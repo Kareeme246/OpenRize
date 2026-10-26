@@ -36,3 +36,6 @@ FROM_KLOCK.md
 
 # Local R2 publisher rehearsal bucket (publish-r2 --local)
 .r2-local/
+
+# Local download-stats ledger (pnpm downloads)
+.download-stats/

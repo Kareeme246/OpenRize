@@ -253,64 +253,14 @@ jobs:
       # checks what the NSIS hooks promise: the app and rize land in the
       # install folder, rize is on the user PATH (once, even after an in-app
       # style update) and the uninstaller takes the PATH entry and the login
-      # item away again. The runner is discarded, so its registry is ours to use.
+      # item away again. The runner is discarded, so its registry is ours to
+      # use. The script bounds and reports every action, so a hang names the
+      # program that hung and fails in seconds rather than at this timeout.
       - name: Smoke test the Windows installer
-        timeout-minutes: 10
+        timeout-minutes: 6
         env:
           VERSION: ${{ inputs.version }}
-        run: |
-          fail() { echo "::error title=Windows installer smoke test::$*"; exit 1; }
-          installer=$(cygpath -w "$PWD/src-tauri/target/release/bundle/nsis/OpenRize_${VERSION}_x64-setup.exe")
-          [[ -f "$(cygpath -u "$installer")" ]] || fail "installer not found: $installer"
-
-          # Runs a program to completion and returns its exit code.
-          run_wait() {
-            EXE="$1" ARGS="$2" powershell.exe -NoProfile -Command \
-              '$p = Start-Process -FilePath $env:EXE -ArgumentList $env:ARGS -Wait -PassThru; exit $p.ExitCode'
-          }
-          user_path() {
-            powershell.exe -NoProfile -Command "[Environment]::GetEnvironmentVariable('Path', 'User')" | tr -d '\r'
-          }
-          # How many PATH entries are the folder, ignoring case and a trailing backslash.
-          path_entries() {
-            user_path | tr ';' '\n' | sed 's/[\]$//' | grep -Fxic "$1" || true
-          }
-
-          dir_win="$LOCALAPPDATA\OpenRize"
-          dir=$(cygpath -u "$dir_win")
-          run_key='HKCU\Software\Microsoft\Windows\CurrentVersion\Run'
-
-          run_wait "$installer" "/S" || fail "silent install exited with $?"
-          [[ -f "$dir/openrize.exe" ]] || fail "openrize.exe is missing from $dir_win"
-          [[ -f "$dir/rize.exe" ]] || fail "rize.exe is missing from $dir_win"
-          [[ -f "$dir/uninstall.exe" ]] || fail "uninstall.exe is missing from $dir_win"
-
-          reported=$("$dir/rize.exe" --version | tr -d '\r')
-          [[ "$reported" == "rize $VERSION" ]] ||
-            fail "rize --version printed '$reported', expected 'rize $VERSION'"
-
-          [[ $(path_entries "$dir_win") == 1 ]] ||
-            fail "$dir_win is not on the user PATH exactly once after install"
-
-          # An in-app update runs the installer again over the install, with /UPDATE.
-          run_wait "$installer" "/S /UPDATE" || fail "silent update exited with $?"
-          [[ -f "$dir/rize.exe" ]] || fail "rize.exe is missing after the update"
-          [[ $(path_entries "$dir_win") == 1 ]] ||
-            fail "$dir_win is not on the user PATH exactly once after an update"
-
-          # Stand-in for the login item the app writes, to prove uninstall clears it.
-          MSYS_NO_PATHCONV=1 reg add "$run_key" /v OpenRize /t REG_SZ /d "\"$dir_win\openrize.exe\" --background" /f > /dev/null
-
-          # _?= keeps the uninstaller in place so that this call waits for it.
-          run_wait "$dir_win\uninstall.exe" "/S _?=$dir_win" || fail "silent uninstall exited with $?"
-          [[ ! -e "$dir/openrize.exe" && ! -e "$dir/rize.exe" ]] ||
-            fail "the uninstaller left the app or rize.exe in $dir_win"
-          [[ $(path_entries "$dir_win") == 0 ]] ||
-            fail "$dir_win is still on the user PATH after uninstall"
-          if MSYS_NO_PATHCONV=1 reg query "$run_key" /v OpenRize > /dev/null 2>&1; then
-            fail "the OpenRize login item is still registered after uninstall"
-          fi
-          echo "Windows installer install, update and uninstall checks passed."
+        run: bash scripts/windows-installer-smoke.sh
       # Tauri names the installer after the product (OpenRize); the release
       # keeps the lowercase names its macOS assets, latest.json and the R2
       # publisher already use. The signature covers the bytes, not the name.

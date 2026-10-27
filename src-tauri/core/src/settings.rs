@@ -483,6 +483,10 @@ pub struct Settings {
     pub breaks: BreakSettings,
     pub stopwatch_reminder: StopwatchReminder,
     pub notification_placement: NotificationPlacement,
+    /// Whether to send anonymous crash reports to the built-in endpoint.
+    pub crash_reporting: bool,
+    /// Persistent anonymous installation identifier for diagnostics and bug reporting.
+    pub install_id: String,
 }
 
 impl Default for Settings {
@@ -504,6 +508,8 @@ impl Default for Settings {
             breaks: BreakSettings::default(),
             stopwatch_reminder: StopwatchReminder::default(),
             notification_placement: NotificationPlacement::default(),
+            crash_reporting: false,
+            install_id: String::new(),
         }
     }
 }
@@ -966,6 +972,8 @@ mod tests {
                     breaks: BreakSettings::default(),
                     stopwatch_reminder: StopwatchReminder::default(),
                     notification_placement: NotificationPlacement::TopLeft,
+                    crash_reporting: true,
+                    install_id: "test-install-id".to_string(),
                 })
                 .unwrap();
         }
@@ -973,6 +981,7 @@ mod tests {
         assert_eq!(reloaded.theme, Theme::Light);
         assert_eq!(reloaded.accent, Accent::Orange);
         assert_eq!(reloaded.shape, Shape::Sharper);
+        assert_eq!(reloaded.install_id, "test-install-id");
         assert_eq!(reloaded.size_mode, SizeMode::VeryRelaxed);
         assert_eq!(reloaded.close_behavior, CloseBehavior::Quit);
         assert!(!reloaded.tray_enabled);
@@ -986,6 +995,7 @@ mod tests {
             reloaded.notification_placement,
             NotificationPlacement::TopLeft
         );
+        assert!(reloaded.crash_reporting);
         assert!(reloaded.tracking_hours.per_day);
         assert_eq!(reloaded.tracking_hours.monday.start, "09:00");
         assert!(!reloaded.tracking_hours.tuesday.enabled);

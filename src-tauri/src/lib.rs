@@ -2,8 +2,10 @@ mod accounts;
 mod activity;
 mod ai;
 mod breaks;
+mod bug_report;
 mod capture;
 mod commands;
+mod crashes;
 mod energy;
 mod invoices;
 mod login_item;
@@ -86,6 +88,7 @@ const BACKGROUND_ARG: &str = "--background";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    crashes::init_panic_hook();
     let background = std::env::args().any(|arg| arg == BACKGROUND_ARG);
     tauri::Builder::default()
         // Registered first so a second launch exits before it opens the
@@ -117,6 +120,7 @@ pub fn run() {
             let dir = launch.resolved.dir.clone();
             let handoff = launch.handoff.clone();
             app.manage(accounts::ActiveAccount::new(root, &launch));
+            crashes::set_crash_data_dir(&dir);
             // Waits out a `rize` edit made while the app was closed, then
             // keeps the stores for as long as the app runs.
             std::fs::create_dir_all(&dir)?;
@@ -126,7 +130,13 @@ pub fn run() {
             let state = AppState::load(&dir)
                 .map_err(|error| -> Box<dyn std::error::Error> { error.into() })?;
             let timers = state.store.lock().map_err(|e| e.to_string())?.snapshot()?;
-            let preferences = state.settings_snapshot();
+            let mut preferences = state.settings_snapshot();
+            if preferences.install_id.trim().is_empty() {
+                preferences.install_id = uuid::Uuid::now_v7().to_string();
+                if let Ok(mut store) = state.settings.lock() {
+                    let _ = store.set(preferences.clone());
+                }
+            }
             app.manage(state);
             app.manage(ai::AiRuntime::default());
             app.manage(pulse::PulseState::default());
@@ -152,6 +162,9 @@ pub fn run() {
             // the first hour-long wait elapses.
             if let Err(error) = commands::sweep_retention(app.handle()) {
                 eprintln!("retention sweep failed: {error}");
+            }
+            if preferences.crash_reporting {
+                crashes::dispatch_pending_reports(dir.clone());
             }
             rpc::serve(app.handle().clone(), dir);
             // A switch restarts with the original arguments, so a window that was
@@ -338,6 +351,9 @@ pub fn run() {
             accounts::paused_on_switch,
             accounts::resume_paused,
             accounts::dismiss_paused,
+            commands::record_client_crash,
+            commands::get_bug_report_diagnostics,
+            commands::submit_bug_report,
         ])
         .build(tauri::generate_context!())
         .expect("error while building OpenRize")

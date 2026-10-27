@@ -6,6 +6,7 @@ import {
   ThresholdSlider,
 } from "../components/AiLearning";
 import { BatteryEnergyMonitor } from "../components/BatteryEnergyMonitor";
+import { BugReportSheet } from "../components/BugReportSheet";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Picker } from "../components/Picker";
 import {
@@ -1015,6 +1016,18 @@ export function Settings({
     resetHistory: resetEnergyHistory,
   } = useEnergy(energyDays, HAS_ENERGY_MONITOR);
 
+  const [showBugReportSheet, setShowBugReportSheet] = useState(false);
+
+  useEffect(() => {
+    const handleOpenBugReport = (): void => {
+      setShowBugReportSheet(true);
+    };
+    window.addEventListener("open-bug-report", handleOpenBugReport);
+    return () => {
+      window.removeEventListener("open-bug-report", handleOpenBugReport);
+    };
+  }, []);
+
   const [activeSection, setActiveSection] =
     useState<SettingsSection>("overview");
   const contentRef = useRef<HTMLDivElement>(null);
@@ -1262,6 +1275,20 @@ export function Settings({
             )}
             <PermissionsSetting onError={setOverviewError} />
             <UpdatesSetting status={updates} />
+            <SettingGroup title="Help & support">
+              <SettingRow
+                title="Report a bug"
+                description="Encountered an issue or glitch? Submit a report directly with steps to reproduce and diagnostics."
+              >
+                <button
+                  type="button"
+                  onClick={() => setShowBugReportSheet(true)}
+                  className="shrink-0 rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] font-medium text-fg-muted hover:bg-surface-strong hover:text-fg transition-colors cursor-pointer"
+                >
+                  Report a bug…
+                </button>
+              </SettingRow>
+            </SettingGroup>
           </section>
 
           <section
@@ -1521,6 +1548,31 @@ export function Settings({
                 />
               </SettingRow>
             </SettingGroup>
+
+            <SettingGroup title="Privacy & diagnostics">
+              <SettingRow
+                title="Anonymous crash reporting"
+                description="Automatically submit anonymous crash diagnostics if an unexpected error occurs. Window titles, browser URLs, and personal data are never included."
+              >
+                <Toggle
+                  checked={settings.crashReporting}
+                  label="Anonymous crash reporting"
+                  onChange={(crashReporting) => update({ crashReporting })}
+                />
+              </SettingRow>
+              <SettingRow
+                title="Report a bug"
+                description="Submit an in-app report directly with steps to reproduce and optional diagnostics."
+              >
+                <button
+                  type="button"
+                  onClick={() => setShowBugReportSheet(true)}
+                  className="shrink-0 rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] font-medium text-fg-muted hover:bg-surface-strong hover:text-fg transition-colors cursor-pointer"
+                >
+                  Report a bug…
+                </button>
+              </SettingRow>
+            </SettingGroup>
           </section>
 
           <section
@@ -1742,6 +1794,9 @@ export function Settings({
               onConfirm={resetLearned}
               onCancel={() => setConfirmReset(false)}
             />
+          )}
+          {showBugReportSheet && (
+            <BugReportSheet onClose={() => setShowBugReportSheet(false)} />
           )}
         </div>
       </div>

@@ -15,6 +15,9 @@ import type {
   AiStatus,
   AppRecord,
   BillableEntry,
+  BugDiagnostics,
+  BugReportPayload,
+  BugReportResponse,
   Category,
   CategoryRemoval,
   CategoryStats,
@@ -777,4 +780,34 @@ export function checkForUpdates(): Promise<UpdateStatus> {
 /** Resolves only if the install fails to restart; otherwise the app relaunches. */
 export function installUpdate(): Promise<void> {
   return invoke<void>("install_update");
+}
+
+// --- Crash diagnostics ---
+
+export function recordClientCrash(
+  source: string,
+  message: string,
+  componentStack?: string,
+  metadata?: Record<string, unknown>,
+): Promise<void> {
+  return invoke<void>("record_client_crash", {
+    source,
+    message,
+    componentStack,
+    metadata,
+  });
+}
+
+// --- Bug reporting ---
+
+export function getBugReportDiagnostics(
+  locale?: string,
+): Promise<BugDiagnostics> {
+  return invoke<BugDiagnostics>("get_bug_report_diagnostics", { locale });
+}
+
+export function submitBugReport(
+  payload: BugReportPayload,
+): Promise<BugReportResponse> {
+  return invoke<BugReportResponse>("submit_bug_report", { payload });
 }

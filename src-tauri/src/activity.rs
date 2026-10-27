@@ -84,9 +84,7 @@ fn emit_tick(app: &AppHandle, now: u64) {
 }
 
 pub(crate) fn read_idle_ms() -> u64 {
-    user_idle3::UserIdle::get_time()
-        .map(|idle| idle.duration().as_millis() as u64)
-        .unwrap_or(0)
+    crate::capture::idle_ms()
 }
 
 pub fn spawn_sampler(app: AppHandle) {

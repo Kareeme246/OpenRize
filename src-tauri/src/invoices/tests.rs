@@ -134,6 +134,114 @@ fn lists_only_approved_billable_uninvoiced_time_for_the_client() {
     assert!(billable_entries(&conn, "c", 5, 5, None).is_err());
 }
 
+/// Why invoices need no opt-in against double billing: billable time is
+/// approved time, approved time is never taken by another entry, and a new
+/// entry can only gain minutes by taking them from pending ones. So however
+/// the entries were written, no two billable entries share a minute.
+#[test]
+fn billable_time_written_through_the_store_never_overlaps() {
+    use openrize_core::activity::{ActivityStore, APPROVED_OVERLAP};
+    use openrize_core::models::{NewTimeEntry, UpdateTimeEntry};
+
+    const MIN: u64 = 60_000;
+    let mut store = ActivityStore::from_conn(db()).unwrap();
+    let manual = |from: u64, to: u64, review: bool| NewTimeEntry {
+        started_at: from * MIN,
+        ended_at: to * MIN,
+        description: "Work".into(),
+        category_id: None,
+        project_id: Some("p".into()),
+        billable: Some(true),
+        review,
+    };
+
+    // e1 (0-60) and e2 (120-210) are approved. Nothing can overlap them.
+    for (from, to) in [(30, 90), (0, 60), (100, 130), (150, 160), (0, 300)] {
+        assert_eq!(
+            store
+                .create_manual_entry(manual(from, to, true), 1)
+                .unwrap_err(),
+            APPROVED_OVERLAP
+        );
+        assert_eq!(
+            store
+                .create_manual_entry(manual(from, to, false), 1)
+                .unwrap_err(),
+            APPROVED_OVERLAP
+        );
+    }
+
+    // Pending time between them gives way to whatever claims it, whether
+    // that is added or edited, and the claimer is what gets billed.
+    let pending = store.create_manual_entry(manual(60, 120, true), 1).unwrap();
+    store
+        .create_manual_entry(manual(80, 100, false), 1)
+        .unwrap();
+    let wide = store.create_manual_entry(manual(60, 70, true), 1).unwrap();
+    store
+        .update_time_entry(
+            &wide.id,
+            UpdateTimeEntry {
+                ended_at: Some(75 * MIN),
+                ..Default::default()
+            },
+            1,
+        )
+        .unwrap();
+    // Approved entries cannot be edited into each other either.
+    store
+        .approve_time_entries(std::slice::from_ref(&wide.id), "user", 1)
+        .unwrap();
+    assert_eq!(
+        store
+            .update_time_entry(
+                &wide.id,
+                UpdateTimeEntry {
+                    ended_at: Some(140 * MIN),
+                    ..Default::default()
+                },
+                1,
+            )
+            .unwrap_err(),
+        openrize_core::activity::LOCKED
+    );
+    assert_eq!(
+        store
+            .create_manual_entry(manual(70, 85, true), 1)
+            .unwrap_err(),
+        APPROVED_OVERLAP
+    );
+    store
+        .unapprove_time_entries(std::slice::from_ref(&wide.id), 1)
+        .unwrap();
+    assert_eq!(
+        store
+            .update_time_entry(
+                &pending.id,
+                UpdateTimeEntry {
+                    ended_at: Some(140 * MIN),
+                    ..Default::default()
+                },
+                1,
+            )
+            .unwrap_err(),
+        APPROVED_OVERLAP
+    );
+
+    let found = billable_entries(store.conn(), "c", 0, 10 * HOUR as u64, None).unwrap();
+    assert!(found.len() >= 3);
+    let mut spans: Vec<(u64, u64)> = found.iter().map(|e| (e.started_at, e.ended_at)).collect();
+    spans.sort_unstable();
+    for pair in spans.windows(2) {
+        assert!(pair[0].1 <= pair[1].0, "billed twice: {spans:?}");
+    }
+    let billed: u64 = spans.iter().map(|(from, to)| to - from).sum();
+    let union = spans.last().unwrap().1
+        - spans.first().unwrap().0
+        - spans.windows(2).map(|p| p[1].0 - p[0].1).sum::<u64>();
+    assert_eq!(billed, union);
+}
+
 #[test]
 fn hybrid_draft_totals_reserve_time_and_release_it_on_edit_and_delete() {
     let mut conn = db();

@@ -29,7 +29,13 @@ import * as api from "../lib/api";
 import { describeError } from "../lib/api";
 import { DEV_TOOLS } from "../lib/devTools";
 import { formatShortDate } from "../lib/format";
-import { ACCESSIBILITY_ID, stateLabel } from "../lib/permissions";
+import {
+  ACCESSIBILITY_ID,
+  roleLabel,
+  stateLabel,
+  stateTone,
+  TONE_CLASS,
+} from "../lib/permissions";
 import {
   FILE_MANAGER,
   HAS_ENERGY_MONITOR,
@@ -978,7 +984,7 @@ function PermissionCard({
                 : "border-line bg-surface text-fg-muted"
             }`}
           >
-            {perm.required ? "Required" : "Optional"}
+            {roleLabel(perm.id, perm.required)}
           </span>
         </div>
         <p className="text-[12px] leading-relaxed text-fg-muted">
@@ -1007,9 +1013,10 @@ function PermissionCard({
 }
 
 function PermissionStatus({ state }: { state: AccessibilityState }) {
+  const tone = `inline-flex items-center gap-1.5 text-[12px] font-medium ${TONE_CLASS[stateTone(state)]}`;
   if (state === "working") {
     return (
-      <div className="inline-flex items-center gap-1.5 text-[12px] font-medium text-emerald-500">
+      <div className={tone}>
         <svg
           className="h-3.5 w-3.5 fill-current"
           viewBox="0 0 16 16"
@@ -1021,13 +1028,8 @@ function PermissionStatus({ state }: { state: AccessibilityState }) {
       </div>
     );
   }
-  const attention = state === "notWorking" || state === "relaunchRequired";
   return (
-    <div
-      className={`inline-flex items-center gap-1.5 text-[12px] font-medium ${
-        attention ? "text-amber-500" : "text-fg-muted"
-      }`}
-    >
+    <div className={tone}>
       <svg
         className="h-3.5 w-3.5"
         fill="none"

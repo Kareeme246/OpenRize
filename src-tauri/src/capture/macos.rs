@@ -6,15 +6,14 @@ use core_foundation::array::CFArray;
 use core_foundation::base::{CFType, TCFType};
 use core_foundation::string::CFString;
 use core_foundation_sys::base::CFTypeRef;
-use std::ffi::c_void;
 use std::sync::{Mutex, OnceLock};
 
 use super::title::{self, Attempt, FailureLog, Resolution, TitleSource};
 use super::{domain_of, WindowSample};
-
-#[repr(C)]
-struct __AXUIElement(c_void);
-type AXUIElementRef = *mut __AXUIElement;
+use crate::ax::{
+    AXUIElementCopyAttributeValue, AXUIElementCreateApplication, AXUIElementRef,
+    AXUIElementSetMessagingTimeout,
+};
 
 #[link(name = "IOKit", kind = "framework")]
 extern "C" {
@@ -78,17 +77,6 @@ fn all_displays_asleep() -> bool {
     displays[..count as usize]
         .iter()
         .all(|&display| unsafe { CGDisplayIsAsleep(display) } != 0)
-}
-
-#[link(name = "ApplicationServices", kind = "framework")]
-extern "C" {
-    fn AXUIElementCreateApplication(pid: libc::pid_t) -> AXUIElementRef;
-    fn AXUIElementCopyAttributeValue(
-        element: AXUIElementRef,
-        attribute: core_foundation_sys::string::CFStringRef,
-        value: *mut CFTypeRef,
-    ) -> i32;
-    fn AXUIElementSetMessagingTimeout(element: AXUIElementRef, timeout_in_seconds: f32) -> i32;
 }
 
 pub fn read_active_window() -> Option<WindowSample> {

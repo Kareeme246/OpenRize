@@ -1134,6 +1134,20 @@ pub fn check_permissions() -> Vec<crate::permissions::PermissionInfo> {
     crate::permissions::check_permissions()
 }
 
+/// Whether Accessibility is working in this process, and if a relaunch is
+/// what it needs. The state also arrives as `permissions-changed`.
+#[tauri::command]
+pub fn accessibility_state(app: AppHandle) -> crate::permissions::AccessibilityState {
+    app.state::<crate::permissions::Monitor>().state()
+}
+
+/// Restarts through the same path as an update, so the open activity segment
+/// is closed first.
+#[tauri::command]
+pub fn relaunch_app(app: AppHandle) {
+    app.request_restart();
+}
+
 #[tauri::command]
 pub fn storage_paths(app: AppHandle) -> Result<StoragePaths, String> {
     // The open account's folder, not always the app's data directory.

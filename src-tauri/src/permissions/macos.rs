@@ -1,11 +1,46 @@
+use core_foundation::base::{CFType, TCFType};
+use core_foundation::string::CFString;
+use core_foundation_sys::base::CFTypeRef;
+
+use super::accessibility::{Probe, Reading};
 use super::PermissionInfo;
 
+use crate::ax::{AXIsProcessTrusted, AXUIElementCopyAttributeValue, AXUIElementCreateSystemWide};
+
 fn check_accessibility() -> bool {
-    #[link(name = "ApplicationServices", kind = "framework")]
-    extern "C" {
-        fn AXIsProcessTrusted() -> bool;
-    }
     unsafe { AXIsProcessTrusted() }
+}
+
+/// Asks the Accessibility service which app has focus. This is the question
+/// capture depends on, put to the system-wide element, which needs no
+/// particular app to be running or cooperative. A process that is not really
+/// trusted gets `kAXErrorAPIDisabled` here whatever the trust flag says.
+fn probe() -> Probe {
+    // SAFETY: the element is created here and released when the wrapper
+    // drops; a successful copy hands back a +1 value that is released too.
+    unsafe {
+        let element = AXUIElementCreateSystemWide();
+        if element.is_null() {
+            return Probe::Fails(-1);
+        }
+        let _element = CFType::wrap_under_create_rule(element as CFTypeRef);
+        let attribute = CFString::from_static_string("AXFocusedApplication");
+        let mut value: CFTypeRef = std::ptr::null_mut();
+        let code =
+            AXUIElementCopyAttributeValue(element, attribute.as_concrete_TypeRef(), &mut value);
+        if code == 0 && !value.is_null() {
+            drop(CFType::wrap_under_create_rule(value));
+        }
+        Probe::from_ax_error(code)
+    }
+}
+
+pub fn accessibility_reading() -> Option<Reading> {
+    Some(if check_accessibility() {
+        Reading::Trusted(probe())
+    } else {
+        Reading::Untrusted
+    })
 }
 
 const BROWSERS: &[&str] = &[

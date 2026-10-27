@@ -40,6 +40,7 @@ import {
   isTyping,
 } from "../lib/entries";
 import { formatDuration } from "../lib/format";
+import { mergeCandidates as mergeCandidatesFor } from "../lib/merge";
 import { formatTargetHours, targetMsFor } from "../lib/settings";
 import type {
   ActivitySegment,
@@ -461,14 +462,8 @@ export function Calendar({ route, navigate }: CalendarProps) {
   const mergeCandidates = useMemo(() => {
     if (!review.detail) return undefined;
     const current = review.detail.entry;
-    const prev = entries.find(
-      (e) => e.id !== current.id && e.endedAt === current.startedAt,
-    );
-    const next = entries.find(
-      (e) => e.id !== current.id && e.startedAt === current.endedAt,
-    );
-    return { prev, next };
-  }, [entries, review.detail]);
+    return mergeCandidatesFor(entries, current, entryEnd(current, now));
+  }, [entries, review.detail, now]);
 
   const targetMs = targetMsFor(settings, scale, daysInRange);
   const title =

@@ -33,6 +33,27 @@ pub const KIND_BREAK: &str = "break";
 
 pub const IDLE_LABEL: &str = "Idle";
 
+/// How far apart two entries may sit and still count as one border to merge.
+/// Capture stops and starts a little either side of a switch, so neighbours
+/// rarely abut to the millisecond; a few minutes between them is the same
+/// border to the user. Mirrors `MERGE_GAP_MS` in `src/lib/merge.ts`, which
+/// decides which merge the review panel offers.
+pub const MERGE_GAP_MS: u64 = 300_000;
+
+/// The untracked time between two entries that are neighbours, or `None` when
+/// they overlap or sit further apart than `MERGE_GAP_MS`. The merge itself
+/// spans both entries and so claims exactly this gap as tracked time.
+pub fn merge_gap(entry: &TimeEntry, other: &TimeEntry) -> Option<u64> {
+    let gap = if other.started_at >= entry.ended_at {
+        other.started_at - entry.ended_at
+    } else if entry.started_at >= other.ended_at {
+        entry.started_at - other.ended_at
+    } else {
+        return None;
+    };
+    (gap <= MERGE_GAP_MS).then_some(gap)
+}
+
 /// Why every change to an approved entry is refused. Approval freezes an
 /// entry; unapproving is the only way back to changing it.
 pub const LOCKED: &str = "Approved entries are locked. Unapprove to change them.";
@@ -183,6 +204,8 @@ mod approval_lock;
 mod break_regressions;
 mod deletions;
 mod history;
+#[cfg(test)]
+mod merge_regressions;
 #[cfg(test)]
 mod split_regressions;
 

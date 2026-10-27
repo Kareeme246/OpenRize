@@ -123,6 +123,11 @@ export interface EntryReviewPanelProps {
   onMergeNext?: () => void;
   /** Why merging with an adjacent entry is refused (it is approved). */
   mergeBlocked?: { prev?: string; next?: string };
+  /**
+   * Untracked time between the open entry and each merge neighbour, when the
+   * two do not touch: merging claims it as tracked time, so the buttons say so.
+   */
+  mergeGap?: { prev?: number; next?: number };
   onDelete: () => void;
   onRetry: () => void;
   onSetField: (field: SuggestionField, valueId: string | null) => void;
@@ -221,6 +226,7 @@ export function EntryReviewPanel({
   onMergePrev,
   onMergeNext,
   mergeBlocked,
+  mergeGap,
   onDelete,
   onRetry,
   onSetField,
@@ -282,6 +288,18 @@ export function EntryReviewPanel({
   const lockedHint = locked ? LOCKED_HINT : undefined;
   const mergePrevBlocked = lockedHint ?? mergeBlocked?.prev;
   const mergeNextBlocked = lockedHint ?? mergeBlocked?.next;
+  // A merge absorbs the gap to its neighbour into the entry's time, so every
+  // merge that is actually on offer says how much untracked time it claims.
+  const mergePrevGap = mergeGap?.prev ?? 0;
+  const mergeNextGap = mergeGap?.next ?? 0;
+  const claimedGaps = [
+    mergePrevGap > 0 && !mergePrevBlocked
+      ? `the ${formatDuration(mergePrevGap)} gap before it`
+      : undefined,
+    mergeNextGap > 0 && !mergeNextBlocked
+      ? `the ${formatDuration(mergeNextGap)} gap after it`
+      : undefined,
+  ].filter((note) => note !== undefined);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -630,7 +648,10 @@ export function EntryReviewPanel({
             <div className="flex flex-wrap items-center gap-1.5">
               <Tooltip
                 content={
-                  mergePrevBlocked ?? "Merge with earlier adjacent entry (M)"
+                  mergePrevBlocked ??
+                  (mergePrevGap > 0
+                    ? `Merge with the earlier entry (M), counting the ${formatDuration(mergePrevGap)} gap between them as tracked time`
+                    : "Merge with earlier adjacent entry (M)")
                 }
                 wrapperClassName="flex flex-auto"
               >
@@ -644,7 +665,12 @@ export function EntryReviewPanel({
                 </button>
               </Tooltip>
               <Tooltip
-                content={mergeNextBlocked ?? "Merge with later adjacent entry"}
+                content={
+                  mergeNextBlocked ??
+                  (mergeNextGap > 0
+                    ? `Merge with the later entry, counting the ${formatDuration(mergeNextGap)} gap between them as tracked time`
+                    : "Merge with later adjacent entry")
+                }
                 wrapperClassName="flex flex-auto"
               >
                 <button
@@ -663,7 +689,9 @@ export function EntryReviewPanel({
                 content={
                   mergePrevBlocked ??
                   mergeNextBlocked ??
-                  "Merge adjacent entries (M)"
+                  (claimedGaps.length > 0
+                    ? `Merge adjacent entries (M), counting ${claimedGaps.join(" and ")} as tracked time`
+                    : "Merge adjacent entries (M)")
                 }
                 wrapperClassName="flex flex-auto"
               >
@@ -678,6 +706,13 @@ export function EntryReviewPanel({
               </Tooltip>
             </div>
           ) : null}
+          {claimedGaps.length > 0 && (
+            <p className="text-[10.5px] text-fg-soft">
+              {claimedGaps.length === 1
+                ? `Merging counts ${claimedGaps[0]} as tracked time.`
+                : `Merging counts whichever gap it closes as tracked time: ${formatDuration(mergePrevGap)} before, ${formatDuration(mergeNextGap)} after.`}
+            </p>
+          )}
         </div>
         {locked ? (
           <p className="text-[10.5px] text-fg-faint">

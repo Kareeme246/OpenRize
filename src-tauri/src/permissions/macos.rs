@@ -2,10 +2,13 @@ use core_foundation::base::{CFType, TCFType};
 use core_foundation::string::CFString;
 use core_foundation_sys::base::CFTypeRef;
 
-use super::accessibility::{Probe, Reading};
+use super::accessibility::{AccessibilityState, Probe, Reading};
 use super::PermissionInfo;
 
-use crate::ax::{AXIsProcessTrusted, AXUIElementCopyAttributeValue, AXUIElementCreateSystemWide};
+use crate::ax::{
+    kAXTrustedCheckOptionPrompt, AXIsProcessTrusted, AXIsProcessTrustedWithOptions,
+    AXUIElementCopyAttributeValue, AXUIElementCreateSystemWide,
+};
 
 fn check_accessibility() -> bool {
     unsafe { AXIsProcessTrusted() }
@@ -33,6 +36,19 @@ fn probe() -> Probe {
         }
         Probe::from_ax_error(code)
     }
+}
+
+/// Asks macOS to show its Accessibility prompt, which also lists OpenRize in
+/// System Settings so there is something to switch on.
+pub fn request_accessibility() {
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::dictionary::CFDictionary;
+
+    // SAFETY: the key is a constant CFString owned by the framework.
+    let key = unsafe { CFString::wrap_under_get_rule(kAXTrustedCheckOptionPrompt) };
+    let options = CFDictionary::from_CFType_pairs(&[(key, CFBoolean::true_value())]);
+    // SAFETY: `options` outlives the call.
+    unsafe { AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef()) };
 }
 
 pub fn accessibility_reading() -> Option<Reading> {
@@ -110,14 +126,16 @@ fn check_automation() -> bool {
     false
 }
 
-pub fn check_permissions() -> Vec<PermissionInfo> {
+pub fn check_permissions(accessibility: AccessibilityState) -> Vec<PermissionInfo> {
+    let automation = check_automation();
     vec![
         PermissionInfo {
             id: "accessibility".to_string(),
             name: "Accessibility".to_string(),
-            description: "Allows OpenRize to read window titles to accurately track and categorize active applications.".to_string(),
-            required: true,
-            granted: check_accessibility(),
+            description: "Lets OpenRize read window titles, which make categories and projects more accurate. Without it OpenRize still tracks which apps you use.".to_string(),
+            required: false,
+            state: accessibility,
+            granted: accessibility == AccessibilityState::Working,
             settings_url: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility".to_string(),
         },
         PermissionInfo {
@@ -125,7 +143,12 @@ pub fn check_permissions() -> Vec<PermissionInfo> {
             name: "Automation".to_string(),
             description: "Allows OpenRize to read active tab URLs from supported web browsers to categorize time spent on websites.".to_string(),
             required: false,
-            granted: check_automation(),
+            state: if automation {
+                AccessibilityState::Working
+            } else {
+                AccessibilityState::NotGranted
+            },
+            granted: automation,
             settings_url: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation".to_string(),
         },
     ]

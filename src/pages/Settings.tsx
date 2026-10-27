@@ -23,10 +23,12 @@ import {
 } from "../hooks/useAiStatus";
 import { useEnergy } from "../hooks/useEnergy";
 import { useSettings } from "../hooks/useSettings";
+import { useTauriEvent } from "../hooks/useTauriEvent";
 import { useToast } from "../hooks/useToast";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
 import { formatShortDate } from "../lib/format";
+import { ACCESSIBILITY_ID, stateLabel } from "../lib/permissions";
 import {
   FILE_MANAGER,
   HAS_ENERGY_MONITOR,
@@ -53,6 +55,7 @@ import {
   type TrackingHours,
 } from "../lib/settings";
 import type {
+  AccessibilityState,
   AiStatus,
   PermissionInfo,
   ReleaseNotes,
@@ -854,10 +857,28 @@ function PermissionsSetting({
     window.addEventListener("focus", loadPermissions);
     return () => window.removeEventListener("focus", loadPermissions);
   }, [loadPermissions]);
+  useTauriEvent(api.PERMISSIONS_CHANGED, loadPermissions);
 
   const handleOpenSettings = (url: string): void => {
     onError(null);
     openUrl(url).catch((cause: unknown) => {
+      onError(describeError(cause));
+    });
+  };
+
+  const handleAllow = (url: string): void => {
+    onError(null);
+    api
+      .requestAccessibility()
+      .then(() => handleOpenSettings(url))
+      .catch((cause: unknown) => {
+        onError(describeError(cause));
+      });
+  };
+
+  const handleRelaunch = (): void => {
+    onError(null);
+    api.relaunchApp().catch((cause: unknown) => {
       onError(describeError(cause));
     });
   };
@@ -878,75 +899,139 @@ function PermissionsSetting({
           </div>
         ) : (
           permissions.map((perm) => (
-            <div
+            <PermissionCard
               key={perm.id}
-              className="settings-group-card shape-bleed-table flex flex-col justify-between gap-3 rounded-xl border border-settings-card-border bg-settings-card p-4"
-            >
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[13px] font-medium text-fg">
-                    {perm.name}
-                  </span>
-                  <span
-                    className={`shrink-0 rounded-full border px-2 py-0.5 font-mono text-[9.5px] uppercase tracking-wider ${
-                      perm.required
-                        ? "border-accent/40 bg-accent-soft text-accent"
-                        : "border-line bg-surface text-fg-muted"
-                    }`}
-                  >
-                    {perm.required ? "Required" : "Not required"}
-                  </span>
-                </div>
-                <p className="text-[12px] leading-relaxed text-fg-muted">
-                  {perm.description}
-                </p>
-              </div>
-
-              <div className="flex items-center justify-between gap-2 border-t border-line/60 pt-3">
-                {perm.granted ? (
-                  <div className="inline-flex items-center gap-1.5 text-[12px] font-medium text-emerald-500">
-                    <svg
-                      className="h-3.5 w-3.5 fill-current"
-                      viewBox="0 0 16 16"
-                      aria-hidden="true"
-                    >
-                      <circle cx="8" cy="8" r="6" />
-                    </svg>
-                    <span>Granted</span>
-                  </div>
-                ) : (
-                  <div className="inline-flex items-center gap-1.5 text-[12px] font-medium text-rose-500">
-                    <svg
-                      className="h-3.5 w-3.5"
-                      fill="none"
-                      viewBox="0 0 16 16"
-                      stroke="currentColor"
-                      strokeWidth="2.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <line x1="4" y1="4" x2="12" y2="12" />
-                      <line x1="12" y1="4" x2="4" y2="12" />
-                    </svg>
-                    <span>Not granted</span>
-                  </div>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => handleOpenSettings(perm.settingsUrl)}
-                  className="shrink-0 cursor-pointer rounded-md border border-line bg-surface px-2.5 py-1 text-[11.5px] font-medium text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg"
-                  aria-label={`Open ${perm.name} settings`}
-                >
-                  Open {perm.name} settings
-                </button>
-              </div>
-            </div>
+              perm={perm}
+              onAllow={handleAllow}
+              onOpenSettings={handleOpenSettings}
+              onRelaunch={handleRelaunch}
+            />
           ))
         )}
       </div>
     </section>
+  );
+}
+
+function PermissionCard({
+  perm,
+  onAllow,
+  onOpenSettings,
+  onRelaunch,
+}: {
+  perm: PermissionInfo;
+  onAllow: (url: string) => void;
+  onOpenSettings: (url: string) => void;
+  onRelaunch: () => void;
+}) {
+  const accessibility = perm.id === ACCESSIBILITY_ID;
+  const buttonClass =
+    "shrink-0 cursor-pointer rounded-md border border-line bg-surface px-2.5 py-1 text-[11.5px] font-medium text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg";
+  const primaryClass =
+    "shrink-0 cursor-pointer rounded-md border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-2.5 py-1 text-[11.5px] font-semibold text-accent-fg";
+
+  let action = (
+    <button
+      type="button"
+      onClick={() => onOpenSettings(perm.settingsUrl)}
+      className={buttonClass}
+      aria-label={`Open ${perm.name} settings`}
+    >
+      Open {perm.name} settings
+    </button>
+  );
+  if (accessibility && perm.state === "notGranted") {
+    action = (
+      <button
+        type="button"
+        onClick={() => onAllow(perm.settingsUrl)}
+        className={primaryClass}
+      >
+        Allow window titles
+      </button>
+    );
+  } else if (accessibility && perm.state === "relaunchRequired") {
+    action = (
+      <button type="button" onClick={onRelaunch} className={primaryClass}>
+        Relaunch now
+      </button>
+    );
+  }
+
+  return (
+    <div className="settings-group-card shape-bleed-table flex flex-col justify-between gap-3 rounded-xl border border-settings-card-border bg-settings-card p-4">
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[13px] font-medium text-fg">{perm.name}</span>
+          <span
+            className={`shrink-0 rounded-full border px-2 py-0.5 font-mono text-[9.5px] uppercase tracking-wider ${
+              perm.required
+                ? "border-accent/40 bg-accent-soft text-accent"
+                : "border-line bg-surface text-fg-muted"
+            }`}
+          >
+            {perm.required ? "Required" : "Optional"}
+          </span>
+        </div>
+        <p className="text-[12px] leading-relaxed text-fg-muted">
+          {perm.description}
+        </p>
+        {accessibility && perm.state === "notWorking" && (
+          <p className="text-[12px] leading-relaxed text-amber-500">
+            macOS lists OpenRize as allowed, but reading window titles still
+            fails. In System Settings, remove OpenRize from the Accessibility
+            list and add it again; OpenRize will then ask for a relaunch.
+          </p>
+        )}
+        {accessibility && perm.state === "relaunchRequired" && (
+          <p className="text-[12px] leading-relaxed text-amber-500">
+            Allowed. macOS gives OpenRize the access the next time it opens.
+          </p>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between gap-2 border-t border-line/60 pt-3">
+        <PermissionStatus state={perm.state} />
+        {action}
+      </div>
+    </div>
+  );
+}
+
+function PermissionStatus({ state }: { state: AccessibilityState }) {
+  if (state === "working") {
+    return (
+      <div className="inline-flex items-center gap-1.5 text-[12px] font-medium text-emerald-500">
+        <svg
+          className="h-3.5 w-3.5 fill-current"
+          viewBox="0 0 16 16"
+          aria-hidden="true"
+        >
+          <circle cx="8" cy="8" r="6" />
+        </svg>
+        <span>{stateLabel(state)}</span>
+      </div>
+    );
+  }
+  const attention = state === "notWorking" || state === "relaunchRequired";
+  return (
+    <div
+      className={`inline-flex items-center gap-1.5 text-[12px] font-medium ${
+        attention ? "text-amber-500" : "text-fg-muted"
+      }`}
+    >
+      <svg
+        className="h-3.5 w-3.5"
+        fill="none"
+        viewBox="0 0 16 16"
+        stroke="currentColor"
+        strokeWidth="2"
+        aria-hidden="true"
+      >
+        <circle cx="8" cy="8" r="5.5" />
+      </svg>
+      <span>{stateLabel(state)}</span>
+    </div>
   );
 }
 

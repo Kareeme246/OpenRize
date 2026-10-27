@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import { MissingAccountDialog } from "./components/MissingAccountDialog";
+import { Onboarding } from "./components/Onboarding";
 import { PausedOnSwitchBanner } from "./components/PausedOnSwitchBanner";
 import { RelaunchModal } from "./components/RelaunchModal";
 import { Sidebar } from "./components/Sidebar";
@@ -418,6 +419,7 @@ export default function App() {
             </div>
           </div>
         </div>
+        <Onboarding />
         <MissingAccountDialog />
         <SwitchingOverlay />
         <RelaunchModal />

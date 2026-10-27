@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::{params, params_from_iter, types::Value, Connection};
 
-use super::{deletions::Deletion, segment_from_row, ActivityStore, LOCKED};
+use super::{deletions::Deletion, merge_gap, segment_from_row, ActivityStore, LOCKED};
 use crate::entry_builder::{describe, SegmentInput};
 use crate::models::TimeEntry;
 
@@ -766,11 +766,12 @@ impl ActivityStore {
         if primary.status == "approved" || secondary.status == "approved" {
             return Err(LOCKED.to_string());
         }
-        let adjacent =
-            primary.ended_at == secondary.started_at || secondary.ended_at == primary.started_at;
-        if !adjacent {
+        // Only a neighbour merges: one that touches, or misses by less than
+        // MERGE_GAP_MS. The merge spans both entries, so that gap becomes
+        // tracked time; overlapping entries have no border of their own.
+        if merge_gap(&primary, &secondary).is_none() {
             return Err(
-                "Time entries must start and stop at the same border to be mergeable".to_string(),
+                "Time entries can only merge with a neighbouring entry: they must touch, or sit less than five minutes apart".to_string(),
             );
         }
 

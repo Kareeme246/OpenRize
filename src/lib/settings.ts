@@ -232,6 +232,7 @@ export interface Settings {
   breaks: BreakSettings;
   stopwatchReminder: StopwatchReminder;
   notificationPlacement: NotificationPlacement;
+  crashReporting: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -251,6 +252,7 @@ export const DEFAULT_SETTINGS: Settings = {
   breaks: DEFAULT_BREAK_SETTINGS,
   stopwatchReminder: { enabled: true, afterMinutes: 180 },
   notificationPlacement: "bottomRight",
+  crashReporting: false,
 };
 
 /** A working day's share of the weekly target, in milliseconds. */

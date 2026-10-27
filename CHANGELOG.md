@@ -5,6 +5,25 @@ All notable changes are documented here. Entries are generated from commit histo
 ## [unreleased]
 
 ### Features
+- **permissions:** Require a relaunch after Accessibility is allowed in a running app (#150)
+- **permissions:** Ask for Accessibility on first run and show its real state in Settings (#151)
+- **settings:** Add dev-only tools to simulate permissions and re-run onboarding (#155)
+- **entries:** Give every minute one owner so totals and invoices are true (#157)
+- **onboarding:** Turn Continue into Restart required once a grant needs a restart (#158)
+
+### Bug Fixes
+- **calendar:** Merge entries that sit a few minutes apart (#148)
+- **capture:** Read window titles when the focused window is missing or untitled (#149)
+- **permissions:** Shorten the relaunch prompt to one line (#152)
+- **permissions:** Name the real permissions on the first-run screen (#153)
+- **merge:** Always show merge up and down, drop the merge shortcut, and merge overlaps (#154)
+- **permissions:** Show Granted or Not granted on the onboarding cards and offer Grant only until granted (#156)
+
+### Maintenance
+- **release:** Bump actions to Node 24 majors and pin Ubuntu LTS runner (#147)
+## [0.9.34] - 2026-10-27
+
+### Features
 - Manage custom categories with smart delete and ordering (#133)
 - Improve session title generation and capture title edits (#134)
 - Move accounts button to menubar (#136)
@@ -19,9 +38,11 @@ All notable changes are documented here. Entries are generated from commit histo
 - **ui:** Windows-honest AI copy, no energy monitor, single title bar (#140)
 - **windows:** Build without a signing key, OpenRize branding, rize on PATH, background login item (#143)
 - **pulse:** Anchor Pulse to the taskbar corner and size panels per monitor on Windows (#141)
+- **windows:** Stop the installer smoke test hanging without a word (#146)
 
 ### Documentation
 - **agents:** Never attribute agents in git history or on GitHub (#144)
+- Update changelog for v0.9.33
 
 ### Other Changes
 - Update readme

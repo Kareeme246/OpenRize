@@ -115,6 +115,20 @@ export async function accessibilityState(): Promise<AccessibilityState> {
   return await invoke<AccessibilityState>("accessibility_state");
 }
 
+/** Shows macOS's Accessibility prompt. The answer arrives as `permissions-changed`. */
+export async function requestAccessibility(): Promise<void> {
+  await invoke("request_accessibility");
+}
+
+/** Whether the first-run permissions screen has not been skipped or finished yet. */
+export async function onboardingNeeded(): Promise<boolean> {
+  return await invoke<boolean>("onboarding_needed");
+}
+
+export async function finishOnboarding(): Promise<void> {
+  await invoke("finish_onboarding");
+}
+
 /** Restarts OpenRize, closing the open activity segment first. */
 export async function relaunchApp(): Promise<void> {
   await invoke("relaunch_app");

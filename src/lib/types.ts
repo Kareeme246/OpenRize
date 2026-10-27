@@ -784,6 +784,8 @@ export interface PermissionInfo {
   name: string;
   description: string;
   required: boolean;
+  /** Whether it is working: Accessibility is judged by a probe, not by the flag. */
+  state: AccessibilityState;
   granted: boolean;
   settingsUrl: string;
 }

@@ -9,6 +9,7 @@ mod commands;
 mod energy;
 mod invoices;
 mod login_item;
+mod onboarding;
 mod permissions;
 mod pulse;
 mod rpc;
@@ -247,6 +248,9 @@ pub fn run() {
             commands::set_launch_at_login,
             commands::check_permissions,
             commands::accessibility_state,
+            commands::request_accessibility,
+            onboarding::onboarding_needed,
+            onboarding::finish_onboarding,
             commands::relaunch_app,
             commands::list_categories,
             commands::create_category,

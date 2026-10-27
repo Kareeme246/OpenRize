@@ -1327,3 +1327,20 @@ pub fn record_client_crash(
 
     Ok(report)
 }
+
+// --- Bug reporting ------------------------------------------------------
+
+#[tauri::command]
+pub fn get_bug_report_diagnostics(
+    app: AppHandle,
+    locale: Option<String>,
+) -> Result<crate::bug_report::BugDiagnostics, String> {
+    crate::bug_report::collect_diagnostics(&app, locale)
+}
+
+#[tauri::command]
+pub async fn submit_bug_report(
+    payload: crate::bug_report::BugReportPayload,
+) -> Result<crate::bug_report::BugReportResponse, String> {
+    crate::bug_report::submit_bug_report(&payload).await
+}

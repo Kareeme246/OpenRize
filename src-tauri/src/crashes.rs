@@ -28,7 +28,7 @@ pub fn get_crash_data_dir() -> Option<PathBuf> {
 }
 
 /// Returns a readable OS version string.
-fn os_version_string() -> String {
+pub(crate) fn os_version_string() -> String {
     #[cfg(target_os = "macos")]
     {
         use objc2_foundation::NSProcessInfo;

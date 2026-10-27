@@ -801,3 +801,50 @@ export interface CrashReport {
   metadata?: Record<string, unknown> | null;
   sent?: boolean;
 }
+
+// --- Bug reporting (src-tauri/src/bug_report.rs) ---
+
+export interface DiagnosticSettings {
+  theme: string;
+  accent: string;
+  shape: string;
+  sizeMode: string;
+  closeBehavior: string;
+  trayEnabled: boolean;
+  retentionDays: number;
+  aiSuggest: string;
+  autoAccept: boolean;
+  autoAcceptPercent: number;
+  weeklyTargetHours: number;
+  trackingHoursEnabled: boolean;
+  breaksEnabled: boolean;
+  stopwatchReminderEnabled: boolean;
+  notificationPlacement: string;
+  crashReporting: boolean;
+}
+
+export interface BugDiagnostics {
+  appVersion: string;
+  os: string;
+  osVersion: string;
+  arch: string;
+  locale: string;
+  appDataDir: string;
+  settings: DiagnosticSettings;
+  recentCrashes: CrashReportSummary[];
+}
+
+export interface BugReportPayload {
+  installId: string;
+  whatHappened: string;
+  whatExpected: string;
+  stepsToReproduce: string;
+  additionalNotes?: string;
+  diagnostics?: BugDiagnostics | null;
+}
+
+export interface BugReportResponse {
+  status: string;
+  issueNumber: number;
+  issueUrl: string;
+}

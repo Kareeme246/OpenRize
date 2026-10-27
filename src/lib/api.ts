@@ -15,6 +15,9 @@ import type {
   AiStatus,
   AppRecord,
   BillableEntry,
+  BugDiagnostics,
+  BugReportPayload,
+  BugReportResponse,
   Category,
   CategoryRemoval,
   CategoryStats,
@@ -793,4 +796,18 @@ export function recordClientCrash(
     componentStack,
     metadata,
   });
+}
+
+// --- Bug reporting ---
+
+export function getBugReportDiagnostics(
+  locale?: string,
+): Promise<BugDiagnostics> {
+  return invoke<BugDiagnostics>("get_bug_report_diagnostics", { locale });
+}
+
+export function submitBugReport(
+  payload: BugReportPayload,
+): Promise<BugReportResponse> {
+  return invoke<BugReportResponse>("submit_bug_report", { payload });
 }

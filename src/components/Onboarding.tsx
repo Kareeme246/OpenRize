@@ -23,7 +23,7 @@ export function Onboarding() {
   const [shown, setShown] = useState(false);
   const step = onboardingStep({ needed, shown, accessibility });
 
-  useEffect(() => {
+  const readNeeded = useCallback(() => {
     api
       .onboardingNeeded()
       .then(setNeeded)
@@ -31,6 +31,12 @@ export function Onboarding() {
         console.error("Could not read onboarding", describeError(cause)),
       );
   }, []);
+  useEffect(readNeeded, [readNeeded]);
+  // A developer re-run brings the screen back at once, even if it was shown before.
+  useTauriEvent(api.ONBOARDING_CHANGED, () => {
+    readNeeded();
+    setShown(false);
+  });
   useEffect(() => {
     if (step !== "hidden") setShown(true);
   }, [step]);

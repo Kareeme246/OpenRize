@@ -115,7 +115,7 @@ enum Command {
         #[arg(long)]
         dir: Option<PathBuf>,
     },
-    /// Remove the installed rize command from ~/.local/bin
+    /// Take rize off PATH: remove the symlink from ~/.local/bin (macOS), or the folder from the user PATH (Windows)
     UninstallPath,
     /// Print a shell completion script
     Completions { shell: clap_complete::Shell },

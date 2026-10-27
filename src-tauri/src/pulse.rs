@@ -11,6 +11,12 @@
 //! resize. The first open waits for that first measurement, so the panel is
 //! never shown at a guessed height.
 //!
+//! On Windows it opens in the work-area corner next to the taskbar, like the
+//! native flyouts, whichever monitor holds the icon and whether the icon is
+//! pinned or inside the overflow (^) flyout; see `placement`. It takes focus
+//! when it opens (Escape closes it and Ctrl+O opens the app, both from the
+//! page) and hides when focus leaves, so a second tray click closes it.
+//!
 //! On macOS the window is a panel that takes key focus but never becomes the
 //! app's main window, like a native menu bar extra. Tiling window managers
 //! (komorebi, for one) adopt whatever window an app reports as its main
@@ -19,10 +25,9 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use tauri::{
-    AppHandle, LogicalSize, Manager, PhysicalPosition, Rect, WebviewUrl, WebviewWindow,
-    WebviewWindowBuilder,
-};
+use tauri::{AppHandle, Manager, Rect, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+
+pub mod placement;
 
 pub const LABEL: &str = "pulse";
 
@@ -31,9 +36,15 @@ const WIDTH: f64 = 320.0;
 /// A placeholder until the page reports its real height.
 const INITIAL_HEIGHT: f64 = 360.0;
 /// Space between the menu bar and the panel's top edge.
+#[cfg(not(windows))]
 const GAP: f64 = 6.0;
 /// Closest the panel may sit to a screen edge.
+#[cfg(not(windows))]
 const EDGE: f64 = 8.0;
+/// Space between the taskbar, the screen edge and the panel, as the native
+/// Windows 11 flyouts leave.
+#[cfg(windows)]
+const FLYOUT_MARGIN: f64 = 12.0;
 
 /// A click on the icon also takes focus from the open panel, so the blur that
 /// hides it lands just before the click that would reopen it. A click this
@@ -170,7 +181,12 @@ fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .decorations(false)
         // Rounded corners are drawn by the page; the window itself is clear.
         .transparent(true)
-        .shadow(true)
+        // On Windows the shadow is DWM's, drawn around the rectangle (and
+        // rounded to Windows 11's 8px, not the card's 12px), so it shows as a
+        // square halo behind the card's corners. Without it the card is the
+        // whole window, and tao stops padding the window by the shadow's
+        // hidden frame, so sizes and positions are exact.
+        .shadow(cfg!(not(windows)))
         .resizable(false)
         .maximizable(false)
         .minimizable(false)
@@ -251,8 +267,8 @@ fn reveal(window: &WebviewWindow) {
 }
 
 /// Centres the panel on the icon, kept inside the screen's usable area: under
-/// it for a menu bar at the top (macOS), above it for a taskbar at the bottom
-/// (Windows' default).
+/// the menu bar item, or above it when there is no room below.
+#[cfg(not(windows))]
 fn place(app: &AppHandle, window: &WebviewWindow, icon: Rect, height: f64) {
     let anchor = anchor(app, icon);
     let (scale, area) = match app.monitor_from_point(anchor.x, anchor.top).ok().flatten() {
@@ -281,8 +297,7 @@ fn place(app: &AppHandle, window: &WebviewWindow, icon: Rect, height: f64) {
         ),
     };
 
-    let width = WIDTH * scale;
-    let tall = height * scale;
+    let (width, tall) = placement::physical_size((WIDTH, height), scale);
     let gap = GAP * scale;
     let edge = EDGE * scale;
     let max_left = (area.right - width - edge).max(area.left + edge);
@@ -294,13 +309,43 @@ fn place(app: &AppHandle, window: &WebviewWindow, icon: Rect, height: f64) {
         (anchor.top - gap - tall).max(area.top + edge)
     };
 
-    // Order matters on macOS: a resize keeps the bottom-left corner fixed, so
-    // the position is set after it to pin the top edge under the icon.
-    let _ = window.set_size(LogicalSize::new(WIDTH, height));
-    let _ = window.set_position(PhysicalPosition::new(panel_x, panel_y));
+    placement::set_bounds(window, scale, (panel_x, panel_y), (WIDTH, height));
+}
+
+/// Puts the panel in the work-area corner beside the taskbar, on the monitor
+/// that holds the icon. Where the icon is only picks the corner: an icon in
+/// the overflow flyout sits mid-screen, and the panel should still hug the
+/// taskbar once that flyout closes.
+#[cfg(windows)]
+fn place(app: &AppHandle, window: &WebviewWindow, icon: Rect, height: f64) {
+    let anchor = anchor(app, icon);
+    let centre = (anchor.x, (anchor.top + anchor.bottom) / 2.0);
+    let monitor = app
+        .monitor_from_point(centre.0, centre.1)
+        .ok()
+        .flatten()
+        .or_else(|| {
+            let cursor = app.cursor_position().ok()?;
+            app.monitor_from_point(cursor.x, cursor.y).ok().flatten()
+        })
+        .or_else(|| app.primary_monitor().ok().flatten());
+    let Some(monitor) = monitor else {
+        return;
+    };
+    let scale = monitor.scale_factor();
+    let work = monitor.work_area();
+    let (x, y) = placement::flyout_origin(
+        placement::PixelRect::new(*monitor.position(), *monitor.size()),
+        placement::PixelRect::new(work.position, work.size),
+        centre,
+        placement::physical_size((WIDTH, height), scale),
+        FLYOUT_MARGIN * scale,
+    );
+    placement::set_bounds(window, scale, (x.round(), y.round()), (WIDTH, height));
 }
 
 /// A screen's usable area in physical pixels.
+#[cfg(not(windows))]
 struct Area {
     left: f64,
     top: f64,

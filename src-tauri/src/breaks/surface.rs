@@ -11,16 +11,16 @@
 //! It never takes focus. On macOS the window is converted into a
 //! non-activating `NSPanel`, so clicking a button acts without activating
 //! OpenRize (which would raise the main window over the user's work).
+//! On Windows the builder's two flags do the same job (see `create`).
 //! Pulse opening over it needs no coordination.
 
 use std::sync::Mutex;
 
 use crate::settings::NotificationPlacement;
 
-use tauri::{
-    AppHandle, LogicalSize, Manager, PhysicalPosition, WebviewUrl, WebviewWindow,
-    WebviewWindowBuilder,
-};
+use crate::pulse::placement;
+
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 pub const LABEL: &str = "reminder";
 
@@ -125,13 +125,10 @@ fn place(app: &AppHandle, window: &WebviewWindow, (width, height): (f64, f64)) {
         preference,
         (f64::from(area.position.x), f64::from(area.position.y)),
         (f64::from(area.size.width), f64::from(area.size.height)),
-        (width * scale, height * scale),
+        placement::physical_size((width, height), scale),
         EDGE * scale,
     );
-    // Order matters on macOS: a resize keeps the bottom-left corner fixed, so
-    // the position is set after it to pin the top edge.
-    let _ = window.set_size(LogicalSize::new(width, height));
-    let _ = window.set_position(PhysicalPosition::new(x.round(), y.round()));
+    placement::set_bounds(window, scale, (x.round(), y.round()), (width, height));
 }
 
 /// Re-anchor an already visible notification immediately after a preference change.
@@ -186,6 +183,10 @@ fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .always_on_top(true)
         .skip_taskbar(true)
         .visible(false)
+        // On Windows these two keep it from ever taking focus: tao gives a
+        // non-focusable window WS_EX_NOACTIVATE (clicks act without
+        // activating it) and shows an unfocused one with SW_SHOWNOACTIVATE,
+        // on every show, not just the first.
         .focused(false)
         .focusable(false)
         .accept_first_mouse(true)
@@ -224,6 +225,8 @@ fn prevent_activation(window: &WebviewWindow) {
     });
 }
 
+/// Nothing to repeat on Windows: WS_EX_NOACTIVATE is a style of the window, not
+/// a tag the window server learns late.
 #[cfg(not(target_os = "macos"))]
 fn prevent_activation(_window: &WebviewWindow) {}
 

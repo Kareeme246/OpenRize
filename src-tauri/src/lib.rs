@@ -6,6 +6,7 @@ mod ax;
 mod breaks;
 mod capture;
 mod commands;
+mod dev_tools;
 mod energy;
 mod invoices;
 mod login_item;
@@ -52,6 +53,10 @@ pub const EVENT_ACCOUNTS_CHANGED: &str = "accounts-changed";
 /// Emitted when what the app knows about its Accessibility access changes.
 /// Carries a `permissions::AccessibilityState`.
 pub const EVENT_PERMISSIONS_CHANGED: &str = "permissions-changed";
+
+/// Emitted when whether the first-run permissions screen should show changes
+/// without a restart (a developer re-run or reset, see dev_tools.rs). No payload.
+pub const EVENT_ONBOARDING_CHANGED: &str = "onboarding-changed";
 
 /// Sent to the main window when the break reminder asks for its settings.
 pub const EVENT_OPEN_BREAK_SETTINGS: &str = "open-break-settings";
@@ -138,6 +143,7 @@ pub fn run() {
             app.manage(ai::AiRuntime::default());
             app.manage(pulse::PulseState::default());
             app.manage(permissions::Monitor::new());
+            app.manage(onboarding::Rerun::default());
             breaks::init(app.handle())?;
             app.manage(updater::UpdaterState::new(
                 app.package_info().version.to_string(),
@@ -251,6 +257,11 @@ pub fn run() {
             commands::request_accessibility,
             onboarding::onboarding_needed,
             onboarding::finish_onboarding,
+            dev_tools::dev_tools_info,
+            dev_tools::dev_simulate_accessibility,
+            dev_tools::dev_simulate_automation,
+            dev_tools::dev_rerun_onboarding,
+            dev_tools::dev_reset,
             commands::relaunch_app,
             commands::list_categories,
             commands::create_category,

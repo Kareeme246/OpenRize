@@ -20,6 +20,7 @@ import type {
   CategoryRemoval,
   CategoryStats,
   Client,
+  DevToolsInfo,
   EnergySummary,
   EntryDetail,
   EntryQuery,
@@ -66,6 +67,8 @@ export const OPEN_REVIEW = "open-review";
 /** Payload: `UpdateStatus`. */
 export const UPDATE_STATUS = "update-status";
 export const PERMISSIONS_CHANGED = "permissions-changed";
+/** The first-run permissions screen was re-armed or reset (developer tools). No payload. */
+export const ONBOARDING_CHANGED = "onboarding-changed";
 /** Main window only: the reminder asked for Settings > Notifications. */
 export const OPEN_BREAK_SETTINGS = "open-break-settings";
 /** Payload: `BreakState`. */
@@ -127,6 +130,35 @@ export async function onboardingNeeded(): Promise<boolean> {
 
 export async function finishOnboarding(): Promise<void> {
   await invoke("finish_onboarding");
+}
+
+/** Developer tools: what the dev build is running as and what is simulated. Dev builds only. */
+export async function devToolsInfo(): Promise<DevToolsInfo> {
+  return await invoke<DevToolsInfo>("dev_tools_info");
+}
+
+/** Developer tools: makes Accessibility report `state` (`null` for the real one). Dev builds only. */
+export async function devSimulateAccessibility(
+  state: AccessibilityState | null,
+): Promise<void> {
+  await invoke("dev_simulate_accessibility", { state });
+}
+
+/** Developer tools: makes Automation report `granted` (`null` for the real one). Dev builds only. */
+export async function devSimulateAutomation(
+  granted: boolean | null,
+): Promise<void> {
+  await invoke("dev_simulate_automation", { granted });
+}
+
+/** Developer tools: shows the first-run permissions screen again now. Dev builds only. */
+export async function devRerunOnboarding(): Promise<void> {
+  await invoke("dev_rerun_onboarding");
+}
+
+/** Developer tools: clears every simulation and the onboarding re-run. Dev builds only. */
+export async function devReset(): Promise<void> {
+  await invoke("dev_reset");
 }
 
 /** Restarts OpenRize, closing the open activity segment first. */

@@ -27,11 +27,13 @@ import { useTauriEvent } from "../hooks/useTauriEvent";
 import { useToast } from "../hooks/useToast";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
+import { DEV_TOOLS } from "../lib/devTools";
 import { formatShortDate } from "../lib/format";
 import { ACCESSIBILITY_ID, stateLabel } from "../lib/permissions";
 import {
   FILE_MANAGER,
   HAS_ENERGY_MONITOR,
+  HAS_PERMISSIONS,
   OS_NAME,
   PLATFORM,
   shortcutLabel,
@@ -64,6 +66,7 @@ import type {
 } from "../lib/types";
 import { AccountsSetting } from "./settings/AccountsSetting";
 import { BreakSettingsGroups } from "./settings/BreakSettings";
+import { DevToolsSetting } from "./settings/DevToolsSetting";
 import {
   Select,
   SettingBlock,
@@ -122,7 +125,11 @@ type SettingsSection =
   | "data"
   | "notifications"
   | "ai"
-  | "advanced";
+  | "advanced"
+  | "developer";
+
+/** The Developer section: dev builds only, and only where there are permissions to test. */
+const HAS_DEV_TOOLS = DEV_TOOLS && HAS_PERMISSIONS;
 
 const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   "overview",
@@ -134,6 +141,7 @@ const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   "notifications",
   "ai",
   ...(HAS_ENERGY_MONITOR ? (["advanced"] as const) : []),
+  ...(HAS_DEV_TOOLS ? (["developer"] as const) : []),
 ];
 
 /** The sections under the Advanced settings group in the nav. */
@@ -1325,6 +1333,18 @@ export function Settings({
               </div>
             )}
           </div>
+          {HAS_DEV_TOOLS && (
+            <button
+              type="button"
+              aria-current={
+                activeSection === "developer" ? "location" : undefined
+              }
+              onClick={() => selectSection("developer")}
+              className={`settings-nav-item ${activeSection === "developer" ? "settings-nav-item-active" : ""}`}
+            >
+              Developer
+            </button>
+          )}
         </nav>
 
         <div
@@ -1813,6 +1833,19 @@ export function Settings({
                   }
                 />
               </SettingGroup>
+            </section>
+          )}
+          {HAS_DEV_TOOLS && (
+            <section
+              id="settings-section-developer"
+              data-settings-section="developer"
+              className="settings-page-section flex flex-col gap-4"
+            >
+              <SettingsSectionHeading
+                title="Developer"
+                description="Dev build only. Tools for testing permissions and onboarding by hand; never shipped in a release."
+              />
+              <DevToolsSetting />
             </section>
           )}
           {confirmReset && (

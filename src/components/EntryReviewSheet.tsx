@@ -3,8 +3,9 @@ import type { EntryReview } from "../hooks/useEntryReview";
 import { useSettings } from "../hooks/useSettings";
 import { entryEnd, isLocked, isTyping } from "../lib/entries";
 import { formatDuration, formatTime } from "../lib/format";
+import type { MergeCandidate } from "../lib/merge";
 import { shortcutLabel } from "../lib/platform";
-import type { Category, Project, TimeEntry } from "../lib/types";
+import type { Category, Project } from "../lib/types";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { EntryReviewPanel } from "./EntryReviewPanel";
 import { SplitDialog } from "./SplitDialog";
@@ -15,8 +16,8 @@ interface EntryReviewSheetProps {
   projects: Project[];
   /** "3 of 7" in review mode. */
   reviewPosition?: { index: number; total: number };
-  /** Adjacent mergeable entries that start or end at the same border. */
-  mergeCandidates?: { prev?: TimeEntry; next?: TimeEntry };
+  /** Neighbouring entries a merge may take in, and the gap it would claim. */
+  mergeCandidates?: MergeCandidate;
   /** Overrides approval, e.g. to advance review mode afterwards. */
   onAccept?: (id: string) => void;
   onReject?: (id: string) => void;
@@ -155,6 +156,10 @@ export function EntryReviewSheet({
             prevId && nextId ? () => void review.merge(nextId) : undefined
           }
           mergeBlocked={mergeBlocked}
+          mergeGap={{
+            prev: mergeCandidates?.prevGapMs,
+            next: mergeCandidates?.nextGapMs,
+          }}
           onDelete={() => setConfirmDelete(true)}
           onRetry={() => void review.retry()}
           onSetField={(field, valueId) => void review.setField(field, valueId)}

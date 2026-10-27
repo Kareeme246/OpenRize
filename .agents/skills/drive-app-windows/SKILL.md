@@ -204,3 +204,9 @@ OpenRize. Do not launch the app any other way for testing.
   alone; it is closed by `stop`.
 - `fill` selects the field's text and types over it. Setting `.value` from `eval`
   would never reach React's `onChange`, which is why the script types instead.
+- **Never send a lone Alt key to the window** (for example to win
+  `SetForegroundWindow` for a native screenshot). It puts the window in Windows'
+  keyboard menu mode, and the webview's debugging port stops answering until an
+  Escape reaches the window. The page itself keeps running, so users are not
+  affected; only the driver is. If every command says the port "is not
+  answering", send Escape.

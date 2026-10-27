@@ -502,7 +502,9 @@ async function locate(cdp, node) {
     returnByValue: true,
     functionDeclaration: `function () {
       const el = this.nodeType === 1 ? this : this.parentElement;
-      el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+      // "nearest", not "center": centering also scrolls the app's
+      // overflow-hidden root, which shifts the whole page off the window.
+      el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" });
       const r = el.getBoundingClientRect();
       const x = r.x + r.width / 2;
       const y = r.y + r.height / 2;

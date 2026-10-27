@@ -1,6 +1,6 @@
 ---
 name: drive-app
-description: Launch an isolated OpenRize instance, click through the real Tauri webview UI, read the result back, and tear it down. Use when verifying a UI or backend change by actually using the app, not just by reading code or running pnpm verify. Several agents can run their own instances at the same time.
+description: macOS only (on Windows use the drive-app-windows skill). Launch an isolated OpenRize instance, click through the real Tauri webview UI, read the result back, and tear it down. Use when verifying a UI or backend change by actually using the app, not just by reading code or running pnpm verify. Several agents can run their own instances at the same time.
 ---
 
 # Driving the real OpenRize app
@@ -19,8 +19,11 @@ scripts/app-drive.sh <command> [args]
 scripts: `pnpm run` prints a banner line that will pollute anything you capture
 with `$(...)`.
 
-macOS only. There is no supported Tauri WebDriver backend for macOS, so do not
-reach for Playwright or WebDriver; this is the driver.
+macOS only; on Windows use the `drive-app-windows` skill instead. There is no
+supported Tauri WebDriver backend for macOS (only Linux/webkit2gtk and
+Windows/Edge), so do not reach for Playwright or WebDriver, and do not write
+Playwright/WebDriver/E2E suites for the app window: such a test would not
+exercise the real Tauri backend here. This is the driver.
 
 ## Prerequisites
 
@@ -50,6 +53,19 @@ checkout started.
 
 With exactly one live session the commands need no session argument. With more
 than one, pass `-s dNNNNN` (or export `OPENRIZE_SESSION=dNNNNN`).
+
+## Just a screenshot
+
+`pnpm dev:screenshot` is the one-shot form for when you only need to look. It
+launches an isolated `tauri dev` on a random port with its own `identifier`,
+waits for the window, repositions it on-screen, screenshots it by window id,
+tears the whole process tree down, and prints the PNG path; read that file.
+Do not run `pnpm tauri dev` directly to check a UI change: it uses a fixed
+port and identifier and will collide with another agent's instance or a real
+running copy of the app.
+
+Both scripts run `tauri dev --no-watch`: the frontend hot-reloads, but a Rust
+change only shows up in a fresh instance (`stop`, then `start`).
 
 ## Finding what to click
 

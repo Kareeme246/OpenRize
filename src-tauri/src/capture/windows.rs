@@ -2,20 +2,18 @@
 //! the executable's version resource, and a browser's URL read from its
 //! address bar through UI Automation.
 //!
-//! Sampling runs on the activity sampler thread, which owns the COM apartment
-//! and per-thread caches. Power notifications have their own message loop.
+//! Sampling runs on the activity sampler thread, which owns per-thread caches;
+//! UI Automation runs on its own worker so a hung browser cannot stall it.
+//! Power notifications have their own message loop.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
 
-use windows::core::{w, Interface, BOOL, PCWSTR, PWSTR};
+use windows::core::{w, BOOL, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
 use windows::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
-};
-use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
 };
 use windows::Win32::System::RemoteDesktop::{
     WTSActive, WTSFreeMemory, WTSQuerySessionInformationW, WTSSessionInfoEx, WTSINFOEXW,
@@ -23,10 +21,6 @@ use windows::Win32::System::RemoteDesktop::{
 };
 use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
-};
-use windows::Win32::UI::Accessibility::{
-    CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationValuePattern,
-    UIA_DocumentControlTypeId, UIA_EditControlTypeId, UIA_ValuePatternId,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumChildWindows, GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW,
@@ -163,8 +157,7 @@ unsafe extern "system" fn power_window_proc(
 /// window owned by another process.
 const FRAME_HOST: &str = "applicationframehost.exe";
 
-/// Executables whose address bar is read for the URL. Chromium and Firefox
-/// both expose it as the first Edit control outside the page.
+/// Executables whose address bar is read for the URL.
 const BROWSERS: [&str; 10] = [
     "chrome.exe",
     "msedge.exe",
@@ -178,15 +171,10 @@ const BROWSERS: [&str; 10] = [
     "floorp.exe",
 ];
 
-/// How far the address bar search may go before giving up on a window.
-const SEARCH_MAX_DEPTH: usize = 12;
-const SEARCH_MAX_NODES: usize = 600;
-
 thread_local! {
     /// Display names by executable path; version resources never change
     /// while the file exists, and reading one every second is wasteful.
     static APP_NAMES: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
-    static ADDRESS_BAR: RefCell<AddressBar> = const { RefCell::new(AddressBar::new()) };
 }
 
 /// Nobody can be at the PC: the session is locked, or switched out to
@@ -244,7 +232,7 @@ pub fn read_active_window() -> Option<WindowSample> {
     let app = app_name(&path);
     let url = BROWSERS
         .contains(&executable.as_str())
-        .then(|| ADDRESS_BAR.with(|bar| bar.borrow_mut().read(window)))
+        .then(|| address_bar::url_of(window))
         .flatten();
     let domain = url.as_deref().and_then(domain_of);
 
@@ -403,160 +391,14 @@ fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-/// The address bar of the browser window last read, kept so the tree is
-/// searched once per window rather than once per second.
-struct AddressBar {
-    automation: Option<IUIAutomation>,
-    window: Option<HWND>,
-    element: Option<IUIAutomationElement>,
-    /// What the bar last showed while the user was not typing in it.
-    last_url: Option<String>,
-}
-
-impl AddressBar {
-    const fn new() -> Self {
-        Self {
-            automation: None,
-            window: None,
-            element: None,
-            last_url: None,
-        }
-    }
-
-    fn read(&mut self, window: HWND) -> Option<String> {
-        if self.window != Some(window) {
-            self.window = Some(window);
-            self.element = None;
-            self.last_url = None;
-        }
-        if self.element.is_none() {
-            let automation = self.automation()?;
-            self.element = find_address_bar(&automation, window);
-        }
-        let element = self.element.as_ref()?;
-        // While the user types in the bar it holds their text, not the page.
-        // SAFETY: COM calls on a live element; failures are handled below.
-        let typing =
-            unsafe { element.CurrentHasKeyboardFocus() }.is_ok_and(|focus| focus.as_bool());
-        if typing {
-            return self.last_url.clone();
-        }
-        match unsafe { address_value(element) } {
-            Some(text) => {
-                self.last_url = normalize_address(&text);
-                self.last_url.clone()
-            }
-            // The element went away (tab torn off, window rebuilt): find it
-            // again on the next sample.
-            None => {
-                self.element = None;
-                None
-            }
-        }
-    }
-
-    fn automation(&mut self) -> Option<IUIAutomation> {
-        if self.automation.is_none() {
-            // SAFETY: joins this thread to the multithreaded apartment for
-            // its whole life; a second call is harmless (S_FALSE).
-            unsafe {
-                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-                self.automation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok();
-            }
-        }
-        self.automation.clone()
-    }
-}
-
-/// Breadth-first over the browser's own controls for the first Edit, never
-/// descending into the page (a Document): walking web content would make
-/// Chromium turn on full accessibility for every tab.
-fn find_address_bar(automation: &IUIAutomation, window: HWND) -> Option<IUIAutomationElement> {
-    // SAFETY: COM calls on live UI Automation objects; every failure ends
-    // the search for that branch.
-    unsafe {
-        let walker = automation.ControlViewWalker().ok()?;
-        let root = automation.ElementFromHandle(window).ok()?;
-        let mut level = vec![root];
-        let mut visited = 0;
-        for _ in 0..SEARCH_MAX_DEPTH {
-            let mut next = Vec::new();
-            for parent in &level {
-                let mut child = walker.GetFirstChildElement(parent).ok();
-                while let Some(element) = child {
-                    visited += 1;
-                    if visited > SEARCH_MAX_NODES {
-                        return None;
-                    }
-                    match element.CurrentControlType() {
-                        Ok(kind) if kind == UIA_EditControlTypeId => return Some(element),
-                        Ok(kind) if kind == UIA_DocumentControlTypeId => {}
-                        _ => next.push(element.clone()),
-                    }
-                    child = walker.GetNextSiblingElement(&element).ok();
-                }
-            }
-            if next.is_empty() {
-                return None;
-            }
-            level = next;
-        }
-        None
-    }
-}
-
-/// # Safety
-/// `element` must be a live UI Automation element.
-unsafe fn address_value(element: &IUIAutomationElement) -> Option<String> {
-    let pattern: IUIAutomationValuePattern = unsafe {
-        element
-            .GetCurrentPattern(UIA_ValuePatternId)
-            .ok()?
-            .cast()
-            .ok()?
-    };
-    unsafe { pattern.CurrentValue() }
-        .ok()
-        .map(|value| value.to_string())
-}
-
-/// Address bars hide the scheme ("github.com/openrize"), and an empty or
-/// search-text bar is no page at all. Only web pages count, as on macOS.
-fn normalize_address(text: &str) -> Option<String> {
-    let text = text.trim();
-    if text.is_empty() || text.contains(char::is_whitespace) {
-        return None;
-    }
-    let url = if text.contains("://") {
-        text.to_string()
-    } else {
-        format!("https://{text}")
-    };
-    let parsed = url::Url::parse(&url).ok()?;
-    let web = matches!(parsed.scheme(), "http" | "https");
-    let host = parsed.host_str()?;
-    (web && (host.contains('.') || host == "localhost")).then_some(url)
-}
+// Reading a browser's address bar can stall on a hung browser, so it lives
+// on its own worker thread rather than on the sampler.
+#[path = "windows/address_bar.rs"]
+mod address_bar;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn address_bar_text_becomes_a_web_url() {
-        assert_eq!(
-            normalize_address("github.com/openrize").as_deref(),
-            Some("https://github.com/openrize")
-        );
-        assert_eq!(
-            normalize_address("http://localhost:1420/").as_deref(),
-            Some("http://localhost:1420/")
-        );
-        assert_eq!(normalize_address(""), None);
-        assert_eq!(normalize_address("how to rust"), None);
-        assert_eq!(normalize_address("edge://settings"), None);
-        assert_eq!(normalize_address("newtab"), None);
-    }
 
     #[test]
     fn file_names_come_from_windows_paths() {

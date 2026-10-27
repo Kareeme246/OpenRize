@@ -50,6 +50,14 @@ pub fn state() -> LoginItemState {
     imp::state()
 }
 
+/// Windows only: rewrites a Run value an earlier version wrote without
+/// `--background`, run at startup so users who never open Settings are
+/// migrated too. A no-op when nothing is registered.
+#[cfg(windows)]
+pub fn refresh() {
+    imp::refresh();
+}
+
 /// Registers or unregisters the app, then reports what the OS now says: on
 /// macOS a successful register can still land on `RequiresApproval`.
 pub fn set(enabled: bool) -> Result<LoginItemState, String> {

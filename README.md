@@ -213,18 +213,29 @@ titles.
 
 ### Windows (experimental)
 
-Install the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for Windows, plus Node and
-pnpm, then:
+Windows 10 or 11 on x64. You need:
+
+- The Rust toolchain with the MSVC target (`rustup default stable-msvc`, the default on Windows).
+- Visual Studio Build Tools with the **Desktop development with C++** workload.
+- WebView2, which Windows 11 already includes (see the
+  [Tauri prerequisites](https://tauri.app/start/prerequisites/#windows)).
+- Node and pnpm.
+- [Git for Windows](https://gitforwindows.org/). The package scripts call `bash`, so run the
+  commands below from Git Bash, or put `C:\Program Files\Git\bin` on PATH ahead of
+  `C:\Windows\System32`, where WSL installs its own `bash.exe` that cannot run them.
 
 ```sh
 git clone https://github.com/Kareeme246/OpenRize.git
 cd OpenRize
 pnpm install
-pnpm tauri build
+pnpm tauri dev          # run it
+pnpm tauri build        # produce the installer
 ```
 
-The installer is in `src-tauri\target\release\bundle\nsis\`. It is not signed, so SmartScreen warns
-the first time you run it. Source builds don't update themselves - pull and rebuild to update.
+The installer is `src-tauri\target\release\bundle\nsis\OpenRize_<version>_x64-setup.exe`. It is not
+signed, so SmartScreen warns the first time you run it. It also puts `rize` on your PATH (open a new
+terminal). Without the release signing key, `pnpm tauri build` skips the updater artifacts, so source
+builds don't update themselves - pull and rebuild to update.
 
 ## Contributing
 

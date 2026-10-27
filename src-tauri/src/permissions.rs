@@ -11,6 +11,10 @@ pub struct PermissionInfo {
     pub settings_url: String,
 }
 
+mod accessibility;
+
+pub use accessibility::{spawn_monitor, AccessibilityState, Monitor};
+
 #[cfg_attr(target_os = "macos", path = "permissions/macos.rs")]
 #[cfg_attr(windows, path = "permissions/windows.rs")]
 #[cfg_attr(

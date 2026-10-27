@@ -12,6 +12,7 @@ use crate::AppState;
 
 pub const TRAY_ID: &str = "openrize";
 const OPEN_WINDOW: &str = "open-window";
+const RELAUNCH: &str = "relaunch";
 const QUIT: &str = "quit";
 const PAUSE_PREFIX: &str = "pause:";
 const MAX_LABEL_CHARS: usize = 32;
@@ -162,6 +163,12 @@ fn build_menu(app: &AppHandle, timers: &[Timer]) -> tauri::Result<Menu<Wry>> {
     }
 
     builder = builder.separator();
+    if app.state::<crate::permissions::Monitor>().state()
+        == crate::permissions::AccessibilityState::RelaunchRequired
+    {
+        builder = builder
+            .item(&MenuItemBuilder::with_id(RELAUNCH, "Relaunch to finish setup").build(app)?);
+    }
     builder = builder.item(&MenuItemBuilder::with_id(OPEN_WINDOW, "Open OpenRize").build(app)?);
     builder = builder.item(&MenuItemBuilder::with_id(QUIT, "Quit OpenRize").build(app)?);
     builder.build()
@@ -228,6 +235,8 @@ fn on_menu_event(app: &AppHandle, event: MenuEvent) {
         }
     } else if id == OPEN_WINDOW {
         show_main_window(app);
+    } else if id == RELAUNCH {
+        app.request_restart();
     } else if id == QUIT {
         app.exit(0);
     }

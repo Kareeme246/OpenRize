@@ -9,6 +9,7 @@
 //! five minutes of Figma inside a coding block doesn't make it Design.
 
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use regex::RegexBuilder;
 
@@ -96,15 +97,7 @@ impl Rule {
                 .as_deref()
                 .is_some_and(|url| strip_scheme(url).starts_with(strip_scheme(pattern))),
             "path_prefix" => {
-                let path = expand_home(pattern);
-                segment
-                    .url
-                    .as_deref()
-                    .map(|url| url.strip_prefix("file://").unwrap_or(url))
-                    .is_some_and(|url| url.starts_with(&path))
-                    || segment.title.contains(&path)
-                    // Terminals show the working directory as `~/Code/...`.
-                    || segment.title.contains(pattern)
+                path_prefix_matches(segment, pattern, home_dir().as_deref(), cfg!(windows))
             }
             _ => false,
         }
@@ -169,11 +162,61 @@ fn strip_scheme(url: &str) -> &str {
     rest.strip_prefix("www.").unwrap_or(rest)
 }
 
-fn expand_home(path: &str) -> String {
-    match (path.strip_prefix("~/"), std::env::var("HOME")) {
-        (Some(rest), Ok(home)) => format!("{home}/{rest}"),
+/// The user's home folder, which `~` in a path rule means. Windows has no
+/// `HOME` outside shells like Git Bash, so it asks for the profile folder
+/// (`%USERPROFILE%`) instead.
+fn home_dir() -> Option<String> {
+    if cfg!(windows) {
+        static PROFILE: LazyLock<Option<String>> =
+            LazyLock::new(|| dirs::home_dir().map(|home| home.to_string_lossy().into_owned()));
+        PROFILE.clone()
+    } else {
+        std::env::var("HOME").ok()
+    }
+}
+
+fn expand_home(path: &str, home: Option<&str>) -> String {
+    match (
+        path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")),
+        home,
+    ) {
+        (Some(rest), Some(home)) => format!("{home}/{rest}"),
         _ => path.to_string(),
     }
+}
+
+/// Whether a segment's file URL starts with the rule's folder, or its window
+/// title (a terminal's working directory, an editor's path) names it. Windows
+/// paths are case-insensitive and may be written with either separator, so
+/// there both sides are compared lowercased with `/` throughout.
+fn path_prefix_matches(
+    segment: &ActivitySegment,
+    pattern: &str,
+    home: Option<&str>,
+    windows: bool,
+) -> bool {
+    let fold = |text: &str| {
+        if windows {
+            text.replace('\\', "/").to_lowercase()
+        } else {
+            text.to_string()
+        }
+    };
+    let path = fold(&expand_home(pattern, home));
+    let pattern = fold(pattern);
+    let title = fold(&segment.title);
+    let url_path = segment.url.as_deref().map(|url| {
+        let url = fold(url.strip_prefix("file://").unwrap_or(url));
+        // `file:///C:/Code` leaves `/C:/Code`; the drive is the path's start.
+        match url.as_bytes() {
+            [b'/', drive, b':', ..] if windows && drive.is_ascii_alphabetic() => url[1..].into(),
+            _ => url,
+        }
+    });
+    url_path.is_some_and(|url| url.starts_with(&path))
+        || title.contains(&path)
+        // Terminals show the working directory as `~/Code/...`.
+        || title.contains(&pattern)
 }
 
 #[cfg(test)]
@@ -245,5 +288,93 @@ mod tests {
         let rules = vec![rule("r1", "app", "Xcode", Some("coding"))];
         let segments = vec![seg("Xcode", "main.rs", None, 1000)];
         assert!(evaluate(&rules, &segments, Field::Project).is_none());
+    }
+
+    const PROFILE: &str = r"C:\Users\Kareem";
+
+    #[test]
+    fn tilde_expands_to_the_profile_with_either_separator() {
+        assert_eq!(
+            expand_home("~/Code/app", Some(PROFILE)),
+            r"C:\Users\Kareem/Code/app"
+        );
+        assert_eq!(
+            expand_home(r"~\Code\app", Some(PROFILE)),
+            r"C:\Users\Kareem/Code\app"
+        );
+        assert_eq!(expand_home("~/Code", None), "~/Code");
+        assert_eq!(expand_home("/srv/app", Some(PROFILE)), "/srv/app");
+    }
+
+    #[test]
+    fn windows_path_rules_match_titles_and_file_urls_in_any_spelling() {
+        let terminal = seg(
+            "WindowsTerminal.exe",
+            r"PowerShell - C:\Users\Kareem\Code\proj\src",
+            None,
+            1,
+        );
+        let prompt = seg("WindowsTerminal.exe", r"~\Code\proj", None, 1);
+        let lower = seg("cmd.exe", r"c:/users/kareem/code/proj", None, 1);
+        let mut file = seg("Code.exe", "main.rs - proj - Visual Studio Code", None, 1);
+        file.url = Some("file:///C:/Users/Kareem/Code/proj/main.rs".to_string());
+        let other = seg(
+            "WindowsTerminal.exe",
+            r"PowerShell - C:\Users\Kareem\Code\other",
+            None,
+            1,
+        );
+
+        for pattern in [
+            "~/Code/proj",
+            r"~\Code\proj",
+            r"C:\Users\Kareem\Code\proj",
+            "C:/users/kareem/code/proj",
+        ] {
+            for matching in [&terminal, &prompt, &lower, &file] {
+                // A prompt that abbreviates the profile as `~` only names the
+                // folder to a rule written with `~`.
+                if pattern.starts_with("C:") && std::ptr::eq(matching, &prompt) {
+                    continue;
+                }
+                assert!(
+                    path_prefix_matches(matching, pattern, Some(PROFILE), true),
+                    "{pattern} should match {:?}",
+                    matching.title
+                );
+            }
+            assert!(!path_prefix_matches(&other, pattern, Some(PROFILE), true));
+        }
+    }
+
+    #[test]
+    fn other_platforms_keep_paths_exact() {
+        let title = seg("Terminal", "~/Code/proj", None, 1);
+        assert!(path_prefix_matches(
+            &title,
+            "~/Code/proj",
+            Some("/Users/k"),
+            false
+        ));
+        // Case and backslashes mean something there.
+        assert!(!path_prefix_matches(
+            &title,
+            "~/code/proj",
+            Some("/Users/k"),
+            false
+        ));
+        let expanded = seg("Terminal", "k@mac: /Users/k/Code/proj", None, 1);
+        assert!(path_prefix_matches(
+            &expanded,
+            "~/Code/proj",
+            Some("/Users/k"),
+            false
+        ));
+        assert!(!path_prefix_matches(
+            &expanded,
+            "~/code/proj",
+            Some("/Users/k"),
+            false
+        ));
     }
 }

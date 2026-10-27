@@ -48,11 +48,19 @@ static DOMAIN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$").expect("domain regex")
 });
 
+/// `~\Code\OpenRize`, `C:\Code\OpenRize`, `C:/Code/OpenRize`, `\\server\share`.
+static WINDOWS_PATH: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(?:~\\|[A-Za-z]:[\\/]|\\\\)").expect("windows path regex"));
+
 /// Classifies one hint: `~/Code/OpenRize` is a path, `github.com/a/b` a URL
-/// prefix, `figma.com` a domain, and anything else a title keyword.
+/// prefix, `figma.com` a domain, and anything else a title keyword. Windows
+/// paths (`C:\Code\OpenRize`) are paths too.
 fn classify(text: &str) -> Option<(&'static str, String)> {
-    if text.starts_with("~/") || text.starts_with('/') {
-        return Some(("path_prefix", text.trim_end_matches('/').to_string()));
+    if text.starts_with("~/") || text.starts_with('/') || WINDOWS_PATH.is_match(text) {
+        return Some((
+            "path_prefix",
+            text.trim_end_matches(['/', '\\']).to_string(),
+        ));
     }
     let bare = text
         .strip_prefix("https://")
@@ -347,9 +355,13 @@ pub struct ProjectSuggestion {
 /// Folders people keep repositories in.
 const CODE_ROOTS: &str = "Code|code|Projects|projects|src|dev|Developer|developer|repos|git|workspace|Workspace|Sites|work";
 
+/// A repository path in a window title: under the home folder (`~`, a macOS or
+/// Linux home, a Windows profile, or WSL's view of one) or straight under a
+/// drive (`D:\Code\app`), in either separator, with `Documents`, `Desktop` or
+/// OneDrive allowed between. Windows paths are case-insensitive, so this is too.
 static TITLE_PATH: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(
-        r"(?:~|/Users/[^/\s]+|/home/[^/\s]+)/({CODE_ROOTS})/([A-Za-z0-9][A-Za-z0-9._-]*)"
+        r"(?i)(?:(?P<home>~|/Users/[^/\s]+|/home/[^/\s]+|/mnt/[a-z]/Users/[^/\s]+|[a-z]:[\\/]Users[\\/][^\\/\s]+)|(?P<drive>[a-z]:))(?P<mid>[\\/](?:Documents|Desktop|OneDrive[^\\/\s]*))?[\\/](?P<root>{CODE_ROOTS})[\\/](?P<name>[a-z0-9][a-z0-9._-]*)"
     ))
     .expect("title path regex")
 });
@@ -432,20 +444,34 @@ fn candidates(segment: &ActivitySegment) -> Vec<(String, String)> {
     }
 
     for capture in TITLE_PATH.captures_iter(&segment.title) {
-        let name = capture[2].trim_end_matches(['.', '-', '_']);
+        let name = capture["name"].trim_end_matches(['.', '-', '_']);
         if !name.is_empty() {
-            out.push((name.to_string(), format!("~/{}/{name}", &capture[1])));
+            // Written the way a hint is, so it can become one: `~/` for any
+            // home folder, the drive for a path outside it.
+            let base = capture.name("drive").map_or("~", |drive| drive.as_str());
+            let mid = capture
+                .name("mid")
+                .map_or(String::new(), |mid| format!("{}/", &mid.as_str()[1..]));
+            out.push((
+                name.to_string(),
+                format!("{base}/{mid}{}/{name}", &capture["root"]),
+            ));
         }
     }
 
     // Editors title windows `file — folder` or `folder — file`; the piece
     // with no file extension is the folder.
-    if EDITORS.contains(&segment.app.as_str()) {
+    // Windows names the process (`Code.exe`) where macOS names the app.
+    let app = segment.app.strip_suffix(".exe").unwrap_or(&segment.app);
+    if EDITORS
+        .iter()
+        .any(|editor| editor.eq_ignore_ascii_case(app))
+    {
         let title = segment.title.replace(" — ", " - ").replace(" – ", " - ");
         for piece in title.split(" - ") {
             let piece = piece.trim();
             if FOLDER_NAME.is_match(piece)
-                && !piece.eq_ignore_ascii_case(&segment.app)
+                && !piece.eq_ignore_ascii_case(app)
                 && !GENERIC_TITLES.contains(&piece.to_ascii_lowercase().as_str())
             {
                 out.push((piece.to_string(), piece.to_string()));
@@ -529,7 +555,11 @@ pub fn discover(conn: &Connection, since_ms: u64) -> Result<Vec<ProjectSuggestio
             .map_err(err)?
         {
             let pattern = pattern.map_err(err)?;
-            if let Some(last) = pattern.trim_end_matches('/').rsplit('/').next() {
+            if let Some(last) = pattern
+                .trim_end_matches(['/', '\\'])
+                .rsplit(['/', '\\'])
+                .next()
+            {
                 known.insert(name_key(last));
             }
             known.insert(name_key(&pattern));
@@ -989,6 +1019,145 @@ mod tests {
             .create_project(new_project("Pantry", Some("~/Code/pantry-tracker")), 1)
             .unwrap();
         assert!(discover(store.conn(), 0).unwrap().is_empty());
+    }
+
+    fn candidate_segment(app: &str, title: &str) -> ActivitySegment {
+        ActivitySegment {
+            id: 0,
+            app: app.to_string(),
+            title: title.to_string(),
+            kind: "activity".to_string(),
+            label: None,
+            started_at: 0,
+            ended_at: Some(1),
+            reviewed: false,
+            app_id: None,
+            bundle_id: None,
+            url: None,
+            domain: None,
+            entry_id: None,
+        }
+    }
+
+    fn names(app: &str, title: &str) -> Vec<(String, String)> {
+        candidates(&candidate_segment(app, title))
+    }
+
+    fn pair(name: &str, evidence: &str) -> (String, String) {
+        (name.to_string(), evidence.to_string())
+    }
+
+    #[test]
+    fn windows_terminal_and_editor_titles_name_the_project() {
+        assert_eq!(
+            names(
+                "WindowsTerminal.exe",
+                r"PowerShell - C:\Users\kareem\Code\proj"
+            ),
+            vec![pair("proj", "~/Code/proj")]
+        );
+        assert_eq!(
+            names(
+                "WindowsTerminal.exe",
+                r"Administrator: PowerShell - C:\Users\kareem\Code\proj\src"
+            ),
+            vec![pair("proj", "~/Code/proj")]
+        );
+        // PowerShell abbreviates the profile folder; forward slashes and case vary.
+        assert_eq!(
+            names("pwsh.exe", r"~\Code\proj"),
+            vec![pair("proj", "~/Code/proj")]
+        );
+        assert_eq!(
+            names("Git Bash", "MINGW64:/c/Users/kareem/Code/proj"),
+            vec![pair("proj", "~/Code/proj")]
+        );
+        assert_eq!(
+            names("mintty.exe", "C:/Users/Kareem/code/Proj-2"),
+            vec![pair("Proj-2", "~/code/Proj-2")]
+        );
+        assert_eq!(
+            names("wsl.exe", "kareem@pc: /mnt/c/Users/kareem/Projects/api"),
+            vec![pair("api", "~/Projects/api")]
+        );
+        // Under Documents, and off the profile entirely.
+        assert_eq!(
+            names("cmd.exe", r"C:\Users\kareem\Documents\Code\proj"),
+            vec![pair("proj", "~/Documents/Code/proj")]
+        );
+        assert_eq!(
+            names("cmd.exe", r"D:\dev\ledger"),
+            vec![pair("ledger", "D:/dev/ledger")]
+        );
+        // Not a code folder.
+        assert!(names("cmd.exe", r"C:\Users\kareem\Downloads\setup").is_empty());
+
+        assert_eq!(
+            names("Code.exe", "file.rs - proj - Visual Studio Code"),
+            vec![pair("proj", "proj")]
+        );
+        assert_eq!(
+            names(
+                "Visual Studio Code",
+                "● main.rs - proj - Visual Studio Code"
+            ),
+            vec![pair("proj", "proj")]
+        );
+        assert_eq!(
+            names("Cursor.exe", "lib.rs - ledger - Cursor"),
+            vec![pair("ledger", "ledger")]
+        );
+    }
+
+    #[test]
+    fn windows_path_hints_are_path_rules_and_their_folder_is_known() {
+        let rules: Vec<_> = parse_hints(r"C:\Users\kareem\Code\proj\, ~\Code\proj, D:/dev/ledger/")
+            .into_iter()
+            .map(|hint| hint.rule)
+            .collect();
+        assert_eq!(
+            rules,
+            vec![
+                Some(("path_prefix", r"C:\Users\kareem\Code\proj".to_string())),
+                Some(("path_prefix", r"~\Code\proj".to_string())),
+                Some(("path_prefix", "D:/dev/ledger".to_string())),
+            ]
+        );
+
+        let mut store = store();
+        let conn = store.conn();
+        segment(
+            conn,
+            "WindowsTerminal.exe",
+            r"PowerShell - C:\Users\kareem\Code\proj",
+            None,
+            0,
+            40,
+        );
+        segment(
+            conn,
+            "Code.exe",
+            "main.rs - ledger - Visual Studio Code",
+            None,
+            50 * MIN,
+            40,
+        );
+        let found: Vec<_> = discover(conn, 0)
+            .unwrap()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert_eq!(found, ["ledger", "proj"]);
+
+        store
+            .create_project(new_project("Work", Some(r"C:\Users\kareem\Code\proj\")), 1)
+            .unwrap();
+        let found: Vec<_> = discover(store.conn(), 0)
+            .unwrap()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert_eq!(found, ["ledger"]);
     }
 
     #[test]

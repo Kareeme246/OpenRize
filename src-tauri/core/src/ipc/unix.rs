@@ -33,6 +33,12 @@ impl Service {
     }
 }
 
+/// Already checked by `Service::accept`, which has the peer's credentials
+/// from the moment it connects.
+pub fn client_allowed(_: &Stream) -> bool {
+    true
+}
+
 impl Drop for Service {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.socket);

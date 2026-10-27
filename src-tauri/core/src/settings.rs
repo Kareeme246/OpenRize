@@ -1,15 +1,19 @@
 //! User preferences - theme, accent, size mode, close behavior, tray, retention.
 //!
 //! Storage policy: a single JSON file under the XDG config home
-//! (`$XDG_CONFIG_HOME/openrize/settings.json`, or `~/.config/openrize/...`).
+//! (`$XDG_CONFIG_HOME/openrize/settings.json`, or `~/.config/openrize/...`;
+//! on Windows `%APPDATA%\openrize\settings.json`).
 //! Preferences are config, not data: they survive deleting the app-data
 //! directory, and they are portable between machines the way `.dotfiles` are.
 //!
 //! The file is written atomically (temp + rename) and a corrupt file is moved
 //! aside rather than silently reset, matching `timers.rs`.
 
+use std::ffi::OsString;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Once;
 
 use serde::{Deserialize, Serialize};
 
@@ -532,15 +536,152 @@ impl Settings {
 ///
 /// Deliberately not Tauri's `app_config_dir`: on macOS that lands under
 /// `~/Library/Application Support`, and this app keeps its preferences in the
-/// conventional `.config` location on every platform.
+/// conventional `.config` location on every platform. Windows is the exception
+/// to the fallback: `HOME` exists only in shells like Git Bash, so honoring it
+/// would give the app (launched from Explorer) and `rize` different files.
+/// There the fallback is the roaming `%APPDATA%\openrize`, and the first call
+/// moves a settings file left in an older location over (`migrate_legacy`).
 pub fn config_dir() -> PathBuf {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
-        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("."));
-    base.join("openrize")
+    let env = ConfigEnv::from_process();
+    let dir = env.resolve(cfg!(windows));
+    // An explicit XDG_CONFIG_HOME is an isolated instance (dev scripts, tests):
+    // never pull the user's real settings into it.
+    if cfg!(windows) && !env.has_xdg() {
+        static MIGRATED: Once = Once::new();
+        MIGRATED.call_once(|| migrate_legacy(&dir, &env.legacy_dirs()));
+    }
+    dir
+}
+
+/// The environment `config_dir` reads, separated so tests can supply it.
+#[derive(Default)]
+struct ConfigEnv {
+    xdg: Option<OsString>,
+    home: Option<OsString>,
+    userprofile: Option<OsString>,
+    /// Windows roaming AppData, where the platform keeps per-user config.
+    roaming: Option<PathBuf>,
+}
+
+impl ConfigEnv {
+    fn from_process() -> Self {
+        Self {
+            xdg: std::env::var_os("XDG_CONFIG_HOME"),
+            home: std::env::var_os("HOME"),
+            userprofile: std::env::var_os("USERPROFILE"),
+            roaming: if cfg!(windows) {
+                dirs::config_dir()
+            } else {
+                None
+            },
+        }
+    }
+
+    fn has_xdg(&self) -> bool {
+        self.xdg.as_ref().is_some_and(|value| !value.is_empty())
+    }
+
+    fn resolve(&self, windows: bool) -> PathBuf {
+        let base = self
+            .xdg
+            .as_ref()
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| self.roaming.clone().filter(|_| windows))
+            .or_else(|| {
+                self.home
+                    .as_ref()
+                    .map(|home| PathBuf::from(home).join(".config"))
+            })
+            .or_else(|| self.userprofile.as_ref().map(PathBuf::from))
+            .unwrap_or_else(|| PathBuf::from("."));
+        base.join("openrize")
+    }
+
+    /// Where Windows builds before the roaming location kept settings: the app
+    /// launched from Explorer (no `HOME`) wrote the first, `rize` run from Git
+    /// Bash (`HOME` set) the second.
+    fn legacy_dirs(&self) -> Vec<PathBuf> {
+        match &self.userprofile {
+            Some(profile) => {
+                let profile = PathBuf::from(profile);
+                vec![
+                    profile.join("openrize"),
+                    profile.join(".config").join("openrize"),
+                ]
+            }
+            None => Vec::new(),
+        }
+    }
+}
+
+/// What a config directory can hold. Anything else in a legacy directory is
+/// not ours (it may be a checkout named `openrize`) and stays put.
+fn is_config_file(name: &str) -> bool {
+    name == FILE_NAME || name.starts_with("settings.corrupt-")
+}
+
+/// Moves settings from the newest legacy directory that has any into `dir`,
+/// only when `dir` has no settings of its own, and removes that directory when
+/// nothing else is left in it. Safe for the app and `rize` starting together
+/// and never replaces a file already in `dir`: each file is copied under a
+/// private name, then published with a hard link, which fails instead of
+/// overwriting, so a reader sees a whole `settings.json` or none. Failures are
+/// logged and leave the legacy files where they were.
+fn migrate_legacy(dir: &Path, legacy_dirs: &[PathBuf]) {
+    if dir.join(FILE_NAME).exists() {
+        return;
+    }
+    let source = legacy_dirs
+        .iter()
+        .filter_map(|legacy| {
+            let modified = fs::metadata(legacy.join(FILE_NAME)).ok()?.modified().ok()?;
+            Some((modified, legacy))
+        })
+        .max_by_key(|(modified, _)| *modified)
+        .map(|(_, legacy)| legacy);
+    let Some(source) = source else { return };
+    if let Err(error) = move_config_files(source, dir) {
+        eprintln!(
+            "could not move settings from {} to {}: {error}",
+            source.display(),
+            dir.display()
+        );
+    }
+}
+
+fn move_config_files(source: &Path, dir: &Path) -> io::Result<()> {
+    fs::create_dir_all(dir)?;
+    let mut names: Vec<String> = fs::read_dir(source)?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| is_config_file(name))
+        .collect();
+    // settings.json goes last: its arrival is what tells other starters to skip.
+    names.sort_by_key(|name| name == FILE_NAME);
+    for name in names {
+        let from = source.join(&name);
+        let to = dir.join(&name);
+        let staging = dir.join(format!("{name}.moving-{}", uuid::Uuid::now_v7().simple()));
+        let published = fs::copy(&from, &staging).and_then(|_| fs::hard_link(&staging, &to));
+        let _ = fs::remove_file(&staging);
+        match published {
+            Ok(()) => {}
+            // Another process published it first: theirs is the same content,
+            // so only our source remains to remove.
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound && to.exists() => {}
+            Err(error) => return Err(error),
+        }
+        match fs::remove_file(&from) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+            _ => {}
+        }
+    }
+    // Fails, as wanted, unless the directory is empty.
+    let _ = fs::remove_dir(source);
+    Ok(())
 }
 
 pub struct SettingsStore {
@@ -1117,5 +1258,138 @@ mod tests {
             .expect("local dt"); // 2026-09-28 is a Monday
         let ms = dt.timestamp_millis() as u64;
         assert!(!th.is_inside_window(ms));
+    }
+
+    fn os(value: &str) -> Option<OsString> {
+        Some(OsString::from(value))
+    }
+
+    #[test]
+    fn config_dir_prefers_xdg_then_roaming_on_windows_and_home_elsewhere() {
+        let env = ConfigEnv {
+            xdg: os("/x"),
+            home: os("/h"),
+            userprofile: os("/u"),
+            roaming: Some(PathBuf::from("/roaming")),
+        };
+        assert_eq!(env.resolve(true), PathBuf::from("/x/openrize"));
+        assert_eq!(env.resolve(false), PathBuf::from("/x/openrize"));
+
+        let env = ConfigEnv { xdg: os(""), ..env };
+        // HOME (set by Git Bash) must not move Windows off the roaming dir.
+        assert_eq!(env.resolve(true), PathBuf::from("/roaming/openrize"));
+        // The other platforms ignore the roaming slot entirely.
+        assert_eq!(env.resolve(false), PathBuf::from("/h/.config/openrize"));
+
+        let env = ConfigEnv { home: None, ..env };
+        assert_eq!(env.resolve(false), PathBuf::from("/u/openrize"));
+        let bare = ConfigEnv::default();
+        assert_eq!(bare.resolve(false), PathBuf::from("./openrize"));
+        assert!(!bare.has_xdg());
+    }
+
+    #[test]
+    fn legacy_dirs_are_the_two_old_profile_locations() {
+        let env = ConfigEnv {
+            userprofile: os("/u"),
+            ..ConfigEnv::default()
+        };
+        assert_eq!(
+            env.legacy_dirs(),
+            vec![
+                PathBuf::from("/u/openrize"),
+                PathBuf::from("/u/.config/openrize")
+            ]
+        );
+        assert!(ConfigEnv::default().legacy_dirs().is_empty());
+    }
+
+    #[test]
+    fn legacy_settings_move_to_the_new_dir_and_the_empty_old_dir_goes() {
+        let root = temp_dir("migrate");
+        let new = root.join("roaming").join("openrize");
+        let legacy = root.join("profile").join("openrize");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join(FILE_NAME), r#"{"accent":"blue"}"#).unwrap();
+        fs::write(legacy.join("settings.corrupt-1"), "junk").unwrap();
+
+        migrate_legacy(&new, std::slice::from_ref(&legacy));
+
+        assert_eq!(
+            SettingsStore::load(&new).unwrap().snapshot().accent,
+            Accent::Blue
+        );
+        assert!(new.join("settings.corrupt-1").is_file());
+        assert!(!legacy.exists());
+        let leftovers: Vec<_> = fs::read_dir(&new).unwrap().collect();
+        assert_eq!(leftovers.len(), 2, "no staging files are left behind");
+
+        // Running again, as a second process would, changes nothing.
+        migrate_legacy(&new, &[legacy]);
+        assert!(new.join(FILE_NAME).is_file());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn migration_never_replaces_new_settings_and_keeps_foreign_files() {
+        let root = temp_dir("migrate-keep");
+        let new = root.join("new");
+        let legacy = root.join("old");
+        fs::create_dir_all(&new).unwrap();
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(new.join(FILE_NAME), "new").unwrap();
+        fs::write(legacy.join(FILE_NAME), "old").unwrap();
+        migrate_legacy(&new, std::slice::from_ref(&legacy));
+        assert_eq!(fs::read_to_string(new.join(FILE_NAME)).unwrap(), "new");
+        assert_eq!(fs::read_to_string(legacy.join(FILE_NAME)).unwrap(), "old");
+
+        // A directory that is really something else keeps its other files.
+        fs::remove_file(new.join(FILE_NAME)).unwrap();
+        fs::write(legacy.join("README.md"), "mine").unwrap();
+        migrate_legacy(&new, std::slice::from_ref(&legacy));
+        assert_eq!(fs::read_to_string(new.join(FILE_NAME)).unwrap(), "old");
+        assert!(legacy.join("README.md").is_file());
+        assert!(!legacy.join(FILE_NAME).exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn migration_takes_the_most_recently_written_legacy_dir() {
+        let root = temp_dir("migrate-newest");
+        let new = root.join("new");
+        let older = root.join("older");
+        let newer = root.join("newer");
+        for dir in [&older, &newer] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        fs::write(older.join(FILE_NAME), "older").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        fs::write(newer.join(FILE_NAME), "newer").unwrap();
+        migrate_legacy(&new, &[older.clone(), newer]);
+        assert_eq!(fs::read_to_string(new.join(FILE_NAME)).unwrap(), "newer");
+        assert!(older.join(FILE_NAME).is_file());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn concurrent_migrations_leave_one_whole_settings_file() {
+        let root = temp_dir("migrate-race");
+        let new = root.join("new");
+        let legacy = root.join("old");
+        fs::create_dir_all(&legacy).unwrap();
+        let body = format!(r#"{{"aiCustomPrompt":"{}"}}"#, "x".repeat(2000));
+        fs::write(legacy.join(FILE_NAME), &body).unwrap();
+        let workers: Vec<_> = (0..8)
+            .map(|_| {
+                let (new, legacy) = (new.clone(), legacy.clone());
+                std::thread::spawn(move || migrate_legacy(&new, &[legacy]))
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        assert_eq!(fs::read_to_string(new.join(FILE_NAME)).unwrap(), body);
+        assert!(!legacy.exists());
+        let _ = fs::remove_dir_all(root);
     }
 }

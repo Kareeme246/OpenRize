@@ -32,6 +32,8 @@ impl Fixture {
             .args(args)
             // Never the developer's own build next to this binary.
             .env("RIZE_APP", self.root.join("missing-openrize"))
+            // Nor the developer's own settings (which Windows would migrate).
+            .env("XDG_CONFIG_HOME", self.root.join("config"))
             .output()
             .unwrap()
     }

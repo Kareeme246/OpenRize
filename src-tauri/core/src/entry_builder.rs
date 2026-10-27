@@ -109,7 +109,10 @@ pub fn build_entries(
     let mut session_end = 0;
     for seg in work {
         let seg_end = seg.ended_at.unwrap_or(now);
-        if !session.is_empty() && seg.started_at.saturating_sub(session_end) > gap {
+        if !session.is_empty()
+            && (seg.started_at.saturating_sub(session_end) > gap
+                || holds_time_between(frozen_entries, session_end, seg.started_at))
+        {
             push_closed(
                 &mut results,
                 &session,
@@ -153,6 +156,15 @@ pub fn build_entries(
     results
 }
 
+/// Whether a kept entry holds any of the time from `from` to `to`. A session
+/// never runs through one: the entry owns those minutes, so the session ends
+/// before it and the next begins after it.
+fn holds_time_between(frozen_entries: &[BuiltTimeEntry], from: u64, to: u64) -> bool {
+    frozen_entries
+        .iter()
+        .any(|fe| fe.deleted_at.is_none() && fe.started_at < to && fe.ended_at > from)
+}
+
 /// Adds a finished session as a pending entry, unless it is too short to be work.
 fn push_closed(
     results: &mut Vec<BuiltTimeEntry>,
@@ -175,7 +187,7 @@ fn push_closed(
 /// Whether a segment is already accounted for by a frozen entry: linked to
 /// it, or inside its span. Inside a deleted entry's span only unlinked
 /// segments count (its time must stay unassigned, but a segment some other
-/// entry owns is that entry's); inside a kept one, only closed unlinked ones.
+/// entry owns is that entry's); inside a kept one, unlinked ones too.
 fn belongs_to_frozen(
     seg: &SegmentInput,
     frozen_ids: &HashSet<&str>,
@@ -192,12 +204,12 @@ fn belongs_to_frozen(
     if seg.entry_id.is_some() {
         return false;
     }
-    let seg_end = seg.ended_at.unwrap_or(now);
-    // A live entry's open segment is never swallowed by a manual entry
-    // dragged over it: the two just overlap.
+    // A segment that has only just opened still holds its first instant.
+    let seg_end = seg.ended_at.unwrap_or(now).max(seg.started_at + 1);
+    // One owner per minute: capture does not start a session inside time an
+    // entry already holds, even a manual one dragged over the live session.
     frozen_entries
         .iter()
-        .filter(|fe| fe.deleted_at.is_some() || seg.ended_at.is_some())
         .any(|fe| seg.started_at < fe.ended_at && seg_end > fe.started_at)
 }
 
@@ -327,6 +339,38 @@ mod tests {
             deleted_at: None,
             segment_ids: vec![],
         }
+    }
+
+    #[test]
+    fn a_session_never_runs_through_a_kept_entry() {
+        // Activity either side of a short hand-made entry: one session would
+        // swallow it, so the entry splits the activity in two.
+        let segments = vec![
+            make_seg(1, "Code", "a", "activity", 0, 6 * MIN),
+            make_seg(2, "Code", "b", "activity", 8 * MIN, 14 * MIN),
+        ];
+        let mut manual = frozen_entry("manual", 6 * MIN, 8 * MIN, "pending");
+        manual.source = "manual".to_string();
+        let built = build_entries(&segments, &[manual], &EntrySettings::default(), 30 * MIN);
+        let spans: Vec<(u64, u64)> = built.iter().map(|e| (e.started_at, e.ended_at)).collect();
+        assert_eq!(
+            spans,
+            [(0, 6 * MIN), (6 * MIN, 8 * MIN), (8 * MIN, 14 * MIN)]
+        );
+
+        // Without it, the same gap is one session.
+        let built = build_entries(&segments, &[], &EntrySettings::default(), 30 * MIN);
+        assert_eq!(built.len(), 1);
+    }
+
+    #[test]
+    fn an_open_segment_inside_a_kept_entry_starts_no_session() {
+        let mut open = make_seg(1, "Code", "a", "activity", 10 * MIN, 10 * MIN);
+        open.ended_at = None;
+        let manual = frozen_entry("manual", 5 * MIN, 40 * MIN, "pending");
+        let built = build_entries(&[open], &[manual], &EntrySettings::default(), 12 * MIN);
+        assert_eq!(built.len(), 1);
+        assert_eq!(built[0].id, "manual");
     }
 
     /// An hour of work hopping between apps every 20 seconds.

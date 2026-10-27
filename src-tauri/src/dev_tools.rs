@@ -78,16 +78,28 @@ pub fn dev_simulate_automation(app: AppHandle, granted: Option<bool>) -> Result<
     Ok(())
 }
 
-/// Opens the first-run screen again. The screen only opens while Accessibility
-/// is off, so a simulated "not granted" is set when the real state is something
-/// else.
+/// The simulation a re-run of the first-run screen needs, given the state now.
+/// The screen opens straight onto the question while Accessibility is off, and
+/// onto Restart while a restart is needed; in any other state it stays hidden
+/// or, for "checking", would hold its button disabled behind the overlay with
+/// no way to reach the dev tools and end the simulation. Those become a
+/// simulated "not granted", so a re-run always opens onto a button that works.
+fn rerun_simulation(current: AccessibilityState) -> Option<AccessibilityState> {
+    match current {
+        AccessibilityState::NotGranted | AccessibilityState::RelaunchRequired => None,
+        _ => Some(AccessibilityState::NotGranted),
+    }
+}
+
+/// Opens the first-run screen again, simulating "not granted" first when the
+/// current state would not show it or would strand its button.
 #[tauri::command]
 pub fn dev_rerun_onboarding(app: AppHandle) -> Result<(), String> {
     require(&app)?;
     app.state::<Rerun>().set();
     let monitor = app.state::<Monitor>();
-    if monitor.state() != AccessibilityState::NotGranted {
-        monitor.simulate(&app, Some(AccessibilityState::NotGranted));
+    if let Some(state) = rerun_simulation(monitor.state()) {
+        monitor.simulate(&app, Some(state));
     }
     let _ = app.emit(crate::EVENT_ONBOARDING_CHANGED, ());
     Ok(())
@@ -109,6 +121,34 @@ pub fn dev_reset(app: AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rerun_over_a_simulated_checking_state_does_not_strand_the_button() {
+        assert_eq!(
+            rerun_simulation(AccessibilityState::Checking),
+            Some(AccessibilityState::NotGranted)
+        );
+    }
+
+    #[test]
+    fn a_rerun_leaves_the_states_that_already_show_the_screen_alone() {
+        assert_eq!(rerun_simulation(AccessibilityState::NotGranted), None);
+        assert_eq!(rerun_simulation(AccessibilityState::RelaunchRequired), None);
+    }
+
+    #[test]
+    fn a_rerun_turns_every_other_state_into_not_granted() {
+        for state in [
+            AccessibilityState::Working,
+            AccessibilityState::NotWorking,
+            AccessibilityState::NotApplicable,
+        ] {
+            assert_eq!(
+                rerun_simulation(state),
+                Some(AccessibilityState::NotGranted)
+            );
+        }
+    }
 
     #[test]
     fn the_release_identifier_is_refused_even_in_a_debug_build() {

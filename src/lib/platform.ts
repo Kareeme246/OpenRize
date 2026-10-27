@@ -64,6 +64,16 @@ export const HAS_NATIVE_CAPTION = byPlatform({
   linux: true,
 });
 
+/**
+ * Permissions the OS asks the user for (Accessibility, Automation), with the
+ * first-run screen that offers them. Only macOS has any.
+ */
+export const HAS_PERMISSIONS = byPlatform({
+  macos: true,
+  windows: false,
+  linux: false,
+});
+
 /** The Battery & Energy monitor. Windows has no per-process energy counter. */
 export const HAS_ENERGY_MONITOR = byPlatform({
   macos: true,

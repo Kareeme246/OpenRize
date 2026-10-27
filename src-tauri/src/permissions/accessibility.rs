@@ -21,7 +21,7 @@
 use std::sync::Mutex;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
 /// How often the trust flag and probe are read.
@@ -63,7 +63,7 @@ pub enum Reading {
     Trusted(Probe),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AccessibilityState {
     /// This platform asks for no Accessibility access.
@@ -138,41 +138,143 @@ impl Tracker {
     }
 }
 
-/// The tracker as app state, with the event and window behaviour that goes
-/// with a change.
+/// The tracker plus a developer's simulated readings (dev builds only, see
+/// dev_tools.rs), which win while set. Plain data, so the rules for combining
+/// the two are tested without a Mac or an app handle.
+#[derive(Debug)]
+pub struct Observed {
+    tracker: Tracker,
+    accessibility: Option<AccessibilityState>,
+    automation: Option<bool>,
+}
+
+impl Observed {
+    pub fn new() -> Self {
+        Self {
+            tracker: Tracker::new(),
+            accessibility: None,
+            automation: None,
+        }
+    }
+
+    /// The simulated state if one is set, otherwise what the tracker says.
+    pub fn state(&self) -> AccessibilityState {
+        self.accessibility.unwrap_or_else(|| self.tracker.state())
+    }
+
+    /// Feeds one real reading. The tracker always takes it, so the relaunch
+    /// logic keeps its history, but only a change to the effective state is
+    /// reported.
+    pub fn observe(&mut self, reading: Reading) -> Option<AccessibilityState> {
+        let before = self.state();
+        self.tracker.observe(reading);
+        let after = self.state();
+        (after != before).then_some(after)
+    }
+
+    /// Sets or clears the simulated state. Clearing shows the tracker's state.
+    pub fn simulate(&mut self, state: Option<AccessibilityState>) -> Option<AccessibilityState> {
+        let before = self.state();
+        self.accessibility = state;
+        let after = self.state();
+        (after != before).then_some(after)
+    }
+
+    pub fn simulated(&self) -> Option<AccessibilityState> {
+        self.accessibility
+    }
+
+    pub fn automation(&self) -> Option<bool> {
+        self.automation
+    }
+
+    pub fn set_automation(&mut self, granted: Option<bool>) {
+        self.automation = granted;
+    }
+}
+
+/// The observed state as app state, with the event and window behaviour that
+/// goes with a change.
 pub struct Monitor {
-    tracker: Mutex<Tracker>,
+    observed: Mutex<Observed>,
 }
 
 impl Monitor {
     pub fn new() -> Self {
         Self {
-            tracker: Mutex::new(Tracker::new()),
+            observed: Mutex::new(Observed::new()),
         }
     }
 
     pub fn state(&self) -> AccessibilityState {
-        self.tracker
+        self.observed
             .lock()
-            .map_or(AccessibilityState::NotApplicable, |tracker| tracker.state())
+            .map_or(AccessibilityState::NotApplicable, |observed| {
+                observed.state()
+            })
+    }
+
+    pub fn simulated(&self) -> Option<AccessibilityState> {
+        self.observed
+            .lock()
+            .ok()
+            .and_then(|observed| observed.simulated())
+    }
+
+    pub fn automation(&self) -> Option<bool> {
+        self.observed
+            .lock()
+            .ok()
+            .and_then(|observed| observed.automation())
     }
 
     fn apply(&self, app: &AppHandle, reading: Reading) {
         let Some(state) = self
-            .tracker
+            .observed
             .lock()
             .ok()
-            .and_then(|mut tracker| tracker.observe(reading))
+            .and_then(|mut observed| observed.observe(reading))
         else {
             return;
         };
         eprintln!("accessibility: {state:?} ({reading:?})");
-        let _ = app.emit(crate::EVENT_PERMISSIONS_CHANGED, state);
-        if state == AccessibilityState::RelaunchRequired {
-            // The relaunch prompt is in the main window; a grant made with
-            // that window closed must bring it forward.
-            crate::tray::show_main_window(app);
+        announce(app, state);
+    }
+
+    /// Shows a simulated state in place of the real one (dev builds only).
+    /// `None` ends the simulation and shows the real state again.
+    pub fn simulate(&self, app: &AppHandle, state: Option<AccessibilityState>) {
+        let Some(state) = self
+            .observed
+            .lock()
+            .ok()
+            .and_then(|mut observed| observed.simulate(state))
+        else {
+            return;
+        };
+        eprintln!("accessibility: {state:?} (simulated)");
+        announce(app, state);
+    }
+
+    /// Sets the simulated Automation answer (dev builds only). Automation has no
+    /// window to bring forward, so this only tells open views to read the
+    /// permissions again, which is where the answer shows.
+    pub fn simulate_automation(&self, app: &AppHandle, granted: Option<bool>) {
+        if let Ok(mut observed) = self.observed.lock() {
+            observed.set_automation(granted);
         }
+        let _ = app.emit(crate::EVENT_PERMISSIONS_CHANGED, self.state());
+    }
+}
+
+/// Tells open views about a state change, and brings the main window forward
+/// when a relaunch is needed.
+fn announce(app: &AppHandle, state: AccessibilityState) {
+    let _ = app.emit(crate::EVENT_PERMISSIONS_CHANGED, state);
+    if state == AccessibilityState::RelaunchRequired {
+        // The relaunch prompt is in the main window; a grant made with that
+        // window closed must bring it forward.
+        crate::tray::show_main_window(app);
     }
 }
 
@@ -355,5 +457,66 @@ mod tests {
             serde_json::to_string(&NotWorking).unwrap(),
             "\"notWorking\""
         );
+        assert_eq!(
+            serde_json::from_str::<AccessibilityState>("\"relaunchRequired\"").unwrap(),
+            RelaunchRequired
+        );
+    }
+
+    #[test]
+    fn a_simulated_state_wins_over_the_readings() {
+        let mut observed = Observed::new();
+        observed.observe(FINE);
+        assert_eq!(observed.simulate(Some(NotGranted)), Some(NotGranted));
+        assert_eq!(observed.observe(FINE), None);
+        assert_eq!(observed.observe(Reading::Untrusted), None);
+        assert_eq!(observed.state(), NotGranted);
+    }
+
+    #[test]
+    fn real_readings_during_a_simulation_report_nothing_but_still_count() {
+        let mut observed = Observed::new();
+        assert_eq!(observed.simulate(Some(Checking)), Some(Checking));
+        assert_eq!(observed.observe(Reading::Untrusted), None);
+        assert_eq!(observed.observe(FINE), None);
+        assert_eq!(observed.state(), Checking);
+        assert_eq!(observed.tracker.state(), Working);
+    }
+
+    #[test]
+    fn clearing_a_simulation_reveals_the_real_state_and_reports_it() {
+        let mut observed = Observed::new();
+        observed.observe(FINE);
+        observed.simulate(Some(NotGranted));
+        assert_eq!(observed.observe(FINE), None);
+        assert_eq!(observed.simulate(None), Some(Working));
+        assert_eq!(observed.simulated(), None);
+    }
+
+    #[test]
+    fn clearing_reports_nothing_when_the_real_state_matches_the_simulation() {
+        let mut observed = Observed::new();
+        observed.observe(FINE);
+        assert_eq!(observed.simulate(Some(Working)), None);
+        assert_eq!(observed.simulate(None), None);
+        assert_eq!(observed.state(), Working);
+    }
+
+    #[test]
+    fn simulating_the_same_state_twice_reports_it_once() {
+        let mut observed = Observed::new();
+        assert_eq!(observed.simulate(Some(NotWorking)), Some(NotWorking));
+        assert_eq!(observed.simulate(Some(NotWorking)), None);
+    }
+
+    #[test]
+    fn the_tracker_keeps_its_relaunch_logic_under_a_simulation() {
+        let mut observed = Observed::new();
+        observed.observe(Reading::Untrusted);
+        observed.simulate(Some(Working));
+        for _ in 0..SETTLE_READINGS {
+            assert_eq!(observed.observe(BROKEN), None);
+        }
+        assert_eq!(observed.simulate(None), Some(RelaunchRequired));
     }
 }

@@ -789,3 +789,20 @@ export interface PermissionInfo {
   granted: boolean;
   settingsUrl: string;
 }
+
+/**
+ * What the developer tools panel reads (src-tauri/src/dev_tools.rs). Only a
+ * dev build answers; the other commands refuse outside one.
+ */
+export interface DevToolsInfo {
+  /** The bundle identifier this process runs as, e.g. `com.offlinestudios.openrize.dev`. */
+  identifier: string;
+  /** The installed app's identifier, which the real macOS grants belong to. */
+  releaseIdentifier: string;
+  /** The simulated Accessibility state, or `null` when the real one is in use. */
+  accessibility: AccessibilityState | null;
+  /** The simulated Automation grant, or `null` when the real one is in use. */
+  automation: boolean | null;
+  /** Whether the first-run permissions screen has been re-armed for this session. */
+  onboardingRerun: boolean;
+}

@@ -1131,15 +1131,18 @@ pub fn set_launch_at_login(enabled: bool) -> Result<LoginItemState, String> {
 /// Current authorization status of required/requested system permissions.
 #[tauri::command]
 pub fn check_permissions(app: AppHandle) -> Vec<crate::permissions::PermissionInfo> {
-    let accessibility = app.state::<crate::permissions::Monitor>().state();
-    crate::permissions::check_permissions(accessibility)
+    let monitor = app.state::<crate::permissions::Monitor>();
+    crate::permissions::check_permissions(monitor.state(), monitor.automation())
 }
 
 /// Shows the system's Accessibility prompt. The answer arrives as
 /// `permissions-changed`, not as a return value: the user answers in System
-/// Settings, not in this call.
+/// Settings, not in this call. Allow ends a simulated state (dev builds only),
+/// so the flow carries on with the real one.
 #[tauri::command]
-pub fn request_accessibility() {
+pub fn request_accessibility(app: AppHandle) {
+    app.state::<crate::permissions::Monitor>()
+        .simulate(&app, None);
     crate::permissions::request_accessibility();
 }
 

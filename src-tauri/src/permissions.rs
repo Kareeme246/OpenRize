@@ -27,9 +27,27 @@ pub use accessibility::{spawn_monitor, AccessibilityState, Monitor};
 mod platform;
 
 /// Every permission this platform has, with Accessibility described by
-/// `accessibility`, the state the monitor has worked out.
-pub fn check_permissions(accessibility: AccessibilityState) -> Vec<PermissionInfo> {
-    platform::check_permissions(accessibility)
+/// `accessibility`, the state the monitor has worked out. A simulated
+/// Automation answer (dev builds only, see dev_tools.rs) replaces the real one.
+pub fn check_permissions(
+    accessibility: AccessibilityState,
+    automation: Option<bool>,
+) -> Vec<PermissionInfo> {
+    let mut permissions = platform::check_permissions(accessibility);
+    if let (Some(granted), Some(entry)) = (
+        automation,
+        permissions
+            .iter_mut()
+            .find(|permission| permission.id == "automation"),
+    ) {
+        entry.granted = granted;
+        entry.state = if granted {
+            AccessibilityState::Working
+        } else {
+            AccessibilityState::NotGranted
+        };
+    }
+    permissions
 }
 
 /// Shows macOS's own Accessibility prompt. Only ever called from a button the
@@ -44,7 +62,7 @@ mod tests {
 
     #[test]
     fn permissions_structure() {
-        let perms = check_permissions(AccessibilityState::NotGranted);
+        let perms = check_permissions(AccessibilityState::NotGranted, None);
         #[cfg(target_os = "macos")]
         {
             assert_eq!(perms.len(), 2);
@@ -81,10 +99,26 @@ mod tests {
             (RelaunchRequired, false),
             (Working, true),
         ] {
-            let perms = check_permissions(state);
+            let perms = check_permissions(state, None);
             let accessibility = perms.iter().find(|p| p.id == "accessibility").unwrap();
             assert_eq!(accessibility.state, state);
             assert_eq!(accessibility.granted, granted, "{state:?}");
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_simulated_automation_answer_replaces_the_real_one_both_ways() {
+        use AccessibilityState::*;
+        for granted in [true, false] {
+            let perms = check_permissions(Checking, Some(granted));
+            let automation = perms.iter().find(|p| p.id == "automation").unwrap();
+            assert_eq!(automation.granted, granted);
+            assert_eq!(automation.state, if granted { Working } else { NotGranted });
+
+            let accessibility = perms.iter().find(|p| p.id == "accessibility").unwrap();
+            assert_eq!(accessibility.state, Checking);
+            assert!(!accessibility.granted);
         }
     }
 }

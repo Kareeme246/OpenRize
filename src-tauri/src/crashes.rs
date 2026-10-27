@@ -88,7 +88,7 @@ fn crash_root() -> Option<PathBuf> {
 }
 
 /// The OS version, in the form the OS itself uses.
-fn os_version() -> String {
+pub(crate) fn os_version() -> String {
     #[cfg(target_os = "macos")]
     {
         let version = objc2_foundation::NSProcessInfo::processInfo().operatingSystemVersion();

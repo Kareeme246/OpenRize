@@ -1,6 +1,8 @@
 mod accounts;
 mod activity;
 mod ai;
+#[cfg(target_os = "macos")]
+mod ax;
 mod breaks;
 mod capture;
 mod commands;
@@ -45,6 +47,10 @@ pub const EVENT_ENTRIES_CHANGED: &str = "entries-changed";
 /// Emitted after the accounts list changes without a restart (a rename or a
 /// delete), so every open view re-reads it.
 pub const EVENT_ACCOUNTS_CHANGED: &str = "accounts-changed";
+
+/// Emitted when what the app knows about its Accessibility access changes.
+/// Carries a `permissions::AccessibilityState`.
+pub const EVENT_PERMISSIONS_CHANGED: &str = "permissions-changed";
 
 /// Sent to the main window when the break reminder asks for its settings.
 pub const EVENT_OPEN_BREAK_SETTINGS: &str = "open-break-settings";
@@ -130,6 +136,7 @@ pub fn run() {
             app.manage(state);
             app.manage(ai::AiRuntime::default());
             app.manage(pulse::PulseState::default());
+            app.manage(permissions::Monitor::new());
             breaks::init(app.handle())?;
             app.manage(updater::UpdaterState::new(
                 app.package_info().version.to_string(),
@@ -138,6 +145,7 @@ pub fn run() {
             if preferences.tray_enabled {
                 tray::init(app.handle(), &timers)?;
             }
+            permissions::spawn_monitor(app.handle().clone());
             activity::spawn_sampler(app.handle().clone());
             ai::worker::spawn(
                 app.handle().clone(),
@@ -238,6 +246,8 @@ pub fn run() {
             commands::launch_at_login,
             commands::set_launch_at_login,
             commands::check_permissions,
+            commands::accessibility_state,
+            commands::relaunch_app,
             commands::list_categories,
             commands::create_category,
             commands::update_category,

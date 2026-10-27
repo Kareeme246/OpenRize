@@ -767,6 +767,18 @@ export interface UpdateStatus {
 
 // --- Permissions (src-tauri/src/permissions.rs) ---
 
+/**
+ * What the running app knows about its Accessibility access
+ * (src-tauri/src/permissions/accessibility.rs).
+ */
+export type AccessibilityState =
+  | "notApplicable"
+  | "notGranted"
+  | "checking"
+  | "working"
+  | "notWorking"
+  | "relaunchRequired";
+
 export interface PermissionInfo {
   id: string;
   name: string;

@@ -10,6 +10,7 @@ import type { BreakEntry, BreakState } from "./breaks";
 import type { LoginItemState, Settings, StoragePaths } from "./settings";
 import type { Timer, TimerSavedState } from "./timers";
 import type {
+  AccessibilityState,
   ActivitySnapshot,
   AiMetrics,
   AiStatus,
@@ -64,6 +65,7 @@ export const ENERGY_CHANGED = "energy-changed";
 export const OPEN_REVIEW = "open-review";
 /** Payload: `UpdateStatus`. */
 export const UPDATE_STATUS = "update-status";
+export const PERMISSIONS_CHANGED = "permissions-changed";
 /** Main window only: the reminder asked for Settings > Notifications. */
 export const OPEN_BREAK_SETTINGS = "open-break-settings";
 /** Payload: `BreakState`. */
@@ -106,6 +108,16 @@ export async function setLaunchAtLogin(
 /** Reads authorization status of system permissions (Accessibility, Automation, etc.). */
 export async function checkPermissions(): Promise<PermissionInfo[]> {
   return await invoke<PermissionInfo[]>("check_permissions");
+}
+
+/** Whether Accessibility is working in this process, or needs a relaunch. */
+export async function accessibilityState(): Promise<AccessibilityState> {
+  return await invoke<AccessibilityState>("accessibility_state");
+}
+
+/** Restarts OpenRize, closing the open activity segment first. */
+export async function relaunchApp(): Promise<void> {
+  await invoke("relaunch_app");
 }
 
 // --- Accounts ---

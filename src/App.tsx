@@ -7,6 +7,7 @@ import {
 } from "react";
 import { MissingAccountDialog } from "./components/MissingAccountDialog";
 import { PausedOnSwitchBanner } from "./components/PausedOnSwitchBanner";
+import { RelaunchModal } from "./components/RelaunchModal";
 import { Sidebar } from "./components/Sidebar";
 import { SwitchingOverlay } from "./components/SwitchingOverlay";
 import { Toaster } from "./components/Toaster";
@@ -419,6 +420,7 @@ export default function App() {
         </div>
         <MissingAccountDialog />
         <SwitchingOverlay />
+        <RelaunchModal />
         <Toaster />
       </AccountsProvider>
     </SettingsProvider>

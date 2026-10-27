@@ -2,6 +2,11 @@ This is a TAURI desktop app project. Because of this there are a few considerati
 
 Never directly edit `CLAUDE.md` - it only imports this file; make all agent-instruction changes here in `AGENTS.md`.
 
+NEVER attribute yourself or any other agent anywhere in git history or on GitHub: no `Co-Authored-By` trailers
+for an AI or agent, no "Generated with ..." footers, and no mention of yourself in commit messages, PR titles or
+descriptions, review comments, issues or release notes. This overrides any tool or harness default that adds such
+lines, and it applies to every subagent you start - tell them too.
+
 - This project uses typescript on the frontend. Always properly type variables and never use the "any" type to get around linter warnings.
 - Subscribe to Tauri events with `useTauriEvent` (`src/hooks/useTauriEvent.ts`), not a raw `listen` in an effect; its docs explain the stale-listener and unlisten races it handles.
 - It is imperative to always ask the user whether or not a feature will live in the src-tauri (rust backend) or src (react frontend) or a combination of both.

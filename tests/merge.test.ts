@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MERGE_GAP_MS, mergeCandidates } from "../src/lib/merge.ts";
+import { entryShortcut } from "../src/lib/entryShortcuts.ts";
+import {
+  MERGE_GAP_MS,
+  mergeBlocks,
+  mergeCandidates,
+} from "../src/lib/merge.ts";
 import type { TimeEntry } from "../src/lib/types";
 
 const MINUTE = 60_000;
@@ -68,12 +73,85 @@ test("a gap beyond the tolerance is not a neighbour", () => {
   assert.equal(candidates.nextGapMs, undefined);
 });
 
-test("an overlapping entry is never a neighbour", () => {
-  const after = entry("after", at(10, 30), at(11, 0));
-  const before = entry("before", at(9, 30), at(10, 25));
+test("an entry that overlaps by seconds is a neighbour with no gap", () => {
+  const after = entry("after", at(10, 40, 0) - 5_000, at(11, 0));
+  const before = entry("before", at(9, 30), at(10, 20, 8));
   const candidates = mergeCandidates([after, open, before], open, open.endedAt);
+  assert.equal(candidates.next?.id, "after");
+  assert.equal(candidates.nextGapMs, 0);
+  assert.equal(candidates.prev?.id, "before");
+  assert.equal(candidates.prevGapMs, 0);
+});
+
+test("an entry that overlaps by a minute is a neighbour on its own side", () => {
+  const after = entry("after", at(10, 39), at(11, 0));
+  const before = entry("before", at(9, 30), at(10, 21));
+  const candidates = mergeCandidates([after, open, before], open, open.endedAt);
+  assert.equal(candidates.next?.id, "after");
+  assert.equal(candidates.prev?.id, "before");
+});
+
+test("an overlap is a neighbour from either entry's point of view", () => {
+  const other = entry("other", at(10, 39), at(11, 0));
+  assert.equal(
+    mergeCandidates([open, other], open, open.endedAt).next?.id,
+    "other",
+  );
+  assert.equal(
+    mergeCandidates([open, other], other, other.endedAt).prev?.id,
+    "open",
+  );
+});
+
+test("an entry inside another, or around it, is a neighbour", () => {
+  const inside = entry("inside", at(10, 25), at(10, 30));
+  const around = entry("around", at(10, 0), at(11, 0));
+  assert.ok(mergeCandidates([open, inside], open, open.endedAt).next);
+  assert.ok(mergeCandidates([open, around], open, open.endedAt).prev);
+});
+
+test("an overlap on one side does not widen the other side's tolerance", () => {
+  const overlapping = entry("overlapping", at(10, 30), at(11, 0));
+  const tooFar = entry("tooFar", at(9, 0), at(10, 20) - MERGE_GAP_MS - 1);
+  const candidates = mergeCandidates(
+    [overlapping, tooFar, open],
+    open,
+    open.endedAt,
+  );
+  assert.equal(candidates.next?.id, "overlapping");
   assert.equal(candidates.prev, undefined);
-  assert.equal(candidates.next, undefined);
+});
+
+test("an overlap beats a gap on the same side", () => {
+  const gapped = entry("gapped", at(10, 43), at(11, 0));
+  const overlapping = entry("overlapping", at(10, 39), at(11, 0));
+  const candidates = mergeCandidates(
+    [gapped, overlapping, open],
+    open,
+    open.endedAt,
+  );
+  assert.equal(candidates.next?.id, "overlapping");
+  assert.equal(candidates.nextGapMs, 0);
+});
+
+test("an overlap across midnight is not a neighbour", () => {
+  const late = entry("late", midnight - 5 * MINUTE, midnight + 5 * MINUTE);
+  const early = entry("early", midnight - 2 * MINUTE, midnight + 10 * MINUTE);
+  assert.equal(
+    mergeCandidates([late, early], late, late.endedAt).next,
+    undefined,
+  );
+  assert.equal(
+    mergeCandidates([late, early], early, early.endedAt).prev,
+    undefined,
+  );
+});
+
+test("an overlap that ends exactly at midnight is one day's work", () => {
+  const evening = entry("evening", midnight - 60 * MINUTE, midnight);
+  const late = entry("late", midnight - 10 * MINUTE, midnight - MINUTE);
+  const candidates = mergeCandidates([evening, late], evening, evening.endedAt);
+  assert.equal(candidates.next?.id, "late");
 });
 
 test("a neighbour on the other side of midnight is not a neighbour", () => {
@@ -117,4 +195,94 @@ test("a recording entry is measured from its live edge", () => {
   const candidates = mergeCandidates([live, after], live, at(10, 20));
   assert.equal(candidates.next?.id, "after");
   assert.equal(candidates.nextGapMs, 2 * MINUTE);
+});
+
+/** The locked rule the sheet uses: approved entries are frozen. */
+const approved = (e: TimeEntry): boolean => e.status === "approved";
+
+test("a lone session has both merge sides present and unavailable", () => {
+  const candidates = mergeCandidates([open], open, open.endedAt);
+  assert.deepEqual(mergeBlocks(candidates, approved), {
+    prev: "none",
+    next: "none",
+  });
+});
+
+test("the first, middle and last of a run enable the sides that have a neighbour", () => {
+  const top = entry("top", at(10, 0), at(10, 20));
+  const middle = entry("middle", at(10, 20), at(10, 40));
+  const bottom = entry("bottom", at(10, 40), at(11, 0));
+  const run = [top, middle, bottom];
+  const sides = (current: TimeEntry) =>
+    mergeBlocks(mergeCandidates(run, current, current.endedAt), approved);
+  assert.deepEqual(sides(top), { prev: "none", next: undefined });
+  assert.deepEqual(sides(middle), { prev: undefined, next: undefined });
+  assert.deepEqual(sides(bottom), { prev: undefined, next: "none" });
+});
+
+test("two sessions leave the far side of each unavailable", () => {
+  const top = entry("top", at(10, 0), at(10, 20));
+  const bottom = entry("bottom", at(10, 20), at(10, 40));
+  const sides = (current: TimeEntry) =>
+    mergeBlocks(
+      mergeCandidates([top, bottom], current, current.endedAt),
+      approved,
+    );
+  assert.deepEqual(sides(top), { prev: "none", next: undefined });
+  assert.deepEqual(sides(bottom), { prev: undefined, next: "none" });
+});
+
+test("an approved neighbour is blocked, not absent", () => {
+  const before = entry("before", at(10, 0), at(10, 20));
+  before.status = "approved";
+  const after = entry("after", at(10, 40), at(11, 0));
+  const candidates = mergeCandidates([before, open, after], open, open.endedAt);
+  assert.deepEqual(mergeBlocks(candidates, approved), {
+    prev: "locked",
+    next: undefined,
+  });
+});
+
+test("no merge shortcut fires", () => {
+  const key = (
+    name: string,
+    modifiers: { metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean } = {},
+  ) =>
+    entryShortcut({
+      key: name,
+      metaKey: false,
+      ctrlKey: false,
+      altKey: false,
+      ...modifiers,
+    });
+  for (const name of ["m", "M"]) {
+    assert.equal(key(name), undefined);
+    assert.equal(key(name, { altKey: true }), undefined);
+    assert.equal(key(name, { metaKey: true }), undefined);
+    assert.equal(key(name, { ctrlKey: true }), undefined);
+  }
+});
+
+test("the other entry shortcuts are unchanged", () => {
+  const key = (
+    name: string,
+    modifiers: { metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean } = {},
+  ) =>
+    entryShortcut({
+      key: name,
+      metaKey: false,
+      ctrlKey: false,
+      altKey: false,
+      ...modifiers,
+    });
+  assert.equal(key("s"), "split");
+  assert.equal(key("S"), "split");
+  assert.equal(key("s", { metaKey: true }), undefined);
+  assert.equal(key("s", { altKey: true }), undefined);
+  assert.equal(key("Escape"), "close");
+  assert.equal(key("Enter", { metaKey: true }), "accept");
+  assert.equal(key("Enter", { ctrlKey: true }), "accept");
+  assert.equal(key("Enter"), undefined);
+  assert.equal(key("Backspace", { metaKey: true }), "reject");
+  assert.equal(key("Backspace"), undefined);
 });

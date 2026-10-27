@@ -2,8 +2,14 @@ import { useEffect, useState } from "react";
 import type { EntryReview } from "../hooks/useEntryReview";
 import { useSettings } from "../hooks/useSettings";
 import { entryEnd, isLocked, isTyping } from "../lib/entries";
+import { entryShortcut } from "../lib/entryShortcuts";
 import { formatDuration, formatTime } from "../lib/format";
-import type { MergeCandidate } from "../lib/merge";
+import {
+  MERGE_GAP_MS,
+  type MergeBlock,
+  type MergeCandidate,
+  mergeBlocks,
+} from "../lib/merge";
 import { shortcutLabel } from "../lib/platform";
 import type { Category, Project } from "../lib/types";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -30,14 +36,22 @@ interface EntryReviewSheetProps {
   pickSplitOnTimeline?: boolean;
 }
 
-const NEIGHBOUR_LOCKED =
-  "The adjacent entry is approved. Unapprove it to merge.";
+const MERGE_BLOCKED: Record<"prev" | "next", Record<MergeBlock, string>> = {
+  prev: {
+    none: `No earlier entry on the same day within ${formatDuration(MERGE_GAP_MS)} of this one.`,
+    locked: "The earlier entry is approved. Unapprove it to merge.",
+  },
+  next: {
+    none: `No later entry on the same day within ${formatDuration(MERGE_GAP_MS)} of this one.`,
+    locked: "The later entry is approved. Unapprove it to merge.",
+  },
+};
 
 /**
  * The entry review panel bound to `useEntryReview`, with its keyboard
- * contract: ⌘↵ accepts, ⌘⌫ rejects, S splits, M merges, Esc closes (or leaves
- * a split in progress). The panel itself
- * owns 1–3, C, P, and E. Renders nothing while no entry is open.
+ * contract: ⌘↵ accepts, ⌘⌫ rejects, S splits, Esc closes (or leaves a
+ * split in progress). Merging has no shortcut. The panel itself owns 1–3, C, P,
+ * and E. Renders nothing while no entry is open.
  */
 export function EntryReviewSheet({
   review,
@@ -60,63 +74,37 @@ export function EntryReviewSheet({
   const prevId = mergeCandidates?.prev?.id;
   const nextId = mergeCandidates?.next?.id;
   const locked = detail ? isLocked(detail.entry) : false;
+  const blocks = mergeBlocks(mergeCandidates, isLocked);
   const mergeBlocked = {
-    prev:
-      mergeCandidates?.prev && isLocked(mergeCandidates.prev)
-        ? NEIGHBOUR_LOCKED
-        : undefined,
-    next:
-      mergeCandidates?.next && isLocked(mergeCandidates.next)
-        ? NEIGHBOUR_LOCKED
-        : undefined,
+    prev: blocks.prev && MERGE_BLOCKED.prev[blocks.prev],
+    next: blocks.next && MERGE_BLOCKED.next[blocks.next],
   };
 
   useEffect(() => {
     if (!detail) return;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (isTyping(event.target)) return;
-      const command = event.metaKey || event.ctrlKey;
       const approved = detail.entry.status === "approved";
+      const shortcut = entryShortcut(event);
       // The split dialog handles its own keys.
       if (review.splitting?.stage === "confirm") return;
-      if (event.key === "Escape") {
+      if (shortcut === "close") {
         if (review.splitting) review.cancelSplit();
         else close();
-      } else if (command && event.key === "Enter") {
+      } else if (shortcut === "accept") {
         event.preventDefault();
         if (detail.entry.categoryId && !approved) accept(detail.entry.id);
-      } else if (command && event.key === "Backspace") {
+      } else if (shortcut === "reject") {
         event.preventDefault();
         if (!approved) reject(detail.entry.id);
-      } else if (!command && !event.altKey && event.key.toLowerCase() === "s") {
+      } else if (shortcut === "split") {
         event.preventDefault();
         if (!locked) review.beginSplit(pickSplitOnTimeline);
-      } else if (!command && !event.altKey && event.key.toLowerCase() === "m") {
-        if (locked) return;
-        if (prevId && !mergeBlocked.prev) {
-          event.preventDefault();
-          void review.merge(prevId);
-        } else if (nextId && !mergeBlocked.next) {
-          event.preventDefault();
-          void review.merge(nextId);
-        }
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [
-    detail,
-    accept,
-    reject,
-    close,
-    review,
-    prevId,
-    nextId,
-    locked,
-    mergeBlocked.prev,
-    mergeBlocked.next,
-    pickSplitOnTimeline,
-  ]);
+  }, [detail, accept, reject, close, review, locked, pickSplitOnTimeline]);
 
   if (!detail) return null;
   return (
@@ -141,20 +129,8 @@ export function EntryReviewSheet({
           onReject={() => reject(detail.entry.id)}
           onUnapprove={() => void review.unapprove()}
           onSplit={() => review.beginSplit(pickSplitOnTimeline)}
-          canMerge={Boolean(prevId || nextId)}
-          onMerge={
-            prevId
-              ? () => void review.merge(prevId)
-              : nextId
-                ? () => void review.merge(nextId)
-                : undefined
-          }
-          onMergePrev={
-            prevId && nextId ? () => void review.merge(prevId) : undefined
-          }
-          onMergeNext={
-            prevId && nextId ? () => void review.merge(nextId) : undefined
-          }
+          onMergePrev={prevId ? () => void review.merge(prevId) : undefined}
+          onMergeNext={nextId ? () => void review.merge(nextId) : undefined}
           mergeBlocked={mergeBlocked}
           mergeGap={{
             prev: mergeCandidates?.prevGapMs,

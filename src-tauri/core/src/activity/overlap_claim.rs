@@ -11,21 +11,6 @@ const MIN: u64 = 60_000;
 const DAY: u64 = 24 * 60 * MIN;
 const NOW: u64 = 900 * MIN;
 const TICK: u64 = 5_000;
-/// Starting points for the runs of random writes below.
-const SEEDS: [u64; 12] = [
-    0x2545_F491_4F6C_DD1D,
-    0x9E37_79B9_7F4A_7C15,
-    1,
-    2,
-    3,
-    0xDEAD_BEEF,
-    0x00C0_FFEE,
-    42,
-    7_777,
-    123_456_789,
-    0xABCD_EF01,
-    99,
-];
 
 fn store() -> ActivityStore {
     let mut store = ActivityStore::from_conn(Connection::open_in_memory().expect("in-memory db"))
@@ -710,14 +695,67 @@ fn the_per_day_union_equals_the_per_day_sum_after_any_run_of_writes() {
     );
 }
 
-/// The same with capture running: the clock moves, the live session grows, and
-/// hand-made entries are added and edited over past, live and future minutes.
-/// (Undo, redo and merge are run against entries alone above: with a live
-/// session regrowing underneath, undoing a change can hand back minutes the
-/// session has since recorded into, and that interplay is not covered here.)
+/// Seeds for the random runs: `default` of them, or as many as
+/// `OVERLAP_FUZZ_SEEDS` says for a long local sweep.
+/// The entries as (status initial, start, end) in minutes, for failure messages.
+fn describe(store: &ActivityStore) -> String {
+    let list: Vec<String> = entries(store)
+        .iter()
+        .map(|e| {
+            format!(
+                "{}{:.1}-{:.1}",
+                &e.status[..1],
+                e.started_at as f64 / 60_000.0,
+                e.ended_at as f64 / 60_000.0
+            )
+        })
+        .collect();
+    list.join(" ")
+}
+
+/// Who owns the recent activity, for failure messages.
+fn describe_segments(store: &ActivityStore, since: u64) -> String {
+    let mut statement = store
+        .conn
+        .prepare("SELECT id, started_at, ended_at, entry_id FROM segments WHERE started_at >= ?1 ORDER BY started_at, id;")
+        .unwrap();
+    let rows: Vec<String> = statement
+        .query_map([(since * MIN) as i64], |row| {
+            Ok(format!(
+                "#{} {:.1}-{} {}",
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)? as f64 / 60_000.0,
+                row.get::<_, Option<i64>>(2)?
+                    .map_or("open".to_string(), |end| format!(
+                        "{:.1}",
+                        end as f64 / 60_000.0
+                    )),
+                row.get::<_, Option<String>>(3)?
+                    .map_or("-".to_string(), |id| id[id.len() - 4..].to_string()),
+            ))
+        })
+        .unwrap()
+        .map(|row| row.unwrap())
+        .collect();
+    rows.join(", ")
+}
+
+fn fuzz_seeds(default: usize) -> impl Iterator<Item = u64> {
+    let count = std::env::var("OVERLAP_FUZZ_SEEDS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(default);
+    (1..=count as u64).map(|i| i.wrapping_mul(0x9E37_79B9_7F4A_7C15))
+}
+
+/// The same with capture running: the clock moves, the live session grows,
+/// hand-made entries are added, edited and merged over past, live and future
+/// minutes, and changes are undone and redone while the live session records
+/// into the time they free. After every step the entries cover exactly as much
+/// time as their lengths add up to, and at most one is live.
 #[test]
 fn the_union_equals_the_sum_while_capture_keeps_recording() {
-    for start in SEEDS.into_iter().take(4) {
+    for start in fuzz_seeds(12) {
         let mut seed: u64 = start;
         let mut random = move |below: u64| {
             seed ^= seed << 13;
@@ -735,8 +773,9 @@ fn the_union_equals_the_sum_while_capture_keeps_recording() {
             let pick = |n: u64| -> Option<String> {
                 (!list.is_empty()).then(|| list[(n % list.len() as u64) as usize].id.clone())
             };
-            // Refusals (over approved time) are part of the run.
-            let _ = match random(6) {
+            // Refusals (over approved time, a change that no longer applies)
+            // are part of the run.
+            let _ = match random(9) {
                 0..=2 => {
                     let to_clock = clock + 1 + random(8);
                     log.push(format!("work {clock}->{to_clock}"));
@@ -752,7 +791,7 @@ fn the_union_equals_the_sum_while_capture_keeps_recording() {
                         .create_manual_entry(new_entry(from, to, random(4) != 0), now)
                         .map(|_| ())
                 }
-                _ => match pick(random(1000)) {
+                4 | 5 => match pick(random(1000)) {
                     Some(id) => {
                         let (from, to) = if random(2) == 0 {
                             (Some(clock.saturating_sub(random(90))), None)
@@ -767,12 +806,45 @@ fn the_union_equals_the_sum_while_capture_keeps_recording() {
                     }
                     None => Ok(()),
                 },
+                6 => match (pick(random(1000)), pick(random(1000))) {
+                    (Some(a), Some(b)) => {
+                        log.push(format!("merge at {clock}"));
+                        store.merge_time_entries(&a, &b, now).map(|_| ())
+                    }
+                    _ => Ok(()),
+                },
+                _ => {
+                    log.push(format!(
+                        "    before: {} | {}",
+                        describe(&store),
+                        describe_segments(&store, clock.saturating_sub(70))
+                    ));
+                    if random(2) == 0 {
+                        log.push(format!("undo at {clock}"));
+                        store
+                            .undo(now)
+                            .map(|label| log.push(format!("  undid {label:?}")))
+                    } else {
+                        log.push(format!("redo at {clock}"));
+                        store
+                            .redo(now)
+                            .map(|label| log.push(format!("  redid {label:?}")))
+                    }
+                }
             };
             let now = clock * MIN;
             store.rebuild_range(0, now + 120 * MIN, now).unwrap();
-            if let Some(problem) = days_that_overlap(&store) {
+            log.push(format!("    => {}", describe(&store)));
+            let live = entries(&store)
+                .iter()
+                .filter(|e| e.status == "building")
+                .count();
+            let problem = days_that_overlap(&store)
+                .or_else(|| (live > 1).then(|| format!("{live} live entries")));
+            if let Some(problem) = problem {
                 panic!(
-                    "{problem}\n{}",
+                    "seed {start}: {problem}\nsegments: {}\n{}",
+                    describe_segments(&store, clock.saturating_sub(15)),
                     log[log.len().saturating_sub(12)..].join("\n")
                 );
             }

@@ -22,7 +22,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use rusqlite::{params, params_from_iter, types::Value, Connection};
+use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension};
 
 use super::{deletions::Deletion, merge_gap, segment_from_row, ActivityStore, LOCKED};
 use crate::entry_builder::{describe, SegmentInput};
@@ -337,6 +337,62 @@ impl Journal {
     }
 }
 
+/// `id` has just become live again. If another live session has been
+/// recording since, they are one session when nothing sits between them: the
+/// newer one is folded into `id` (its activity moves over and it goes, as a
+/// rebuild would have done). Otherwise `id` is closed. Returns whether `id`
+/// is still live.
+fn settle_live(conn: &Connection, id: &str, now: u64) -> Result<bool, String> {
+    let newer: Option<(String, i64, i64)> = conn
+        .query_row(
+            "SELECT id, started_at, ended_at FROM time_entries
+             WHERE status = 'building' AND deleted_at IS NULL AND id != ?1;",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let Some((other, other_start, other_end)) = newer else {
+        return Ok(true);
+    };
+    let (start, end): (i64, i64) = conn
+        .query_row(
+            "SELECT started_at, ended_at FROM time_entries WHERE id = ?1;",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    let between: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM time_entries
+             WHERE deleted_at IS NULL AND id NOT IN (?1, ?2)
+               AND started_at < ?3 AND ended_at > ?4);",
+            params![id, other, other_start, end],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if other_start >= start && !between {
+        conn.execute(
+            "UPDATE segments SET entry_id = ?1 WHERE entry_id = ?2;",
+            params![id, other],
+        )
+        .map_err(|e| e.to_string())?;
+        Stash::take(conn, &other)?;
+        conn.execute(
+            "UPDATE time_entries SET ended_at = MAX(ended_at, ?1), updated_at = ?2 WHERE id = ?3;",
+            params![other_end, now as i64, id],
+        )
+        .map_err(|e| e.to_string())?;
+        return Ok(true);
+    }
+    conn.execute(
+        "UPDATE time_entries SET status = 'pending', updated_at = ?1 WHERE id = ?2;",
+        params![now as i64, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(false)
+}
+
 impl Edit {
     fn apply(&mut self, conn: &Connection, undo: bool, now: u64) -> Result<(), String> {
         // Entries come back first, so everything below finds them; the ones
@@ -350,6 +406,7 @@ impl Edit {
                     conn,
                     restored.int(STARTED),
                     restored.int(ENDED),
+                    &[],
                 )?;
                 change.stash = None;
             }
@@ -417,6 +474,25 @@ impl Edit {
                 change.stash = Some(Stash::take(conn, &change.id)?);
             }
         }
+        // Capture may have carried on in a newer live session since: an entry
+        // that comes back live joins it, or, when something sits between them,
+        // stays closed. Never two live sessions.
+        for change in &mut self.entries {
+            let (from, to) = Self::direction(change, undo);
+            let (Some(from), Some(to)) = (from, to) else {
+                continue;
+            };
+            if to.building() && !from.building() && !settle_live(conn, &change.id, now)? {
+                let mut row = to.clone();
+                row.0[STATUS] = Value::Text("pending".to_string());
+                // The change now reads as what it did, so the way back is exact.
+                if undo {
+                    change.before = Some(row);
+                } else {
+                    change.after = Some(row);
+                }
+            }
+        }
         for (id, before, after) in &self.outcomes {
             let (from, to) = if undo {
                 (after, before)
@@ -475,6 +551,10 @@ pub(super) struct Split {
     stash: Option<Stash>,
 }
 
+/// What a merge hands back: the merged entry, the secondary's stash, the
+/// secondary's and the primary's segments, and what it took from others.
+type MergeOutcome = (TimeEntry, Stash, Vec<i64>, Vec<i64>, Option<Edit>);
+
 /// A merge: `primary` absorbed `secondary`. The secondary's segments are
 /// remembered by id rather than by where they sit in time, because overlapping
 /// entries interleave in time.
@@ -483,6 +563,8 @@ pub(super) struct Merge {
     secondary: String,
     /// The secondary's segments when it was absorbed.
     segments: Vec<i64>,
+    /// The primary's own segments when the merge happened.
+    kept: Vec<i64>,
     /// Whether the secondary was the live entry, whose later segments return
     /// to it on undo.
     secondary_live: bool,
@@ -672,6 +754,7 @@ impl ActivityStore {
 
     fn apply(&mut self, command: &mut Command, undo: bool, now: u64) -> Result<(), String> {
         let label = command.label();
+        let overlapping = self.overlapping_pairs()?;
         let touched: Vec<String> = match command {
             Command::Deletion(deletion) => {
                 deletion.apply(&self.conn, undo, now)?;
@@ -689,7 +772,9 @@ impl ActivityStore {
                 }
                 stepped.taken = None;
                 stepped.apply(&self.conn, undo, now)?;
-                stepped.taken = self.reclaim(&stepped, undo, now)?.map(Box::new);
+                stepped.taken = self
+                    .reclaim(&stepped, undo, &overlapping, now)?
+                    .map(Box::new);
                 *edit = stepped;
                 edit.entries
                     .iter()
@@ -714,10 +799,11 @@ impl ActivityStore {
                         claimed.apply(&self.conn, true, now)?;
                     }
                 } else {
-                    let (_, stash, segments, claimed) =
+                    let (_, stash, segments, kept, claimed) =
                         self.merge_claiming(&merge.primary, &merge.secondary, now)?;
                     merge.stash = Some(stash);
                     merge.segments = segments;
+                    merge.kept = kept;
                     merge.claimed = claimed;
                     merge.merged_at = now;
                     merge.after = EntryRow::read(&self.conn, &merge.primary)?.ok_or(CONFLICT)?;
@@ -725,6 +811,18 @@ impl ActivityStore {
                 vec![merge.primary.clone()]
             }
         };
+        if !matches!(command, Command::Edit(_)) {
+            // (Edits settle theirs while recording them, above.)
+            let winners = match command {
+                Command::Split(split) => vec![split.original.clone(), split.second.clone()],
+                Command::Merge(merge) => vec![merge.primary.clone(), merge.secondary.clone()],
+                _ => Vec::new(),
+            };
+            self.journal = Some(Journal::default());
+            let settled = self.settle_overlaps(&overlapping, &winners, now);
+            self.journal = None;
+            settled?;
+        }
         let kind = if undo { "undone" } else { "redone" };
         let payload = serde_json::json!({ "action": label }).to_string();
         for id in touched {
@@ -735,30 +833,109 @@ impl ActivityStore {
 
     /// After a step, claims the minutes it gave entries back from anyone who
     /// holds them now, so undo and redo keep one owner per minute too.
-    fn reclaim(&mut self, edit: &Edit, undo: bool, now: u64) -> Result<Option<Edit>, String> {
-        let mut ids: Vec<&str> = Vec::new();
-        let mut ranges = Vec::new();
+    fn reclaim(
+        &mut self,
+        edit: &Edit,
+        undo: bool,
+        overlapping: &BTreeSet<(String, String)>,
+        now: u64,
+    ) -> Result<Option<Edit>, String> {
+        let mut claims: Vec<(&str, Vec<(u64, u64)>)> = Vec::new();
         for change in &edit.entries {
-            ids.push(&change.id);
             let (from, to) = Edit::direction(change, undo);
             let Some(to) = to else {
                 continue;
             };
-            let end = |row: &EntryRow| row.int(ENDED);
             let held: Vec<(u64, u64)> = from
-                .map(|row| (row.int(STARTED), end(row)))
+                .map(|row| (row.int(STARTED), row.int(ENDED)))
                 .into_iter()
                 .collect();
-            ranges.extend(super::claim::gained(&held, to.int(STARTED), end(to)));
+            let gained = super::claim::gained(&held, to.int(STARTED), to.int(ENDED));
+            if !gained.is_empty() {
+                claims.push((&change.id, gained));
+            }
         }
-        if ranges.is_empty() {
-            return Ok(None);
-        }
+        // Each entry claims for itself, so an entry the same edit trimmed that
+        // the live session has since grown back into gives that up too.
         self.journal = Some(Journal::default());
-        let claimed = self.claim(&ids, &ranges, now);
+        let mut claimed = Ok(());
+        for (id, ranges) in &claims {
+            claimed = self.claim(&[id], ranges, now);
+            if claimed.is_err() {
+                break;
+            }
+        }
+        let winners: Vec<String> = edit
+            .entries
+            .iter()
+            .filter(|change| Edit::direction(change, undo).1.is_some())
+            .map(|change| change.id.clone())
+            .collect();
+        if claimed.is_ok() {
+            claimed = self.settle_overlaps(overlapping, &winners, now);
+        }
         let journal = self.journal.take().unwrap_or_default();
         claimed?;
         journal.into_edit(edit.label, &self.conn, Vec::new())
+    }
+
+    /// Every pair of entries that share time.
+    fn overlapping_pairs(&self) -> Result<BTreeSet<(String, String)>, String> {
+        let mut statement = self
+            .conn
+            .prepare(
+                "SELECT a.id, b.id FROM time_entries a JOIN time_entries b
+                   ON a.id < b.id AND a.started_at < b.ended_at AND b.started_at < a.ended_at
+                  AND a.deleted_at IS NULL AND b.deleted_at IS NULL;",
+            )
+            .map_err(|e| e.to_string())?;
+        let pairs = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(|e| e.to_string())?
+            .collect::<rusqlite::Result<_>>()
+            .map_err(|e| e.to_string())?;
+        Ok(pairs)
+    }
+
+    /// The last word of undo and redo: whatever it did, no two entries share
+    /// time that did not share it before. Where the step brought back an
+    /// entry (`winners`) over time another holds, the restored entry keeps it
+    /// and the other gives it up (or the step is refused when that is
+    /// approved). Time two other entries share is the newer entry's to give.
+    fn settle_overlaps(
+        &mut self,
+        before: &BTreeSet<(String, String)>,
+        winners: &[String],
+        now: u64,
+    ) -> Result<(), String> {
+        for (a, b) in self.overlapping_pairs()?.difference(before) {
+            let (Ok(first), Ok(second)) = (self.time_entry(a), self.time_entry(b)) else {
+                continue;
+            };
+            // Settled by an earlier claim in this loop.
+            if first.deleted_at.is_some()
+                || second.deleted_at.is_some()
+                || first.started_at >= second.ended_at
+                || second.started_at >= first.ended_at
+            {
+                continue;
+            }
+            let restored = |id: &String| winners.contains(id);
+            let winner = match (restored(a), restored(b)) {
+                (true, false) => a,
+                (false, true) => b,
+                (true, true) => continue,
+                // Neither came back: the one that is recording yields.
+                (false, false) if first.status == "building" => b,
+                (false, false) => a,
+            };
+            let (from, to) = (
+                first.started_at.max(second.started_at),
+                first.ended_at.min(second.ended_at),
+            );
+            self.claim(&[winner], &[(from, to)], now)?;
+        }
+        Ok(())
     }
 
     // --- Split ---------------------------------------------------------------
@@ -943,13 +1120,14 @@ impl ActivityStore {
     ) -> Result<TimeEntry, String> {
         let before = EntryRow::read(&self.conn, primary_id)?.ok_or("Primary entry not found")?;
         let secondary = self.time_entry(secondary_id)?;
-        let (merged, stash, segments, claimed) =
+        let (merged, stash, segments, kept, claimed) =
             self.atomically(|store| store.merge_claiming(primary_id, secondary_id, now))?;
         let after = EntryRow::read(&self.conn, primary_id)?.ok_or(CONFLICT)?;
         self.record_undo(Command::Merge(Merge {
             primary: primary_id.to_string(),
             secondary: secondary_id.to_string(),
             segments,
+            kept,
             secondary_live: secondary.status == "building",
             merged_at: now,
             before,
@@ -966,15 +1144,16 @@ impl ActivityStore {
         primary_id: &str,
         secondary_id: &str,
         now: u64,
-    ) -> Result<(TimeEntry, Stash, Vec<i64>, Option<Edit>), String> {
+    ) -> Result<MergeOutcome, String> {
         self.journal = Some(Journal::default());
         let merged = self.merge_into(primary_id, secondary_id, now);
         let journal = self.journal.take().unwrap_or_default();
-        let (merged, stash, segments) = merged?;
+        let (merged, stash, segments, kept) = merged?;
         Ok((
             merged,
             stash,
             segments,
+            kept,
             journal.into_edit("Merge", &self.conn, Vec::new())?,
         ))
     }
@@ -984,7 +1163,7 @@ impl ActivityStore {
         primary_id: &str,
         secondary_id: &str,
         now: u64,
-    ) -> Result<(TimeEntry, Stash, Vec<i64>), String> {
+    ) -> Result<(TimeEntry, Stash, Vec<i64>, Vec<i64>), String> {
         if primary_id == secondary_id {
             return Err("An entry cannot be merged with itself".to_string());
         }
@@ -1050,17 +1229,19 @@ impl ActivityStore {
             )
             .map_err(|e| e.to_string())?;
 
-        let segments: Vec<i64> = {
+        let owned = |id: &str| -> Result<Vec<i64>, String> {
             let mut statement = self
                 .conn
                 .prepare("SELECT id FROM segments WHERE entry_id = ?1;")
                 .map_err(|e| e.to_string())?;
             let rows = statement
-                .query_map([secondary_id], |row| row.get(0))
+                .query_map([id], |row| row.get(0))
                 .map_err(|e| e.to_string())?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
-                .map_err(|e| e.to_string())?
+                .map_err(|e| e.to_string())
         };
+        let kept = owned(primary_id)?;
+        let segments = owned(secondary_id)?;
         self.conn
             .execute(
                 "UPDATE segments SET entry_id = ?1 WHERE entry_id = ?2;",
@@ -1076,7 +1257,7 @@ impl ActivityStore {
             .map_err(|e| e.to_string())?;
         self.describe_closed(primary_id)?;
         self.log_event(primary_id, "merged", "user", None, now);
-        Ok((self.time_entry(primary_id)?, stash, segments))
+        Ok((self.time_entry(primary_id)?, stash, segments, kept))
     }
 
     fn unmerge(&mut self, merge: &mut Merge, now: u64) -> Result<(), String> {
@@ -1101,6 +1282,23 @@ impl ActivityStore {
                 )
                 .map_err(|e| e.to_string())?;
         }
+        // Activity nobody owned before the merge, which the rebuilt merged
+        // entry took in since (it covered the time), is nobody's again.
+        let kept: Vec<String> = merge.kept.iter().map(i64::to_string).collect();
+        self.conn
+            .execute(
+                &format!(
+                    "UPDATE segments SET entry_id = NULL
+                     WHERE entry_id = ?1 AND started_at < ?2 AND id NOT IN ({});",
+                    if kept.is_empty() {
+                        "0".to_string()
+                    } else {
+                        kept.join(",")
+                    }
+                ),
+                params![merge.primary, merge.merged_at as i64],
+            )
+            .map_err(|e| e.to_string())?;
         if merge.secondary_live {
             // Capture kept writing into the merged entry; the live half takes
             // back what it recorded since.
@@ -1144,6 +1342,21 @@ impl ActivityStore {
                 params![recorded as i64, now as i64, merge.secondary],
             )
             .map_err(|e| e.to_string())?;
+        // Capture may have carried on in a newer live session since the merge
+        // closed a half that was live: it joins that session, or stays closed.
+        for id in [&merge.primary, &merge.secondary] {
+            let live: bool = self
+                .conn
+                .query_row(
+                    "SELECT status = 'building' FROM time_entries WHERE id = ?1;",
+                    [id],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            if live {
+                settle_live(&self.conn, id, now)?;
+            }
+        }
         Ok(())
     }
 

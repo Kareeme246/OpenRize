@@ -90,13 +90,27 @@ pub const LOCKED: &str = "Approved entries are locked. Unapprove to change them.
 /// Approved time is never given up to another entry, however the change is made.
 pub const APPROVED_OVERLAP: &str = "This time range overlaps approved entries. Unapprove those entries first, or choose a time that avoids them.";
 
-fn ensure_no_approved_overlap(conn: &Connection, start: u64, end: u64) -> Result<(), String> {
-    let overlaps: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM time_entries WHERE deleted_at IS NULL AND (status = 'approved' OR invoice_id IS NOT NULL) AND started_at < ?2 AND ended_at > ?1);",
-        params![start as i64, end as i64],
-        |row| row.get(0),
-    ).map_err(|error| error.to_string())?;
-    if overlaps {
+/// Fails when approved (or invoiced) time other than `except` lies in
+/// `start..end`.
+fn ensure_no_approved_overlap(
+    conn: &Connection,
+    start: u64,
+    end: u64,
+    except: &[&str],
+) -> Result<(), String> {
+    let mut statement = conn
+        .prepare(
+            "SELECT id FROM time_entries WHERE deleted_at IS NULL AND (status = 'approved' OR invoice_id IS NOT NULL) AND started_at < ?2 AND ended_at > ?1;",
+        )
+        .map_err(|error| error.to_string())?;
+    let ids = statement
+        .query_map(params![start as i64, end as i64], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| error.to_string())?;
+    if ids.iter().any(|id| !except.contains(&id.as_str())) {
         return Err(APPROVED_OVERLAP.to_string());
     }
     Ok(())

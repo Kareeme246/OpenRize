@@ -55,7 +55,7 @@ impl ActivityStore {
         now: u64,
     ) -> Result<(), String> {
         for &(start, end) in ranges {
-            ensure_no_approved_overlap(&self.conn, start, end)?;
+            ensure_no_approved_overlap(&self.conn, start, end, except)?;
         }
         for &(start, end) in ranges {
             for id in self.holders(except, start, end, now)? {

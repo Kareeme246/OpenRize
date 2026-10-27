@@ -358,12 +358,19 @@ pub(super) struct Split {
     stash: Option<Stash>,
 }
 
-/// A merge: `primary` absorbed `secondary`, which met it at `boundary`.
+/// A merge: `primary` absorbed `secondary`. The secondary's segments are
+/// remembered by id rather than by where they sit in time, because overlapping
+/// entries interleave in time.
 pub(super) struct Merge {
     primary: String,
     secondary: String,
-    boundary: u64,
-    secondary_later: bool,
+    /// The secondary's segments when it was absorbed.
+    segments: Vec<i64>,
+    /// Whether the secondary was the live entry, whose later segments return
+    /// to it on undo.
+    secondary_live: bool,
+    /// When the merge happened; segments recorded after it belong to the live half.
+    merged_at: u64,
     before: EntryRow,
     after: EntryRow,
     /// The secondary while the merge stands.
@@ -531,7 +538,11 @@ impl ActivityStore {
                 if undo {
                     self.unmerge(merge, now)?;
                 } else {
-                    merge.stash = Some(self.merge_into(&merge.primary, &merge.secondary, now)?.1);
+                    let (_, stash, segments) =
+                        self.merge_into(&merge.primary, &merge.secondary, now)?;
+                    merge.stash = Some(stash);
+                    merge.segments = segments;
+                    merge.merged_at = now;
                     merge.after = EntryRow::read(&self.conn, &merge.primary)?.ok_or(CONFLICT)?;
                 }
                 vec![merge.primary.clone()]
@@ -721,19 +732,15 @@ impl ActivityStore {
     ) -> Result<TimeEntry, String> {
         let before = EntryRow::read(&self.conn, primary_id)?.ok_or("Primary entry not found")?;
         let secondary = self.time_entry(secondary_id)?;
-        let (merged, stash) =
+        let (merged, stash, segments) =
             self.atomically(|store| store.merge_into(primary_id, secondary_id, now))?;
-        let secondary_later = secondary.started_at >= before.int(ENDED);
         let after = EntryRow::read(&self.conn, primary_id)?.ok_or(CONFLICT)?;
         self.record_undo(Command::Merge(Merge {
             primary: primary_id.to_string(),
             secondary: secondary_id.to_string(),
-            boundary: if secondary_later {
-                secondary.started_at
-            } else {
-                secondary.ended_at
-            },
-            secondary_later,
+            segments,
+            secondary_live: secondary.status == "building",
+            merged_at: now,
             before,
             after,
             stash: Some(stash),
@@ -746,7 +753,7 @@ impl ActivityStore {
         primary_id: &str,
         secondary_id: &str,
         now: u64,
-    ) -> Result<(TimeEntry, Stash), String> {
+    ) -> Result<(TimeEntry, Stash, Vec<i64>), String> {
         if primary_id == secondary_id {
             return Err("An entry cannot be merged with itself".to_string());
         }
@@ -766,12 +773,12 @@ impl ActivityStore {
         if primary.status == "approved" || secondary.status == "approved" {
             return Err(LOCKED.to_string());
         }
-        // Only a neighbour merges: one that touches, or misses by less than
-        // MERGE_GAP_MS. The merge spans both entries, so that gap becomes
-        // tracked time; overlapping entries have no border of their own.
+        // Only a neighbour merges: one that overlaps, touches, or misses by
+        // at most MERGE_GAP_MS, on one local day. The merge spans both
+        // entries, so that gap becomes tracked time and an overlap is absorbed.
         if merge_gap(&primary, &secondary).is_none() {
             return Err(
-                "Time entries can only merge with a neighbouring entry: they must touch, or sit less than five minutes apart".to_string(),
+                "Time entries can only merge with a neighbouring entry on the same day: they must overlap, touch, or sit no more than five minutes apart".to_string(),
             );
         }
 
@@ -792,6 +799,17 @@ impl ActivityStore {
             primary.status.as_str()
         };
 
+        let segments: Vec<i64> = {
+            let mut statement = self
+                .conn
+                .prepare("SELECT id FROM segments WHERE entry_id = ?1;")
+                .map_err(|e| e.to_string())?;
+            let rows = statement
+                .query_map([secondary_id], |row| row.get(0))
+                .map_err(|e| e.to_string())?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|e| e.to_string())?
+        };
         self.conn
             .execute(
                 "UPDATE segments SET entry_id = ?1 WHERE entry_id = ?2;",
@@ -807,7 +825,7 @@ impl ActivityStore {
             .map_err(|e| e.to_string())?;
         self.describe_closed(primary_id)?;
         self.log_event(primary_id, "merged", "user", None, now);
-        Ok((self.time_entry(primary_id)?, stash))
+        Ok((self.time_entry(primary_id)?, stash, segments))
     }
 
     fn unmerge(&mut self, merge: &mut Merge, now: u64) -> Result<(), String> {
@@ -824,17 +842,24 @@ impl ActivityStore {
             return Err(CONFLICT.to_string());
         }
         merge.stash.take().ok_or(CONFLICT)?.restore(&self.conn)?;
-        let side = if merge.secondary_later {
-            "started_at >= ?3"
-        } else {
-            "started_at < ?3"
-        };
-        self.conn
-            .execute(
-                &format!("UPDATE segments SET entry_id = ?1 WHERE entry_id = ?2 AND {side};"),
-                params![merge.secondary, merge.primary, merge.boundary as i64],
-            )
-            .map_err(|e| e.to_string())?;
+        for segment in &merge.segments {
+            self.conn
+                .execute(
+                    "UPDATE segments SET entry_id = ?1 WHERE id = ?2 AND entry_id = ?3;",
+                    params![merge.secondary, segment, merge.primary],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        if merge.secondary_live {
+            // Capture kept writing into the merged entry; the live half takes
+            // back what it recorded since.
+            self.conn
+                .execute(
+                    "UPDATE segments SET entry_id = ?1 WHERE entry_id = ?2 AND started_at >= ?3;",
+                    params![merge.secondary, merge.primary, merge.merged_at as i64],
+                )
+                .map_err(|e| e.to_string())?;
+        }
         // Whichever half was live gets the time recorded since the merge.
         let recorded = current.int(ENDED);
         let primary_end = if merge.before.building() {

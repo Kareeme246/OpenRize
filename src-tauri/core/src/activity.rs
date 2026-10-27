@@ -40,18 +40,46 @@ pub const IDLE_LABEL: &str = "Idle";
 /// decides which merge the review panel offers.
 pub const MERGE_GAP_MS: u64 = 300_000;
 
-/// The untracked time between two entries that are neighbours, or `None` when
-/// they overlap or sit further apart than `MERGE_GAP_MS`. The merge itself
-/// spans both entries and so claims exactly this gap as tracked time.
-pub fn merge_gap(entry: &TimeEntry, other: &TimeEntry) -> Option<u64> {
-    let gap = if other.started_at >= entry.ended_at {
-        other.started_at - entry.ended_at
-    } else if entry.started_at >= other.ended_at {
-        entry.started_at - other.ended_at
-    } else {
-        return None;
+/// Whether two instants fall on the same local calendar day.
+fn same_local_day(left: u64, right: u64) -> bool {
+    use chrono::{Local, TimeZone};
+    let day = |ms: u64| {
+        Local
+            .timestamp_millis_opt(ms as i64)
+            .earliest()
+            .map(|time| time.date_naive())
     };
-    (gap <= MERGE_GAP_MS).then_some(gap)
+    day(left) == day(right)
+}
+
+/// The untracked time between two entries that are neighbours, or `None` when
+/// they are not. Entries that overlap are neighbours with no gap between them;
+/// otherwise only `MERGE_GAP_MS` of gap is tolerated, and the tolerance never
+/// widens because of an overlap on the entry's other side. Either way both
+/// entries must be on one local calendar day: time either side of midnight is
+/// a different day's work. The merge spans the earliest start to the latest
+/// end, so it claims exactly this gap as tracked time and absorbs any overlap.
+pub fn merge_gap(entry: &TimeEntry, other: &TimeEntry) -> Option<u64> {
+    let (gap, near, far) = if other.started_at >= entry.ended_at {
+        (
+            other.started_at - entry.ended_at,
+            entry.ended_at,
+            other.started_at,
+        )
+    } else if entry.started_at >= other.ended_at {
+        (
+            entry.started_at - other.ended_at,
+            other.ended_at,
+            entry.started_at,
+        )
+    } else {
+        // The span's last instant is the one before its end, so a span that
+        // stops exactly at midnight still belongs to the day before.
+        let start = entry.started_at.min(other.started_at);
+        let last = entry.ended_at.max(other.ended_at).saturating_sub(1);
+        return same_local_day(start, last.max(start)).then_some(0);
+    };
+    (gap <= MERGE_GAP_MS && same_local_day(near, far)).then_some(gap)
 }
 
 /// Why every change to an approved entry is refused. Approval freezes an

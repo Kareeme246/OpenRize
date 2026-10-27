@@ -1,6 +1,6 @@
 [package]
 name = "openrize"
-version = "0.9.27"
+version = "0.9.28"
 description = "Automatic, private, local-first time tracking for your Mac"
 authors = ["Kareem Elgohry <kareemdev52@gmail.com>"]
 edition = "2021"
@@ -31,7 +31,6 @@ serde_json = "1"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 uuid = { version = "1", features = ["v7", "serde"] }
 url = "2"
-user-idle3 = "0.7.3"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 regex = "1"
 tauri-plugin-updater = "2"
@@ -49,6 +48,11 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 tauri-plugin-single-instance = "2"
 trash = "5.2.9"
 
+# Windows reads GetLastInputInfo itself (capture/windows.rs `idle_ms`): this
+# crate subtracts two tick counts as u32 and wraps when input lands between.
+[target.'cfg(not(windows))'.dependencies]
+user-idle3 = "0.7.3"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
 core-foundation-sys = "0.8"
@@ -65,13 +69,21 @@ windows = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
   "Win32_Media_Audio",
+  "Win32_Media_Audio_Endpoints",
   "Win32_Storage_FileSystem",
   "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_LibraryLoader",
   "Win32_System_Power",
   "Win32_System_RemoteDesktop",
+  "Win32_System_SystemInformation",
+  "Win32_System_SystemServices",
   "Win32_System_Threading",
+  "Win32_System_Variant",
   "Win32_UI_Accessibility",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }
 

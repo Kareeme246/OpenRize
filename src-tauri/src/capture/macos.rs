@@ -35,6 +35,13 @@ pub fn user_is_away() -> bool {
     screen_is_locked() || all_displays_asleep()
 }
 
+/// Milliseconds since the last keyboard or mouse input.
+pub fn idle_ms() -> u64 {
+    user_idle3::UserIdle::get_time()
+        .map(|idle| idle.duration().as_millis() as u64)
+        .unwrap_or(0)
+}
+
 fn screen_is_locked() -> bool {
     use core_foundation::base::{CFType, TCFType};
     use core_foundation::boolean::CFBoolean;

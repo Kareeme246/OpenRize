@@ -1,6 +1,6 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useState } from "react";
-import { useAccessibilityState } from "../hooks/useAccessibilityState";
+import { useRelaunch } from "../hooks/useRelaunch";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import { useToast } from "../hooks/useToast";
 import * as api from "../lib/api";
@@ -9,7 +9,7 @@ import {
   accessibilityCard,
   automationCard,
   type OnboardingStep,
-  onboardingStep,
+  onboardingAction,
   type PermissionCardView,
 } from "../lib/onboarding";
 import { ACCESSIBILITY_ID, roleLabel, TONE_CLASS } from "../lib/permissions";
@@ -20,47 +20,19 @@ const AUTOMATION_ID = "automation";
 /**
  * The first screen a Mac user sees: the permissions OpenRize can use, each
  * explained once. Accessibility is recommended and Automation optional, and
- * neither gates Continue, so skipping is the normal path. See `onboardingStep`
- * for when it comes up and when it steps aside.
+ * neither gates Continue, so skipping is the normal path. When a grant needs
+ * the app restarted, the same button becomes Restart. See `onboardingStep` for
+ * when it comes up and `useOnboarding` for the state behind it.
  */
-export function Onboarding() {
-  const accessibility = useAccessibilityState();
-  const [needed, setNeeded] = useState<boolean | null>(null);
-  const [shown, setShown] = useState(false);
-  const step = onboardingStep({ needed, shown, accessibility });
-
-  const readNeeded = useCallback(() => {
-    api
-      .onboardingNeeded()
-      .then(setNeeded)
-      .catch((cause: unknown) =>
-        console.error("Could not read onboarding", describeError(cause)),
-      );
-  }, []);
-  useEffect(readNeeded, [readNeeded]);
-  // A developer re-run brings the screen back at once, even if it was shown before.
-  useTauriEvent(api.ONBOARDING_CHANGED, () => {
-    readNeeded();
-    setShown(false);
-  });
-  useEffect(() => {
-    if (step !== "hidden") setShown(true);
-  }, [step]);
-
+export function Onboarding({
+  step,
+  onFinish,
+}: {
+  step: OnboardingStep;
+  onFinish: () => void;
+}) {
   if (step === "hidden") return null;
-  return (
-    <Screen
-      step={step}
-      onFinish={() => {
-        setNeeded(false);
-        api
-          .finishOnboarding()
-          .catch((cause: unknown) =>
-            console.error("Could not save onboarding", describeError(cause)),
-          );
-      }}
-    />
-  );
+  return <Screen step={step} onFinish={onFinish} />;
 }
 
 function Screen({
@@ -71,6 +43,9 @@ function Screen({
   onFinish: () => void;
 }) {
   const showToast = useToast();
+  // Marks onboarding done first, so the restarted app does not show it again.
+  const { relaunching, failed, relaunch } = useRelaunch(api.finishOnboarding);
+  const action = onboardingAction(step);
   const [permissions, setPermissions] = useState<PermissionInfo[]>([]);
   const load = useCallback(() => {
     api
@@ -140,13 +115,23 @@ function Screen({
           onGrant={() => open(urlOf(AUTOMATION_ID))}
         />
 
-        <div className="flex justify-end border-t border-line/60 pt-4">
+        <div className="flex flex-col items-end gap-2 border-t border-line/60 pt-4">
+          {action.kind === "restart" && (
+            <p className="text-[12.5px] text-amber-500">{action.note}</p>
+          )}
+          {failed && (
+            <p className="text-[12px] text-rose-500" role="alert">
+              OpenRize couldn't restart itself. Quit it from the menu bar and
+              open it again.
+            </p>
+          )}
           <button
             type="button"
-            onClick={onFinish}
-            className="shrink-0 rounded-lg border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-3.5 py-1.5 text-[12.5px] font-semibold text-accent-fg"
+            onClick={action.kind === "restart" ? relaunch : onFinish}
+            disabled={relaunching || action.disabled}
+            className="shrink-0 rounded-lg border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-3.5 py-1.5 text-[12.5px] font-semibold text-accent-fg disabled:opacity-60"
           >
-            Continue
+            {relaunching ? "Restarting…" : action.label}
           </button>
         </div>
       </section>

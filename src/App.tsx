@@ -13,9 +13,11 @@ import { Sidebar } from "./components/Sidebar";
 import { SwitchingOverlay } from "./components/SwitchingOverlay";
 import { Toaster } from "./components/Toaster";
 import { TopBar } from "./components/TopBar";
+import { useAccessibilityState } from "./hooks/useAccessibilityState";
 import { AccountsProvider } from "./hooks/useAccounts";
 import { useBreaks } from "./hooks/useBreaks";
 import { useMediaQuery } from "./hooks/useMediaQuery";
+import { useOnboarding } from "./hooks/useOnboarding";
 import { SettingsProvider } from "./hooks/useSettings";
 import { useTauriEvent } from "./hooks/useTauriEvent";
 import { useToast } from "./hooks/useToast";
@@ -23,6 +25,7 @@ import { useUpdates } from "./hooks/useUpdates";
 import * as api from "./lib/api";
 import { currentCalendarDay, localDateString } from "./lib/dates";
 import { isTyping } from "./lib/entries";
+import { relaunchModalOpen } from "./lib/onboarding";
 import { hasPrimaryModifier } from "./lib/platform";
 import type { ActivitySnapshot, ActivityTick, Route } from "./lib/types";
 import { Apps } from "./pages/Apps";
@@ -62,6 +65,10 @@ interface NavState {
 }
 
 export default function App() {
+  // One reading of Accessibility feeds both the first-run screen and the
+  // relaunch screen, so they cannot disagree about who owns a restart.
+  const accessibility = useAccessibilityState();
+  const onboarding = useOnboarding(accessibility);
   const [nav, setNav] = useState<NavState>({
     entries: [{ name: "calendar" }],
     cursor: 0,
@@ -419,10 +426,12 @@ export default function App() {
             </div>
           </div>
         </div>
-        <Onboarding />
+        <Onboarding step={onboarding.step} onFinish={onboarding.finish} />
         <MissingAccountDialog />
         <SwitchingOverlay />
-        <RelaunchModal />
+        <RelaunchModal
+          open={relaunchModalOpen(accessibility, onboarding.step)}
+        />
         <Toaster />
       </AccountsProvider>
     </SettingsProvider>

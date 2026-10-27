@@ -13,6 +13,7 @@ import {
 } from "../../lib/accounts";
 import * as api from "../../lib/api";
 import { describeError } from "../../lib/api";
+import { THIS_COMPUTER } from "../../lib/platform";
 import { SettingGroup } from "./SettingParts";
 
 const ROW_BUTTON =
@@ -42,7 +43,7 @@ export function AccountsSetting() {
           <p className="py-3 text-[12px] leading-relaxed text-fg-muted">
             No accounts yet. An account is a name with its own time entries,
             projects, clients, invoices and stopwatches. There is no password:
-            anyone using this Mac can switch to any account.
+            anyone using {THIS_COMPUTER} can switch to any account.
           </p>
         )}
         {listed.map((account) => {

@@ -3,11 +3,13 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { FIELD, TEXTAREA_FIELD } from "../../components/Page";
 import { Toggle } from "../../components/SegmentedControl";
 import { Field, Sheet } from "../../components/Sheet";
+import { onDeviceMlUnavailable, useAiStatus } from "../../hooks/useAiStatus";
 import { useToast } from "../../hooks/useToast";
 import * as api from "../../lib/api";
 import { describeError } from "../../lib/api";
 import { plural } from "../../lib/format";
 import { PALETTE } from "../../lib/palette";
+import { shortcutLabel } from "../../lib/platform";
 import type {
   Category,
   CategoryRemoval,
@@ -67,6 +69,7 @@ export function CategorySheet({
   onRemoved,
 }: CategorySheetProps) {
   const showToast = useToast();
+  const mlUnavailable = onDeviceMlUnavailable(useAiStatus());
   const [name, setName] = useState(category?.name ?? "");
   const [color, setColor] = useState(() =>
     category ? category.color : leastUsedSwatch(categories),
@@ -220,7 +223,11 @@ export function CategorySheet({
         <Field
           label={`What counts as ${name.trim() || "this category"}?`}
           htmlFor="category-description"
-          hint="One line describing the kind of work. Apple Intelligence uses this to suggest this category."
+          hint={
+            mlUnavailable
+              ? "One line describing the kind of work."
+              : "One line describing the kind of work. Apple Intelligence uses this to suggest this category."
+          }
         >
           <textarea
             id="category-description"
@@ -275,7 +282,7 @@ export function CategorySheet({
           />
         </div>
 
-        {aiPrompt && (
+        {aiPrompt && !mlUnavailable && (
           <div className="rounded-lg border border-line bg-surface/30 p-3">
             <div className="flex items-center justify-between">
               <span className="font-medium text-[11px] text-fg-soft">
@@ -320,7 +327,7 @@ export function CategorySheet({
                 ).toFixed(
                   1,
                 )}h). It will be hidden from pickers and suggestions; past entries keep it. Restore anytime from the Archived tab.`
-              : `"${category.name}" has never been used. It will be permanently removed. Undo with ⌘Z.`
+              : `"${category.name}" has never been used. It will be permanently removed. Undo with ${shortcutLabel("Z")}.`
           }
           confirmLabel={isUsed ? "Archive" : "Delete"}
           tone="destructive"

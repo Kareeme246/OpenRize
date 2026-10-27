@@ -6,11 +6,11 @@ import {
   MAX_NAME_LENGTH,
 } from "../lib/accounts";
 import * as api from "../lib/api";
+import { THIS_COMPUTER } from "../lib/platform";
 import { FIELD } from "./Page";
 import { Field, Sheet } from "./Sheet";
 
-const NAME_HINT =
-  "Just a name to tell accounts apart. There is no password: anyone using this Mac can switch to any account.";
+const NAME_HINT = `Just a name to tell accounts apart. There is no password: anyone using ${THIS_COMPUTER} can switch to any account.`;
 
 /**
  * Adds an account and opens it (the app restarts). From No account with data

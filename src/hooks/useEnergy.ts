@@ -15,14 +15,16 @@ export interface EnergyApi {
 /**
  * Energy usage and battery monitor telemetry hook.
  *
- * Refetches on interval or whenever Rust emits `energy-changed`.
+ * Refetches on interval or whenever Rust emits `energy-changed`. With
+ * `enabled` false (no monitor on this platform) it never asks Rust.
  */
-export function useEnergy(days = 7): EnergyApi {
+export function useEnergy(days = 7, enabled = true): EnergyApi {
   const [summary, setSummary] = useState<EnergySummary | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(enabled);
 
   const fetchSummary = useCallback(() => {
+    if (!enabled) return () => {};
     let active = true;
     api
       .getEnergySummary(days)
@@ -40,15 +42,17 @@ export function useEnergy(days = 7): EnergyApi {
     return () => {
       active = false;
     };
-  }, [days]);
+  }, [days, enabled]);
 
   useEffect(() => {
+    if (!enabled) return;
     setLoading(true);
     const cancel = fetchSummary();
     return cancel;
-  }, [fetchSummary]);
+  }, [enabled, fetchSummary]);
 
   useTauriEvent<EnergySummary>(api.ENERGY_CHANGED, (next) => {
+    if (!enabled) return;
     // If emitted summary matches the requested days window, adopt directly;
     // otherwise refetch for the selected days.
     if (next.windowDays === days) {

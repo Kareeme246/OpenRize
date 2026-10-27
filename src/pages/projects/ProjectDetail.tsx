@@ -27,6 +27,7 @@ import {
   formatShortDate,
   formatTime,
 } from "../../lib/format";
+import { shortcutLabel } from "../../lib/platform";
 import type {
   EntryQuery,
   Project,
@@ -523,7 +524,7 @@ export function ProjectDetail({
       {confirmDelete && (
         <ConfirmDialog
           title={`Delete ${project.name}?`}
-          body="Time entries keep their time but lose this project's link. The project and its rules are removed together. Undo with Command-Z (Ctrl-Z on Windows) during this app session."
+          body={`Time entries keep their time but lose this project's link. The project and its rules are removed together. Undo with ${shortcutLabel("Z")} during this app session.`}
           confirmLabel="Delete"
           onCancel={() => setConfirmDelete(false)}
           onConfirm={() => void remove()}

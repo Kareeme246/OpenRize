@@ -16,7 +16,11 @@ import {
 import { Tooltip } from "../components/Tooltip";
 import { useAccounts } from "../hooks/useAccounts";
 import { useAiMetrics } from "../hooks/useAiMetrics";
-import { llmUnavailableReason, useAiStatus } from "../hooks/useAiStatus";
+import {
+  llmUnavailableReason,
+  onDeviceMlUnavailable,
+  useAiStatus,
+} from "../hooks/useAiStatus";
 import { useEnergy } from "../hooks/useEnergy";
 import { useSettings } from "../hooks/useSettings";
 import { useToast } from "../hooks/useToast";
@@ -25,6 +29,7 @@ import { describeError } from "../lib/api";
 import { formatShortDate } from "../lib/format";
 import {
   FILE_MANAGER,
+  HAS_ENERGY_MONITOR,
   OS_NAME,
   PLATFORM,
   shortcutLabel,
@@ -125,11 +130,14 @@ const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   "data",
   "notifications",
   "ai",
-  "advanced",
+  ...(HAS_ENERGY_MONITOR ? (["advanced"] as const) : []),
 ];
 
 /** The sections under the Advanced settings group in the nav. */
-const ADVANCED_SECTIONS: readonly SettingsSection[] = ["ai", "advanced"];
+const ADVANCED_SECTIONS: readonly SettingsSection[] = [
+  "ai",
+  ...(HAS_ENERGY_MONITOR ? (["advanced"] as const) : []),
+];
 
 function isAdvancedSection(section: SettingsSection): boolean {
   return ADVANCED_SECTIONS.includes(section);
@@ -380,6 +388,31 @@ function AppleIntelligenceRow({
           </button>
         )}
       </div>
+    </SettingRow>
+  );
+}
+
+/** How far calibration has got: the reviews its confidence curve learns from. */
+function reviewedLabel(status: AiStatus | null): string {
+  if (status === null) return "";
+  return status.calibrated
+    ? `${status.outcomes} reviewed`
+    : `learning · ${status.outcomes}/50 reviewed`;
+}
+
+/**
+ * What stands in for every on-device-model control while the build has no
+ * model: suggestions come from the rules, and nothing here can be tuned.
+ */
+function RulesOnlyRow({ status }: { status: AiStatus | null }) {
+  return (
+    <SettingRow
+      title="Suggestions use your rules"
+      description={`OpenRize currently suggests categories from your rules on ${OS_NAME}. Smart on-device suggestions are coming in a future update.`}
+    >
+      <span className="shrink-0 font-mono text-[11px] text-fg-muted">
+        {reviewedLabel(status)}
+      </span>
     </SettingRow>
   );
 }
@@ -944,6 +977,7 @@ export function Settings({
   };
 
   const aiStatus = useAiStatus();
+  const mlUnavailable = onDeviceMlUnavailable(aiStatus);
   const [metricDays, setMetricDays] = useState(30);
   const { metrics, error: metricsError, adopt } = useAiMetrics(metricDays);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -979,7 +1013,7 @@ export function Settings({
     error: energyError,
     loading: energyLoading,
     resetHistory: resetEnergyHistory,
-  } = useEnergy(energyDays);
+  } = useEnergy(energyDays, HAS_ENERGY_MONITOR);
 
   const [activeSection, setActiveSection] =
     useState<SettingsSection>("overview");
@@ -1187,20 +1221,22 @@ export function Settings({
                 >
                   AI
                 </button>
-                <button
-                  type="button"
-                  aria-current={
-                    activeSection === "advanced" ? "location" : undefined
-                  }
-                  onClick={() => selectSection("advanced")}
-                  className={`settings-nav-item !text-[11.5px] !py-1.5 cursor-pointer ${
-                    activeSection === "advanced"
-                      ? "settings-nav-item-active"
-                      : ""
-                  }`}
-                >
-                  Battery & Energy
-                </button>
+                {HAS_ENERGY_MONITOR && (
+                  <button
+                    type="button"
+                    aria-current={
+                      activeSection === "advanced" ? "location" : undefined
+                    }
+                    onClick={() => selectSection("advanced")}
+                    className={`settings-nav-item !text-[11.5px] !py-1.5 cursor-pointer ${
+                      activeSection === "advanced"
+                        ? "settings-nav-item-active"
+                        : ""
+                    }`}
+                  >
+                    Battery & Energy
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -1376,18 +1412,16 @@ export function Settings({
               description="Set everyday categorization and confident auto-accept behavior."
             />
             <SettingGroup title="Categories & AI">
-              <SettingRow
-                title="Suggestion engine"
-                description={engineSummary(aiStatus)}
-              >
-                <span className="shrink-0 font-mono text-[11px] text-fg-muted">
-                  {aiStatus === null
-                    ? ""
-                    : aiStatus.calibrated
-                      ? `${aiStatus.outcomes} reviewed`
-                      : `learning · ${aiStatus.outcomes}/50 reviewed`}
-                </span>
-              </SettingRow>
+              {!mlUnavailable && (
+                <SettingRow
+                  title="Suggestion engine"
+                  description={engineSummary(aiStatus)}
+                >
+                  <span className="shrink-0 font-mono text-[11px] text-fg-muted">
+                    {reviewedLabel(aiStatus)}
+                  </span>
+                </SettingRow>
+              )}
               <SettingRow
                 title="What to suggest"
                 description="Suggest a category for each entry, or a project too"
@@ -1425,10 +1459,12 @@ export function Settings({
                   onChange={saveThreshold}
                 />
               </SettingBlock>
-              <CustomInstructions
-                value={settings.aiCustomPrompt}
-                onSave={(aiCustomPrompt) => update({ aiCustomPrompt })}
-              />
+              {!mlUnavailable && (
+                <CustomInstructions
+                  value={settings.aiCustomPrompt}
+                  onSave={(aiCustomPrompt) => update({ aiCustomPrompt })}
+                />
+              )}
             </SettingGroup>
           </section>
 
@@ -1573,24 +1609,37 @@ export function Settings({
             className="settings-page-section flex flex-col gap-4"
           >
             <SettingsSectionHeading
-              title="AI & Machine Learning"
-              description="On-device models, Apple Intelligence integration, personal model maintenance, and prediction effectiveness."
+              title={
+                mlUnavailable ? "AI & suggestions" : "AI & Machine Learning"
+              }
+              description={
+                mlUnavailable
+                  ? "How well suggestions are doing, and what OpenRize has learned from your reviews."
+                  : "On-device models, Apple Intelligence integration, personal model maintenance, and prediction effectiveness."
+              }
             />
-            <SettingGroup title="On-device intelligence">
-              <SettingRow
-                title="Suggestion engine"
-                description={engineSummary(aiStatus)}
-              >
-                <span className="shrink-0 font-mono text-[11px] text-fg-muted">
-                  {aiStatus === null
-                    ? ""
-                    : aiStatus.calibrated
-                      ? `${aiStatus.outcomes} reviewed`
-                      : `learning · ${aiStatus.outcomes}/50 reviewed`}
-                </span>
-              </SettingRow>
-              {PLATFORM === "macos" && (
-                <AppleIntelligenceRow status={aiStatus} onError={setAiError} />
+            <SettingGroup
+              title={mlUnavailable ? "Suggestions" : "On-device intelligence"}
+            >
+              {mlUnavailable ? (
+                <RulesOnlyRow status={aiStatus} />
+              ) : (
+                <>
+                  <SettingRow
+                    title="Suggestion engine"
+                    description={engineSummary(aiStatus)}
+                  >
+                    <span className="shrink-0 font-mono text-[11px] text-fg-muted">
+                      {reviewedLabel(aiStatus)}
+                    </span>
+                  </SettingRow>
+                  {PLATFORM === "macos" && (
+                    <AppleIntelligenceRow
+                      status={aiStatus}
+                      onError={setAiError}
+                    />
+                  )}
+                </>
               )}
             </SettingGroup>
 
@@ -1618,23 +1667,29 @@ export function Settings({
                   <AiEffectiveness metrics={metrics} status={aiStatus} />
                 )}
               </div>
-              <SettingBlock
-                title="Personal model"
-                description="Classifiers trained on your approved entries"
-              >
-                {metrics === null ? (
-                  <p className="text-[12px] text-fg-muted">Loading…</p>
-                ) : (
-                  <PersonalModels
-                    metrics={metrics}
-                    status={aiStatus}
-                    onRetrain={retrain}
-                  />
-                )}
-              </SettingBlock>
+              {!mlUnavailable && (
+                <SettingBlock
+                  title="Personal model"
+                  description="Classifiers trained on your approved entries"
+                >
+                  {metrics === null ? (
+                    <p className="text-[12px] text-fg-muted">Loading…</p>
+                  ) : (
+                    <PersonalModels
+                      metrics={metrics}
+                      status={aiStatus}
+                      onRetrain={retrain}
+                    />
+                  )}
+                </SettingBlock>
+              )}
               <SettingRow
                 title="Reset learned data"
-                description="Forget personal models, calibration, and the similar-entry index. Entries, categories, projects, and rules stay."
+                description={
+                  mlUnavailable
+                    ? "Forget calibration and what OpenRize has learned from your reviews. Entries, categories, projects, and rules stay."
+                    : "Forget personal models, calibration, and the similar-entry index. Entries, categories, projects, and rules stay."
+                }
               >
                 <button
                   type="button"
@@ -1647,36 +1702,42 @@ export function Settings({
             </SettingGroup>
           </section>
 
-          <section
-            id="settings-section-advanced"
-            data-settings-section="advanced"
-            className="settings-page-section flex flex-col gap-4"
-          >
-            <SettingsSectionHeading
-              title="Advanced settings"
-              description="System performance diagnostics and Battery & Energy monitoring."
-            />
-            <SettingGroup title="Battery & Energy">
-              <BatteryEnergyMonitor
-                summary={energySummary}
-                loading={energyLoading}
-                selectedDays={energyDays}
-                onRangeChange={setEnergyDays}
-                onReset={() =>
-                  resetEnergyHistory().then(() =>
-                    showToast({
-                      message: "Energy benchmark reset",
-                      tone: "success",
-                    }),
-                  )
-                }
+          {HAS_ENERGY_MONITOR && (
+            <section
+              id="settings-section-advanced"
+              data-settings-section="advanced"
+              className="settings-page-section flex flex-col gap-4"
+            >
+              <SettingsSectionHeading
+                title="Advanced settings"
+                description="System performance diagnostics and Battery & Energy monitoring."
               />
-            </SettingGroup>
-          </section>
+              <SettingGroup title="Battery & Energy">
+                <BatteryEnergyMonitor
+                  summary={energySummary}
+                  loading={energyLoading}
+                  selectedDays={energyDays}
+                  onRangeChange={setEnergyDays}
+                  onReset={() =>
+                    resetEnergyHistory().then(() =>
+                      showToast({
+                        message: "Energy benchmark reset",
+                        tone: "success",
+                      }),
+                    )
+                  }
+                />
+              </SettingGroup>
+            </section>
+          )}
           {confirmReset && (
             <ConfirmDialog
               title="Reset learned data?"
-              body="OpenRize forgets its personal models, calibration, and the index of similar entries. Your entries, categories, projects, and rules are kept. Suggestions start over from Apple's on-device model and rules, and confidence is capped at 90% again until you review 50 more."
+              body={
+                mlUnavailable
+                  ? "OpenRize forgets its calibration and what it has learned from your reviews. Your entries, categories, projects, and rules are kept. Confidence is capped at 90% again until you review 50 more."
+                  : "OpenRize forgets its personal models, calibration, and the index of similar entries. Your entries, categories, projects, and rules are kept. Suggestions start over from Apple's on-device model and rules, and confidence is capped at 90% again until you review 50 more."
+              }
               confirmLabel="Reset learned data"
               onConfirm={resetLearned}
               onCancel={() => setConfirmReset(false)}

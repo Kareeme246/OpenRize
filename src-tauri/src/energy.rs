@@ -107,7 +107,13 @@ pub fn read_battery_info() -> BatteryInfo {
 
 // --- Background energy sampler -----------------------------------------------
 
+/// Windows has no per-process energy counter, so it ships without the monitor
+/// (the UI hides it, see `HAS_ENERGY_MONITOR` in src/lib/platform.ts) and the
+/// sampler would only burn a thread and write CPU-time guesses.
 pub fn spawn_sampler(app: AppHandle, db_path: PathBuf) {
+    if cfg!(windows) {
+        return;
+    }
     let running = Arc::new(AtomicBool::new(true));
     let handle = app.clone();
 

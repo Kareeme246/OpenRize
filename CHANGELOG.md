@@ -5,6 +5,29 @@ All notable changes are documented here. Entries are generated from commit histo
 ## [unreleased]
 
 ### Features
+- Manage custom categories with smart delete and ordering (#133)
+- Improve session title generation and capture title edits (#134)
+- Move accounts button to menubar (#136)
+- **tooling:** Windows drive-app skill and CDP driver (#142)
+
+### Bug Fixes
+- Give every toast the same fixed width and wrap long messages (#130)
+- **toast:** Narrow toasts to 16rem, just under the day summary column (#131)
+- **capture:** Read browser URLs off the sampler thread and support Firefox-family (#137)
+- **capture:** Detect video and calls, display-off and lock, and idle wrap on Windows (#138)
+- **windows:** Settings in AppData, Windows paths, elevated rize, and adopt retries (#139)
+- **ui:** Windows-honest AI copy, no energy monitor, single title bar (#140)
+- **windows:** Build without a signing key, OpenRize branding, rize on PATH, background login item (#143)
+- **pulse:** Anchor Pulse to the taskbar corner and size panels per monitor on Windows (#141)
+
+### Documentation
+- **agents:** Never attribute agents in git history or on GitHub (#144)
+
+### Other Changes
+- Update readme
+## [0.9.23] - 2026-10-25
+
+### Features
 - Add local accounts with separate data per name (#126)
 
 ### Bug Fixes
@@ -12,6 +35,9 @@ All notable changes are documented here. Entries are generated from commit histo
 - Polish timer drag reorder geometry, a11y announcements, and arrow containment (#125)
 - Preserve manual timers across upgrades with versioned migration (#124)
 - Keep toasts in the corner, add a close button, and stop review actions overlapping (#129)
+
+### Documentation
+- Update changelog for v0.9.23
 
 ### Maintenance
 - **release:** Add opt-in verified R2 publishing (#127)

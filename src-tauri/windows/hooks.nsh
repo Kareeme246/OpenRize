@@ -19,11 +19,6 @@
     nsExec::Exec '"$INSTDIR\rize.exe" install-path'
     Pop $0
   ${EndIf}
-
-  ; Earlier installers recorded the install folder under the identifier's
-  ; "offlinestudios" key; the publisher name now writes it under its own.
-  DeleteRegKey HKCU "Software\offlinestudios\openrize"
-  DeleteRegKey /ifempty HKCU "Software\offlinestudios"
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL

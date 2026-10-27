@@ -5,8 +5,6 @@
     "targets": ["nsis"],
     "externalBin": ["binaries/rize"],
     "createUpdaterArtifacts": true,
-    "publisher": "Offline Studios",
-    "copyright": "Copyright (c) 2026 Offline Studios",
     "shortDescription": "Automatic, private, local-first time tracking",
     "windows": {
       "webviewInstallMode": { "type": "embedBootstrapper" },

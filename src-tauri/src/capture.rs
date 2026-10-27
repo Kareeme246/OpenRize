@@ -15,6 +15,9 @@
 )]
 mod platform;
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod title;
+
 pub use platform::{
     idle_ms, read_active_window, register_sleep_listeners, user_is_away, AppNapAssertion,
 };

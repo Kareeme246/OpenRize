@@ -2,11 +2,14 @@
 //! through the Accessibility API (so Screen Recording permission is not
 //! needed), and a browser's URL through AppleScript.
 
-use core_foundation::base::TCFType;
+use core_foundation::array::CFArray;
+use core_foundation::base::{CFType, TCFType};
 use core_foundation::string::CFString;
-use core_foundation_sys::base::{CFRelease, CFTypeRef};
+use core_foundation_sys::base::CFTypeRef;
 use std::ffi::c_void;
+use std::sync::{Mutex, OnceLock};
 
+use super::title::{self, Attempt, FailureLog, Resolution, TitleSource};
 use super::{domain_of, WindowSample};
 
 #[repr(C)]
@@ -85,6 +88,7 @@ extern "C" {
         attribute: core_foundation_sys::string::CFStringRef,
         value: *mut CFTypeRef,
     ) -> i32;
+    fn AXUIElementSetMessagingTimeout(element: AXUIElementRef, timeout_in_seconds: f32) -> i32;
 }
 
 pub fn read_active_window() -> Option<WindowSample> {
@@ -105,9 +109,9 @@ pub fn read_active_window() -> Option<WindowSample> {
 
     let bundle_id = front_app.bundleIdentifier().map(|s| s.to_string());
 
-    // Switch window title capture from active-win-pos-rs to macOS Accessibility API
-    // (AXUIElement / AXFocusedWindow -> AXTitle) so Screen Recording permission is NOT required.
-    let title = get_window_title_ax(pid).unwrap_or_default();
+    // Titles come from the Accessibility API (see `title` for the order tried),
+    // so Screen Recording permission is not needed.
+    let title = window_title(pid, bundle_id.as_deref());
 
     let (url, domain) = if let Some(ref bid) = bundle_id {
         get_browser_url_and_domain(bid, &app_name)
@@ -125,46 +129,131 @@ pub fn read_active_window() -> Option<WindowSample> {
     })
 }
 
-fn get_window_title_ax(pid: libc::pid_t) -> Option<String> {
-    unsafe {
-        let app_element = AXUIElementCreateApplication(pid);
-        if app_element.is_null() {
-            return None;
+/// `kAXErrorNoValue`: the attribute exists but nothing is set.
+const AX_ERROR_NO_VALUE: i32 = -25212;
+
+/// How long one Accessibility call may wait on a stuck app before giving up,
+/// instead of the system default holding up the sampler thread.
+const AX_MESSAGING_TIMEOUT_SECS: f32 = 1.0;
+
+/// An app with many windows is not walked past this many.
+const MAX_WINDOWS_READ: usize = 8;
+
+/// One failure line per kind per this long; the sampler runs every second.
+const FAILURE_LOG_INTERVAL_MS: u64 = 5 * 60 * 1000;
+
+fn failure_log() -> &'static Mutex<FailureLog> {
+    static LOG: OnceLock<Mutex<FailureLog>> = OnceLock::new();
+    LOG.get_or_init(|| Mutex::new(FailureLog::new(FAILURE_LOG_INTERVAL_MS)))
+}
+
+/// The title of `pid`'s frontmost window, or an empty string. Why a title was
+/// not found is logged, since the sampler would otherwise record nothing and
+/// say nothing.
+fn window_title(pid: libc::pid_t, bundle_id: Option<&str>) -> String {
+    let resolution = resolve_title(pid);
+    if let Some(key) = title::failure_to_log(bundle_id, &resolution) {
+        let now = openrize_core::timers::now_epoch_ms();
+        let admitted = failure_log()
+            .lock()
+            .ok()
+            .and_then(|mut log| log.admit(&key, now));
+        if let Some(held_back) = admitted {
+            eprintln!(
+                "capture: no window title for {key}{}",
+                if held_back == 0 {
+                    String::new()
+                } else {
+                    format!(" (and {held_back} more since the last note)")
+                }
+            );
         }
-
-        let attr_focused_window = CFString::new("AXFocusedWindow");
-        let mut window_ref: CFTypeRef = std::ptr::null_mut();
-        let err = AXUIElementCopyAttributeValue(
-            app_element,
-            attr_focused_window.as_concrete_TypeRef(),
-            &mut window_ref,
-        );
-
-        CFRelease(app_element as CFTypeRef);
-
-        if err != 0 || window_ref.is_null() {
-            return None;
-        }
-
-        let attr_title = CFString::new("AXTitle");
-        let mut title_ref: CFTypeRef = std::ptr::null_mut();
-        let err = AXUIElementCopyAttributeValue(
-            window_ref as AXUIElementRef,
-            attr_title.as_concrete_TypeRef(),
-            &mut title_ref,
-        );
-
-        CFRelease(window_ref);
-
-        if err != 0 || title_ref.is_null() {
-            return None;
-        }
-
-        let title_cf =
-            CFString::wrap_under_create_rule(title_ref as core_foundation_sys::string::CFStringRef);
-        let title = title_cf.to_string();
-        Some(title)
     }
+    resolution.title.unwrap_or_default()
+}
+
+fn resolve_title(pid: libc::pid_t) -> Resolution {
+    // SAFETY: the element is created here and released when `app` drops.
+    let app = unsafe {
+        let element = AXUIElementCreateApplication(pid);
+        if element.is_null() {
+            return Resolution {
+                title: None,
+                attempts: vec![(
+                    TitleSource::FocusedWindow,
+                    Attempt::Failed(AX_ERROR_NO_VALUE),
+                )],
+            };
+        }
+        AXUIElementSetMessagingTimeout(element, AX_MESSAGING_TIMEOUT_SECS);
+        CFType::wrap_under_create_rule(element as CFTypeRef)
+    };
+    title::resolve(|source| read_title_from(&app, source))
+}
+
+fn read_title_from(app: &CFType, source: TitleSource) -> Attempt {
+    match source {
+        TitleSource::FocusedWindow => window_attempt(copy_attribute(app, "AXFocusedWindow")),
+        TitleSource::MainWindow => window_attempt(copy_attribute(app, "AXMainWindow")),
+        TitleSource::FocusedElementWindow => window_attempt(
+            copy_attribute(app, "AXFocusedUIElement")
+                .and_then(|element| copy_attribute(&element, "AXWindow")),
+        ),
+        TitleSource::WindowList => match copy_attribute(app, "AXWindows") {
+            Err(code) => Attempt::Failed(code),
+            Ok(list) if list.type_of() != CFArray::<CFType>::type_id() => Attempt::Empty,
+            // SAFETY: checked to be a CFArray just above, and `list` keeps it alive.
+            Ok(list) => {
+                let windows: CFArray<CFType> =
+                    unsafe { CFArray::wrap_under_get_rule(list.as_CFTypeRef() as _) };
+                title::pick_from_windows(
+                    windows
+                        .iter()
+                        .take(MAX_WINDOWS_READ)
+                        .map(|window| title_of(&window)),
+                )
+            }
+        },
+    }
+}
+
+fn window_attempt(window: Result<CFType, i32>) -> Attempt {
+    match window {
+        Ok(window) => title_of(&window),
+        Err(code) => Attempt::Failed(code),
+    }
+}
+
+fn title_of(window: &CFType) -> Attempt {
+    match copy_attribute(window, "AXTitle") {
+        Err(AX_ERROR_NO_VALUE) => Attempt::Empty,
+        Err(code) => Attempt::Failed(code),
+        Ok(value) => match value.downcast::<CFString>() {
+            Some(title) => Attempt::Title(title.to_string()),
+            None => Attempt::Empty,
+        },
+    }
+}
+
+fn copy_attribute(element: &CFType, name: &'static str) -> Result<CFType, i32> {
+    let name = CFString::from_static_string(name);
+    let mut value: CFTypeRef = std::ptr::null_mut();
+    // SAFETY: `element` is an AXUIElement kept alive by the caller; on success
+    // the call hands back a +1 value that the wrapper releases.
+    let code = unsafe {
+        AXUIElementCopyAttributeValue(
+            element.as_CFTypeRef() as AXUIElementRef,
+            name.as_concrete_TypeRef(),
+            &mut value,
+        )
+    };
+    if code != 0 {
+        return Err(code);
+    }
+    if value.is_null() {
+        return Err(AX_ERROR_NO_VALUE);
+    }
+    Ok(unsafe { CFType::wrap_under_create_rule(value) })
 }
 
 /// Whether `pid` holds an active display-sleep assertion, directly or through

@@ -45,7 +45,9 @@ permissions:
 jobs:
   publish-r2:
     if: inputs.r2
-    runs-on: ubuntu-latest
+    # Pin an explicit LTS image so runner-image migrations cannot silently
+    # change the environment under us.
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     # current.json is shared across versions. Never race two promotions.
@@ -57,8 +59,7 @@ jobs:
       # default GitHub download path permits missing platforms; do not use it.
       - name: Require the public release and download every selected installer
         id: installers
-        # v7.0.1
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           VERSION: ${{ inputs.version }}
           MACOS_ARM: ${{ inputs.macos_arm }}

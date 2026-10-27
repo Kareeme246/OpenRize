@@ -83,7 +83,7 @@ installed.
 | `rize paths` | The open account, the settings file, the data directory and the database path. | `storage_paths` | Yes | Shipped |
 | `rize account` / `rize account list` | The account the app opens (or No account) and every account. Switching accounts stays in the app. | `accounts_state` | Yes | Planned |
 | `rize install-path` | Put `rize` on PATH: a symlink on macOS, the user PATH on Windows. | client only | Yes | Shipped |
-| `rize uninstall-path` | Remove the installed command from `~/.local/bin`, even if the app is gone. | client only | Yes | Shipped |
+| `rize uninstall-path` | Remove the installed command from `~/.local/bin` on macOS, or its folder from the user PATH on Windows, even if the app is gone. | client only | Yes | Shipped |
 | `rize completions bash\|zsh\|fish\|powershell\|elvish` | Print a shell completion script. | client only | Yes | Shipped |
 | `rize projects discover` / `dismiss <key>` | Suggested projects from recent activity. | `discover_projects`, `dismiss_project_suggestion` | Yes | M2 |
 | `rize projects import <file.csv>` | Bulk import projects. | `import_projects_csv` | Yes | M2 |

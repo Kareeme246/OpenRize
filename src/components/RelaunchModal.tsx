@@ -54,15 +54,13 @@ function Screen() {
     >
       <div className="w-[380px] max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-panel p-5 shadow-2xl">
         <h2 id="relaunch-title" className="text-[14px] font-semibold">
-          Relaunch OpenRize to finish setup
+          Relaunch OpenRize
         </h2>
         <p
           id="relaunch-body"
           className="mt-1.5 text-[12.5px] leading-relaxed text-fg-soft"
         >
-          Accessibility is allowed, but macOS only gives it to OpenRize the next
-          time it opens. Until then window titles can't be read. Relaunching
-          takes a moment and keeps your data and trackers.
+          Accessibility is allowed. Relaunch to finish.
         </p>
         {failed && (
           <p className="mt-2 text-[12px] text-rose-500" role="alert">

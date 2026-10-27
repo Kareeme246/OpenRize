@@ -1,8 +1,8 @@
 //! A local named pipe that only its owner can open. `interprocess` creates the
 //! first instance with `FILE_FLAG_FIRST_PIPE_INSTANCE` and rejects remote
-//! clients. Pipe names are global, so both ends also check that the process
-//! on the other end runs as the same user: a pipe created first by someone
-//! else is never trusted.
+//! clients. Pipe names are global, so both ends also check that the other end
+//! runs as the same user: a pipe created first by someone else is never
+//! trusted.
 use std::io;
 use std::path::Path;
 
@@ -13,7 +13,8 @@ use interprocess::os::windows::security_descriptor::SecurityDescriptor;
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Security::{EqualSid, GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER};
 use windows::Win32::System::Threading::{
-    GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+    GetCurrentProcess, GetCurrentThread, OpenProcess, OpenProcessToken, OpenThreadToken,
+    PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
 /// Protected DACL with one ACE: generic-all for the pipe's owner, the user
@@ -29,14 +30,10 @@ pub struct Service {
 }
 
 impl Service {
-    /// Waits for the next client running as this user.
+    /// Waits for the next client. Who it is can only be asked once it has
+    /// sent something (see `client_allowed`), so `respond` checks.
     pub fn accept(&self) -> io::Result<Stream> {
-        loop {
-            let stream = self.listener.accept()?;
-            if same_user(&stream) {
-                return Ok(stream);
-            }
-        }
+        self.listener.accept()
     }
 }
 
@@ -83,23 +80,63 @@ fn same_user(stream: &Stream) -> bool {
         let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
             return false;
         };
-        let peer = token_user(process);
+        let mut token = HANDLE::default();
+        let opened = OpenProcessToken(process, TOKEN_QUERY, &mut token);
         let _ = CloseHandle(process);
-        match (peer, token_user(GetCurrentProcess())) {
-            (Some(peer), Some(own)) => {
-                let peer = &*(peer.as_ptr() as *const TOKEN_USER);
-                let own = &*(own.as_ptr() as *const TOKEN_USER);
-                EqualSid(peer.User.Sid, own.User.Sid).is_ok()
-            }
-            _ => false,
-        }
+        let peer = opened.ok().and_then(|()| token_user(token));
+        same_sid(peer, own_user())
     }
 }
 
-/// The `TOKEN_USER` of a process, in a buffer that also holds its SID.
-unsafe fn token_user(process: HANDLE) -> Option<Vec<u64>> {
+/// Whether the client of a connection accepted here runs as this user, at any
+/// elevation. The client's process token is the wrong thing to ask for: an
+/// elevated process's token cannot be opened from a non-elevated one, so an
+/// administrator's `rize` would be refused by the app. Impersonating the pipe
+/// client instead yields a token for the connection itself, which this process
+/// may always query; the guard puts the thread back as it was on every path.
+/// Windows refuses to impersonate until the server has read from the pipe, so
+/// this only works after the request has started to arrive.
+pub fn client_allowed(stream: &Stream) -> bool {
+    let Stream::NamedPipe(pipe) = stream;
+    let impersonation = pipe.inner().impersonate_client();
+    let Ok(impersonation) = impersonation else {
+        return false;
+    };
     let mut token = HANDLE::default();
-    OpenProcessToken(process, TOKEN_QUERY, &mut token).ok()?;
+    // SAFETY: the pseudo handle needs no closing; `token` is closed by
+    // `token_user` when it is opened. OpenAsSelf checks access against this
+    // process rather than the client being impersonated.
+    let opened = unsafe { OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, true, &mut token) };
+    drop(impersonation);
+    let peer = opened.ok().and_then(|()| unsafe { token_user(token) });
+    same_sid(peer, own_user())
+}
+
+fn own_user() -> Option<Vec<u64>> {
+    // SAFETY: the process token is opened and closed here.
+    unsafe {
+        let mut token = HANDLE::default();
+        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).ok()?;
+        token_user(token)
+    }
+}
+
+fn same_sid(peer: Option<Vec<u64>>, own: Option<Vec<u64>>) -> bool {
+    match (peer, own) {
+        // SAFETY: both buffers hold a TOKEN_USER and its SID, filled by
+        // `token_user`, and live through the comparison.
+        (Some(peer), Some(own)) => unsafe {
+            let peer = &*(peer.as_ptr() as *const TOKEN_USER);
+            let own = &*(own.as_ptr() as *const TOKEN_USER);
+            EqualSid(peer.User.Sid, own.User.Sid).is_ok()
+        },
+        _ => false,
+    }
+}
+
+/// The `TOKEN_USER` of a token, in a buffer that also holds its SID. Closes
+/// the token.
+unsafe fn token_user(token: HANDLE) -> Option<Vec<u64>> {
     let mut needed = 0;
     let _ = GetTokenInformation(token, TokenUser, None, 0, &mut needed);
     // u64 elements keep the buffer aligned for TOKEN_USER's pointer field.
@@ -113,4 +150,54 @@ unsafe fn token_user(process: HANDLE) -> Option<Vec<u64>> {
     );
     let _ = CloseHandle(token);
     filled.ok().map(|()| buffer)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+
+    /// Whether this thread is running as someone else right now.
+    fn impersonating() -> bool {
+        let mut token = HANDLE::default();
+        // SAFETY: the token, when there is one, is closed straight away.
+        unsafe {
+            let opened = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, true, &mut token);
+            if opened.is_ok() {
+                let _ = CloseHandle(token);
+            }
+            opened.is_ok()
+        }
+    }
+
+    #[test]
+    fn the_client_is_this_user_once_it_has_written_and_the_thread_is_restored() {
+        let dir = std::env::temp_dir().join(format!("rize-ipc-win-{}", std::process::id()));
+        let address = Address::new(&dir).unwrap();
+        let service = address.listen().unwrap();
+        let server = std::thread::spawn(move || {
+            let mut stream = service.accept().unwrap();
+            // Nothing read yet, so Windows cannot say who the client is.
+            assert!(!client_allowed(&stream));
+            assert!(!impersonating());
+            let mut byte = [0_u8; 1];
+            stream.read_exact(&mut byte).unwrap();
+            assert!(client_allowed(&stream));
+            assert!(!impersonating());
+            stream.write_all(&byte).unwrap();
+        });
+        let mut client = address.connect().unwrap();
+        client.write_all(b"x").unwrap();
+        let mut echoed = [0_u8; 1];
+        client.read_exact(&mut echoed).unwrap();
+        server.join().unwrap();
+        assert_eq!(&echoed, b"x");
+    }
+
+    #[test]
+    fn a_missing_user_is_never_the_same_user() {
+        assert!(!same_sid(None, own_user()));
+        assert!(!same_sid(own_user(), None));
+        assert!(same_sid(own_user(), own_user()));
+    }
 }

@@ -16,6 +16,7 @@ import {
 } from "../lib/accounts";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
+import { THIS_COMPUTER } from "../lib/platform";
 import type { Route } from "../lib/types";
 import { AddAccountSheet } from "./AddAccountSheet";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -283,7 +284,7 @@ export function AccountSwitcher({
               <p className="mt-1.5 text-[11.5px] leading-5 text-fg-muted">
                 An account is just a name with its own time entries, projects,
                 clients, invoices and stopwatches. There is no password: anyone
-                using this Mac can switch to any account.
+                using {THIS_COMPUTER} can switch to any account.
               </p>
               <div className="mt-3 flex gap-2">
                 <button

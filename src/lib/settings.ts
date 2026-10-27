@@ -7,6 +7,9 @@
  * so changing a hex here repaints the entire app, no component edits.
  */
 
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { HAS_NATIVE_CAPTION } from "./platform";
+
 export type Theme = "system" | "light" | "dark";
 export type Accent = "green" | "blue" | "purple" | "orange";
 export type Shape = "rounded" | "sharper";
@@ -362,6 +365,37 @@ export function resolveTheme(theme: Theme): "light" | "dark" {
     : "dark";
 }
 
+/** The preference last sent to the native caption, so a repaint is not an IPC. */
+let captionTheme: Theme | null = null;
+
+/**
+ * Makes the OS-drawn window caption (title, window buttons) follow the app's
+ * theme rather than the system's, and back to the system's for "system".
+ * Only the main window has one (the panels are undecorated), and macOS has
+ * none to follow (its title bar is overlaid on the page). It is cosmetic, so
+ * a failure is dropped and retried on the next change.
+ */
+function syncCaptionTheme(theme: Theme): void {
+  if (!HAS_NATIVE_CAPTION || captionTheme === theme) return;
+  const current = getCurrentWindow();
+  if (current.label !== "main") return;
+  captionTheme = theme;
+  current
+    .setTheme(theme === "system" ? null : theme)
+    .then(() => {
+      // The page's own idea of "system" was borrowed from the window while it
+      // was forced to the other scheme; look again now it is released.
+      if (theme === "system" && captionTheme === "system") {
+        const resolved = resolveTheme("system");
+        document.documentElement.dataset.theme = resolved;
+        document.documentElement.style.colorScheme = resolved;
+      }
+    })
+    .catch(() => {
+      captionTheme = null;
+    });
+}
+
 /**
  * Paints the current preference onto the document. Theme is an attribute
  * (`[data-theme]`) so the CSS variable overrides in app.css apply; accent is
@@ -370,6 +404,7 @@ export function resolveTheme(theme: Theme): "light" | "dark" {
 export function applyAppearance(settings: Settings): void {
   const root = document.documentElement;
   const theme = resolveTheme(settings.theme);
+  syncCaptionTheme(settings.theme);
   try {
     localStorage.setItem(THEME_HINT_KEY, settings.theme);
     localStorage.setItem(SHAPE_HINT_KEY, settings.shape);

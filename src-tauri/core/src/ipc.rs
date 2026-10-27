@@ -52,8 +52,18 @@ impl Endpoint {
 /// Sends one request on a connected stream and reads the answer.
 pub fn exchange(mut stream: Stream, request: &Request) -> Result<Response, String> {
     bound(&stream).map_err(|e| e.to_string())?;
-    protocol::write_frame(&mut stream, request, protocol::MAX_REQUEST)?;
-    protocol::read_frame(&mut stream, protocol::MAX_RESPONSE)
+    // A server that turns the connection away answers and hangs up, which can
+    // fail this write; its answer is still waiting to be read.
+    let sent = protocol::write_frame(&mut stream, request, protocol::MAX_REQUEST);
+    match protocol::read_frame(&mut stream, protocol::MAX_RESPONSE) {
+        Ok(response) => Ok(response),
+        Err(error) => Err(match sent {
+            Err(write_error) => format!("could not reach OpenRize: {write_error}"),
+            Ok(()) => format!(
+                "OpenRize hung up without answering ({error}). It may have refused this connection."
+            ),
+        }),
+    }
 }
 
 /// Reads one request from a client and writes back what `handle` answers.
@@ -63,6 +73,11 @@ pub fn respond(mut stream: Stream, handle: impl FnOnce(Request) -> Response) {
         return;
     }
     let response = match protocol::read_frame::<Request>(&mut stream, protocol::MAX_REQUEST) {
+        // Answered, not dropped, so `rize` can say why it got nothing.
+        Ok(_) if !platform::client_allowed(&stream) => Response::error(
+            protocol::code::FAILED,
+            "OpenRize refused the connection: this program does not run as the user that started the app.",
+        ),
         Ok(request) => handle(request),
         Err(_) => Response::error("INVALID_REQUEST", "invalid or oversized request"),
     };
@@ -83,14 +98,54 @@ fn bound(stream: &Stream) -> io::Result<()> {
 }
 
 /// The same directory always names the same endpoint, however it was spelled.
-/// Windows canonical paths are verbatim (`\\?\`), so there the absolute path is
-/// the key.
 fn canonical(data_dir: &Path) -> PathBuf {
     let absolute = std::path::absolute(data_dir).unwrap_or_else(|_| data_dir.into());
     if cfg!(unix) {
         absolute.canonicalize().unwrap_or(absolute)
     } else {
-        absolute
+        on_disk_form(&absolute)
+    }
+}
+
+/// Windows paths are case-insensitive and accept either separator, so the key
+/// is taken from the spelling the file system itself reports: its casing, no
+/// trailing separator, no `.` or `..`, no 8.3 short names. A path that does not
+/// exist yet keeps its own spelling below the nearest folder that does. The
+/// folder the app opens (`%APPDATA%\<identifier>`) is already written that way,
+/// so it hashes exactly as it did before this normalisation and an older `rize`
+/// still finds a newer app; only variant spellings, which never matched the
+/// app's pipe, now do.
+fn on_disk_form(absolute: &Path) -> PathBuf {
+    let mut tail = Vec::new();
+    let mut base = absolute;
+    loop {
+        // Canonical Windows paths are verbatim (`\\?\`), which the key must not be.
+        if let Ok(real) = base.canonicalize() {
+            let mut form = strip_verbatim(&real);
+            form.extend(tail.iter().rev());
+            return form;
+        }
+        match (base.parent(), base.file_name()) {
+            (Some(parent), Some(name)) => {
+                tail.push(name);
+                base = parent;
+            }
+            _ => return absolute.components().collect(),
+        }
+    }
+}
+
+/// `\\?\C:\x` is `C:\x` and `\\?\UNC\server\share` is `\\server\share`.
+fn strip_verbatim(path: &Path) -> PathBuf {
+    let Some(text) = path.to_str() else {
+        return path.to_path_buf();
+    };
+    if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{unc}"));
+    }
+    match text.strip_prefix(r"\\?\") {
+        Some(local) if local.as_bytes().get(1) == Some(&b':') => PathBuf::from(local),
+        _ => path.to_path_buf(),
     }
 }
 
@@ -107,6 +162,54 @@ fn key(path: &Path) -> u64 {
 mod tests {
     use super::*;
     use crate::protocol::Operation;
+
+    #[test]
+    fn verbatim_prefixes_come_off_local_and_network_paths_only() {
+        let strip = |text: &str| strip_verbatim(Path::new(text));
+        assert_eq!(strip(r"\\?\C:\Users\k"), Path::new(r"C:\Users\k"));
+        assert_eq!(
+            strip(r"\\?\UNC\server\share\d"),
+            Path::new(r"\\server\share\d")
+        );
+        assert_eq!(
+            strip(r"\\?\Volume{1234}\d"),
+            Path::new(r"\\?\Volume{1234}\d")
+        );
+        assert_eq!(strip(r"C:\plain"), Path::new(r"C:\plain"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn every_spelling_of_a_windows_folder_names_the_same_endpoint() {
+        let dir = std::env::temp_dir().join(format!("Rize-Ipc-Key-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("Data")).unwrap();
+        let reference = canonical(&dir.join("Data"));
+        // Already in the file system's own form, it is its own key.
+        assert_eq!(canonical(&reference), reference);
+        assert_eq!(strip_verbatim(&reference), reference);
+
+        let text = reference.to_string_lossy().into_owned();
+        for spelling in [
+            text.to_uppercase(),
+            text.to_lowercase(),
+            format!("{text}\\"),
+            text.replace('\\', "/"),
+            format!("{text}\\.\\"),
+            format!("{text}\\..\\Data"),
+        ] {
+            assert_eq!(
+                key(&canonical(Path::new(&spelling))),
+                key(&reference),
+                "{spelling}"
+            );
+        }
+
+        // A folder that is not there yet: the existing part is corrected, the
+        // rest is as typed and loses its trailing separator.
+        let missing = canonical(Path::new(&format!("{}\\New\\", text.to_uppercase())));
+        assert_eq!(missing, reference.join("New"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn a_request_round_trips_and_a_missing_server_is_an_error() {

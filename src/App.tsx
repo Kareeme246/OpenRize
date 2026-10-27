@@ -376,6 +376,7 @@ export default function App() {
             onForward={forward}
             sidebarCollapsed={sidebarCollapsed}
             onToggleSidebar={toggleSidebar}
+            onNavigate={navigate}
           />
           <div
             className={`grid min-h-0 flex-1 overflow-hidden transition-[grid-template-columns] duration-150 ${

@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import { PLATFORM } from "../lib/platform";
+import type { Route } from "../lib/types";
+import { AccountSwitcher } from "./AccountSwitcher";
 import { Tooltip } from "./Tooltip";
 
 interface TopBarProps {
@@ -9,6 +11,7 @@ interface TopBarProps {
   onForward: () => void;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
+  onNavigate: (route: Route) => void;
 }
 
 /**
@@ -24,6 +27,7 @@ export function TopBar({
   onForward,
   sidebarCollapsed,
   onToggleSidebar,
+  onNavigate,
 }: TopBarProps) {
   return (
     <header
@@ -58,6 +62,7 @@ export function TopBar({
             <path d="M16 10l-2 2 2 2" />
           )}
         </IconButton>
+        <AccountSwitcher onNavigate={onNavigate} />
       </div>
 
       <span className="shrink-0 select-none font-mono text-[11.5px] font-semibold tracking-wide text-fg-soft">

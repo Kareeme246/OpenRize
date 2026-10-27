@@ -30,17 +30,18 @@ export function AccountTile({
   account: Account | null;
   size?: number;
 }) {
+  const roundedClass = size <= 20 ? "rounded-[5px]" : "rounded-[7px]";
   if (account === null) {
     return (
       <span
         aria-hidden="true"
-        className="flex shrink-0 items-center justify-center rounded-[7px] bg-surface-strong text-fg-muted"
+        className={`flex shrink-0 items-center justify-center ${roundedClass} bg-surface-strong text-fg-muted`}
         style={{ width: size, height: size }}
       >
         <svg
           aria-hidden="true"
           viewBox="0 0 24 24"
-          className="size-3.5"
+          className={size <= 20 ? "size-3" : "size-3.5"}
           fill="none"
           stroke="currentColor"
           strokeWidth={2}
@@ -56,7 +57,7 @@ export function AccountTile({
   return (
     <span
       aria-hidden="true"
-      className="flex shrink-0 items-center justify-center rounded-[7px] font-extrabold text-cat-ink"
+      className={`flex shrink-0 items-center justify-center ${roundedClass} font-extrabold text-cat-ink`}
       style={{
         width: size,
         height: size,
@@ -143,18 +144,22 @@ interface PendingSwitch {
   preview: SwitchPreview;
 }
 
+interface AccountSwitcherProps {
+  onNavigate: (route: Route) => void;
+  collapsed?: boolean;
+  variant?: "bar" | "rail";
+}
+
 /**
- * The account switcher at the top of the sidebar. Choosing another account (or
+ * The account switcher in the bar (or rail). Choosing another account (or
  * Sign out) restarts the app into it; running work pauses first and waits for
  * the user in the account it belongs to.
  */
 export function AccountSwitcher({
-  collapsed,
   onNavigate,
-}: {
-  collapsed: boolean;
-  onNavigate: (route: Route) => void;
-}) {
+  collapsed = false,
+  variant = "bar",
+}: AccountSwitcherProps) {
   const { accounts, current, readOnly, switchTo } = useAccounts();
   const showToast = useToast();
   const [open, setOpen] = useState(false);
@@ -202,33 +207,56 @@ export function AccountSwitcher({
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: the arrow keys move between the menu's own buttons, from the trigger too
-    <div ref={root} onKeyDown={moveFocus} className="relative">
-      <Tooltip content={`${title} - switch account`} placement="right">
+    <div ref={root} onKeyDown={moveFocus} className="relative shrink-0">
+      <Tooltip
+        content={`${title} - switch account`}
+        placement={variant === "bar" ? "bottom" : "right"}
+      >
         <button
           type="button"
           aria-haspopup="menu"
           aria-expanded={open}
           aria-label={`Account: ${title}`}
           onClick={() => setOpen((was) => !was)}
-          className={`flex w-full items-center gap-2.5 rounded-[10px] border border-line px-2 py-1.5 text-left transition-colors hover:bg-surface-strong ${
-            open ? "border-line-strong bg-surface-strong" : "bg-surface"
-          } ${collapsed ? "justify-center px-1" : ""}`}
+          className={
+            variant === "bar"
+              ? `flex h-7 w-40 items-center gap-1.5 rounded-lg border border-line px-2 text-left transition-colors hover:bg-surface-strong ${
+                  open ? "border-line-strong bg-surface-strong" : "bg-surface"
+                }`
+              : `flex w-full items-center gap-2.5 rounded-[10px] border border-line px-2 py-1.5 text-left transition-colors hover:bg-surface-strong ${
+                  open ? "border-line-strong bg-surface-strong" : "bg-surface"
+                } ${collapsed ? "justify-center px-1" : ""}`
+          }
         >
-          <AccountTile account={current} />
-          {!collapsed && (
+          <AccountTile account={current} size={variant === "bar" ? 20 : 26} />
+          {variant === "bar" ? (
             <>
-              <span className="min-w-0 flex-1 leading-tight">
-                <span className="block truncate font-semibold text-[13px] text-fg-strong">
-                  {title}
-                </span>
-                <span className="block truncate text-[10.5px] text-fg-soft">
-                  {subtitle}
-                </span>
+              <span className="min-w-0 flex-1 truncate font-medium text-[12px] text-fg-strong">
+                {title}
               </span>
-              <span aria-hidden="true" className="text-[10px] text-fg-soft">
+              <span
+                aria-hidden="true"
+                className="shrink-0 text-[10px] text-fg-soft"
+              >
                 {open ? "▴" : "▾"}
               </span>
             </>
+          ) : (
+            !collapsed && (
+              <>
+                <span className="min-w-0 flex-1 leading-tight">
+                  <span className="block truncate font-semibold text-[13px] text-fg-strong">
+                    {title}
+                  </span>
+                  <span className="block truncate text-[10.5px] text-fg-soft">
+                    {subtitle}
+                  </span>
+                </span>
+                <span aria-hidden="true" className="text-[10px] text-fg-soft">
+                  {open ? "▴" : "▾"}
+                </span>
+              </>
+            )
           )}
         </button>
       </Tooltip>
@@ -238,8 +266,13 @@ export function AccountSwitcher({
           ref={menu}
           role="menu"
           aria-label="Account"
+          data-tauri-drag-region="none"
           className={`absolute z-50 w-[272px] rounded-xl border border-line-strong bg-panel p-1.5 shadow-2xl ${
-            collapsed ? "top-0 left-full ml-2" : "top-full left-0 mt-1.5"
+            variant === "bar"
+              ? "top-full left-0 mt-1.5"
+              : collapsed
+                ? "top-0 left-full ml-2"
+                : "top-full left-0 mt-1.5"
           }`}
         >
           {listed.length === 0 ? (

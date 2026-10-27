@@ -73,6 +73,8 @@ function Screen({
 
   const urlOf = (id: string): string | undefined =>
     permissions.find((permission) => permission.id === id)?.settingsUrl;
+  const descriptionOf = (id: string): string | undefined =>
+    permissions.find((permission) => permission.id === id)?.description;
   const open = (url: string | undefined): void => {
     if (url === undefined) return;
     openUrl(url).catch((cause: unknown) =>
@@ -100,18 +102,16 @@ function Screen({
             id="onboarding-title"
             className="text-[16px] font-semibold text-fg-strong"
           >
-            Welcome to OpenRize
+            Permissions
           </h1>
           <p className="text-[12.5px] leading-relaxed text-fg-soft">
-            OpenRize tracks your time on this Mac and keeps it here. It works
-            without any permission. These two make what it records more precise,
-            and you can switch either on later in Settings.
+            Both are optional. You can change them later in Settings.
           </p>
         </header>
 
         <PermissionRow
-          title="Window titles"
-          detail="Accessibility lets OpenRize read the title of the window in front, such as the page you are on in a browser, so entries can be sorted into the right project."
+          title="Accessibility"
+          detail={descriptionOf(ACCESSIBILITY_ID)}
           status={<AccessibilityStatus step={step} />}
           action={
             step === "asking" ? (
@@ -120,14 +120,14 @@ function Screen({
                 onClick={allow}
                 className="shrink-0 rounded-lg border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-3 py-1.5 text-[12px] font-semibold text-accent-fg"
               >
-                Allow window titles
+                Allow Accessibility
               </button>
             ) : null
           }
         />
         <PermissionRow
-          title="Browser addresses"
-          detail="Automation lets OpenRize read the address of the tab you are on in Safari, Chrome, Brave, Edge and Arc. macOS asks the first time you use one of them, so there is nothing to allow here."
+          title="Automation"
+          detail={descriptionOf(AUTOMATION_ID)}
           status={null}
           action={
             <button
@@ -172,7 +172,7 @@ function PermissionRow({
   action,
 }: {
   title: string;
-  detail: string;
+  detail: string | undefined;
   status: React.ReactNode;
   action: React.ReactNode;
 }) {
@@ -184,7 +184,9 @@ function PermissionRow({
           Optional
         </span>
       </div>
-      <p className="text-[12px] leading-relaxed text-fg-muted">{detail}</p>
+      {detail !== undefined && (
+        <p className="text-[12px] leading-relaxed text-fg-muted">{detail}</p>
+      )}
       {(status !== null || action !== null) && (
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0 text-[12px]">{status}</div>
@@ -208,11 +210,7 @@ function AccessibilityStatus({
     case "waiting":
       return <span className="text-fg-muted">Checking that it works…</span>;
     case "granted":
-      return (
-        <span className="font-medium text-emerald-500">
-          On. Window titles are being read.
-        </span>
-      );
+      return <span className="font-medium text-emerald-500">On.</span>;
     case "notWorking":
       return (
         <span className="text-amber-500">

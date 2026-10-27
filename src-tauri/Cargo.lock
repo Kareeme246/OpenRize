@@ -3164,7 +3164,7 @@ dependencies = [
 
 [[package]]
 name = "openrize"
-version = "0.9.38"
+version = "0.9.39"
 dependencies = [
  "block2",
  "chrono",
@@ -3200,7 +3200,7 @@ dependencies = [
 
 [[package]]
 name = "openrize-cli"
-version = "0.9.38"
+version = "0.9.39"
 dependencies = [
  "chrono",
  "clap",
@@ -3216,7 +3216,7 @@ dependencies = [
 
 [[package]]
 name = "openrize-core"
-version = "0.9.38"
+version = "0.9.39"
 dependencies = [
  "chrono",
  "dirs",

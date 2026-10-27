@@ -1,7 +1,7 @@
 {
   "name": "openrize",
   "private": true,
-  "version": "0.9.32",
+  "version": "0.9.33",
   "description": "Automatic, private, local-first time tracking for your Mac",
   "license": "AGPL-3.0",
   "packageManager": "pnpm@12.5.1",
@@ -19,6 +19,8 @@
     "fix": "bash scripts/verify.sh --fix",
     "dev:screenshot": "bash scripts/dev-screenshot.sh",
     "dev:drive": "bash scripts/app-drive.sh",
+    "dev:screenshot:win": "node scripts/app-drive-windows.mjs screenshot",
+    "dev:drive:win": "node scripts/app-drive-windows.mjs",
     "publish-r2": "node scripts/publish-r2/cli.ts",
     "test:publisher": "node --test \"scripts/publish-r2/*.test.ts\""
   },

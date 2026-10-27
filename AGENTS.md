@@ -35,7 +35,7 @@ when release/bundle behavior specifically needs testing.
 
 Do not add test frameworks, CI workflows, or git hooks on your own
 initiative. Verification for this project is deliberately just these scripts
-(`pnpm verify`, `pnpm dev:screenshot`, and `pnpm dev:drive` below) — that
+(`pnpm verify` and the drive scripts below) — that
 is a decision, not an oversight.
 
 ## CI and releases
@@ -80,6 +80,10 @@ code can be checked from a Mac with the `x86_64-pc-windows-gnu` rustup target an
 `mingw-w64`: in `src-tauri`, set `CC_x86_64_pc_windows_gnu=x86_64-w64-mingw32-gcc` and run
 `cargo clippy --target x86_64-pc-windows-gnu --all-targets -- -D warnings`.
 
+On Windows, `.claude/skills` is a git symlink that a default clone checks out as a plain text file, which
+hides every repo skill from Claude Code. Enable Developer Mode and clone with
+`git -c core.symlinks=true clone ...`, or delete that file and run `mklink /D .claude\skills ..\.agents\skills`.
+
 ## On-device AI sidecar
 
 AI categorization lives in `src-tauri/src/ai/` (module docs in `ai/mod.rs`
@@ -102,31 +106,10 @@ specimen PDFs for a visual check with
 
 ## Visually verifying UI changes
 
-Tauri has no supported WebDriver backend for macOS (only Linux/webkit2gtk and
-Windows/Edge are supported), so there is no Playwright-style automated driver
-for the real app on this machine. To actually see a change running, use:
-
-```
-pnpm dev:screenshot
-```
-
-This launches an isolated `tauri dev` instance on a randomly chosen port with
-its own Tauri app `identifier` (so its app-data storage never collides with
-the real app data or with another agent's concurrent run), waits for
-the window, repositions it on-screen, screenshots it, tears the whole process
-tree down, and prints the PNG path — read that file to look at the result.
-
-- Do not run `pnpm tauri dev` directly to check a UI change — it uses a fixed
-  port and identifier and will collide with another agent's instance or with
-  a real running copy of the app. Always go through `pnpm dev:screenshot`.
-- Both scripts run `tauri dev --no-watch`: the frontend hot-reloads, but a
-  Rust change only shows up in a fresh instance (`pnpm dev:drive stop`, then
-  `start`).
-- Do not write Playwright/WebDriver/E2E test suites to drive the app window —
-  see the WebDriver limitation above; such a test would not exercise the real
-  Tauri backend on this platform.
-- macOS only. If you are not on macOS, state that visual verification isn't
-  available in this environment rather than attempting a workaround.
+To see a change running in the real app, load the skill for your OS (they are separate so you only
+read one): on macOS `drive-app` (`pnpm dev:screenshot` for a single look, `pnpm dev:drive` to click
+through); on Windows `drive-app-windows` (`pnpm dev:screenshot:win`, `pnpm dev:drive:win`). Never
+run `pnpm tauri dev` directly for this, and do not write Playwright/WebDriver suites.
 
 ## Maintaining this file
 

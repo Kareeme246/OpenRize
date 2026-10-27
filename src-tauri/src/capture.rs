@@ -2,7 +2,7 @@
 //! browser's URL, plus the OS hooks the sampler needs around that.
 //!
 //! Each platform lives in its own file and provides the same items:
-//! `read_active_window`, `user_is_away`, `AppNapAssertion`, and
+//! `read_active_window`, `user_is_away`, `idle_ms`, `AppNapAssertion`, and
 //! `register_sleep_listeners`. macOS and Windows are implemented (Windows is
 //! experimental); anything else compiles `unsupported.rs`, which captures
 //! nothing.
@@ -15,7 +15,9 @@
 )]
 mod platform;
 
-pub use platform::{read_active_window, register_sleep_listeners, user_is_away, AppNapAssertion};
+pub use platform::{
+    idle_ms, read_active_window, register_sleep_listeners, user_is_away, AppNapAssertion,
+};
 
 pub use openrize_core::capture::WindowSample;
 

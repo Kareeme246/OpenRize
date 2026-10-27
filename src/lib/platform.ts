@@ -52,6 +52,43 @@ export const THIS_COMPUTER = byPlatform({
   linux: "this computer",
 });
 
+/**
+ * Whether the OS draws its own window caption (title and window buttons)
+ * above the webview. macOS overlays its title bar on the webview instead
+ * (`titleBarStyle: "Overlay"` in tauri.conf.json), so the app's own bar is
+ * the title bar there.
+ */
+export const HAS_NATIVE_CAPTION = byPlatform({
+  macos: false,
+  windows: true,
+  linux: true,
+});
+
+/** The Battery & Energy monitor. Windows has no per-process energy counter. */
+export const HAS_ENERGY_MONITOR = byPlatform({
+  macos: true,
+  windows: false,
+  linux: true,
+});
+
+/**
+ * Whether this platform's build is expected to ship the on-device ML sidecar.
+ * Only the first guess, before the AI status has loaded: after that the
+ * status's `sidecar` says what is actually there.
+ */
+export const EXPECTS_ON_DEVICE_ML = byPlatform({
+  macos: true,
+  windows: false,
+  linux: false,
+});
+
+/** The OS setting that throttles background work to save battery. */
+export const POWER_SAVING_MODE = byPlatform({
+  macos: "Low Power Mode",
+  windows: "Battery Saver",
+  linux: "power saver",
+});
+
 /** The modifier app shortcuts use (and not the other one). */
 export function hasPrimaryModifier(event: KeyboardEvent): boolean {
   return byPlatform({

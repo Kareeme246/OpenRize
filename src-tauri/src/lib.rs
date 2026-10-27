@@ -107,6 +107,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
             install_bundled_cli();
+            #[cfg(windows)]
+            login_item::refresh();
             let root = app.path().app_data_dir()?;
             std::fs::create_dir_all(&root)?;
             // Before any store opens: repairs the account list, finishes a

@@ -307,3 +307,13 @@ test("the relaunch screen and the Restart button share one relaunch hook", () =>
     assert.ok(!source.includes("relaunchApp"), `${file} relaunches by itself`);
   }
 });
+
+test("simulate Checking, re-run onboarding: the button is usable", () => {
+  // Simulated Checking alone: the screen would hold Continue disabled.
+  assert.equal(actionFor("checking").disabled, true);
+  // The re-run (dev_tools.rs `rerun_simulation`, tested in Rust) replaces it
+  // with a simulated "not granted", which opens onto a usable Continue.
+  const afterRerun = actionFor("notGranted", false);
+  assert.equal(afterRerun.kind, "continue");
+  assert.equal(afterRerun.disabled, false);
+});

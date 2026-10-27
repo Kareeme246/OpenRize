@@ -985,7 +985,7 @@ function PermissionCard({
         )}
         {accessibility && perm.state === "relaunchRequired" && (
           <p className="text-[12px] leading-relaxed text-amber-500">
-            Allowed. macOS gives OpenRize the access the next time it opens.
+            Allowed. Relaunch to finish.
           </p>
         )}
       </div>

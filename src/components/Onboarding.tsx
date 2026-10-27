@@ -5,17 +5,23 @@ import { useTauriEvent } from "../hooks/useTauriEvent";
 import { useToast } from "../hooks/useToast";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
-import { type OnboardingStep, onboardingStep } from "../lib/onboarding";
-import { ACCESSIBILITY_ID } from "../lib/permissions";
+import {
+  accessibilityCard,
+  automationCard,
+  type OnboardingStep,
+  onboardingStep,
+  type PermissionCardView,
+} from "../lib/onboarding";
+import { ACCESSIBILITY_ID, roleLabel, TONE_CLASS } from "../lib/permissions";
 import type { PermissionInfo } from "../lib/types";
 
 const AUTOMATION_ID = "automation";
 
 /**
  * The first screen a Mac user sees: the permissions OpenRize can use, each
- * explained once. Both are optional and skipping is the normal path, so the
- * way out is as prominent as the way in. See `onboardingStep` for when it
- * comes up and when it steps aside.
+ * explained once. Accessibility is recommended and Automation optional, and
+ * neither gates Continue, so skipping is the normal path. See `onboardingStep`
+ * for when it comes up and when it steps aside.
  */
 export function Onboarding() {
   const accessibility = useAccessibilityState();
@@ -97,6 +103,10 @@ function Screen({
       );
   };
 
+  const automation = permissions.find(
+    (permission) => permission.id === AUTOMATION_ID,
+  );
+
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-canvas p-4">
       <section
@@ -111,59 +121,32 @@ function Screen({
             Permissions
           </h1>
           <p className="text-[12.5px] leading-relaxed text-fg-soft">
-            Both are optional. You can change them later in Settings.
+            You can change these later in Settings.
           </p>
         </header>
 
         <PermissionRow
           title="Accessibility"
+          role={roleLabel(ACCESSIBILITY_ID, false)}
           detail={descriptionOf(ACCESSIBILITY_ID)}
-          status={<AccessibilityStatus step={step} />}
-          action={
-            step === "asking" ? (
-              <button
-                type="button"
-                onClick={allow}
-                className="shrink-0 rounded-lg border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-3 py-1.5 text-[12px] font-semibold text-accent-fg"
-              >
-                Allow Accessibility
-              </button>
-            ) : null
-          }
+          view={accessibilityCard(step)}
+          onGrant={allow}
         />
         <PermissionRow
           title="Automation"
+          role={roleLabel(AUTOMATION_ID, false)}
           detail={descriptionOf(AUTOMATION_ID)}
-          status={null}
-          action={
-            <button
-              type="button"
-              onClick={() => open(urlOf(AUTOMATION_ID))}
-              className="shrink-0 rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] font-medium text-fg-muted hover:bg-surface-strong hover:text-fg"
-            >
-              Open Automation settings
-            </button>
-          }
+          view={automationCard(automation?.granted)}
+          onGrant={() => open(urlOf(AUTOMATION_ID))}
         />
 
-        <div className="flex items-center justify-between gap-3 border-t border-line/60 pt-4">
-          <p className="text-[11.5px] text-fg-muted">
-            {step === "waiting"
-              ? "Waiting for macOS to apply it…"
-              : "Nothing else is needed to start."}
-          </p>
+        <div className="flex justify-end border-t border-line/60 pt-4">
           <button
             type="button"
             onClick={onFinish}
-            className={
-              step === "granted" || step === "notWorking"
-                ? "shrink-0 rounded-lg border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-3.5 py-1.5 text-[12.5px] font-semibold text-accent-fg"
-                : "shrink-0 rounded-lg border border-line bg-surface px-3.5 py-1.5 text-[12.5px] font-medium text-fg hover:bg-surface-strong"
-            }
+            className="shrink-0 rounded-lg border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-3.5 py-1.5 text-[12.5px] font-semibold text-accent-fg"
           >
-            {step === "granted" || step === "notWorking"
-              ? "Continue"
-              : "Skip for now"}
+            Continue
           </button>
         </div>
       </section>
@@ -173,55 +156,47 @@ function Screen({
 
 function PermissionRow({
   title,
+  role,
   detail,
-  status,
-  action,
+  view,
+  onGrant,
 }: {
   title: string;
+  role: string;
   detail: string | undefined;
-  status: React.ReactNode;
-  action: React.ReactNode;
+  view: PermissionCardView | null;
+  onGrant: () => void;
 }) {
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-settings-card-border bg-settings-card p-4">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[13px] font-medium text-fg">{title}</span>
         <span className="shrink-0 rounded-full border border-line bg-surface px-2 py-0.5 font-mono text-[9.5px] uppercase tracking-wider text-fg-muted">
-          Optional
+          {role}
         </span>
       </div>
       {detail !== undefined && (
         <p className="text-[12px] leading-relaxed text-fg-muted">{detail}</p>
       )}
-      {(status !== null || action !== null) && (
+      {view !== null && (
         <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0 text-[12px]">{status}</div>
-          {action}
+          <span
+            className={`min-w-0 text-[12px] font-medium ${TONE_CLASS[view.tone]}`}
+          >
+            {view.status}
+          </span>
+          {view.showGrant && (
+            <button
+              type="button"
+              onClick={onGrant}
+              aria-label={`Grant ${title}`}
+              className="shrink-0 rounded-lg border border-accent/30 bg-linear-to-br from-accent to-accent-dim px-3 py-1.5 text-[12px] font-semibold text-accent-fg"
+            >
+              Grant
+            </button>
+          )}
         </div>
       )}
     </div>
   );
-}
-
-function AccessibilityStatus({
-  step,
-}: {
-  step: Exclude<OnboardingStep, "hidden">;
-}) {
-  switch (step) {
-    case "asking":
-      return (
-        <span className="text-fg-muted">Off. OpenRize works without it.</span>
-      );
-    case "waiting":
-      return <span className="text-fg-muted">Checking that it works…</span>;
-    case "granted":
-      return <span className="font-medium text-emerald-500">On.</span>;
-    case "notWorking":
-      return (
-        <span className="text-amber-500">
-          Allowed, but not working. Settings says how to fix it.
-        </span>
-      );
-  }
 }

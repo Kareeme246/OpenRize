@@ -1,3 +1,4 @@
+import { type StateTone, stateLabel, stateTone } from "./permissions.ts";
 import type { AccessibilityState } from "./types";
 
 /** What the first-run permissions screen is showing, if anything. */
@@ -47,4 +48,41 @@ export function onboardingStep({
     case "notApplicable":
       return "hidden";
   }
+}
+
+/** One permission card's status line and whether it still offers to grant. */
+export interface PermissionCardView {
+  status: string;
+  tone: StateTone;
+  /** Only while the permission is not granted; once it is, there is nothing to press. */
+  showGrant: boolean;
+}
+
+/** The Accessibility card follows the step, so it keeps up as macOS applies the grant. */
+export function accessibilityCard(
+  step: Exclude<OnboardingStep, "hidden">,
+): PermissionCardView {
+  const states: Record<typeof step, AccessibilityState> = {
+    asking: "notGranted",
+    waiting: "checking",
+    granted: "working",
+    notWorking: "notWorking",
+  };
+  return cardFor(states[step]);
+}
+
+/** Automation is a yes or no; `undefined` is not known yet, so the card says nothing. */
+export function automationCard(
+  granted: boolean | undefined,
+): PermissionCardView | null {
+  if (granted === undefined) return null;
+  return cardFor(granted ? "working" : "notGranted");
+}
+
+function cardFor(state: AccessibilityState): PermissionCardView {
+  return {
+    status: stateLabel(state),
+    tone: stateTone(state),
+    showGrant: state === "notGranted",
+  };
 }

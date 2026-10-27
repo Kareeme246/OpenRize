@@ -7,6 +7,13 @@ pub fn user_is_away() -> bool {
     false
 }
 
+/// Milliseconds since the last keyboard or mouse input.
+pub fn idle_ms() -> u64 {
+    user_idle3::UserIdle::get_time()
+        .map(|idle| idle.duration().as_millis() as u64)
+        .unwrap_or(0)
+}
+
 pub fn read_active_window() -> Option<WindowSample> {
     None
 }

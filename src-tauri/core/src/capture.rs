@@ -11,8 +11,9 @@ pub struct WindowSample {
     /// The app holds a power assertion keeping the display awake, which is
     /// how a browser playing video or a call app tells macOS someone is
     /// watching. Watching gives no keyboard or mouse input, so this is the
-    /// only sign the user is still there. Always false on Windows, which
-    /// does not attribute display requests to a process without admin
-    /// rights.
+    /// only sign the user is still there. Windows does not attribute display
+    /// requests to a process without admin rights, so it infers this: the
+    /// system holds a display request while the foreground app (or a process
+    /// of the same app) is playing audio or recording, or is fullscreen.
     pub keeps_display_awake: bool,
 }

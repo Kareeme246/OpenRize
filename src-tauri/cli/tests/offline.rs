@@ -199,6 +199,145 @@ fn edits_and_reports_with_the_app_closed() {
     );
 }
 
+/// Every entry on the day as (short id, start, end, status), from `rize`.
+fn day(store: &Store) -> Vec<(String, String, String, String)> {
+    let list = store.ok(&["entries", "list", "--from", "2026-09-01", "--limit", "50"]);
+    let mut rows: Vec<_> = list["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| {
+            let id = entry["id"].as_str().unwrap();
+            let time = |key: &str| {
+                use chrono::{Local, TimeZone};
+                Local
+                    .timestamp_millis_opt(entry[key].as_i64().unwrap())
+                    .unwrap()
+                    .format("%H:%M")
+                    .to_string()
+            };
+            (
+                id[id.len() - 8..].to_string(),
+                time("startedAt"),
+                time("endedAt"),
+                entry["status"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    rows.sort_by(|a, b| a.1.cmp(&b.1));
+    rows
+}
+
+/// One owner per minute from the command line: the same claim the app makes,
+/// since both reach the one store.
+#[test]
+fn entries_claim_their_minutes_and_never_take_approved_ones() {
+    let store = Store::new();
+    let add = |from: &str, to: &str, description: &str| {
+        store.ok(&[
+            "entries",
+            "add",
+            "--from",
+            from,
+            "--to",
+            to,
+            "-d",
+            description,
+        ])["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let short = |id: &str| id[id.len() - 8..].to_string();
+
+    let first = short(&add("2026-09-01T09:00", "2026-09-01T10:00", "First"));
+    store.ok(&["entries", "unapprove", &first]);
+
+    // Adding over a pending entry trims it; the new one keeps the minutes.
+    let second = short(&add("2026-09-01T09:30", "2026-09-01T10:30", "Second"));
+    let rows = day(&store);
+    assert_eq!(
+        rows.iter()
+            .map(|r| (&r.1[..], &r.2[..]))
+            .collect::<Vec<_>>(),
+        vec![("09:00", "09:30"), ("09:30", "10:30")]
+    );
+
+    // ...and over an approved one is refused, atomically.
+    let before = day(&store);
+    let refused = store.rize(&[
+        "--json",
+        "entries",
+        "add",
+        "--from",
+        "2026-09-01T09:15",
+        "--to",
+        "2026-09-01T09:45",
+        "-d",
+        "Third",
+    ]);
+    assert_eq!(refused.status.code(), Some(1));
+    let refused: Value = serde_json::from_slice(&refused.stdout).unwrap();
+    assert_eq!(
+        refused["error"]["message"],
+        openrize_core::activity::APPROVED_OVERLAP
+    );
+    assert_eq!(day(&store), before);
+
+    // Editing an end takes the gained minutes from the pending neighbour...
+    store.ok(&["entries", "unapprove", &second]);
+    store.ok(&["entries", "edit", &first, "--to", "2026-09-01T10:15"]);
+    let rows = day(&store);
+    assert_eq!(
+        rows.iter()
+            .map(|r| (&r.1[..], &r.2[..]))
+            .collect::<Vec<_>>(),
+        vec![("09:00", "10:15"), ("10:15", "10:30")]
+    );
+
+    // ...but never from an approved one, and nothing changes when refused.
+    store.ok(&["entries", "approve", &second]);
+    let before = day(&store);
+    let edit = store.rize(&[
+        "--json",
+        "entries",
+        "edit",
+        &first,
+        "--to",
+        "2026-09-01T10:20",
+    ]);
+    assert_eq!(edit.status.code(), Some(1));
+    let refused: Value = serde_json::from_slice(&edit.stdout).unwrap();
+    assert_eq!(
+        refused["error"]["message"],
+        openrize_core::activity::APPROVED_OVERLAP
+    );
+    assert_eq!(day(&store), before);
+
+    // Several entries cannot be given the same times in one go.
+    assert_eq!(
+        store.err(&[
+            "entries",
+            "edit",
+            &first,
+            &second,
+            "--to",
+            "2026-09-01T11:00"
+        ]),
+        ("FAILED".into(), 1)
+    );
+
+    // Totals are plain sums, and they are true: no minute is counted twice.
+    let report = store.ok(&["report", "--from", "2026-09-01", "--by", "status"]);
+    let total: i64 = report["cells"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|cell| cell["ms"].as_i64().unwrap())
+        .sum();
+    assert_eq!(total, 90 * 60_000);
+}
+
 #[test]
 fn settings_timers_and_what_needs_the_app() {
     let store = Store::new();

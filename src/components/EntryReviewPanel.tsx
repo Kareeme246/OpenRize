@@ -71,6 +71,7 @@ const EVENT_LABELS: Record<string, string> = {
   edited: "Edited",
   split: "Split",
   merged: "Merged",
+  trimmed: "Trimmed",
   recategorized: "Recategorized",
   auto_approved: "Auto-approved",
 };

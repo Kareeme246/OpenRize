@@ -86,11 +86,13 @@ pub fn merge_gap(entry: &TimeEntry, other: &TimeEntry) -> Option<u64> {
 /// entry; unapproving is the only way back to changing it.
 pub const LOCKED: &str = "Approved entries are locked. Unapprove to change them.";
 
-pub const APPROVED_OVERLAP: &str = "This time range overlaps approved entries. Unapprove those entries before creating a manual entry here.";
+/// Why a change that would take minutes from approved entries is refused.
+/// Approved time is never given up to another entry, however the change is made.
+pub const APPROVED_OVERLAP: &str = "This time range overlaps approved entries. Unapprove those entries first, or choose a time that avoids them.";
 
 fn ensure_no_approved_overlap(conn: &Connection, start: u64, end: u64) -> Result<(), String> {
     let overlaps: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM time_entries WHERE deleted_at IS NULL AND status = 'approved' AND started_at < ?2 AND ended_at > ?1);",
+        "SELECT EXISTS(SELECT 1 FROM time_entries WHERE deleted_at IS NULL AND (status = 'approved' OR invoice_id IS NOT NULL) AND started_at < ?2 AND ended_at > ?1);",
         params![start as i64, end as i64],
         |row| row.get(0),
     ).map_err(|error| error.to_string())?;
@@ -230,10 +232,13 @@ struct Totals {
 mod approval_lock;
 #[cfg(test)]
 mod break_regressions;
+mod claim;
 mod deletions;
 mod history;
 #[cfg(test)]
 mod merge_regressions;
+#[cfg(test)]
+mod overlap_claim;
 #[cfg(test)]
 mod split_regressions;
 
@@ -251,6 +256,8 @@ pub struct ActivityStore {
     pub watch_since_ms: Option<u64>,
     tracking_hours: crate::settings::TrackingHours,
     manual_tracking: bool,
+    /// What the undoable change under way has touched; see `history.rs`.
+    journal: Option<history::Journal>,
 }
 
 impl ActivityStore {
@@ -290,6 +297,7 @@ impl ActivityStore {
             watch_since_ms: None,
             tracking_hours: crate::settings::TrackingHours::default(),
             manual_tracking: false,
+            journal: None,
         };
         store.capture_enabled = store
             .read_setting("capture_enabled")
@@ -1635,6 +1643,11 @@ impl ActivityStore {
         patch: UpdateTimeEntry,
         now: u64,
     ) -> Result<Vec<TimeEntry>, String> {
+        // Entries given the same times would each claim the minutes the
+        // others just claimed, and the last would swallow the rest.
+        if ids.len() > 1 && (patch.started_at.is_some() || patch.ended_at.is_some()) {
+            return Err("Set the start or end of one entry at a time.".to_string());
+        }
         self.edit("Edit", ids, |store| {
             ids.iter()
                 .map(|id| store.patch_time_entry(id, patch.clone(), now))
@@ -1657,6 +1670,7 @@ impl ActivityStore {
         if entry.status == "approved" {
             return Err(LOCKED.to_string());
         }
+        let held = (entry.started_at, entry.ended_at);
 
         let title_draft = if let Some(ref desc) = patch.description {
             if *desc != entry.description && entry.description_origin == "ai" {
@@ -1700,6 +1714,12 @@ impl ActivityStore {
         }
         if entry.ended_at <= entry.started_at {
             return Err("Entry end must be after its start".to_string());
+        }
+        // The edit wins the minutes it gains; minutes the entry already held
+        // are not in dispute, so an overlap that was there before is left be.
+        if patch.started_at.is_some() || patch.ended_at.is_some() {
+            let gained = claim::gained(&[held], entry.started_at, entry.ended_at);
+            self.claim(&[id], &gained, now)?;
         }
         entry.updated_at = now;
 
@@ -1938,7 +1958,7 @@ impl ActivityStore {
         if new_entry.description.trim().is_empty() && !unclassified {
             return Err("Entry description cannot be empty".to_string());
         }
-        ensure_no_approved_overlap(&self.conn, new_entry.started_at, new_entry.ended_at)?;
+        self.claim(&[id], &[(new_entry.started_at, new_entry.ended_at)], now)?;
         let billable = new_entry.billable.unwrap_or(false) as i64;
         let pending = unclassified || new_entry.review;
         let status = if pending { "pending" } else { "approved" };
@@ -2017,6 +2037,7 @@ impl ActivityStore {
         use crate::entry_builder::{build_entries, BuiltTimeEntry, EntrySettings, SegmentInput};
 
         self.release_live_tail(now)?;
+        self.fence_live_session(now)?;
         let tx = self.conn.transaction().map_err(|e| e.to_string())?;
 
         let segments: Vec<SegmentInput> = {
@@ -2047,13 +2068,17 @@ impl ActivityStore {
         };
 
         // Every entry touching the range, deleted ones included: a deleted
-        // entry's time stays unassigned instead of being rebuilt.
+        // entry's time stays unassigned instead of being rebuilt. So is any
+        // entry that owns a segment in it, even one that lies outside: its
+        // segments are its own, not free to be built into a new session.
         let existing: Vec<TimeEntry> = {
             let mut stmt = tx
                 .prepare(
                     "SELECT id, started_at, ended_at, description, category_id, project_id, status, approved_by, source, billable, invoice_id, created_at, updated_at, deleted_at, description_origin
                      FROM time_entries
-                     WHERE ended_at >= ?1 AND started_at <= ?2;",
+                     WHERE (ended_at >= ?1 AND started_at <= ?2)
+                        OR id IN (SELECT entry_id FROM segments
+                                  WHERE started_at >= ?1 AND started_at <= ?2);",
                 )
                 .map_err(|e| e.to_string())?;
             let rows = stmt
@@ -2176,7 +2201,7 @@ impl ActivityStore {
             .optional()
             .map_err(|e| e.to_string())?;
         let Some((entry_id, ended_at)) = owner else {
-            return Ok(());
+            return self.release_unowned_tail(now);
         };
         if current.started_at >= ended_at as u64 {
             self.conn
@@ -2188,7 +2213,73 @@ impl ActivityStore {
             return Ok(());
         }
         let id = current.id;
-        self.cut_segment(id, &entry_id, ended_at as u64, None)
+        self.cut_segment(id, Some(&entry_id), ended_at as u64, None)
+            .map(|_| ())
+    }
+
+    /// The same for a segment no entry owns that began inside a closed
+    /// entry's time, as when a hand-made entry reaching past now was dragged
+    /// over the live session: once the clock passes that entry's end,
+    /// recording carries on in a new session from there.
+    fn release_unowned_tail(&mut self, now: u64) -> Result<(), String> {
+        let Some(current) = self.current.as_ref() else {
+            return Ok(());
+        };
+        let id = current.id;
+        let ended_at: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT MAX(e.ended_at) FROM segments s JOIN time_entries e
+                   ON e.status != 'building' AND e.deleted_at IS NULL
+                  AND e.started_at <= s.started_at AND e.ended_at > s.started_at
+                  AND e.ended_at < ?2
+                 WHERE s.id = ?1 AND s.ended_at IS NULL AND s.entry_id IS NULL;",
+                params![id, now as i64],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        match ended_at {
+            Some(ended_at) => self
+                .cut_segment(id, None, ended_at as u64, None)
+                .map(|_| ()),
+            None => Ok(()),
+        }
+    }
+
+    /// The live session never records into time another entry holds. A closed
+    /// entry dragged out past now starts after the live session's recorded
+    /// end; once the clock reaches it, what the live session recorded from
+    /// there on is cut off, so the session ends where that entry begins.
+    /// (An entry the live session already runs through is left as it is.)
+    fn fence_live_session(&mut self, now: u64) -> Result<(), String> {
+        let fences: Vec<(String, i64)> = {
+            let mut statement = self
+                .conn
+                .prepare(
+                    "SELECT b.id, MIN(f.started_at)
+                     FROM time_entries b JOIN time_entries f
+                       ON f.id != b.id AND f.status != 'building' AND f.deleted_at IS NULL
+                      AND f.started_at >= b.ended_at AND f.started_at < ?1
+                     WHERE b.status = 'building' AND b.deleted_at IS NULL
+                     GROUP BY b.id;",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = statement
+                .query_map(params![now as i64], |row| Ok((row.get(0)?, row.get(1)?)))
+                .map_err(|e| e.to_string())?;
+            rows.collect::<rusqlite::Result<_>>()
+                .map_err(|e| e.to_string())?
+        };
+        for (live, at) in fences {
+            self.cut_segments(&live, at as u64, None)?;
+            self.conn
+                .execute(
+                    "UPDATE segments SET entry_id = NULL WHERE entry_id = ?1 AND started_at >= ?2;",
+                    params![live, at],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 
     // --- P1: Apps -------------------------------------------------------
@@ -3390,7 +3481,7 @@ mod tests {
     }
 
     #[test]
-    fn a_manual_session_dragged_over_the_live_entry_leaves_it_running() {
+    fn a_manual_session_dragged_over_the_live_entry_closes_it_before_the_new_entry() {
         let mut store = store();
         let start = 13 * 60 * MIN;
         // Tracking since 1:00 PM, still going at 2:00 PM.
@@ -3419,32 +3510,36 @@ mod tests {
             .unwrap();
         store.rebuild_range(0, now + 40 * MIN, now).unwrap();
 
+        // The live session closed where the new entry begins; nothing is
+        // tracked twice, and no captured activity is left unowned.
         let entries = live_entries(&store);
         assert_eq!(entries.len(), 2);
-        let open = entries.iter().find(|e| e.id == live[0].id).unwrap();
-        assert_eq!(open.status, "building");
-        assert_eq!(open.started_at, start);
-        assert_eq!(open.ended_at, now);
-        assert!(entries.iter().any(|e| e.id == dragged.id));
-        // The live segments stay owned by the open entry (no untinted blocks).
-        let owned: i64 = store
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM segments WHERE entry_id = ?1;",
-                params![open.id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(owned > 0);
+        let closed = entries.iter().find(|e| e.id == live[0].id).unwrap();
+        assert_ne!(closed.status, "building");
+        assert_eq!(closed.started_at, start);
+        assert_eq!(closed.ended_at, start + 30 * MIN);
+        let manual = entries.iter().find(|e| e.id == dragged.id).unwrap();
+        assert_eq!(manual.started_at, start + 30 * MIN);
+        assert_eq!(manual.ended_at, now + 30 * MIN);
         let orphaned: i64 = store
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM segments WHERE entry_id IS NULL;",
-                [],
+                "SELECT COUNT(*) FROM segments WHERE entry_id IS NULL AND started_at < ?1;",
+                params![(start + 30 * MIN) as i64],
                 |row| row.get(0),
             )
             .unwrap();
         assert_eq!(orphaned, 0);
+
+        // Capture resumes after the new entry, not inside it.
+        let later = now + 31 * MIN;
+        store.tick(sample("Code", "main.rs"), 0, later).unwrap();
+        store.rebuild_range(0, later + MIN, later).unwrap();
+        let entries = live_entries(&store);
+        assert_eq!(entries.len(), 3, "{entries:?}");
+        assert_eq!(entries[2].status, "building");
+        assert_eq!(entries[2].started_at, now + 30 * MIN);
+        assert!(entries[1].ended_at <= entries[2].started_at);
     }
 
     #[test]

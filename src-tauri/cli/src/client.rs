@@ -192,13 +192,14 @@ fn installed_apps() -> Vec<PathBuf> {
     apps
 }
 
-/// The per-user install folder the Windows installer uses, then a machine-wide one.
+/// The per-user install folder the Windows installer uses, then a machine-wide
+/// one. NTFS ignores case, so installs from before the folder was `OpenRize` match too.
 #[cfg(windows)]
 fn installed_apps() -> Vec<PathBuf> {
     ["LOCALAPPDATA", "ProgramFiles"]
         .iter()
         .filter_map(std::env::var_os)
-        .map(|base| PathBuf::from(base).join("openrize").join("openrize.exe"))
+        .map(|base| PathBuf::from(base).join("OpenRize").join("openrize.exe"))
         .collect()
 }
 

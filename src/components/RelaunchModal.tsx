@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { useAccessibilityState } from "../hooks/useAccessibilityState";
-import * as api from "../lib/api";
+import { useEffect, useRef } from "react";
+import { useRelaunch } from "../hooks/useRelaunch";
 
 /**
  * Held over the whole window from the moment Accessibility is allowed in a
@@ -8,18 +7,17 @@ import * as api from "../lib/api";
  * only gives such a process the access on its next launch, so there is nothing
  * to dismiss and nothing to postpone: no close button, no "later". If the
  * access is withdrawn or starts working on its own, the backend says so and the
- * screen goes away by itself.
+ * screen goes away by itself. While the first-run permissions screen is up it
+ * asks for the restart itself, so `open` is false then (`relaunchModalOpen`).
  */
-export function RelaunchModal() {
-  const state = useAccessibilityState();
-  if (state !== "relaunchRequired") return null;
+export function RelaunchModal({ open }: { open: boolean }) {
+  if (!open) return null;
   return <Screen />;
 }
 
 function Screen() {
   const ref = useRef<HTMLDialogElement>(null);
-  const [relaunching, setRelaunching] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const { relaunching, failed, relaunch } = useRelaunch();
 
   useEffect(() => {
     const dialog = ref.current;
@@ -27,16 +25,6 @@ function Screen() {
     dialog.showModal();
     return () => dialog.close();
   }, []);
-
-  const relaunch = (): void => {
-    setRelaunching(true);
-    setFailed(false);
-    api.relaunchApp().catch((cause: unknown) => {
-      console.error("Could not relaunch", api.describeError(cause));
-      setRelaunching(false);
-      setFailed(true);
-    });
-  };
 
   return (
     <dialog

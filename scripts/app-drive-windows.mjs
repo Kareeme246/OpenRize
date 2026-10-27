@@ -754,6 +754,9 @@ function cmdList() {
   for (const meta of live) {
     console.log(`${meta.id}  port=${meta.port}  cdp=${meta.cdpPort}  pid=${meta.pid}  identifier=${meta.identifier}`);
   }
+  // A window closed by hand ends the app without `stop`, which leaves its data.
+  const dead = allSessionIds().filter((id) => !live.some((meta) => meta.id === id));
+  if (dead.length > 0) console.log(`ended without stop (data left behind): ${dead.join(" ")} - run 'stop --all'`);
 }
 
 async function cmdScreenshot(options) {

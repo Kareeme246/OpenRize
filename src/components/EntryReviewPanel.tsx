@@ -117,11 +117,10 @@ export interface EntryReviewPanelProps {
   onReject: () => void;
   onUnapprove: () => void;
   onSplit: () => void;
-  canMerge?: boolean;
-  onMerge?: () => void;
+  /** Merges with the earlier / later neighbour; there is none when absent. */
   onMergePrev?: () => void;
   onMergeNext?: () => void;
-  /** Why merging with an adjacent entry is refused (it is approved). */
+  /** Why merging up or down is off: no neighbour on that side, or it is approved. */
   mergeBlocked?: { prev?: string; next?: string };
   /**
    * Untracked time between the open entry and each merge neighbour, when the
@@ -221,8 +220,6 @@ export function EntryReviewPanel({
   onReject,
   onUnapprove,
   onSplit,
-  canMerge,
-  onMerge,
   onMergePrev,
   onMergeNext,
   mergeBlocked,
@@ -644,68 +641,44 @@ export function EntryReviewPanel({
               </button>
             </Tooltip>
           </div>
-          {onMergePrev && onMergeNext ? (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Tooltip
-                content={
-                  mergePrevBlocked ??
-                  (mergePrevGap > 0
-                    ? `Merge with the earlier entry (M), counting the ${formatDuration(mergePrevGap)} gap between them as tracked time`
-                    : "Merge with earlier adjacent entry (M)")
-                }
-                wrapperClassName="flex flex-auto"
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Tooltip
+              content={
+                mergePrevBlocked ??
+                (mergePrevGap > 0
+                  ? `Merge with the earlier entry, counting the ${formatDuration(mergePrevGap)} gap between them as tracked time`
+                  : "Merge with the earlier adjacent entry")
+              }
+              wrapperClassName="flex flex-auto"
+            >
+              <button
+                type="button"
+                onClick={onMergePrev}
+                disabled={!onMergePrev || Boolean(mergePrevBlocked)}
+                className="whitespace-nowrap flex-1 rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-surface disabled:hover:text-fg-soft"
               >
-                <button
-                  type="button"
-                  onClick={onMergePrev}
-                  disabled={Boolean(mergePrevBlocked)}
-                  className="whitespace-nowrap flex-1 rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-surface disabled:hover:text-fg-soft"
-                >
-                  Merge ⭡
-                </button>
-              </Tooltip>
-              <Tooltip
-                content={
-                  mergeNextBlocked ??
-                  (mergeNextGap > 0
-                    ? `Merge with the later entry, counting the ${formatDuration(mergeNextGap)} gap between them as tracked time`
-                    : "Merge with later adjacent entry")
-                }
-                wrapperClassName="flex flex-auto"
+                Merge ⭡
+              </button>
+            </Tooltip>
+            <Tooltip
+              content={
+                mergeNextBlocked ??
+                (mergeNextGap > 0
+                  ? `Merge with the later entry, counting the ${formatDuration(mergeNextGap)} gap between them as tracked time`
+                  : "Merge with the later adjacent entry")
+              }
+              wrapperClassName="flex flex-auto"
+            >
+              <button
+                type="button"
+                onClick={onMergeNext}
+                disabled={!onMergeNext || Boolean(mergeNextBlocked)}
+                className="whitespace-nowrap flex-1 rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-surface disabled:hover:text-fg-soft"
               >
-                <button
-                  type="button"
-                  onClick={onMergeNext}
-                  disabled={Boolean(mergeNextBlocked)}
-                  className="whitespace-nowrap flex-1 rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-surface disabled:hover:text-fg-soft"
-                >
-                  Merge ⭣
-                </button>
-              </Tooltip>
-            </div>
-          ) : onMerge || canMerge ? (
-            <div className="flex items-center gap-1.5">
-              <Tooltip
-                content={
-                  mergePrevBlocked ??
-                  mergeNextBlocked ??
-                  (claimedGaps.length > 0
-                    ? `Merge adjacent entries (M), counting ${claimedGaps.join(" and ")} as tracked time`
-                    : "Merge adjacent entries (M)")
-                }
-                wrapperClassName="flex flex-auto"
-              >
-                <button
-                  type="button"
-                  onClick={onMerge}
-                  disabled={Boolean(mergePrevBlocked ?? mergeNextBlocked)}
-                  className="whitespace-nowrap flex-1 rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] text-fg-soft transition-colors hover:bg-surface-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-surface disabled:hover:text-fg-soft"
-                >
-                  Merge
-                </button>
-              </Tooltip>
-            </div>
-          ) : null}
+                Merge ⭣
+              </button>
+            </Tooltip>
+          </div>
           {claimedGaps.length > 0 && (
             <p className="text-[10.5px] text-fg-soft">
               {claimedGaps.length === 1

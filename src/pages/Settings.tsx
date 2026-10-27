@@ -947,7 +947,7 @@ function PermissionCard({
         onClick={() => onAllow(perm.settingsUrl)}
         className={primaryClass}
       >
-        Allow window titles
+        Allow Accessibility
       </button>
     );
   } else if (accessibility && perm.state === "relaunchRequired") {

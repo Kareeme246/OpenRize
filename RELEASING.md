@@ -5,6 +5,10 @@ bumps the patch version in the same pull request and uses a Conventional Commit
 subject. See `cliff.toml` for the commit categories and `AGENTS.md` for the
 project-wide rule.
 
+Before tagging, run a maintenance pass of the verification skill
+(`.agents/skills/drive-app/references/maintenance.md`) and keep its coverage table with the
+release notes handoff.
+
 To cut a release:
 
 1. On `main`, regenerate and commit the changelog:

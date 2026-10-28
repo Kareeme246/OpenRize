@@ -326,7 +326,7 @@ function AppleIntelligenceRow({
   const handleOpenSettings = (): void => {
     onError(null);
     if (status?.llm === "unsupportedOS") {
-      onError("Apple Intelligence requires macOS 15.1 or later.");
+      onError("The on-device model needs macOS 26 or later.");
       return;
     }
     if (status?.llm === "deviceNotEligible") {

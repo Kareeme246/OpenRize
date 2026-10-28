@@ -2,7 +2,8 @@
 //! captured, so restoring a catalog link never overwrites later descriptions.
 use std::collections::{BTreeMap, BTreeSet};
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, Transaction};
+use serde::Serialize;
 
 use super::{history::Command, segment_from_row, ActivityStore, LOCKED};
 use crate::models::ActivitySegment;
@@ -39,7 +40,57 @@ pub(super) struct Deletion {
     segments: Vec<ActivitySegment>,
 }
 
+/// What a deletion would change, as `rize --dry-run` reports it. Built from
+/// the same `Deletion` the real command applies and records for undo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletionPreview {
+    /// Entries that would be deleted.
+    pub deleted_entries: Vec<String>,
+    /// Entries that keep existing but lose a category or project link.
+    pub unlinked_entries: Vec<String>,
+    pub projects: Vec<String>,
+    pub categories: Vec<CategoryPreview>,
+    /// Rules that would be deleted with their category or project.
+    pub rules: usize,
+    /// Apps that would lose a default category or project.
+    pub apps: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CategoryPreview {
+    pub id: String,
+    /// Whether the category was already archived before the deletion.
+    pub was_archived: bool,
+}
+
 impl Deletion {
+    fn preview(&self) -> DeletionPreview {
+        let entries = |deleted: bool| {
+            self.entries
+                .iter()
+                .filter(|entry| entry.after.deleted.is_some() == deleted)
+                .map(|entry| entry.id.clone())
+                .collect()
+        };
+        DeletionPreview {
+            deleted_entries: entries(true),
+            unlinked_entries: entries(false),
+            projects: self.projects.clone(),
+            categories: self
+                .categories
+                .iter()
+                .map(|category| CategoryPreview {
+                    id: category.id.clone(),
+                    was_archived: category.archived,
+                })
+                .collect(),
+            rules: self.rules.len(),
+            apps: self.apps.len(),
+        }
+    }
+
     fn capture(
         conn: &Connection,
         ids: &[String],
@@ -366,6 +417,24 @@ impl Deletion {
     }
 }
 
+/// Captures what a deletion touches and applies it inside `tx`, refusing
+/// exactly as the real command does. The caller decides whether to commit.
+fn stage(
+    tx: &Transaction,
+    ids: &[String],
+    category: Option<&str>,
+    project: Option<&str>,
+    now: u64,
+) -> Result<Deletion, String> {
+    let deletion = Deletion::capture(tx, ids, category, project, now)?;
+    if deletion.entries.is_empty() && deletion.categories.is_empty() && deletion.projects.is_empty()
+    {
+        return Err("Those items no longer exist.".to_string());
+    }
+    deletion.apply(tx, false, now)?;
+    Ok(deletion)
+}
+
 impl ActivityStore {
     pub(super) fn delete_undoable(
         &mut self,
@@ -375,18 +444,28 @@ impl ActivityStore {
         now: u64,
     ) -> Result<(), String> {
         let tx = self.conn.transaction().map_err(|error| error.to_string())?;
-        let deletion = Deletion::capture(&tx, ids, category, project, now)?;
-        if deletion.entries.is_empty()
-            && deletion.categories.is_empty()
-            && deletion.projects.is_empty()
-        {
-            return Err("Those items no longer exist.".to_string());
-        }
-        deletion.apply(&tx, false, now)?;
+        let deletion = stage(&tx, ids, category, project, now)?;
         tx.commit().map_err(|error| error.to_string())?;
         self.forget_deleted_segment(&deletion);
         self.record_undo(Command::Deletion(deletion));
         Ok(())
+    }
+
+    /// What `delete_undoable` would change, run through the same staging and
+    /// then rolled back: nothing is written, and no undo step, live segment
+    /// or journal entry is touched. An `Err` is the message the real
+    /// deletion would fail with.
+    pub fn preview_deletion(
+        &mut self,
+        ids: &[String],
+        category: Option<&str>,
+        project: Option<&str>,
+        now: u64,
+    ) -> Result<DeletionPreview, String> {
+        let tx = self.conn.transaction().map_err(|error| error.to_string())?;
+        let preview = stage(&tx, ids, category, project, now)?.preview();
+        tx.rollback().map_err(|error| error.to_string())?;
+        Ok(preview)
     }
 
     /// Deleting the live entry deletes the segment capture is writing; the

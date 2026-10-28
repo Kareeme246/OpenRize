@@ -17,8 +17,11 @@ use std::sync::{Mutex, MutexGuard};
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use crate::activity::{CategoryRemovalPreview, DeletionPreview};
 use crate::models::UpdateTimeEntry;
-use crate::protocol::{code, ApiError, Hello, Operation, Request, Response, PROTOCOL_VERSION};
+use crate::protocol::{
+    code, ApiError, Hello, Operation, Request, Response, DRY_RUN_UNSUPPORTED, PROTOCOL_VERSION,
+};
 use crate::reports::{self, ExportFormat, GroupBy};
 use crate::settings::Settings;
 use crate::state::{AppState, StoragePaths};
@@ -72,7 +75,10 @@ pub fn answer(
     };
     match context.dispatch(&request.operation) {
         Ok(data) => {
-            if let Some(live) = live {
+            // A preview changed nothing, so there is nothing for a window to show.
+            if let Some(live) =
+                live.filter(|_| !matches!(request.operation, Operation::Preview { .. }))
+            {
                 live.changed(state, &request.operation);
             }
             Response::success(data)
@@ -414,7 +420,139 @@ impl Context<'_> {
                 to_value(next)
             }
             O::Paths {} => to_value(StoragePaths::new(self.data_dir)),
+            O::Preview { operation } => self.preview(&operation),
         }
+    }
+
+    /// What a delete, reset or rebuild would change, through the same
+    /// resolution the real command uses, and without changing anything. When
+    /// the real command would be refused the preview still succeeds and
+    /// carries the refusal as `refused`.
+    fn preview(&self, operation: &Operation) -> Outcome {
+        use Operation as O;
+        let now = now_epoch_ms();
+        match operation {
+            O::TimerReset { timer } | O::TimerDelete { timer } => {
+                let id = self.timer(timer)?;
+                let timer = self
+                    .timers()?
+                    .into_iter()
+                    .find(|timer| timer.id == id)
+                    .ok_or_else(|| not_found("timer", &id))?;
+                let effect = if matches!(operation, O::TimerReset { .. }) {
+                    "reset"
+                } else {
+                    "delete"
+                };
+                self.previewed(operation, None, json!({ "timer": timer, "effect": effect }))
+            }
+            O::EntriesDelete { entries } => {
+                let ids = self.entries(entries)?;
+                let staged = lock(&self.state.activity)?.preview_deletion(&ids, None, None, now);
+                let (refused, deletion) = staged_deletion(staged);
+                self.previewed(operation, refused, json!({ "deletion": deletion }))
+            }
+            O::EntriesRebuild { from, to } => {
+                if to <= from {
+                    return Err(invalid("--to must be after --from"));
+                }
+                let entries = lock(&self.state.activity)?
+                    .list_time_entries(*from, *to)
+                    .map_err(fail)?;
+                self.previewed(
+                    operation,
+                    None,
+                    json!({
+                        "from": from,
+                        "to": to,
+                        "entries": entries,
+                        "note": "Closed entries are frozen and keep their ids and edits; only the open entry is re-segmented.",
+                    }),
+                )
+            }
+            O::ProjectDelete { project } => {
+                let id = self.project(project)?;
+                let staged =
+                    lock(&self.state.activity)?.preview_deletion(&[], None, Some(&id), now);
+                let (refused, deletion) = staged_deletion(staged);
+                self.previewed(
+                    operation,
+                    refused,
+                    json!({ "id": id, "deletion": deletion }),
+                )
+            }
+            O::ClientDelete { client } => {
+                let id = self.client(client)?;
+                let preview = lock(&self.state.activity)?
+                    .preview_delete_client(&id)
+                    .map_err(fail)?;
+                self.previewed(
+                    operation,
+                    preview.refused.clone(),
+                    json!({
+                        "id": id,
+                        "client": preview.client,
+                        "detachedProjects": preview.detached_projects,
+                    }),
+                )
+            }
+            O::CategoryDelete { category } => {
+                let id = self.category(category)?;
+                let removal = lock(&self.state.activity)?
+                    .preview_category_removal(&id, now)
+                    .map_err(fail)?;
+                match removal {
+                    CategoryRemovalPreview::Archived => {
+                        let category = lock(&self.state.activity)?
+                            .list_categories()
+                            .map_err(fail)?
+                            .into_iter()
+                            .find(|category| category.id == id);
+                        self.previewed(
+                            operation,
+                            None,
+                            json!({ "id": id, "removal": "archived", "category": category }),
+                        )
+                    }
+                    CategoryRemovalPreview::Deleted(staged) => {
+                        let (refused, deletion) = staged_deletion(staged);
+                        self.previewed(
+                            operation,
+                            refused,
+                            json!({ "id": id, "removal": "deleted", "deletion": deletion }),
+                        )
+                    }
+                }
+            }
+            O::Preview { .. } => Err(invalid("a dry run cannot preview another dry run")),
+            _ => Err(invalid(DRY_RUN_UNSUPPORTED)),
+        }
+    }
+
+    /// The common shape of a preview's answer around its own `fields`.
+    fn previewed(
+        &self,
+        operation: &Operation,
+        refused: Option<String>,
+        mut fields: Value,
+    ) -> Outcome {
+        let kind = serde_json::to_value(operation)
+            .ok()
+            .and_then(|value| value["kind"].as_str().map(str::to_owned))
+            .unwrap_or_default();
+        if let Some(object) = fields.as_object_mut() {
+            object.insert("dryRun".into(), json!(true));
+            object.insert("operation".into(), json!(kind));
+            object.insert(
+                "refused".into(),
+                match refused {
+                    Some(message) => json!({ "code": code::FAILED, "message": message }),
+                    None => Value::Null,
+                },
+            );
+            object.insert("names".into(), json!(self.names()?));
+        }
+        Ok(fields)
     }
 
     fn live(&self) -> Result<&dyn Live, ApiError> {
@@ -647,6 +785,17 @@ fn pick<T>(
                 .map(|item| format!("{} ({})", name(item), id(item)))
                 .collect(),
         )),
+    }
+}
+
+/// A staged deletion as the answer carries it: the refusal, if the real
+/// command would fail, and the deletion it would have made otherwise.
+fn staged_deletion(
+    staged: Result<DeletionPreview, String>,
+) -> (Option<String>, Option<DeletionPreview>) {
+    match staged {
+        Ok(deletion) => (None, Some(deletion)),
+        Err(message) => (Some(message), None),
     }
 }
 

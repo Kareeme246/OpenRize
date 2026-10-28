@@ -1,7 +1,7 @@
 {
   "name": "openrize",
   "private": true,
-  "version": "0.9.43",
+  "version": "0.9.44",
   "description": "Automatic, private, local-first time tracking for your Mac",
   "license": "AGPL-3.0",
   "packageManager": "pnpm@12.5.1",
@@ -23,7 +23,9 @@
     "dev:drive:win": "node scripts/app-drive-windows.mjs",
     "publish-r2": "node scripts/publish-r2/cli.ts",
     "test:lib": "node --test \"tests/*.test.ts\"",
-    "test:publisher": "node --test \"scripts/publish-r2/*.test.ts\""
+    "test:publisher": "node --test \"scripts/publish-r2/*.test.ts\"",
+    "lint:skills": "node scripts/lint-skills/cli.ts",
+    "test:skills": "node --test \"scripts/lint-skills/*.test.ts\""
   },
   "dependencies": {
     "@radix-ui/react-toast": "^1.3.1",

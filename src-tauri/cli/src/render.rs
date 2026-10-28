@@ -253,6 +253,110 @@ pub fn show(command: Option<&Command>, data: &Value, full: bool) {
     }
 }
 
+/// A `--dry-run` answer: what the command would change, then the refusal the
+/// real command would meet, if any.
+pub fn dry_run(data: &Value) {
+    let names = &data["names"];
+    let target = |kind: &str| format!("{kind} {}", name(names, &data["id"]));
+    println!("Dry run: nothing was changed.");
+    let refused = data["refused"]["message"].as_str();
+    if refused.is_none() {
+        match data["operation"].as_str().unwrap_or_default() {
+            "timerReset" | "timerDelete" => {
+                let timer = &data["timer"];
+                println!(
+                    "Would {} timer {} ({})",
+                    if data["effect"].as_str() == Some("reset") {
+                        "reset"
+                    } else {
+                        "delete"
+                    },
+                    text(&timer["label"]),
+                    duration(elapsed(timer))
+                );
+            }
+            "entriesDelete" => deletion(&data["deletion"], None),
+            "entriesRebuild" => {
+                println!(
+                    "Would rebuild {} between {} {} and {} {}",
+                    count(&data["entries"], "entry", "entries"),
+                    day(ms(&data["from"])),
+                    clock(ms(&data["from"])),
+                    day(ms(&data["to"])),
+                    clock(ms(&data["to"]))
+                );
+                println!("{}", text(&data["note"]));
+            }
+            "projectDelete" => {
+                let project = target("project");
+                println!("Would delete {project}");
+                deletion(&data["deletion"], Some(&project));
+            }
+            "clientDelete" => {
+                let client = target("client");
+                println!("Would delete {client}");
+                let projects = data["detachedProjects"].as_array().map_or(0, Vec::len);
+                if projects > 0 {
+                    println!(
+                        "Would detach {} from {client}",
+                        count(&data["detachedProjects"], "project", "projects")
+                    );
+                }
+            }
+            "categoryDelete" => {
+                let category = target("category");
+                if data["removal"].as_str() == Some("archived") {
+                    println!("Would archive {category}");
+                } else {
+                    println!("Would delete {category}");
+                    deletion(&data["deletion"], Some(&category));
+                }
+            }
+            _ => {}
+        }
+    }
+    if let Some(message) = refused {
+        println!("The real command would fail: {message}");
+    }
+}
+
+/// The lines for one staged deletion. `owner` is the project or category
+/// being deleted, which the entries it still links to lose.
+fn deletion(deletion: &Value, owner: Option<&str>) {
+    let list = |key: &str| deletion[key].as_array().cloned().unwrap_or_default();
+    let ids = |key: &str| list(key).iter().map(short).collect::<Vec<_>>().join(", ");
+    let deleted = list("deletedEntries");
+    if !deleted.is_empty() {
+        println!(
+            "Would delete {}: {}",
+            count(&Value::Array(deleted), "entry", "entries"),
+            ids("deletedEntries")
+        );
+    }
+    let unlinked = list("unlinkedEntries");
+    if !unlinked.is_empty() {
+        println!(
+            "Would unlink {} from {}",
+            count(&Value::Array(unlinked), "entry", "entries"),
+            owner.unwrap_or("their project or category")
+        );
+    }
+    let rules = deletion["rules"].as_u64().unwrap_or(0);
+    if rules > 0 {
+        println!(
+            "Would delete {rules} {}",
+            if rules == 1 { "rule" } else { "rules" }
+        );
+    }
+    let apps = deletion["apps"].as_u64().unwrap_or(0);
+    if apps > 0 {
+        println!(
+            "Would clear the default of {apps} {}",
+            if apps == 1 { "app" } else { "apps" }
+        );
+    }
+}
+
 fn status(data: &Value) {
     let activity = &data["activity"];
     let version = text(&data["appVersion"]);

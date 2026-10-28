@@ -20,6 +20,9 @@ pub const PROTOCOL_VERSION: u32 = 2;
 /// The `--json` envelope's version. Adding a field keeps it; removing or
 /// renaming one bumps it.
 pub const SCHEMA_VERSION: u32 = 2;
+/// Why a command that changes nothing destructive cannot take `--dry-run`;
+/// the core and `rize` give the same words.
+pub const DRY_RUN_UNSUPPORTED: &str = "--dry-run only previews commands that delete, reset or rebuild; this one would run for real. Run it without --dry-run.";
 pub const MAX_REQUEST: usize = 1024 * 1024;
 pub const MAX_RESPONSE: usize = 64 * 1024 * 1024;
 
@@ -194,6 +197,15 @@ pub enum Operation {
         value: Value,
     },
     Paths {},
+    /// What `operation` would change, answered without changing anything.
+    /// Only the commands `rize` confirms (`TimerReset`, `TimerDelete`,
+    /// `EntriesDelete`, `EntriesRebuild`, `ProjectDelete`, `ClientDelete`,
+    /// `CategoryDelete`) can be previewed; anything else, or a nested
+    /// preview, is `INVALID_ARGUMENT`. This adds an operation and changes no
+    /// existing request or answer, so `PROTOCOL_VERSION` stays as it is.
+    Preview {
+        operation: Box<Operation>,
+    },
 }
 
 impl Operation {

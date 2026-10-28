@@ -35,7 +35,7 @@ import {
 } from "node:fs";
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 
@@ -57,6 +57,7 @@ const IDENTIFIER_RE = /^com\.offlinestudios\.openrize\.drive\d+$/;
 
 const USAGE = `usage: node scripts/app-drive-windows.mjs <command> [args]
 
+  doctor [--json]             check this machine can launch and drive an instance (launches nothing)
   start                       launch an isolated instance, print its session id
   list                        list live sessions started from this checkout
   screenshot                  one-shot: start, screenshot, stop; print the PNG path
@@ -68,10 +69,11 @@ const USAGE = `usage: node scripts/app-drive-windows.mjs <command> [args]
   key    [-s ID] <keyspec>    send a keystroke, e.g. return, tab, ctrl+comma, ctrl+,
   text   [-s ID]              print the window's visible text (document.body.innerText)
   wait   [-s ID] <text> [sec] block until text appears in the page (default 15s)
-  shot   [-s ID]              screenshot the webview, print the PNG path
+  shot   [-s ID] [--out PATH] screenshot the webview, print the PNG path
   logs   [-s ID] [n]          tail the instance's vite/cargo log
   console [-s ID] [sec]       print console output and uncaught exceptions
   eval   [-s ID] <js>         evaluate a JS expression in the page (debugging)
+  rize   [-s ID] -- <args>    run the repo's rize CLI against this session's data
   stop   [-s ID | --all]      kill the instance and delete its data
 
 Options:
@@ -82,12 +84,43 @@ Options:
   -i, --index N      pick the Nth match when a name is ambiguous
       --full         tree: include unnamed and static-text nodes
       --append       fill: keep the field's current text instead of replacing it
-      --all          stop: every session started from this checkout`;
+      --all          stop: every session started from this checkout, including
+                     stale ones (their process already died but their data remains)
+      --json         doctor, stop: print one JSON object on stdout
+      --dry-run      stop: kill and delete nothing, print what would happen
+      --out PATH     shot: write the PNG to PATH (must end in .png) instead of
+                     the session's shots dir; PATH survives 'stop'
+
+rize runs the repo's own CLI with --data-dir set to the session's data, so you can
+seed data and read backend state through the same tool. Everything after the first
+'--' goes to rize verbatim (--json, --full, --yes, --dry-run reach rize). The
+instance holds its stores, so rize reaches it over the app's local endpoint and
+changes show in the window at once. RIZE_APP points at a path that does not exist,
+so 'rize app start' or 'rize track start' can never launch a second app outside
+the session. The first call compiles the CLI crate (debug profile); later ones are fast.
+
+'stop' without --dry-run moves a session's screenshots (shots made without --out)
+to <temp dir>\\openrize-app-drive-evidence\\<session id>\\ before deleting the
+session, and prints where.
+
+Exit codes: 0 success, 1 failure, 2 usage error (unknown command, missing arguments).
+
+Examples:
+    node scripts/app-drive-windows.mjs doctor
+    node scripts/app-drive-windows.mjs rize -- --json entries list --from today
+    node scripts/app-drive-windows.mjs shot --out C:\\temp\\proof\\settings.png
+    node scripts/app-drive-windows.mjs stop --all --dry-run`;
 
 class DriveError extends Error {}
+/** A usage error (missing arguments, unknown command): exits 2 instead of 1. */
+class UsageError extends DriveError {}
 
 function die(message) {
   throw new DriveError(message);
+}
+
+function usageError(message) {
+  throw new UsageError(message);
 }
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -169,6 +202,24 @@ async function pickPort(taken) {
     }
   }
   return die("could not find a free port");
+}
+
+/** PATH with ~/.cargo/bin in front, how every child that needs cargo is started. */
+function pathWithCargo() {
+  const cargoBin = join(homedir(), ".cargo", "bin");
+  const current = process.env.PATH ?? process.env.Path ?? "";
+  return existsSync(cargoBin) ? `${cargoBin}${delimiter}${current}` : current;
+}
+
+/** Absolute path of cargo: on PATH, else in %USERPROFILE%\\.cargo\\bin. Null when missing. */
+function findCargo() {
+  const names = process.platform === "win32" ? ["cargo.exe"] : ["cargo", "cargo.exe"];
+  for (const dir of pathWithCargo().split(delimiter)) {
+    for (const name of names) {
+      if (dir && existsSync(join(dir, name))) return join(dir, name);
+    }
+  }
+  return null;
 }
 
 function powershell(script) {
@@ -650,12 +701,11 @@ async function startSession() {
       devUrl: `http://localhost:${port}`,
     },
   });
-  const cargoBin = join(homedir(), ".cargo", "bin");
   const env = {
     ...process.env,
     XDG_CONFIG_HOME: join(dir, "config"),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${cdpPort}`,
-    PATH: existsSync(cargoBin) ? `${cargoBin};${process.env.PATH ?? process.env.Path ?? ""}` : (process.env.PATH ?? process.env.Path),
+    PATH: pathWithCargo(),
   };
   // The tauri CLI is run through node directly: `pnpm tauri` goes via bash and
   // .cmd shims, and a JSON argument does not survive cmd.exe quoting.
@@ -733,12 +783,13 @@ function stopSession(meta) {
   if (meta.appPid && pidAlive(meta.appPid)) taskkillTree(meta.appPid);
   // Orphans whose parents died first are out of reach of /T: find them by
   // their command line instead, which carries this session's identifier/ports.
-  for (let sweep = 0; sweep < 3; sweep++) {
+  // A session whose meta could not be read has neither, so there is nothing to sweep.
+  for (let sweep = 0; meta.identifier && sweep < 3; sweep++) {
     const leftovers = sessionProcesses(meta).filter((proc) => proc.ProcessId !== process.pid);
     if (leftovers.length === 0) break;
     for (const proc of leftovers) taskkillTree(proc.ProcessId);
   }
-  for (const dir of identifierDirs(meta.identifier)) removeDir(dir);
+  if (meta.identifier) for (const dir of identifierDirs(meta.identifier)) removeDir(dir);
   removeDir(sessionDir(meta.id));
 }
 
@@ -781,7 +832,7 @@ async function cmdTree(options) {
 }
 
 async function cmdFind(options, [name]) {
-  if (!name) die("find needs a name");
+  if (!name) usageError('find needs a name, e.g. node scripts/app-drive-windows.mjs find "Settings"');
   await withPage(options, async (cdp) => {
     const node = pickMatch(await axNodes(cdp), name, options);
     const point = await locate(cdp, node);
@@ -790,7 +841,7 @@ async function cmdFind(options, [name]) {
 }
 
 async function cmdClick(options, [name]) {
-  if (!name) die("click needs a name");
+  if (!name) usageError('click needs a name, e.g. node scripts/app-drive-windows.mjs click "Settings"');
   await withPage(options, async (cdp) => {
     const node = pickMatch(await axNodes(cdp), name, options);
     if (propOf(node, "disabled")) die(`${describe(node)} is disabled`);
@@ -800,7 +851,9 @@ async function cmdClick(options, [name]) {
 }
 
 async function cmdFill(options, [name, text]) {
-  if (name === undefined || text === undefined) die("fill needs a field name and text");
+  if (name === undefined || text === undefined) {
+    usageError('fill needs a field name and text, e.g. node scripts/app-drive-windows.mjs fill "Search" "hello"');
+  }
   await withPage(options, async (cdp) => {
     const nodes = await axNodes(cdp);
     // Unless told otherwise, only text-entry roles are candidates.
@@ -821,7 +874,7 @@ async function cmdFill(options, [name, text]) {
 }
 
 async function cmdKey(options, [spec]) {
-  if (!spec) die("key needs a keyspec");
+  if (!spec) usageError("key needs a keyspec, e.g. node scripts/app-drive-windows.mjs key ctrl+comma");
   await withPage(options, async (cdp) => {
     await pressKey(cdp, spec);
     console.log(`sent ${spec}`);
@@ -833,7 +886,7 @@ async function cmdText(options) {
 }
 
 async function cmdWait(options, [needle, seconds]) {
-  if (!needle) die("wait needs text to look for");
+  if (!needle) usageError('wait needs text to look for, e.g. node scripts/app-drive-windows.mjs wait "Settings" 15');
   const limit = Number(seconds ?? 15);
   await withPage(options, async (cdp) => {
     const wanted = needle.toLowerCase();
@@ -852,17 +905,22 @@ async function cmdWait(options, [needle, seconds]) {
   });
 }
 
-/** Save a webview-only PNG into `dir` and return its path. */
-async function captureTo(cdp, dir) {
-  mkdirSync(dir, { recursive: true });
+/** Save a webview-only PNG into `dir`, or at `out` when given, and return its path. */
+async function captureTo(cdp, dir, out) {
   const { data } = await cdp.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
-  const out = join(dir, `${Date.now()}-${randomInt(1000, 9999)}.png`);
-  writeFileSync(out, Buffer.from(data, "base64"));
-  return out;
+  const path = out ?? join(dir, `${Date.now()}-${randomInt(1000, 9999)}.png`);
+  mkdirSync(dirname(resolve(path)), { recursive: true });
+  writeFileSync(path, Buffer.from(data, "base64"));
+  return path;
 }
 
 async function cmdShot(options) {
-  await withPage(options, async (cdp, meta) => console.log(await captureTo(cdp, join(sessionDir(meta.id), "shots"))));
+  if (options.out !== undefined && !options.out.toLowerCase().endsWith(".png")) {
+    usageError("--out must end in .png, e.g. node scripts/app-drive-windows.mjs shot --out C:\\temp\\proof\\settings.png");
+  }
+  await withPage(options, async (cdp, meta) =>
+    console.log(await captureTo(cdp, join(sessionDir(meta.id), "shots"), options.out)),
+  );
 }
 
 function cmdLogs(options, [count]) {
@@ -892,34 +950,182 @@ async function cmdConsole(options, [seconds]) {
 }
 
 async function cmdEval(options, [expression]) {
-  if (!expression) die("eval needs a JavaScript expression");
+  if (!expression) usageError('eval needs a JavaScript expression, e.g. node scripts/app-drive-windows.mjs eval "document.title"');
   await withPage(options, async (cdp) => {
     const value = await cdp.evaluate(expression);
     console.log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
   });
 }
 
+/**
+ * What stopping a session would do, without doing it. `refused` is set when the
+ * session's meta looks corrupted, in which case nothing is deleted for it.
+ */
+function planStop(id, meta) {
+  const dir = sessionDir(id);
+  const pgid = Number.isInteger(meta.pid) && meta.pid > 0 ? meta.pid : null;
+  const plan = { id, meta: { ...meta, id }, state: pgid && pidAlive(pgid) ? "live" : "stale", pgid, deleted: [], evidence: undefined };
+  const refuse = (path) =>
+    `refusing to delete '${path}': the meta file of session ${id} looks corrupted; nothing was deleted for that session`;
+  if (!/^d\d+$/.test(id) || dirname(dir) !== SESSION_ROOT || (meta.id !== undefined && meta.id !== id)) {
+    return { ...plan, refused: refuse(dir) };
+  }
+  let dataDirs = [];
+  if (meta.identifier !== undefined) {
+    if (typeof meta.identifier !== "string" || !IDENTIFIER_RE.test(meta.identifier)) {
+      return { ...plan, refused: refuse(String(meta.identifier)) };
+    }
+    dataDirs = identifierDirs(meta.identifier);
+  }
+  plan.deleted = [...dataDirs, dir].filter((path) => existsSync(path));
+  const shotsDir = join(dir, "shots");
+  if (existsSync(shotsDir) && readdirSync(shotsDir).some((name) => name.toLowerCase().endsWith(".png"))) {
+    plan.evidence = join(tmpdir(), "openrize-app-drive-evidence", id);
+  }
+  return plan;
+}
+
+/** Move the session's screenshots out of the directory stop is about to delete. */
+function keepEvidence(plan) {
+  const shotsDir = join(sessionDir(plan.id), "shots");
+  mkdirSync(plan.evidence, { recursive: true });
+  for (const name of readdirSync(shotsDir).filter((file) => file.toLowerCase().endsWith(".png"))) {
+    copyFileSync(join(shotsDir, name), join(plan.evidence, name));
+    rmSync(join(shotsDir, name), { force: true });
+  }
+}
+
 async function cmdStop(options) {
-  let sessions;
+  const json = Boolean(options.json);
+  const dry = Boolean(options["dry-run"]);
+  let ids;
   if (options.all) {
-    // Includes sessions whose process already died, so their data still goes.
-    sessions = allSessionIds().map(readMeta).filter(Boolean);
-    if (sessions.length === 0) {
-      console.log(`no sessions for ${REPO_ROOT}`);
+    // Includes sessions whose process already died (or whose meta is gone), so their data still goes.
+    ids = allSessionIds();
+    if (ids.length === 0) {
+      console.log(json ? JSON.stringify({ dryRun: dry, sessions: [] }) : `no sessions for ${REPO_ROOT}`);
       return;
     }
   } else {
-    sessions = [resolveSession(options)];
+    const meta = resolveSession(options);
+    ids = [options.session ?? process.env.OPENRIZE_SESSION ?? meta.id];
   }
-  for (const meta of sessions) {
-    stopSession(meta);
-    console.log(`stopped ${meta.id}`);
+  const plans = ids.map((id) => planStop(id, readMeta(id) ?? {}));
+  // Refuse before touching anything, so a corrupted session never leaves a
+  // half-stopped batch behind. A dry run reports the refusal instead.
+  if (!dry) {
+    const refused = plans.find((plan) => plan.refused);
+    if (refused) die(refused.refused);
   }
+  for (const plan of plans) {
+    if (!dry && !plan.refused) {
+      if (plan.evidence) {
+        keepEvidence(plan);
+        if (!json) console.log(`kept evidence in ${plan.evidence}`);
+      }
+      stopSession(plan.meta);
+      if (!json) console.log(`stopped ${plan.id}`);
+    } else if (!json) {
+      if (plan.refused) {
+        console.log(`would refuse to stop ${plan.id} (${plan.state}): ${plan.refused.replace("refusing to delete ", "")}`);
+        continue;
+      }
+      console.log(`would stop ${plan.id} (${plan.state}) pgid=${plan.pgid ?? "none"}`);
+      if (plan.evidence) console.log(`  would keep evidence in ${plan.evidence}`);
+      for (const path of plan.deleted) console.log(`  would delete ${path}`);
+    }
+  }
+  if (json) {
+    const sessions = plans.map((plan) => ({
+      session: plan.id,
+      state: plan.state,
+      pgid: plan.pgid,
+      deleted: plan.refused ? [] : plan.deleted,
+      ...(plan.evidence && !plan.refused ? { evidence: plan.evidence } : {}),
+      ...(plan.refused ? { refused: plan.refused } : {}),
+    }));
+    console.log(JSON.stringify({ dryRun: dry, sessions }));
+  } else if (dry) {
+    console.log("dry run: nothing was stopped or deleted");
+  }
+}
+
+// ----------------------------------------------------------------------- doctor
+
+function cmdDoctor(options) {
+  const checks = [];
+  const add = (id, status, detail, fix) => checks.push({ id, status, detail, ...(status === "ok" ? {} : { fix }) });
+
+  if (process.platform === "win32") add("windows", "ok", "win32");
+  else add("windows", "fail", "app-drive-windows.mjs only works on Windows (macOS: scripts/app-drive.sh)", "run this on Windows, or use scripts/app-drive.sh on a Mac");
+
+  const nodeMajor = Number(process.versions.node.split(".")[0]);
+  if (nodeMajor >= 22) add("node", "ok", `node ${process.versions.node}`);
+  else add("node", "fail", `node ${process.versions.node} is too old (needs the global fetch and WebSocket of Node 22+)`, "install Node 22 or newer");
+
+  if (existsSync(TAURI_JS)) add("node-modules", "ok", TAURI_JS);
+  else add("node-modules", "fail", "node_modules/@tauri-apps/cli/tauri.js is missing", "pnpm install");
+
+  const cargo = findCargo();
+  if (cargo) add("cargo", "ok", cargo);
+  else add("cargo", "fail", "cargo not found on PATH or in %USERPROFILE%\\.cargo\\bin", "install Rust with rustup (https://rustup.rs)");
+
+  const exe = join(REPO_ROOT, "src-tauri", "target", "debug", "openrize.exe");
+  if (existsSync(exe)) add("warm-build", "ok", exe);
+  else {
+    add(
+      "warm-build",
+      "warn",
+      `src-tauri/target/debug/openrize.exe is missing: the first start compiles the whole Rust tree (can take minutes; start waits OPENRIZE_DRIVE_TIMEOUT, default ${STARTUP_TIMEOUT}s)`,
+      "expect a long first start, or raise OPENRIZE_DRIVE_TIMEOUT",
+    );
+  }
+
+  const live = liveSessions().map((meta) => meta.id);
+  const stale = allSessionIds().filter((id) => !live.includes(id));
+  if (stale.length > 0) {
+    add("sessions", "warn", `${live.length} live, ${stale.length} stale (directory left by a dead process): ${stale.join(" ")}`, "node scripts/app-drive-windows.mjs stop --all");
+  } else {
+    add("sessions", "ok", live.length > 0 ? `${live.length} live: ${live.join(" ")}` : "no sessions");
+  }
+
+  const failures = checks.filter((check) => check.status === "fail").length;
+  if (options.json) {
+    console.log(JSON.stringify({ ok: failures === 0, checks }));
+  } else {
+    for (const check of checks) {
+      console.log(`${check.status.padEnd(5)}${check.id}  ${check.detail}`);
+      if (check.fix !== undefined) console.log(`     fix: ${check.fix}`);
+    }
+    console.log(failures === 0 ? "doctor: ready" : `doctor: ${failures} problem(s) - fix the lines marked fail, then rerun doctor`);
+  }
+  process.exitCode = failures === 0 ? 0 : 1;
+}
+
+// ------------------------------------------------------------------------- rize
+
+/** Run the repo's rize CLI against the session's data directory and exit with its code. */
+function cmdRize(options, args, rizeArgs) {
+  if (rizeArgs === undefined || rizeArgs.length === 0 || args.length > 0) {
+    usageError("rize needs '--' followed by the rize arguments, e.g. node scripts/app-drive-windows.mjs rize -- --json entries list --from today");
+  }
+  const meta = resolveSession(options);
+  const cargo = findCargo();
+  if (!cargo) die("cargo not found - run 'node scripts/app-drive-windows.mjs doctor'");
+  const result = spawnSync(
+    cargo,
+    ["run", "--quiet", "--manifest-path", join(REPO_ROOT, "src-tauri", "Cargo.toml"), "-p", "openrize-cli", "--bin", "rize", "--", "--data-dir", meta.appData, ...rizeArgs],
+    // RIZE_APP names a path that does not exist, so `rize app start` can never launch a second app.
+    { stdio: "inherit", env: { ...process.env, PATH: pathWithCargo(), RIZE_APP: join(sessionDir(meta.id), "no-app-launch") } },
+  );
+  if (result.error) die(`could not run cargo: ${result.error.message}`);
+  process.exit(result.status ?? 1);
 }
 
 // ------------------------------------------------------------------ entry point
 
 const COMMANDS = {
+  doctor: cmdDoctor,
   start: cmdStart,
   list: cmdList,
   screenshot: cmdScreenshot,
@@ -935,43 +1141,59 @@ const COMMANDS = {
   logs: cmdLogs,
   console: cmdConsole,
   eval: cmdEval,
+  rize: cmdRize,
   stop: cmdStop,
 };
 
+const OPTIONS = {
+  session: { type: "string", short: "s" },
+  target: { type: "string", short: "t" },
+  role: { type: "string", short: "r" },
+  index: { type: "string", short: "i" },
+  out: { type: "string" },
+  full: { type: "boolean" },
+  append: { type: "boolean" },
+  all: { type: "boolean" },
+  json: { type: "boolean" },
+  "dry-run": { type: "boolean" },
+  help: { type: "boolean", short: "h" },
+};
+
 async function main() {
-  const { values, positionals } = parseArgs({
-    allowPositionals: true,
-    options: {
-      session: { type: "string", short: "s" },
-      target: { type: "string", short: "t" },
-      role: { type: "string", short: "r" },
-      index: { type: "string", short: "i" },
-      full: { type: "boolean" },
-      append: { type: "boolean" },
-      all: { type: "boolean" },
-      help: { type: "boolean", short: "h" },
-    },
-  });
+  const argv = process.argv.slice(2);
+  // For `rize`, everything after the first `--` is rize's and must not be parsed here.
+  const dashes = argv.indexOf("--");
+  let parsed = parseArgs({ args: argv, allowPositionals: true, options: OPTIONS });
+  let rizeArgs;
+  if (dashes >= 0) {
+    const before = parseArgs({ args: argv.slice(0, dashes), allowPositionals: true, options: OPTIONS });
+    if (before.positionals[0] === "rize") {
+      parsed = before;
+      rizeArgs = argv.slice(dashes + 1);
+    }
+  }
+  const { values, positionals } = parsed;
   const [command, ...args] = positionals;
   if (values.help || command === "help" || command === undefined) {
-    console.log(USAGE);
-    process.exit(command === undefined && !values.help ? 1 : 0);
+    (command === undefined && !values.help ? console.error : console.log)(USAGE);
+    process.exit(command === undefined && !values.help ? 2 : 0);
   }
   const run = COMMANDS[command];
   if (!run) {
+    console.error(`app-drive-windows: unknown command '${command}'`);
     console.error(USAGE);
-    process.exit(1);
+    process.exit(2);
   }
-  await run(values, args);
+  await run(values, args, rizeArgs);
 }
 
 main().then(
   async () => {
     await sleep(100);
-    process.exit(0);
+    process.exit(process.exitCode ?? 0);
   },
   (error) => {
     console.error(error instanceof DriveError ? `app-drive-windows: ${error.message}` : error);
-    process.exit(1);
+    process.exit(error instanceof UsageError ? 2 : 1);
   },
 );

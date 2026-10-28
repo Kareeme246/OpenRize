@@ -26,6 +26,12 @@ pnpm exec tsc -p scripts/publish-r2
 echo "==> tsc (lib tests)"
 pnpm exec tsc -p tsconfig.tests.json
 
+echo "==> tsc (skill lint)"
+pnpm exec tsc -p scripts/lint-skills
+
+echo "==> skills (lint)"
+node scripts/lint-skills/cli.ts
+
 echo "==> cargo fmt (backend)"
 if $FIX; then
   cargo fmt --manifest-path src-tauri/Cargo.toml --all

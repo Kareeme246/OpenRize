@@ -391,6 +391,7 @@ export function EntryReviewPanel({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close review panel"
             className="rounded p-1 text-fg-faint transition-colors hover:bg-surface hover:text-fg"
           >
             ✕
@@ -428,6 +429,7 @@ export function EntryReviewPanel({
                 autoFocus
                 ref={descriptionRef}
                 value={draft}
+                aria-label="Entry description"
                 onChange={(event) => setDraft(event.target.value)}
                 onBlur={saveDescription}
                 onKeyDown={(event) => {

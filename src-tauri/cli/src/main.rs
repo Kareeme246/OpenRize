@@ -15,7 +15,7 @@ use openrize_core::models::{
     NewCategory, NewClient, NewProject, NewTimeEntry, UpdateCategory, UpdateClient, UpdateProject,
     UpdateTimeEntry,
 };
-use openrize_core::protocol::{code, Operation, Response};
+use openrize_core::protocol::{code, Operation, Response, DRY_RUN_UNSUPPORTED};
 use openrize_core::EntryFilter;
 use serde_json::{json, Value};
 
@@ -44,6 +44,9 @@ struct Args {
     /// Confirm deletions and resets without asking
     #[arg(long, short = 'y', global = true)]
     yes: bool,
+    /// Show what a delete, reset or rebuild would change, and change nothing
+    #[arg(long, global = true)]
+    dry_run: bool,
     /// Another app data directory, such as a dev build's
     #[arg(long, global = true, value_name = "DIR")]
     data_dir: Option<PathBuf>,
@@ -551,7 +554,11 @@ fn main() {
             eprintln!("  {candidate}");
         }
     } else if let Some(data) = &response.data {
-        render::show(args.command.as_ref(), data, args.full);
+        if args.dry_run {
+            render::dry_run(data);
+        } else {
+            render::show(args.command.as_ref(), data, args.full);
+        }
     }
     std::process::exit(exit_code(&response));
 }
@@ -578,7 +585,30 @@ fn invalid(message: impl Into<String>) -> Response {
     Response::error(code::INVALID_ARGUMENT, message)
 }
 
+/// The commands `confirm` guards, which `--dry-run` previews.
+fn previewable(command: Option<&Command>) -> bool {
+    matches!(
+        command,
+        Some(
+            Command::Timers {
+                command: TimersCommand::Reset { .. } | TimersCommand::Rm { .. }
+            } | Command::Entries {
+                command: EntriesCommand::Rm { .. } | EntriesCommand::Rebuild { .. }
+            } | Command::Projects {
+                command: ProjectsCommand::Rm { .. }
+            } | Command::Clients {
+                command: ClientsCommand::Rm { .. }
+            } | Command::Categories {
+                command: CategoriesCommand::Rm { .. }
+            }
+        )
+    )
+}
+
 fn run(args: &Args) -> Result<Outcome, Response> {
+    if args.dry_run && !previewable(args.command.as_ref()) {
+        return Err(invalid(DRY_RUN_UNSUPPORTED));
+    }
     let command = match &args.command {
         Some(Command::Completions { shell }) => {
             let mut script = Vec::new();
@@ -601,7 +631,24 @@ fn run(args: &Args) -> Result<Outcome, Response> {
     let today = dates::today();
     let ask = |operation: Operation| Ok(Outcome::Answer(client.request(operation)));
     let time = |input: &str| dates::instant(input, false, today).map_err(invalid);
-    let confirm = |question: &str| confirm(args.yes, question);
+    // A dry run never asks: it changes nothing, and sends the preview of the
+    // operation a destructive command would otherwise send.
+    let confirm = |question: &str| {
+        if args.dry_run {
+            Ok(())
+        } else {
+            confirm(args.yes, question)
+        }
+    };
+    let destructive = |operation: Operation| {
+        ask(if args.dry_run {
+            Operation::Preview {
+                operation: Box::new(operation),
+            }
+        } else {
+            operation
+        })
+    };
 
     let Some(command) = command else {
         return ask(Operation::Status {
@@ -688,7 +735,7 @@ fn run(args: &Args) -> Result<Outcome, Response> {
             }),
             TimersCommand::Reset { timer } => {
                 confirm(&format!("Reset timer \"{timer}\" to zero?"))?;
-                ask(Operation::TimerReset {
+                destructive(Operation::TimerReset {
                     timer: timer.clone(),
                 })
             }
@@ -698,7 +745,7 @@ fn run(args: &Args) -> Result<Outcome, Response> {
             }),
             TimersCommand::Rm { timer } => {
                 confirm(&format!("Delete timer \"{timer}\"?"))?;
-                ask(Operation::TimerDelete {
+                destructive(Operation::TimerDelete {
                     timer: timer.clone(),
                 })
             }
@@ -825,7 +872,7 @@ fn run(args: &Args) -> Result<Outcome, Response> {
                     "Delete {count} {}?",
                     if count == 1 { "entry" } else { "entries" }
                 ))?;
-                ask(Operation::EntriesDelete {
+                destructive(Operation::EntriesDelete {
                     entries: entries.clone(),
                 })
             }
@@ -834,7 +881,7 @@ fn run(args: &Args) -> Result<Outcome, Response> {
                 confirm(
                     "Rebuild entries from recorded activity? Edits to automatic entries in this range are replaced.",
                 )?;
-                ask(Operation::EntriesRebuild { from, to })
+                destructive(Operation::EntriesRebuild { from, to })
             }
             EntriesCommand::Export {
                 format,
@@ -965,7 +1012,7 @@ fn run(args: &Args) -> Result<Outcome, Response> {
             }),
             ProjectsCommand::Rm { project } => {
                 confirm(&format!("Delete project \"{project}\"?"))?;
-                ask(Operation::ProjectDelete {
+                destructive(Operation::ProjectDelete {
                     project: project.clone(),
                 })
             }
@@ -1004,7 +1051,7 @@ fn run(args: &Args) -> Result<Outcome, Response> {
             }),
             ClientsCommand::Rm { client: reference } => {
                 confirm(&format!("Delete client \"{reference}\"?"))?;
-                ask(Operation::ClientDelete {
+                destructive(Operation::ClientDelete {
                     client: reference.clone(),
                 })
             }
@@ -1047,7 +1094,7 @@ fn run(args: &Args) -> Result<Outcome, Response> {
             }),
             CategoriesCommand::Rm { category } => {
                 confirm(&format!("Delete category \"{category}\"?"))?;
-                ask(Operation::CategoryDelete {
+                destructive(Operation::CategoryDelete {
                     category: category.clone(),
                 })
             }

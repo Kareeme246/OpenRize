@@ -248,6 +248,7 @@ mod approval_lock;
 mod break_regressions;
 mod claim;
 mod deletions;
+pub use deletions::{CategoryPreview, DeletionPreview};
 mod history;
 #[cfg(test)]
 mod merge_regressions;
@@ -255,6 +256,28 @@ mod merge_regressions;
 mod overlap_claim;
 #[cfg(test)]
 mod split_regressions;
+
+/// What `ActivityStore::preview_category_removal` found.
+#[derive(Debug)]
+pub enum CategoryRemovalPreview {
+    /// Entries use the category, so removing it archives it.
+    Archived,
+    /// Nothing uses it: the staged deletion, or the message it would fail with.
+    Deleted(Result<DeletionPreview, String>),
+}
+
+/// What `ActivityStore::preview_delete_client` found.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientDeletionPreview {
+    pub client: Client,
+    /// Projects that would lose the client link.
+    pub detached_projects: Vec<Project>,
+    /// The message the real deletion would fail with. `rpc` reports it as the
+    /// answer's `refused`.
+    #[serde(skip)]
+    pub refused: Option<String>,
+}
 
 pub struct ActivityStore {
     conn: Connection,
@@ -997,15 +1020,7 @@ impl ActivityStore {
     /// reports group by category, so its history keeps it, while pickers and
     /// suggestions drop it. One nobody used is deleted (undoably).
     pub fn remove_category(&mut self, id: &str, now: u64) -> Result<CategoryRemoval, String> {
-        let used: bool = self
-            .conn
-            .query_row(
-                "SELECT EXISTS (SELECT 1 FROM time_entries WHERE category_id = ?1 AND deleted_at IS NULL);",
-                params![id],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        if used {
+        if self.category_is_used(id)? {
             let patch = UpdateCategory {
                 archived: Some(true),
                 ..UpdateCategory::default()
@@ -1016,6 +1031,39 @@ impl ActivityStore {
             self.delete_category(id, now)?;
             Ok(CategoryRemoval::Deleted)
         }
+    }
+
+    /// What `remove_category` would do, changing nothing: archiving needs no
+    /// staging, and a deletion is staged and rolled back (see
+    /// `preview_deletion`). The inner `Err` is the message the real deletion
+    /// would fail with.
+    pub fn preview_category_removal(
+        &mut self,
+        id: &str,
+        now: u64,
+    ) -> Result<CategoryRemovalPreview, String> {
+        if self.category_is_used(id)? {
+            Ok(CategoryRemovalPreview::Archived)
+        } else {
+            Ok(CategoryRemovalPreview::Deleted(self.preview_deletion(
+                &[],
+                Some(id),
+                None,
+                now,
+            )))
+        }
+    }
+
+    /// Whether any time entry still uses the category, which decides between
+    /// archiving and deleting it.
+    fn category_is_used(&self, id: &str) -> Result<bool, String> {
+        self.conn
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM time_entries WHERE category_id = ?1 AND deleted_at IS NULL);",
+                params![id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())
     }
 
     /// Puts `ids` first, in that order, and the rest after them in their
@@ -1421,19 +1469,7 @@ impl ActivityStore {
     pub fn delete_client(&mut self, id: &str, now: u64) -> Result<(), String> {
         let client = self.get_client(id)?;
         let tx = self.conn.transaction().map_err(|e| e.to_string())?;
-        let invoiced: bool = tx
-            .query_row(
-                "SELECT EXISTS (SELECT 1 FROM invoices WHERE client_id = ?1);",
-                params![id],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        if invoiced {
-            return Err(format!(
-                "{} has invoices, so it can't be deleted. Archive it instead.",
-                client.name
-            ));
-        }
+        Self::ensure_client_deletable(&tx, &client)?;
         tx.execute(
             "UPDATE projects SET client_id = NULL, updated_at = ?1 WHERE client_id = ?2;",
             params![now as i64, id],
@@ -1445,6 +1481,42 @@ impl ActivityStore {
         )
         .map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())
+    }
+
+    /// What `delete_client` would do, changing nothing: the client, the
+    /// projects that would lose it, and the refusal the real command would
+    /// fail with, if any.
+    pub fn preview_delete_client(&self, id: &str) -> Result<ClientDeletionPreview, String> {
+        let client = self.get_client(id)?;
+        let refused = Self::ensure_client_deletable(&self.conn, &client).err();
+        let detached_projects = self
+            .list_projects()?
+            .into_iter()
+            .filter(|project| project.client_id.as_deref() == Some(id))
+            .collect();
+        Ok(ClientDeletionPreview {
+            client,
+            detached_projects,
+            refused,
+        })
+    }
+
+    /// A client with invoices cannot be deleted: those documents bill it.
+    fn ensure_client_deletable(conn: &Connection, client: &Client) -> Result<(), String> {
+        let invoiced: bool = conn
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM invoices WHERE client_id = ?1);",
+                params![client.id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if invoiced {
+            return Err(format!(
+                "{} has invoices, so it can't be deleted. Archive it instead.",
+                client.name
+            ));
+        }
+        Ok(())
     }
 
     fn get_client(&self, id: &str) -> Result<Client, String> {

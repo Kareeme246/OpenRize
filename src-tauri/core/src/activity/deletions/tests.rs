@@ -387,3 +387,82 @@ fn add_and_undo_redo_round_trip() {
         .unwrap();
     assert_eq!(created_deleted, None);
 }
+
+/// Every row a deletion could touch, flattened so two states compare equal
+/// only if nothing changed.
+fn rows(store: &ActivityStore) -> String {
+    [
+        "SELECT group_concat(id||':'||ifnull(category_id,'')||':'||ifnull(project_id,'')||':'||ifnull(deleted_at,'')||':'||updated_at||':'||status) FROM (SELECT * FROM time_entries ORDER BY id)",
+        "SELECT group_concat(id||':'||ifnull(deleted_at,'')||':'||archived||':'||updated_at) FROM (SELECT * FROM categories ORDER BY id)",
+        "SELECT group_concat(id||':'||ifnull(deleted_at,'')||':'||updated_at) FROM (SELECT * FROM projects ORDER BY id)",
+        "SELECT group_concat(id||':'||ifnull(deleted_at,'')||':'||updated_at) FROM (SELECT * FROM rules ORDER BY id)",
+        "SELECT group_concat(id||':'||ifnull(default_category_id,'')||':'||ifnull(default_project_id,'')||':'||updated_at) FROM (SELECT * FROM apps ORDER BY id)",
+        "SELECT group_concat(id||':'||ifnull(entry_id,'')||':'||ifnull(ended_at,'')) FROM (SELECT * FROM segments ORDER BY id)",
+    ]
+    .iter()
+    .map(|sql| {
+        store
+            .conn()
+            .query_row(sql, [], |row| row.get::<_, Option<String>>(0))
+            .unwrap()
+            .unwrap_or_default()
+    })
+    .collect::<Vec<_>>()
+    .join("\n")
+}
+
+#[test]
+fn previewing_a_deletion_reports_it_and_leaves_everything_as_it_was() {
+    let mut store = store();
+    let before = rows(&store);
+
+    let preview = store.preview_deletion(&[], None, Some("p"), 400).unwrap();
+    assert_eq!(preview.deleted_entries, Vec::<String>::new());
+    assert_eq!(preview.unlinked_entries, vec!["a", "b"]);
+    assert_eq!(preview.projects, vec!["p"]);
+    assert!(preview.categories.is_empty());
+    assert_eq!((preview.rules, preview.apps), (1, 1));
+
+    let preview = store
+        .preview_deletion(&["a".into(), "a".into()], None, None, 400)
+        .unwrap();
+    assert_eq!(preview.deleted_entries, vec!["a"]);
+    assert!(preview.unlinked_entries.is_empty());
+
+    let preview = store.preview_deletion(&[], Some("c"), None, 400).unwrap();
+    assert_eq!(preview.categories.len(), 1);
+    assert_eq!(preview.categories[0].id, "c");
+    assert!(!preview.categories[0].was_archived);
+
+    // Nothing was written, and nothing can be undone or redone.
+    assert_eq!(rows(&store), before);
+    assert!(store.undo_stack.is_empty());
+    assert!(store.redo_stack.is_empty());
+    assert!(!store.undo(500).map(|step| step.is_some()).unwrap());
+}
+
+#[test]
+fn previewing_a_refused_deletion_fails_with_the_real_message_and_changes_nothing() {
+    let mut store = store();
+    store
+        .conn()
+        .execute("UPDATE time_entries SET status='approved' WHERE id='a'", [])
+        .unwrap();
+    let before = rows(&store);
+
+    let preview = store.preview_deletion(&["a".into()], None, None, 400);
+    let real = store.delete_time_entries(&["a".into()], 400);
+    assert_eq!(preview.unwrap_err(), crate::activity::LOCKED);
+    assert_eq!(real.unwrap_err(), crate::activity::LOCKED);
+
+    // The project's approved entry blocks it too, with the same words.
+    let preview = store.preview_deletion(&[], None, Some("p"), 400);
+    let real = store.delete_project("p", 400);
+    assert_eq!(preview.unwrap_err(), real.unwrap_err());
+
+    assert_eq!(rows(&store), before);
+    assert!(store.undo_stack.is_empty());
+
+    let missing = store.preview_deletion(&[], None, Some("nothing"), 400);
+    assert_eq!(missing.unwrap_err(), "Those items no longer exist.");
+}

@@ -82,6 +82,11 @@ Include window titles and URLs in output.
 .BR -y , " --yes"
 Confirm destructive operations without prompting.
 .TP
+.B --dry-run
+Show what a delete, reset or rebuild would change, and change nothing. It needs no
+.BR --yes .
+Only commands that ask for confirmation take it; others fail with exit status 2.
+.TP
 .BI --data-dir " DIR"
 Use another OpenRize data directory, such as a development build's.
 .PP

@@ -79,6 +79,7 @@ scripts/app-drive.sh wait "Application / Website"
 Table filters, per-app defaults and the exclusion toggle:
 
 ```bash
+scripts/app-drive.sh fill "Search apps" "Notes"
 scripts/app-drive.sh click "Websites"
 scripts/app-drive.sh click "All Types"
 scripts/app-drive.sh click "Excluded"
@@ -109,7 +110,7 @@ scripts/app-drive.sh stop
 
 - `rize` has no apps command (the apps list and edit commands in the rize reference are still planned), so there is no rize read-back; use the session database as the evidence and say so in the result.
 - "Tracked" and "Excluded" are both filter buttons and per-row toggles, and "Apps" is also the sidebar item and the filter button. Run `tree` and use `-i N`, or `-r` to narrow; the filter buttons come before the rows.
-- The search box has only a placeholder ("Search by app name or bundle ID...") and no accessible name, so `fill` cannot target it by name. Find it with `tree` (an unnamed text field) and use `-r AXTextField` with `-i`, or skip search verification.
+- The Table tab's search box is named "Search apps" (its placeholder is "Search by app name or bundle ID..."); fill it with `scripts/app-drive.sh fill "Search apps" "Notes"`. It exists only on the Table tab.
 - Pickers are comboboxes labelled "Default category", "Default project" (Table) and "Default category for NAME", "Default project for NAME" (Timeline); the current value is not part of the name. The Default project picker is replaced by the text "No projects yet" until a project exists.
 - A picker offers "(None)" first; choosing it clears the default.
 - The Timeline's "Defaults unavailable" text shows for a day app that has no matching app record, typically after history was purged.

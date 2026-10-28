@@ -157,6 +157,7 @@ export function Apps() {
               <input
                 type="text"
                 placeholder="Search by app name or bundle ID..."
+                aria-label="Search apps"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-full rounded-lg border border-line bg-surface px-3 py-1.5 pl-8 text-xs text-fg placeholder:text-fg-faint focus:border-accent focus:outline-none"

@@ -128,7 +128,7 @@ Cheapest first; a PASS needs the first item for the behaviour under test, plus t
 - The week view day headers have no aria-label (their text is the weekday, date, total and pending count), so find them with `tree` and click by the weekday text; there is no stable label.
 - The sidebar's Calendar item has the accessible name "Calendar" only; its pending badge is separate text.
 - Shortcuts (R, J, K, Escape, Backspace) stand down while a text field, select or textarea has focus. After a `fill` anywhere, move focus before sending keys, for example by clicking the Calendar sidebar item.
-- `scripts/app-drive.sh key` has no keyspec for Backspace or Delete, so the delete shortcut cannot be sent on macOS; use the entry's Delete button ([entry review](review.md)). The Windows driver does accept `backspace` and `delete`.
+- Send the delete shortcut with `scripts/app-drive.sh key backspace` (or `key delete`) once an entry is selected and no field has focus; both the macOS and the Windows driver accept them. The entry's Delete button ([entry review](review.md)) is the click equivalent.
 - Past days are rebuilt from recorded activity on open, and the rebuild emits `entries-changed`; a seeded manual entry survives it.
 - A day with no entries shows "No entries recorded for this day" only after loading finishes; `wait` for it rather than reading `tree` straight away.
 - The window can remount when the dev server reloads, which drops you back on the Calendar's default day.

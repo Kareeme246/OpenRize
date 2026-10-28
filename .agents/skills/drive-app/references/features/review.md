@@ -68,6 +68,7 @@ Keyboard equivalents (focus must not be in a field):
 
 ```bash
 scripts/app-drive.sh key cmd+return
+scripts/app-drive.sh key cmd+backspace
 scripts/app-drive.sh key s
 scripts/app-drive.sh key e
 scripts/app-drive.sh key c
@@ -75,12 +76,18 @@ scripts/app-drive.sh key 1
 scripts/app-drive.sh key escape
 ```
 
-Edit the description. The editor's textarea has no accessible name, so press E and type with `key`, which sends a whole string as keystrokes, then Enter to save:
+Edit the description. Press E to open the editor, fill the textarea named "Entry description", then press Enter to save (focus is in the field, so `key return` is read by the field, not as a shortcut):
 
 ```bash
 scripts/app-drive.sh key e
-scripts/app-drive.sh key "Write the quarterly report"
+scripts/app-drive.sh fill -r AXTextArea "Entry description" "Write the quarterly report"
 scripts/app-drive.sh key return
+```
+
+Close the panel by name:
+
+```bash
+scripts/app-drive.sh click "Close review panel"
 ```
 
 Edit times and billable. The time fields are named, the checkbox is named by its label:
@@ -151,7 +158,7 @@ A PASS needs the visible panel state and the matching backend row.
 ## Gotchas
 
 - Button names carry extra text: the accessible name of Accept is "Accept" followed by the shortcut hint, Reject likewise, and the merge buttons are "Merge ⭡" and "Merge ⭣" (arrow glyphs are part of the name). Match on the word; if the hint hides at narrow widths the name is just the word.
-- The panel's close control is a "✕" with no aria-label (the Delete button is the other "✕", labelled "Delete time entry"), so close with `key escape`, not by name.
+- The panel's close control is named "Close review panel" (the Delete button is the other "✕", labelled "Delete time entry"). `key escape` closes it too, but only while no field has focus.
 - The four tabs are plain buttons whose text is lowercase: "apps", "titles", "log", "history". "Apps" also matches the sidebar item exactly, so for the apps tab use `tree` to see the order and `-i N`, or use "history", "titles" and "log", which are unique.
 - The dialog's submit "Split" and the panel's "Split" button share a name; `key return` in the dialog avoids the clash, otherwise use `-i`.
 - Approved entries are locked: Accept turns into "Approved", Split, Delete, the time fields, Billable, description and category/project edits are disabled. Unapprove first. Invoiced entries cannot be unapproved or deleted ([invoices](invoices.md)).
@@ -159,7 +166,7 @@ A PASS needs the visible panel state and the matching backend row.
 - A manual `rize entries add` that has a description and category is approved, not pending. Only an add with neither description, category nor project (or one made on the Calendar by dragging) is pending.
 - Time fields are native time inputs; `fill` types characters into them, and whether a value like "1030AM" lands depends on the webview's locale. Confirm with `tree`, which prints the field's value, and fall back to `rize entries edit --to` to arrange times.
 - Shortcuts ignore keypresses while any input, select or textarea has focus, so after `fill` the next `key s` does nothing until focus moves.
-- `scripts/app-drive.sh key` has no Backspace or Delete keyspec, so Cmd+Backspace (Reject) and the Calendar delete shortcut cannot be sent on macOS; click Reject or the delete button. The Windows driver accepts `ctrl+backspace`.
+- `scripts/app-drive.sh key backspace` and `key delete` exist, so Cmd+Backspace (Reject) is `key cmd+backspace` on macOS; the Windows driver spells it `ctrl+backspace`. Like every shortcut it is ignored while a field has focus.
 - The category and project pickers' option names are the category and project names, so "Coding" or "Client work" is the label to click after opening a section; the 1 to 3 keys only act on the section that is open (press C first).
 - The project section exists only when the AI setting suggests projects as well as categories ([settings](settings.md)); with no active projects it reads "No projects yet".
 - Toasts are information only and carry no Undo button; reverse a change with the keyboard ([undo and redo](undo.md)).

@@ -99,7 +99,7 @@ Replace `3f9a1c2e` with the last characters of an entry id from the list. The `e
 - The "Suggestion engine" row, "Custom instructions" textarea (`fill -r AXTextArea "Custom instructions" ...`, saved on blur) and "Personal model" block are hidden when the on-device model is unavailable.
 - The status refreshes when the window regains focus and on every `ai-status-changed` event, so right after launch the text may still say "Starting the on-device models..."; `wait` for the final text.
 - Dismissing the banner stores the dismissed reason in browser storage for that window profile only; a fresh session shows it again. `Dismiss` is also the name of other controls; `tree` first.
-- A text inconsistency to know about: the Apple Intelligence row's button on an unsupported OS says "Apple Intelligence requires macOS 15.1 or later." while the engine text says "needs macOS 26 or later". The code paths differ; report rather than assume one is right.
+- On an unsupported OS the Apple Intelligence row's button reports "The on-device model needs macOS 26 or later.", matching the engine text, because the on-device model needs macOS 26.
 - The auto-accept switch reads "Starts after 50 reviewed suggestions; until then only rule matches auto-approve" until calibration starts; only rule matches (certain) clear a threshold above 90.
 - The worker retrains only while the machine is idle, on power and outside Low Power Mode, so "Retrain now" may sit in "Retrain queued..." in a driven run.
 - Rules (hint matches) are created by project and category sheets; a rule hit has confidence 100 percent and engine `rules`.

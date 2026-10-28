@@ -35,7 +35,7 @@ usage: scripts/app-drive.sh <command> [args]
   find   [-s ID] <name>       resolve a control by its accessible name
   click  [-s ID] <name>       click a control (real DOM click via AXPress)
   fill   [-s ID] <name> <txt> focus a field and type text into it
-  key    [-s ID] <keyspec>    send a keystroke, e.g. return, tab, cmd+comma
+  key    [-s ID] <keyspec>    send a keystroke, e.g. return, tab, backspace, delete, cmd+comma
   wait   [-s ID] <text> [sec] block until text appears in the tree (default 15s)
   shot   [-s ID] [--out PATH] screenshot the window, print the PNG path
   logs   [-s ID] [n]          tail the instance's dev-server/cargo log
@@ -494,6 +494,8 @@ cmd_key() {
     tab) action="key code 48" ;;
     space) action="key code 49" ;;
     escape | esc) action="key code 53" ;;
+    backspace) action="key code 51" ;;
+    delete | forwarddelete) action="key code 117" ;;
     left) action="key code 123" ;;
     right) action="key code 124" ;;
     down) action="key code 125" ;;

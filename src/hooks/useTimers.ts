@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
-import { formatDuration, type Timer } from "../lib/timers";
+import { formatDuration, type SegmentEdit, type Timer } from "../lib/timers";
 import { useTauriEvent } from "./useTauriEvent";
 import { useToast } from "./useToast";
 
@@ -18,8 +18,8 @@ export interface TimersApi {
   /** Resets without a toast, once the time has been logged elsewhere. */
   clear: (id: string) => void;
   rename: (id: string, label: string) => void;
-  addSegment: (id: string, durationMs: number) => void;
-  updateSegment: (id: string, segmentId: number, durationMs: number) => void;
+  addSegment: (id: string, startedAt: number, endedAt: number) => void;
+  updateSegment: (id: string, segmentId: number, edit: SegmentEdit) => void;
   deleteSegment: (id: string, segmentId: number) => void;
   saveState: (id: string) => void;
   remove: (id: string) => void;
@@ -127,20 +127,20 @@ export function useTimers(): TimersApi {
     [confirm],
   );
   const addSegment = useCallback(
-    (id: string, durationMs: number) =>
+    (id: string, startedAt: number, endedAt: number) =>
       confirm(
-        api.addTimerSegment(id, durationMs),
-        `Added ${formatDuration(durationMs)} to "${labelOf(id)}"`,
+        api.addTimerSegment(id, startedAt, endedAt),
+        `Added ${formatDuration(endedAt - startedAt)} to "${labelOf(id)}"`,
       ),
     [confirm, labelOf],
   );
   const updateSegment = useCallback(
-    (id: string, segmentId: number, durationMs: number) =>
+    (id: string, segmentId: number, edit: SegmentEdit) =>
       confirm(
-        api.updateTimerSegment(id, segmentId, durationMs),
-        `Segment changed to ${formatDuration(durationMs)}`,
+        api.updateTimerSegment(id, segmentId, edit),
+        `Segment changed on "${labelOf(id)}"`,
       ),
-    [confirm],
+    [confirm, labelOf],
   );
   const deleteSegment = useCallback(
     (id: string, segmentId: number) =>

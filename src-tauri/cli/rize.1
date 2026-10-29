@@ -33,6 +33,18 @@ Start or end a manual focus session (requires the app running).
 .B timers list | new LABEL | start TIMER | pause TIMER | reset TIMER | rename TIMER LABEL | rm TIMER
 List and manage stopwatch timers.
 .TP
+.B timers segments list TIMER | add TIMER --from START (--to END | --for LENGTH) | edit TIMER SEGMENT [--from START] [--to END]
+A timer's time is its segments, each a start and an end as a time entry is; its length is the difference.
+.B add
+takes a start and an end, or with
+.B --for
+a length such as 90m that makes the end the start plus that length (it cannot be combined with
+.BR --to ).
+.B edit
+changes the start, the end or both of the segment whose id
+.B list
+shows. A segment may be zero length but cannot end before it starts.
+.TP
 .B entries list | show | add | edit | approve | unapprove | reject | split | rm | rebuild | export
 List, create, edit, review, split, delete, rebuild, or export time entries.
 .TP

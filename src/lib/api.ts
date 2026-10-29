@@ -8,7 +8,7 @@ import type {
 } from "./accounts";
 import type { BreakEntry, BreakState } from "./breaks";
 import type { LoginItemState, Settings, StoragePaths } from "./settings";
-import type { Timer, TimerSavedState } from "./timers";
+import type { SegmentEdit, Timer, TimerSavedState } from "./timers";
 import type {
   AccessibilityState,
   ActivitySnapshot,
@@ -768,20 +768,22 @@ export function renameTimer(id: string, label: string): Promise<Timer[]> {
 
 export function addTimerSegment(
   id: string,
-  durationMs: number,
+  startedAt: number,
+  endedAt: number,
 ): Promise<Timer[]> {
-  return invoke<Timer[]>("add_timer_segment", { id, durationMs });
+  return invoke<Timer[]>("add_timer_segment", { id, startedAt, endedAt });
 }
 
 export function updateTimerSegment(
   id: string,
   segmentId: number,
-  durationMs: number,
+  edit: SegmentEdit,
 ): Promise<Timer[]> {
   return invoke<Timer[]>("update_timer_segment", {
     id,
     segmentId,
-    durationMs,
+    startedAt: edit.startedAt ?? null,
+    endedAt: edit.endedAt ?? null,
   });
 }
 

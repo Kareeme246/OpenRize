@@ -372,6 +372,146 @@ fn settings_timers_and_what_needs_the_app() {
 }
 
 #[test]
+fn timer_segments_are_a_start_and_an_end() {
+    let store = Store::new();
+    store.ok(&["timers", "new", "Deep work"]);
+
+    // A fresh timer reads zero; started, it reads from its start instant.
+    let fresh = store.ok(&["timers", "list"]);
+    assert_eq!(fresh[0]["accumulatedMs"], 0);
+    assert!(fresh[0]["startedAt"].is_null());
+    store.ok(&["timers", "start", "deep"]);
+    let paused = store.ok(&["timers", "pause", "deep"]);
+    let first = &paused[0]["segments"][0];
+    assert_eq!(
+        first["durationMs"].as_u64().unwrap(),
+        first["endedAt"].as_u64().unwrap() - first["startedAt"].as_u64().unwrap()
+    );
+
+    // Add by start and end, then by start and a length.
+    store.ok(&[
+        "timers",
+        "segments",
+        "add",
+        "deep",
+        "--from",
+        "2026-09-01T09:00",
+        "--to",
+        "2026-09-01T10:30",
+    ]);
+    let timers = store.ok(&[
+        "timers",
+        "segments",
+        "add",
+        "deep",
+        "--from",
+        "2026-09-01T11:00",
+        "--for",
+        "45m",
+    ]);
+    // Segments run in start order: the two September ones come before the
+    // pause that was recorded just now.
+    let segments = timers[0]["segments"].as_array().unwrap();
+    let lengths: Vec<u64> = segments
+        .iter()
+        .map(|segment| segment["durationMs"].as_u64().unwrap())
+        .collect();
+    assert_eq!(lengths[..2], [5_400_000, 2_700_000]);
+
+    // Edit the end of the first manual segment, then only its start.
+    let id = segments[0]["id"].to_string();
+    let edited = store.ok(&[
+        "timers",
+        "segments",
+        "edit",
+        "deep",
+        &id,
+        "--to",
+        "2026-09-01T10:45",
+    ]);
+    assert_eq!(edited[0]["segments"][0]["durationMs"], 6_300_000);
+    let edited = store.ok(&[
+        "timers",
+        "segments",
+        "edit",
+        "deep",
+        &id,
+        "--from",
+        "2026-09-01T09:30",
+    ]);
+    assert_eq!(edited[0]["segments"][0]["durationMs"], 4_500_000);
+
+    // The listing carries every segment, and the total is their sum.
+    let listed = store.ok(&["timers", "segments", "list", "deep"]);
+    let sum: u64 = listed["segments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|segment| segment["durationMs"].as_u64().unwrap())
+        .sum();
+    assert_eq!(listed["accumulatedMs"].as_u64().unwrap(), sum);
+
+    // A segment cannot end before it starts, and may be zero length.
+    assert_eq!(
+        store.err(&[
+            "timers",
+            "segments",
+            "add",
+            "deep",
+            "--from",
+            "2026-09-01T10:00",
+            "--to",
+            "2026-09-01T09:59",
+        ]),
+        ("INVALID_ARGUMENT".into(), 2)
+    );
+    assert_eq!(
+        store.err(&[
+            "timers",
+            "segments",
+            "edit",
+            "deep",
+            &id,
+            "--to",
+            "2026-09-01T09:00",
+        ]),
+        ("INVALID_ARGUMENT".into(), 2)
+    );
+    assert_eq!(
+        store.err(&["timers", "segments", "edit", "deep", &id]),
+        ("INVALID_ARGUMENT".into(), 2)
+    );
+    assert_eq!(
+        store.err(&["timers", "segments", "edit", "deep", "9999", "--to", "today"]),
+        ("NOT_FOUND".into(), 1)
+    );
+    store.ok(&[
+        "timers",
+        "segments",
+        "add",
+        "deep",
+        "--from",
+        "2026-09-01T12:00",
+        "--for",
+        "0m",
+    ]);
+    let listed = store.ok(&["timers", "segments", "list", "deep"]);
+    assert_eq!(listed["segments"].as_array().unwrap().len(), 4);
+
+    // --to and --for are two ways to say the same thing, not both.
+    assert_eq!(
+        store
+            .rize(&[
+                "timers", "segments", "add", "deep", "--from", "today", "--to", "today", "--for",
+                "1h",
+            ])
+            .status
+            .code(),
+        Some(2)
+    );
+}
+
+#[test]
 fn no_data_means_the_app_was_never_installed() {
     let store = Store::new();
     let database = store.root.join("data/activity.db");

@@ -92,7 +92,9 @@ impl Live for App<'_> {
             | O::TimerPause { .. }
             | O::TimerReset { .. }
             | O::TimerRename { .. }
-            | O::TimerDelete { .. } => {
+            | O::TimerDelete { .. }
+            | O::TimerSegmentAdd { .. }
+            | O::TimerSegmentEdit { .. } => {
                 let timers = state
                     .store
                     .lock()

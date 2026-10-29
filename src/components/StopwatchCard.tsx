@@ -1,5 +1,10 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { elapsedMs, formatDuration, type Timer } from "../lib/timers";
+import {
+  elapsedMs,
+  formatDuration,
+  type SegmentEdit,
+  type Timer,
+} from "../lib/timers";
 import type { Category, Project } from "../lib/types";
 import { useDismiss } from "../pages/timesheets/useDismiss";
 import { AddTimeSheet } from "./AddTimeSheet";
@@ -21,8 +26,8 @@ interface StopwatchCardProps {
   /** Resets quietly once "Add to calendar" has logged the time. */
   onClear: (id: string) => void;
   onRename: (id: string, label: string) => void;
-  onAddSegment: (id: string, durationMs: number) => void;
-  onUpdateSegment: (id: string, segmentId: number, durationMs: number) => void;
+  onAddSegment: (id: string, startedAt: number, endedAt: number) => void;
+  onUpdateSegment: (id: string, segmentId: number, edit: SegmentEdit) => void;
   onDeleteSegment: (id: string, segmentId: number) => void;
   onSaveState: (id: string) => void;
   onDelete: (id: string) => void;
@@ -223,9 +228,11 @@ export function StopwatchCard({
           total={elapsed}
           runningMs={elapsed - timer.accumulatedMs}
           onRename={(label) => onRename(timer.id, label)}
-          onAdd={(durationMs) => onAddSegment(timer.id, durationMs)}
-          onUpdate={(segmentId, durationMs) =>
-            onUpdateSegment(timer.id, segmentId, durationMs)
+          onAdd={(startedAt, endedAt) =>
+            onAddSegment(timer.id, startedAt, endedAt)
+          }
+          onUpdate={(segmentId, edit) =>
+            onUpdateSegment(timer.id, segmentId, edit)
           }
           onDelete={(segmentId) => onDeleteSegment(timer.id, segmentId)}
           onClose={() => setDialog(null)}

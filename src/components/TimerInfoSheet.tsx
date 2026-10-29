@@ -8,9 +8,11 @@ import {
 } from "react";
 import * as api from "../lib/api";
 import { describeError } from "../lib/api";
+import { localDateTimeString, parseLocalDateTime } from "../lib/dates";
 import { formatShortDate, formatTime } from "../lib/format";
 import {
   formatDuration,
+  type SegmentEdit,
   type Timer,
   type TimerSavedState,
   type TimerSegment,
@@ -24,66 +26,49 @@ interface TimerInfoSheetProps {
   runningMs: number;
   total: number;
   onRename: (label: string) => void;
-  onAdd: (durationMs: number) => void;
-  onUpdate: (segmentId: number, durationMs: number) => void;
+  onAdd: (startedAt: number, endedAt: number) => void;
+  onUpdate: (segmentId: number, edit: SegmentEdit) => void;
   onDelete: (segmentId: number) => void;
   onClose: () => void;
 }
 
-const UNITS = [3_600_000, 60_000, 1_000] as const;
-const LABELS = ["h", "m", "s"] as const;
+const BACKWARDS = "A segment cannot end before it starts.";
 
-function split(ms: number): string[] {
-  const total = Math.floor(ms / 1000);
-  return [
-    Math.floor(total / 3600),
-    Math.floor((total % 3600) / 60),
-    total % 60,
-  ].map(String);
+/** A new segment starts as the last hour, ending now. */
+function lastHour(): [string, string] {
+  const end = Date.now();
+  return [localDateTimeString(end - 3_600_000), localDateTimeString(end)];
 }
 
-/** Blank counts as 0; null when any part is not a whole number of 0 or more. */
-function join(parts: string[]): number | null {
-  const numbers = parts.map((part) => (part.trim() === "" ? 0 : Number(part)));
-  if (!numbers.every((value) => Number.isInteger(value) && value >= 0)) {
-    return null;
-  }
-  return numbers.reduce((sum, value, index) => sum + value * UNITS[index], 0);
-}
-
-interface DurationFieldsProps {
-  parts: string[];
+interface SpanFieldsProps {
+  start: string;
+  end: string;
   label: string;
-  onChange: (parts: string[]) => void;
+  onStart: (value: string) => void;
+  onEnd: (value: string) => void;
 }
 
-function DurationFields({ parts, label, onChange }: DurationFieldsProps) {
+/** A segment's start and end, as a time entry's are. */
+function SpanFields({ start, end, label, onStart, onEnd }: SpanFieldsProps) {
   return (
-    <div className="flex items-center gap-1">
-      {parts.map((part, index) => (
-        <label
-          key={LABELS[index]}
-          className="flex items-center gap-0.5 text-fg-faint"
-        >
-          <input
-            type="number"
-            min={0}
-            step={1}
-            inputMode="numeric"
-            aria-label={`${label} ${LABELS[index] === "h" ? "hours" : LABELS[index] === "m" ? "minutes" : "seconds"}`}
-            value={part}
-            onChange={(event) =>
-              onChange(
-                parts.map((old, at) =>
-                  at === index ? event.target.value : old,
-                ),
-              )
-            }
-            className={`${FIELD} w-14 px-1.5 text-right font-mono tabular-nums`}
-          />
-          {LABELS[index]}
-        </label>
-      ))}
+    <div className="flex items-center gap-1.5 text-fg-faint">
+      <input
+        type="datetime-local"
+        step={1}
+        aria-label={`${label} start`}
+        value={start}
+        onChange={(event) => onStart(event.target.value)}
+        className={`${FIELD} w-[11.5rem] px-1.5 font-mono tabular-nums`}
+      />
+      <span aria-hidden="true">to</span>
+      <input
+        type="datetime-local"
+        step={1}
+        aria-label={`${label} end`}
+        value={end}
+        onChange={(event) => onEnd(event.target.value)}
+        className={`${FIELD} w-[11.5rem] px-1.5 font-mono tabular-nums`}
+      />
     </div>
   );
 }
@@ -92,22 +77,48 @@ function SegmentRow({
   segment,
   onUpdate,
   onDelete,
+  onInvalid,
 }: {
   segment: TimerSegment;
-  onUpdate: (segmentId: number, durationMs: number) => void;
+  onUpdate: (segmentId: number, edit: SegmentEdit) => void;
   onDelete: (segmentId: number) => void;
+  onInvalid: (message: string | null) => void;
 }) {
-  const [parts, setParts] = useState(() => split(segment.durationMs));
+  const savedStart = localDateTimeString(segment.startedAt);
+  const savedEnd = localDateTimeString(segment.endedAt);
+  const [start, setStart] = useState(savedStart);
+  const [end, setEnd] = useState(savedEnd);
   const ref = useRef<HTMLDivElement>(null);
   const label = "Segment";
 
+  const revert = (): void => {
+    setStart(savedStart);
+    setEnd(savedEnd);
+  };
+
+  // Only a boundary that was touched is sent, so the seconds and milliseconds
+  // of the one left alone survive an edit of the other.
   const commit = (): void => {
-    const next = join(parts);
-    if (next === null || next === 0) {
-      setParts(split(segment.durationMs));
-    } else if (next !== segment.durationMs) {
-      onUpdate(segment.id, next);
+    const startedAt = start === savedStart ? null : parseLocalDateTime(start);
+    const endedAt = end === savedEnd ? null : parseLocalDateTime(end);
+    if (
+      (start !== savedStart && startedAt === null) ||
+      (end !== savedEnd && endedAt === null)
+    ) {
+      revert();
+      return;
     }
+    if (startedAt === null && endedAt === null) return;
+    if ((endedAt ?? segment.endedAt) < (startedAt ?? segment.startedAt)) {
+      onInvalid(BACKWARDS);
+      revert();
+      return;
+    }
+    onInvalid(null);
+    onUpdate(segment.id, {
+      ...(startedAt === null ? {} : { startedAt }),
+      ...(endedAt === null ? {} : { endedAt }),
+    });
   };
 
   // The form around the rows would submit (close) on Enter; commit instead.
@@ -128,16 +139,17 @@ function SegmentRow({
       onBlur={onBlur}
       className="flex items-center justify-between gap-2"
     >
-      <span className="min-w-0 truncate text-fg-muted">
-        {new Date(segment.recordedAt).toLocaleString([], {
-          month: "short",
-          day: "numeric",
-          hour: "numeric",
-          minute: "2-digit",
-        })}
-      </span>
+      <SpanFields
+        start={start}
+        end={end}
+        label={label}
+        onStart={setStart}
+        onEnd={setEnd}
+      />
       <div className="flex items-center gap-1.5">
-        <DurationFields parts={parts} label={label} onChange={setParts} />
+        <span className="w-14 text-right font-mono text-fg-muted tabular-nums">
+          {formatDuration(segment.durationMs)}
+        </span>
         <button
           type="button"
           aria-label="Remove segment"
@@ -181,11 +193,15 @@ export function TimerInfoSheet({
   onClose,
 }: TimerInfoSheetProps) {
   const [name, setName] = useState(timer.label);
-  const [parts, setParts] = useState(["0", "0", "0"]);
+  const [[newStart, newEnd], setNewSpan] = useState(lastHour);
   const [states, setStates] = useState<TimerSavedState[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const added = join(parts);
-  const canAdd = added !== null && added > 0;
+  const [segmentError, setSegmentError] = useState<string | null>(null);
+  const addedStart = parseLocalDateTime(newStart);
+  const addedEnd = parseLocalDateTime(newEnd);
+  const backwards =
+    addedStart !== null && addedEnd !== null && addedEnd < addedStart;
+  const canAdd = addedStart !== null && addedEnd !== null && !backwards;
 
   useEffect(() => {
     let cancelled = false;
@@ -210,9 +226,10 @@ export function TimerInfoSheet({
   };
 
   const add = (): void => {
-    if (added === null || added === 0) return;
-    onAdd(added);
-    setParts(["0", "0", "0"]);
+    if (addedStart === null || addedEnd === null || backwards) return;
+    onAdd(addedStart, addedEnd);
+    setSegmentError(null);
+    setNewSpan(lastHour());
   };
 
   const running = timer.startedAt !== null;
@@ -235,8 +252,9 @@ export function TimerInfoSheet({
       submitLabel="Done"
       onSubmit={onClose}
       onClose={onClose}
-      error={error}
+      error={error ?? segmentError ?? (backwards ? BACKWARDS : null)}
       cancellable={false}
+      width="lg"
     >
       <Section title="Name">
         <input
@@ -269,14 +287,17 @@ export function TimerInfoSheet({
 
       <Section title="Segments">
         {timer.segments.length === 0 && runningMs === 0 && (
-          <p className="text-fg-faint">No time yet. Add a segment below.</p>
+          <p className="text-fg-faint">
+            No time yet. Add a segment below with a start and an end.
+          </p>
         )}
         {timer.segments.map((segment) => (
           <SegmentRow
-            key={`${segment.id}-${segment.durationMs}`}
+            key={`${segment.id}-${segment.startedAt}-${segment.endedAt}`}
             segment={segment}
             onUpdate={onUpdate}
             onDelete={onDelete}
+            onInvalid={setSegmentError}
           />
         ))}
         {running && (
@@ -298,7 +319,13 @@ export function TimerInfoSheet({
         >
           <span className="whitespace-nowrap text-fg-muted">Add a segment</span>
           <div className="flex items-center gap-1.5">
-            <DurationFields parts={parts} label="New" onChange={setParts} />
+            <SpanFields
+              start={newStart}
+              end={newEnd}
+              label="New segment"
+              onStart={(value) => setNewSpan([value, newEnd])}
+              onEnd={(value) => setNewSpan([newStart, value])}
+            />
             <button
               type="button"
               disabled={!canAdd}

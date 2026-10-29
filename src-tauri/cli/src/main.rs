@@ -181,6 +181,53 @@ enum TimersCommand {
     Rename { timer: String, label: String },
     /// Delete a timer (asks first)
     Rm { timer: String },
+    /// The segments a timer's total is made of, each a start and an end
+    Segments {
+        #[command(subcommand)]
+        command: SegmentsCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum SegmentsCommand {
+    /// A timer's segments with their ids, starts, ends and lengths
+    List { timer: String },
+    /// Add a segment: it starts at --from and ends at --to (or runs --for a length)
+    #[command(
+        after_help = "A segment is a start and an end, as a time entry is; its length is the\n\
+            difference, and it may be zero. Pausing a running timer records one.\n\n\
+            Examples:\n  \
+            rize timers segments add \"Deep work\" --from 2026-09-01T09:00 --to 2026-09-01T10:30\n  \
+            rize timers segments add \"Deep work\" --from 2026-09-01T09:00 --for 90m   (the end is the start plus 90m)"
+    )]
+    Add {
+        timer: String,
+        /// When the segment starts
+        #[arg(long)]
+        from: String,
+        /// When the segment ends; not before --from
+        #[arg(long, required_unless_present = "length", conflicts_with = "length")]
+        to: Option<String>,
+        /// A shortcut for --to: the end is --from plus this length, such as 90m, 12h or 2w
+        #[arg(long = "for", value_name = "LENGTH", id = "length")]
+        length: Option<String>,
+    },
+    /// Change a segment's start, its end, or both (ids come from `segments list`)
+    #[command(
+        after_help = "Whichever of --from and --to you leave out stays as it is. The end cannot\n\
+            be before the start.\n\n\
+            Example:\n  rize timers segments edit \"Deep work\" 3 --to 2026-09-01T10:45"
+    )]
+    Edit {
+        timer: String,
+        segment: i64,
+        /// New start
+        #[arg(long)]
+        from: Option<String>,
+        /// New end
+        #[arg(long)]
+        to: Option<String>,
+    },
 }
 
 #[derive(ClapArgs, Debug, Default)]
@@ -749,6 +796,45 @@ fn run(args: &Args) -> Result<Outcome, Response> {
                     timer: timer.clone(),
                 })
             }
+            TimersCommand::Segments { command } => match command {
+                SegmentsCommand::List { timer } => ask(Operation::TimerSegments {
+                    timer: timer.clone(),
+                }),
+                SegmentsCommand::Add {
+                    timer,
+                    from,
+                    to,
+                    length,
+                } => {
+                    let started_at = time(from)?;
+                    let ended_at = match (to, length) {
+                        (Some(to), _) => dates::instant(to, true, today).map_err(invalid)?,
+                        (None, Some(length)) => started_at
+                            .checked_add(dates::duration(length).map_err(invalid)?)
+                            .ok_or_else(|| invalid("that length is too long"))?,
+                        (None, None) => return Err(invalid("pass --to or --for")),
+                    };
+                    ask(Operation::TimerSegmentAdd {
+                        timer: timer.clone(),
+                        started_at,
+                        ended_at,
+                    })
+                }
+                SegmentsCommand::Edit {
+                    timer,
+                    segment,
+                    from,
+                    to,
+                } => ask(Operation::TimerSegmentEdit {
+                    timer: timer.clone(),
+                    segment: *segment,
+                    started_at: from.as_deref().map(time).transpose()?,
+                    ended_at: to
+                        .as_deref()
+                        .map(|to| dates::instant(to, true, today).map_err(invalid))
+                        .transpose()?,
+                }),
+            },
         },
         Command::Entries { command } => match command {
             EntriesCommand::List {

@@ -1,7 +1,7 @@
 use rusqlite::{params, Connection, Result};
 
 /// The `user_version` `run_migrations` leaves a database at.
-pub const SCHEMA_VERSION: i32 = 12;
+pub const SCHEMA_VERSION: i32 = 13;
 
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     let current_version: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
@@ -418,6 +418,17 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
             tx.execute_batch(TIMER_SEGMENTS_V12)?;
         }
         tx.execute("PRAGMA user_version = 12;", [])?;
+        tx.commit()?;
+    }
+
+    // A timer may belong to a named group; a group is just the timers that
+    // share the name, so there is no groups table.
+    if current_version < 13 {
+        let tx = conn.transaction()?;
+        if !table_has_column(&tx, "timers", "group_name")? {
+            tx.execute_batch("ALTER TABLE timers ADD COLUMN group_name TEXT;")?;
+        }
+        tx.execute("PRAGMA user_version = 13;", [])?;
         tx.commit()?;
     }
 

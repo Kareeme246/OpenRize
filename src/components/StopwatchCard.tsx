@@ -10,6 +10,7 @@ import { useDismiss } from "../pages/timesheets/useDismiss";
 import { AddTimeSheet } from "./AddTimeSheet";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { HourRing } from "./HourRing";
+import { TimerGroupSheet } from "./TimerGroupSheet";
 import { TimerInfoSheet } from "./TimerInfoSheet";
 import { Tooltip } from "./Tooltip";
 
@@ -26,6 +27,9 @@ interface StopwatchCardProps {
   /** Resets quietly once "Add to calendar" has logged the time. */
   onClear: (id: string) => void;
   onRename: (id: string, label: string) => void;
+  onSetGroup: (id: string, group: string | null) => void;
+  /** Every group name in use, offered when choosing one. */
+  groupNames: string[];
   onAddSegment: (id: string, startedAt: number, endedAt: number) => void;
   onUpdateSegment: (id: string, segmentId: number, edit: SegmentEdit) => void;
   onDeleteSegment: (id: string, segmentId: number) => void;
@@ -51,6 +55,8 @@ export function StopwatchCard({
   onReset,
   onClear,
   onRename,
+  onSetGroup,
+  groupNames,
   onAddSegment,
   onUpdateSegment,
   onDeleteSegment,
@@ -69,7 +75,9 @@ export function StopwatchCard({
   const [draft, setDraft] = useState(timer.label);
   /** Which confirmation is up, if any. Both destroy real accumulated time. */
   const [pending, setPending] = useState<"reset" | "delete" | null>(null);
-  const [dialog, setDialog] = useState<"info" | "calendar" | null>(null);
+  const [dialog, setDialog] = useState<"info" | "calendar" | "group" | null>(
+    null,
+  );
   /** Frozen when "Add to calendar" opens, so the prefilled range holds still. */
   const [calendarRange, setCalendarRange] = useState<{
     start: number;
@@ -170,6 +178,7 @@ export function StopwatchCard({
         onMoveDown={() => onMoveDown?.(timer.id)}
         onSaveState={() => onSaveState(timer.id)}
         onInfo={() => setDialog("info")}
+        onGroup={() => setDialog("group")}
         onAddToCalendar={openCalendar}
         onReset={() => setPending("reset")}
         onDelete={() => setPending("delete")}
@@ -208,6 +217,15 @@ export function StopwatchCard({
         )}
       </div>
 
+      {timer.group !== null && (
+        <div
+          data-timer-group-badge={timer.group}
+          className="-mt-1.5 max-w-full truncate rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent"
+        >
+          {timer.group}
+        </div>
+      )}
+
       <HourRing
         elapsed={elapsed}
         running={running}
@@ -235,6 +253,16 @@ export function StopwatchCard({
             onUpdateSegment(timer.id, segmentId, edit)
           }
           onDelete={(segmentId) => onDeleteSegment(timer.id, segmentId)}
+          onClose={() => setDialog(null)}
+        />
+      )}
+
+      {dialog === "group" && (
+        <TimerGroupSheet
+          label={timer.label}
+          current={timer.group}
+          groups={groupNames}
+          onSave={(group) => onSetGroup(timer.id, group)}
           onClose={() => setDialog(null)}
         />
       )}
@@ -290,6 +318,7 @@ interface TimerMenuProps {
   onMoveDown: () => void;
   onSaveState: () => void;
   onInfo: () => void;
+  onGroup: () => void;
   onAddToCalendar: () => void;
   onReset: () => void;
   onDelete: () => void;
@@ -305,6 +334,7 @@ function TimerMenu({
   onMoveDown,
   onSaveState,
   onInfo,
+  onGroup,
   onAddToCalendar,
   onReset,
   onDelete,
@@ -387,6 +417,7 @@ function TimerMenu({
           className={`absolute right-0 z-30 ${above ? "bottom-full mb-1" : "top-full mt-1"} w-48 rounded-lg border border-line bg-panel p-1 shadow-black/40 shadow-xl`}
         >
           {item("Info", onInfo)}
+          {item("Group...", onGroup)}
           <hr className="my-1 border-line" />
           {item("Save state", onSaveState)}
           {item("Add to calendar", onAddToCalendar, {

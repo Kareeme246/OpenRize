@@ -766,6 +766,21 @@ export function renameTimer(id: string, label: string): Promise<Timer[]> {
   return invoke<Timer[]>("rename_timer", { id, label });
 }
 
+export function setTimerGroup(
+  id: string,
+  group: string | null,
+): Promise<Timer[]> {
+  return invoke<Timer[]>("set_timer_group", { id, group });
+}
+
+export function startTimerGroup(group: string): Promise<Timer[]> {
+  return invoke<Timer[]>("start_timer_group", { group });
+}
+
+export function pauseTimerGroup(group: string): Promise<Timer[]> {
+  return invoke<Timer[]>("pause_timer_group", { group });
+}
+
 export function addTimerSegment(
   id: string,
   startedAt: number,

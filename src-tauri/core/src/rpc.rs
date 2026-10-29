@@ -168,6 +168,22 @@ impl Context<'_> {
                 let id = self.timer(&timer)?;
                 to_value(lock(&self.state.store)?.delete(&id).map_err(fail)?)
             }
+            O::TimerGroup { timer, group } => {
+                let id = self.timer(&timer)?;
+                to_value(
+                    lock(&self.state.store)?
+                        .set_group(&id, group.as_deref())
+                        .map_err(fail)?,
+                )
+            }
+            O::TimerGroupStart { group } => {
+                let group = self.group(&group)?;
+                to_value(lock(&self.state.store)?.start_group(&group).map_err(fail)?)
+            }
+            O::TimerGroupPause { group } => {
+                let group = self.group(&group)?;
+                to_value(lock(&self.state.store)?.pause_group(&group).map_err(fail)?)
+            }
             O::TimerSegments { timer } => {
                 let id = self.timer(&timer)?;
                 to_value(self.timer_by_id(&id)?)
@@ -674,6 +690,19 @@ impl Context<'_> {
         pick(&timers, reference, "timer", |t| &t.id, |t| &t.label)
     }
 
+    /// The group a reference names, as its members spell it. Groups are
+    /// matched by name or a unique prefix, as timers are by label.
+    fn group(&self, reference: &str) -> Result<String, ApiError> {
+        let mut names: Vec<String> = self
+            .timers()?
+            .into_iter()
+            .filter_map(|timer| timer.group)
+            .collect();
+        names.sort();
+        names.dedup();
+        pick(&names, reference, "group", same, same)
+    }
+
     fn category(&self, reference: &str) -> Result<String, ApiError> {
         let items = lock(&self.state.activity)?
             .list_categories()
@@ -792,6 +821,10 @@ impl Context<'_> {
             many => Err(ambiguous("entry", &reference, many.to_vec())),
         }
     }
+}
+
+fn same(name: &String) -> &String {
+    name
 }
 
 /// Resolves what someone typed: an id, a whole name (any case), or the start

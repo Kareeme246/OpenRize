@@ -108,6 +108,55 @@ pub fn rename_timer(app: AppHandle, id: String, label: String) -> Timers {
 }
 
 #[tauri::command]
+pub fn set_timer_group(app: AppHandle, id: String, group: Option<String>) -> Timers {
+    let timers = {
+        let state = app.state::<AppState>();
+        let mut store = state.store.lock().map_err(|error| error.to_string())?;
+        store.set_group(&id, group.as_deref())?
+    };
+    refresh_tray(&app, &timers);
+    Ok(timers)
+}
+
+#[tauri::command]
+pub fn start_timer_group(app: AppHandle, group: String) -> Timers {
+    let (timers, started) = {
+        let state = app.state::<AppState>();
+        let mut store = state.store.lock().map_err(|error| error.to_string())?;
+        let paused: Vec<String> = store
+            .snapshot()?
+            .into_iter()
+            .filter(|timer| {
+                !timer.is_running()
+                    && timer
+                        .group
+                        .as_deref()
+                        .is_some_and(|name| name.eq_ignore_ascii_case(group.trim()))
+            })
+            .map(|timer| timer.id)
+            .collect();
+        (store.start_group(&group)?, paused)
+    };
+    // Started by hand, so no longer work an account switch left paused.
+    for id in &started {
+        crate::accounts::forget_paused_stopwatch(&app, id);
+    }
+    refresh_tray(&app, &timers);
+    Ok(timers)
+}
+
+#[tauri::command]
+pub fn pause_timer_group(app: AppHandle, group: String) -> Timers {
+    let timers = {
+        let state = app.state::<AppState>();
+        let mut store = state.store.lock().map_err(|error| error.to_string())?;
+        store.pause_group(&group)?
+    };
+    refresh_tray(&app, &timers);
+    Ok(timers)
+}
+
+#[tauri::command]
 pub fn add_timer_segment(app: AppHandle, id: String, started_at: u64, ended_at: u64) -> Timers {
     let timers = {
         let state = app.state::<AppState>();

@@ -5,7 +5,8 @@ use chrono::{Local, TimeZone};
 use serde_json::Value;
 
 use crate::{
-    AppCommand, CategoriesCommand, ClientsCommand, Command, EntriesCommand, Group, Per,
+    AppCommand, CategoriesCommand, ClientsCommand, Command, EntriesCommand, Group, GroupCommand,
+    Per,
     ProjectsCommand, SegmentsCommand, SettingsCommand, TimersCommand, TrackCommand,
 };
 
@@ -104,6 +105,13 @@ pub fn show(command: Option<&Command>, data: &Value, full: bool) {
             | TimersCommand::Reset { .. }
             | TimersCommand::Rename { .. }
             | TimersCommand::Rm { .. } => timers(data),
+            TimersCommand::Group { command } => match command {
+                GroupCommand::List => groups(data),
+                GroupCommand::Add { .. }
+                | GroupCommand::Rm { .. }
+                | GroupCommand::Start { .. }
+                | GroupCommand::Pause { .. } => timers(data),
+            },
             TimersCommand::Segments { command } => match command {
                 SegmentsCommand::List { .. } => segments(data),
                 SegmentsCommand::Add { .. } | SegmentsCommand::Edit { .. } => timers(data),
@@ -459,27 +467,75 @@ fn segments(timer: &Value) {
 }
 
 fn timers(data: &Value) {
+    let grouped = data
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|timer| timer["group"].is_string());
     let rows: Vec<Vec<String>> = data
         .as_array()
         .into_iter()
         .flatten()
         .map(|timer| {
-            vec![
-                text(&timer["label"]),
-                duration(elapsed(timer)),
-                if timer["startedAt"].is_null() {
-                    "paused".into()
-                } else {
-                    "running".into()
-                },
-            ]
+            let mut row = vec![text(&timer["label"])];
+            if grouped {
+                row.push(match timer["group"].as_str() {
+                    Some(group) => group.to_string(),
+                    None => "-".into(),
+                });
+            }
+            row.push(duration(elapsed(timer)));
+            row.push(if timer["startedAt"].is_null() {
+                "paused".into()
+            } else {
+                "running".into()
+            });
+            row
         })
         .collect();
     if rows.is_empty() {
         println!("No timers. Create one with `rize timers new <label>`.");
+    } else if grouped {
+        table(&["TIMER", "GROUP", "ELAPSED", "STATE"], rows);
     } else {
         table(&["TIMER", "ELAPSED", "STATE"], rows);
     }
+}
+
+/// Each group with how many of its timers are running and their combined time.
+fn groups(data: &Value) {
+    let mut totals: Vec<(String, usize, usize, u64)> = Vec::new();
+    for timer in data.as_array().into_iter().flatten() {
+        let Some(name) = timer["group"].as_str() else {
+            continue;
+        };
+        let at = match totals.iter().position(|(group, ..)| group == name) {
+            Some(at) => at,
+            None => {
+                totals.push((name.to_string(), 0, 0, 0));
+                totals.len() - 1
+            }
+        };
+        totals[at].1 += 1;
+        totals[at].2 += usize::from(!timer["startedAt"].is_null());
+        totals[at].3 += elapsed(timer);
+    }
+    if totals.is_empty() {
+        println!("No groups. Create one with `rize timers group add <timer> <group>`.");
+        return;
+    }
+    let rows = totals
+        .into_iter()
+        .map(|(name, timers, running, total)| {
+            vec![
+                name,
+                timers.to_string(),
+                running.to_string(),
+                duration(total),
+            ]
+        })
+        .collect();
+    table(&["GROUP", "TIMERS", "RUNNING", "TOTAL"], rows);
 }
 
 fn entries(data: &Value) {

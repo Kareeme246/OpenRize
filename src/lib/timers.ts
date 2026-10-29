@@ -40,6 +40,39 @@ export interface Timer {
   startedAt: number | null;
   createdAt: number;
   ordinal: number;
+  /** The group this timer belongs to; timers sharing a name form a group. */
+  group: string | null;
+}
+
+/** One group of timers, read as a set. */
+export interface TimerGroup {
+  name: string;
+  timers: number;
+  running: number;
+  totalMs: number;
+}
+
+/**
+ * The groups among `timers`, in the order their first member appears. Names
+ * are compared without regard to case, as Rust does when it joins a group.
+ */
+export function timerGroups(timers: Timer[], now: number): TimerGroup[] {
+  const groups = new Map<string, TimerGroup>();
+  for (const timer of timers) {
+    if (timer.group === null) continue;
+    const key = timer.group.toLowerCase();
+    const group = groups.get(key) ?? {
+      name: timer.group,
+      timers: 0,
+      running: 0,
+      totalMs: 0,
+    };
+    group.timers += 1;
+    if (timer.startedAt !== null) group.running += 1;
+    group.totalMs += elapsedMs(timer, now);
+    groups.set(key, group);
+  }
+  return [...groups.values()];
 }
 
 /**

@@ -6,10 +6,11 @@ import {
   SkeletonRows,
 } from "../components/Page";
 import { StopwatchCard } from "../components/StopwatchCard";
+import { TimerGroupBar } from "../components/TimerGroupBar";
 import { useCatalog } from "../hooks/useCatalog";
 import { useTimerReorder } from "../hooks/useTimerReorder";
 import { type TimersApi, useTimers } from "../hooks/useTimers";
-import { elapsedMs, formatDuration } from "../lib/timers";
+import { elapsedMs, formatDuration, timerGroups } from "../lib/timers";
 
 interface TimersProps {
   api?: TimersApi;
@@ -42,6 +43,8 @@ export function Timers({ api: propApi, revealTimer }: TimersProps = {}) {
   const runningCount = api.timers.filter(
     (timer) => timer.startedAt !== null,
   ).length;
+  const groups = timerGroups(api.timers, api.now);
+  const groupNames = groups.map((group) => group.name);
   const totalMs = api.timers.reduce(
     (sum, timer) => sum + elapsedMs(timer, api.now),
     0,
@@ -107,6 +110,12 @@ export function Timers({ api: propApi, revealTimer }: TimersProps = {}) {
 
         {api.error !== null && <InlineError message={api.error} />}
 
+        <TimerGroupBar
+          groups={groups}
+          onStart={api.startGroup}
+          onPause={api.pauseGroup}
+        />
+
         {api.loading && api.timers.length === 0 ? (
           <SkeletonRows rows={3} />
         ) : api.timers.length === 0 ? (
@@ -159,6 +168,8 @@ export function Timers({ api: propApi, revealTimer }: TimersProps = {}) {
                   onReset={api.reset}
                   onClear={api.clear}
                   onRename={api.rename}
+                  onSetGroup={api.setGroup}
+                  groupNames={groupNames}
                   onAddSegment={api.addSegment}
                   onUpdateSegment={api.updateSegment}
                   onDeleteSegment={api.deleteSegment}

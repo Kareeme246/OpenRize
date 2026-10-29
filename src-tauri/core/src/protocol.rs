@@ -105,6 +105,20 @@ pub enum Operation {
     TimerDelete {
         timer: String,
     },
+    /// Puts a timer in the group `group`, or takes it out of its group when
+    /// `group` is `None`.
+    TimerGroup {
+        timer: String,
+        group: Option<String>,
+    },
+    /// Starts every paused timer in the group.
+    TimerGroupStart {
+        group: String,
+    },
+    /// Pauses every running timer in the group.
+    TimerGroupPause {
+        group: String,
+    },
     /// One timer with its segments, each a start and an end.
     TimerSegments {
         timer: String,

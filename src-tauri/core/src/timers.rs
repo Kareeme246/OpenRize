@@ -41,6 +41,9 @@ pub struct Timer {
     pub started_at: Option<u64>,
     pub created_at: u64,
     pub ordinal: i64,
+    /// The group this timer belongs to, or `None`. A group is the timers that
+    /// share a name (compared without regard to case), nothing more.
+    pub group: Option<String>,
 }
 
 /// A stretch of time on a timer, defined as a time entry is: a start and an
@@ -88,7 +91,7 @@ pub struct TimerSavedState {
 /// Selects a timer with its total computed from its segments.
 const TIMER_SELECT: &str = "SELECT id, label,
        COALESCE((SELECT SUM(ended_at - started_at) FROM timer_segments WHERE timer_id = timers.id), 0),
-       started_at, created_at, ordinal
+       started_at, created_at, ordinal, group_name
      FROM timers";
 
 impl Timer {
@@ -265,6 +268,99 @@ impl TimerStore {
             )
             .map_err(|error| error.to_string())?;
         self.snapshot()
+    }
+
+    /// Puts a timer in the group called `group`, or takes it out of any group
+    /// when `group` is `None` or blank. A name that matches an existing group
+    /// without regard to case joins that group and takes its spelling, so
+    /// "Launch" and "launch" never become two groups.
+    pub fn set_group(&mut self, id: &str, group: Option<&str>) -> Result<Vec<Timer>, String> {
+        self.find(id)?;
+        let group = match group.map(str::trim).filter(|name| !name.is_empty()) {
+            None => None,
+            Some(name) => Some(self.canonical_group(name)?),
+        };
+        self.conn
+            .execute(
+                "UPDATE timers SET group_name = ?1 WHERE id = ?2",
+                params![group, id],
+            )
+            .map_err(|error| error.to_string())?;
+        self.snapshot()
+    }
+
+    pub fn start_group(&mut self, group: &str) -> Result<Vec<Timer>, String> {
+        let now = now_epoch_ms();
+        self.start_group_at(group, now)
+    }
+
+    /// Starts every paused timer in the group at the same instant, so the
+    /// set reads one clock; a timer already running keeps its own start.
+    pub fn start_group_at(&mut self, group: &str, now: u64) -> Result<Vec<Timer>, String> {
+        let members = self.members(group)?;
+        let tx = self.conn.transaction().map_err(|error| error.to_string())?;
+        for timer in members.iter().filter(|timer| !timer.is_running()) {
+            tx.execute(
+                "UPDATE timers SET started_at = ?1 WHERE id = ?2",
+                params![now as i64, timer.id],
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        tx.commit().map_err(|error| error.to_string())?;
+        self.snapshot()
+    }
+
+    pub fn pause_group(&mut self, group: &str) -> Result<Vec<Timer>, String> {
+        let now = now_epoch_ms();
+        self.pause_group_at(group, now)
+    }
+
+    /// Pauses every running timer in the group, each recording its segment as
+    /// `pause` does, all in one transaction.
+    pub fn pause_group_at(&mut self, group: &str, now: u64) -> Result<Vec<Timer>, String> {
+        let members = self.members(group)?;
+        let tx = self.conn.transaction().map_err(|error| error.to_string())?;
+        for timer in &members {
+            if let Some((started_at, ended_at)) = timer.run_span_at(now) {
+                tx.execute(
+                    "UPDATE timers SET started_at = NULL WHERE id = ?1",
+                    params![timer.id],
+                )
+                .map_err(|error| error.to_string())?;
+                insert_segment(&tx, &timer.id, started_at, ended_at)?;
+            }
+        }
+        tx.commit().map_err(|error| error.to_string())?;
+        self.snapshot()
+    }
+
+    /// The timers in `group`, oldest ordinal first; an error if there are none.
+    fn members(&self, group: &str) -> Result<Vec<Timer>, String> {
+        let group = group.trim();
+        let members: Vec<Timer> = self
+            .snapshot()?
+            .into_iter()
+            .filter(|timer| {
+                timer
+                    .group
+                    .as_deref()
+                    .is_some_and(|name| name.eq_ignore_ascii_case(group))
+            })
+            .collect();
+        if members.is_empty() {
+            return Err(unknown_group(group));
+        }
+        Ok(members)
+    }
+
+    /// The spelling an existing group already uses for `name`, else `name`.
+    fn canonical_group(&self, name: &str) -> Result<String, String> {
+        Ok(self
+            .snapshot()?
+            .into_iter()
+            .filter_map(|timer| timer.group)
+            .find(|existing| existing.eq_ignore_ascii_case(name))
+            .unwrap_or_else(|| name.to_string()))
     }
 
     /// Updates the display order of timers to match the given list of IDs.
@@ -529,6 +625,7 @@ fn timer_from_row(row: &Row<'_>) -> rusqlite::Result<Timer> {
         started_at: row.get::<_, Option<i64>>(3)?.map(|value| value as u64),
         created_at: row.get::<_, i64>(4)? as u64,
         ordinal: row.get::<_, i64>(5)?,
+        group: row.get(6)?,
     })
 }
 
@@ -563,6 +660,10 @@ pub fn check_span(started_at: u64, ended_at: u64) -> Result<(), String> {
 
 fn unknown_segment(segment_id: i64) -> String {
     format!("no time segment with id {segment_id}")
+}
+
+fn unknown_group(group: &str) -> String {
+    format!("no group named {group}")
 }
 
 fn unknown(id: &str) -> String {
@@ -633,6 +734,51 @@ mod tests {
         let started = timer.started_at.expect("running");
         assert!((before..=after).contains(&started), "stamped {started}");
         assert!(timer.elapsed_at(after) <= after - before);
+    }
+
+    #[test]
+    fn timers_sharing_a_group_name_form_one_group_whatever_the_case() {
+        let mut store = store("group-names");
+        let a = store.create_at("A", 1).unwrap()[0].id.clone();
+        store.create_at("B", 2).unwrap();
+        let b = store.snapshot().unwrap()[1].id.clone();
+
+        store.set_group(&a, Some("  Launch ")).unwrap();
+        let timers = store.set_group(&b, Some("launch")).unwrap();
+        assert_eq!(timers[0].group.as_deref(), Some("Launch"));
+        // Joins the existing group and takes its spelling.
+        assert_eq!(timers[1].group.as_deref(), Some("Launch"));
+
+        let timers = store.set_group(&a, Some("   ")).unwrap();
+        assert_eq!(timers[0].group, None);
+        assert!(store.set_group("t99", Some("x")).is_err());
+    }
+
+    #[test]
+    fn a_group_starts_and_pauses_as_a_set_at_one_instant() {
+        let mut store = store("group-run");
+        for label in ["A", "B", "C"] {
+            store.create_at(label, 1).unwrap();
+        }
+        let ids: Vec<String> = store.snapshot().unwrap().into_iter().map(|t| t.id).collect();
+        store.set_group(&ids[0], Some("Launch")).unwrap();
+        store.set_group(&ids[1], Some("Launch")).unwrap();
+        // B is already running from its own start; C is outside the group.
+        store.start_at(&ids[1], 10_000).unwrap();
+
+        let timers = store.start_group_at("launch", 20_000).unwrap();
+        assert_eq!(timers[0].started_at, Some(20_000));
+        assert_eq!(timers[1].started_at, Some(10_000));
+        assert_eq!(timers[2].started_at, None);
+
+        let timers = store.pause_group_at("Launch", 50_000).unwrap();
+        assert!(timers.iter().all(|timer| !timer.is_running()));
+        assert_eq!(timers[0].accumulated_ms, 30_000);
+        assert_eq!(timers[1].accumulated_ms, 40_000);
+        assert_eq!(timers[2].accumulated_ms, 0);
+        assert_eq!(timers[1].segments[0].started_at, 10_000);
+
+        assert!(store.start_group_at("nobody", 1).is_err());
     }
 
     #[test]
@@ -1142,9 +1288,9 @@ mod tests {
                duration_ms INTEGER NOT NULL,
                recorded_at INTEGER NOT NULL
              );
-             INSERT INTO timers VALUES ('t1', 'Paused', 0, NULL, 1700000000000, 0);
-             INSERT INTO timers VALUES ('t2', 'Running', 0, 1700000500000, 1700000000000, 1);
-             INSERT INTO timers VALUES ('t3', 'Empty', 0, NULL, 1700000000000, 2);
+             INSERT INTO timers (id, label, accumulated_ms, started_at, created_at, ordinal) VALUES ('t1', 'Paused', 0, NULL, 1700000000000, 0);
+             INSERT INTO timers (id, label, accumulated_ms, started_at, created_at, ordinal) VALUES ('t2', 'Running', 0, 1700000500000, 1700000000000, 1);
+             INSERT INTO timers (id, label, accumulated_ms, started_at, created_at, ordinal) VALUES ('t3', 'Empty', 0, NULL, 1700000000000, 2);
              INSERT INTO timer_segments (id, timer_id, duration_ms, recorded_at) VALUES
                (1, 't1', 3600000, 1700003600000),
                (2, 't1', 0, 1700003700000),

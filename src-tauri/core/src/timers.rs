@@ -760,7 +760,12 @@ mod tests {
         for label in ["A", "B", "C"] {
             store.create_at(label, 1).unwrap();
         }
-        let ids: Vec<String> = store.snapshot().unwrap().into_iter().map(|t| t.id).collect();
+        let ids: Vec<String> = store
+            .snapshot()
+            .unwrap()
+            .into_iter()
+            .map(|t| t.id)
+            .collect();
         store.set_group(&ids[0], Some("Launch")).unwrap();
         store.set_group(&ids[1], Some("Launch")).unwrap();
         // B is already running from its own start; C is outside the group.

@@ -93,6 +93,9 @@ impl Live for App<'_> {
             | O::TimerReset { .. }
             | O::TimerRename { .. }
             | O::TimerDelete { .. }
+            | O::TimerGroup { .. }
+            | O::TimerGroupStart { .. }
+            | O::TimerGroupPause { .. }
             | O::TimerSegmentAdd { .. }
             | O::TimerSegmentEdit { .. } => {
                 let timers = state

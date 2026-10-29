@@ -62,6 +62,10 @@ installed.
 | `rize timers segments add <timer> --from <start> (--to <end> \| --for <length>)` | Add a segment as a start and an end, as a time entry is. `--for 90m` is a shortcut that derives the end as the start plus the length; it cannot be combined with `--to`. A segment may be zero length; an end before the start is refused with `INVALID_ARGUMENT`. | `add_timer_segment` | Yes | Shipped |
 | `rize timers segments edit <timer> <segment> [--from <start>] [--to <end>]` | Change a segment's start, its end or both; the one left out stays. The result must still end at or after its start. Segment ids come from `segments list`. | `update_timer_segment` | Yes | Shipped |
 | `rize timers segments rm <timer> <segment>` | Remove one segment from a timer's total. | `delete_timer_segment` | Yes | Planned |
+| `rize timers group list` | Every group with its timers, how many are running and the combined time. `--json` is the timers, each with its `group` (or null). | `list_timers` | Yes | Shipped |
+| `rize timers group add <timer> <group>` | Put a timer in a group; a name matching an existing group (any case, or a unique prefix) joins it, otherwise a new group starts. | `set_timer_group` | Yes | Shipped |
+| `rize timers group rm <timer>` | Take a timer out of its group. | `set_timer_group` | Yes | Shipped |
+| `rize timers group start <group>` / `pause <group>` | Start every paused timer in the group, or pause every running one. | `start_timer_group`, `pause_timer_group` | Yes | Shipped |
 | `rize timers saves <timer>` / `saves add` | List a timer's saved states (label, elapsed time and when each was saved), or record one now. | `list_timer_saved_states`, `save_timer_state` | Yes | Planned |
 | `rize entries list` | Filter by range, project, client, category, app, status, billable and search. Newest first, `--limit` 1 to 5000. | `query_time_entries` | Yes | Shipped |
 | `rize entries show <id>` | One entry with its apps, events and AI suggestion; window titles with `--full`. | `get_entry_detail` | Yes | Shipped |

@@ -6,8 +6,7 @@ use serde_json::Value;
 
 use crate::{
     AppCommand, CategoriesCommand, ClientsCommand, Command, EntriesCommand, Group, GroupCommand,
-    Per,
-    ProjectsCommand, SegmentsCommand, SettingsCommand, TimersCommand, TrackCommand,
+    Per, ProjectsCommand, SegmentsCommand, SettingsCommand, TimersCommand, TrackCommand,
 };
 
 /// Keys that carry window titles or URLs, left out unless `--full`.

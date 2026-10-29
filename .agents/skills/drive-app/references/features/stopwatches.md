@@ -4,8 +4,8 @@ title: Stopwatches
 summary: Keep any number of named stopwatches, start and pause them, edit their segments, reorder them, and turn their time into a calendar entry.
 surfaces: [window, pulse, tray, reminder, cli]
 routes: [timers]
-code: [src/pages/Timers.tsx, src/components/StopwatchCard.tsx, src/components/TimerInfoSheet.tsx, src/components/HourRing.tsx, src/hooks/useTimers.ts, src/hooks/useTimerReorder.ts, src/lib/timers.ts, src/lib/timerInsertion.ts, src-tauri/core/src/timers.rs, src-tauri/src/tray.rs]
-rize: ["rize timers list", "rize timers new", "rize timers start", "rize timers pause", "rize timers reset", "rize timers rename", "rize timers rm", "rize timers segments"]
+code: [src/pages/Timers.tsx, src/components/StopwatchCard.tsx, src/components/TimerInfoSheet.tsx, src/components/TimerGroupBar.tsx, src/components/TimerGroupSheet.tsx, src/components/HourRing.tsx, src/hooks/useTimers.ts, src/hooks/useTimerReorder.ts, src/lib/timers.ts, src/lib/timerInsertion.ts, src-tauri/core/src/timers.rs, src-tauri/src/tray.rs]
+rize: ["rize timers list", "rize timers new", "rize timers start", "rize timers pause", "rize timers reset", "rize timers rename", "rize timers rm", "rize timers segments", "rize timers group"]
 reach-macos: partial
 reach-windows: partial
 reach-rize: partial
@@ -27,6 +27,7 @@ Stopwatches is the manual-timing page, the one item in the sidebar's Manual grou
 - add-to-calendar: "Add to calendar" opens Add time prefilled with the name and the elapsed range, and resets the stopwatch once the entry is added (needs at least a minute).
 - reorder: the "Reorder NAME" handle (drag, or arrow keys while it has focus) and the menu's "Move up" and "Move down".
 - reset-delete: "Reset to zero" and "Delete", each behind a confirmation.
+- group: "Group..." in the Options menu opens a sheet with a "Group" field (existing groups appear as "Use group NAME" chips under it) and a "Save" button ("Remove from group" when the field is emptied on a grouped stopwatch); a grouped card shows its group as a badge, and a "Stopwatch groups" section above the cards has one row per group with its count, running count and combined time and the buttons "Start all in NAME" and "Pause all in NAME".
 - reveal: a timer row in the Pulse panel opens this page and focuses the card.
 - reminder: a stopwatch that has run a long time raises a reminder card with Pause and Keep going buttons, outside the main window.
 - empty-state: "No stopwatches yet".
@@ -124,6 +125,17 @@ scripts/app-drive.sh rize -- --dry-run timers rm "Deep work"
 scripts/app-drive.sh rize -- --yes timers reset "Deep work"
 ```
 
+Groups through the shell (a name matching an existing group in any case joins it; start and pause act on the whole group):
+
+```bash
+scripts/app-drive.sh rize -- timers group add "Email" "Admin"
+scripts/app-drive.sh rize -- timers group list
+scripts/app-drive.sh click "Start all in Admin"
+scripts/app-drive.sh click "Pause all in Admin"
+scripts/app-drive.sh rize -- timers group start "Admin"
+scripts/app-drive.sh rize -- timers group rm "Email"
+```
+
 ## What proves it works
 
 - Created: `wait "Stopwatch Deep work"` (the card is a section named "Stopwatch" plus the label) and `rize --json timers list` returning an array element with `label`, `accumulatedMs: 0`, `startedAt: null` and an `ordinal`.
@@ -135,6 +147,7 @@ scripts/app-drive.sh rize -- --yes timers reset "Deep work"
 - Move: the order of `ordinal` in `timers list` swaps with the card order in `tree`.
 - Add to calendar: a new entry appears in `rize --json entries list --from today` whose description is the stopwatch's name, and the stopwatch returns to 00:00 with `accumulatedMs: 0`.
 - Reset and delete: the toast is brief, so rely on `timers list` (zeroed, or the element gone) and on `wait "No stopwatches yet"` after the last delete.
+- Groups: after `timers group add`, `wait "Start all in NAME"` shows the page repainted without navigating, `rize --json timers list` has the `group` on each member, and `timers group list` gives members, running count and combined total; "Start all" sets every member running at once and "Pause all" stops them all with equal elapsed times, leaving other groups alone.
 - Visual (ring progress, running accent edge): `scripts/app-drive.sh shot`.
 
 ## Gotchas
@@ -153,6 +166,7 @@ scripts/app-drive.sh rize -- --yes timers reset "Deep work"
 
 ## Not reachable
 
+- Typing a name into the Group sheet depends on the driver's keystrokes, which can time out; click a "Use group NAME" chip for an existing group, or set groups with `rize timers group add`.
 - Dragging a card to reorder, and the drop-position indicator.
 - The menu-bar tray menu and glyph that reflect running stopwatches ([tray](tray.md)).
 - The stopwatch reminder card (Pause and Keep going), which lives in the separate reminder window; the macOS driver reads only the first window of the app and the Windows driver reaches it only with `-t` and its window label ([breaks](breaks.md)).

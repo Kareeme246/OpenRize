@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useState } from "react";
 import { FIELD } from "./Page";
 import { Field, Sheet } from "./Sheet";
 
@@ -6,7 +6,7 @@ interface TimerGroupSheetProps {
   label: string;
   /** The group the timer is in now, if any. */
   current: string | null;
-  /** Every group that exists, offered as suggestions. */
+  /** Every group that exists, offered as one-click choices. */
   groups: string[];
   onSave: (group: string | null) => void;
   onClose: () => void;
@@ -21,13 +21,14 @@ export function TimerGroupSheet({
   onClose,
 }: TimerGroupSheetProps) {
   const [draft, setDraft] = useState(current ?? "");
-  const listId = useId();
   const name = draft.trim();
 
   return (
     <Sheet
       title={`Group "${label}"`}
-      submitLabel={name.length === 0 ? "Remove from group" : "Save"}
+      submitLabel={
+        name.length === 0 && current !== null ? "Remove from group" : "Save"
+      }
       width="sm"
       canSubmit={name !== (current ?? "")}
       onSubmit={() => {
@@ -43,17 +44,30 @@ export function TimerGroupSheet({
       >
         <input
           id="timer-group"
-          list={listId}
           value={draft}
           placeholder="e.g. Website redesign"
           onChange={(event) => setDraft(event.target.value)}
           className={FIELD}
         />
-        <datalist id={listId}>
-          {groups.map((group) => (
-            <option key={group} value={group} />
-          ))}
-        </datalist>
+        {groups.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {groups.map((group) => (
+              <button
+                key={group}
+                type="button"
+                aria-label={`Use group ${group}`}
+                onClick={() => setDraft(group)}
+                className={`max-w-full truncate rounded-full px-2.5 py-0.5 text-[11.5px] font-medium ${
+                  group === name
+                    ? "bg-accent/20 text-accent"
+                    : "bg-accent/10 text-fg-soft hover:text-accent"
+                }`}
+              >
+                {group}
+              </button>
+            ))}
+          </div>
+        )}
       </Field>
     </Sheet>
   );

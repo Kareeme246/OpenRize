@@ -1,7 +1,7 @@
 use rusqlite::{params, Connection, Result};
 
 /// The `user_version` `run_migrations` leaves a database at.
-pub const SCHEMA_VERSION: i32 = 11;
+pub const SCHEMA_VERSION: i32 = 12;
 
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     let current_version: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
@@ -395,21 +395,63 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
             }
         }
 
-        tx.execute(
-            "INSERT INTO timer_segments (timer_id, duration_ms, recorded_at)
-             SELECT id, accumulated_ms, created_at
-             FROM timers
-             WHERE accumulated_ms > 0
-               AND id NOT IN (SELECT DISTINCT timer_id FROM timer_segments);",
-            [],
-        )?;
+        // Segments are a start and an end from v12; a database that has
+        // already moved on has nothing left to carry over from `accumulated_ms`.
+        if table_has_column(&tx, "timer_segments", "duration_ms")? {
+            tx.execute(
+                "INSERT INTO timer_segments (timer_id, duration_ms, recorded_at)
+                 SELECT id, accumulated_ms, created_at
+                 FROM timers
+                 WHERE accumulated_ms > 0
+                   AND id NOT IN (SELECT DISTINCT timer_id FROM timer_segments);",
+                [],
+            )?;
+        }
 
         tx.execute("PRAGMA user_version = 11;", [])?;
         tx.commit()?;
     }
 
+    if current_version < 12 {
+        let tx = conn.transaction()?;
+        if !table_has_column(&tx, "timer_segments", "ended_at")? {
+            tx.execute_batch(TIMER_SEGMENTS_V12)?;
+        }
+        tx.execute("PRAGMA user_version = 12;", [])?;
+        tx.commit()?;
+    }
+
     Ok(())
 }
+
+fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let mut cols = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    Ok(cols.any(|col| col.as_deref() == Ok(column)))
+}
+
+/// A timer segment becomes a start and an end, as a time entry is, instead of
+/// a length. `recorded_at` is when the stretch was recorded, which for a pause
+/// is the end of the run, so the end is `recorded_at` and the start is a
+/// `duration_ms` before it. A stretch recorded sooner after the epoch than it
+/// is long (only seeded data) starts at 0 instead, so no start goes negative;
+/// either way `ended_at - started_at` is the old `duration_ms` exactly and
+/// every timer's total is unchanged.
+const TIMER_SEGMENTS_V12: &str = "
+CREATE TABLE timer_segments_v12 (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  timer_id   TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  ended_at   INTEGER NOT NULL CHECK (ended_at >= started_at)
+);
+INSERT INTO timer_segments_v12 (id, timer_id, started_at, ended_at)
+  SELECT id, timer_id,
+         MAX(recorded_at - duration_ms, 0),
+         MAX(recorded_at - duration_ms, 0) + duration_ms
+  FROM timer_segments;
+DROP TABLE timer_segments;
+ALTER TABLE timer_segments_v12 RENAME TO timer_segments;
+";
 
 /// Agent jobs. A job is one agent turn (prompt to stop) on one project, seen
 /// through an agent bridge (see `agents/mod.rs`): `agent_transitions` holds its

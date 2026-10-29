@@ -58,7 +58,10 @@ installed.
 | `rize timers start` / `pause` / `reset` / `rm <timer>` | Control or delete a timer by id or label; reset and rm are confirmed. | `start_timer`, `pause_timer`, `reset_timer`, `delete_timer` | Yes | Shipped |
 | Timer reordering (CLI not yet exposed) | Persist the complete timer order or move one timer up/down; available in the Stopwatches UI. | `reorder_timers`, `move_timer` | Not yet exposed by CLI | Planned |
 | `rize timers rename <timer> <label>` | Rename a timer. | `rename_timer` | Yes | Shipped |
-| `rize timers segments <timer>` / `segments add` / `edit` / `rm` | List, add, edit or remove the time segments that make up a timer's total. | `add_timer_segment`, `update_timer_segment`, `delete_timer_segment` | Yes | Planned |
+| `rize timers segments list <timer>` | The segments that make up a timer's total: id, start, end and length. `--json` is the timer, with `segments[]` of `id`, `startedAt`, `endedAt` and the derived `durationMs`. | `list_timers` | Yes | Shipped |
+| `rize timers segments add <timer> --from <start> (--to <end> \| --for <length>)` | Add a segment as a start and an end, as a time entry is. `--for 90m` is a shortcut that derives the end as the start plus the length; it cannot be combined with `--to`. A segment may be zero length; an end before the start is refused with `INVALID_ARGUMENT`. | `add_timer_segment` | Yes | Shipped |
+| `rize timers segments edit <timer> <segment> [--from <start>] [--to <end>]` | Change a segment's start, its end or both; the one left out stays. The result must still end at or after its start. Segment ids come from `segments list`. | `update_timer_segment` | Yes | Shipped |
+| `rize timers segments rm <timer> <segment>` | Remove one segment from a timer's total. | `delete_timer_segment` | Yes | Planned |
 | `rize timers saves <timer>` / `saves add` | List a timer's saved states (label, elapsed time and when each was saved), or record one now. | `list_timer_saved_states`, `save_timer_state` | Yes | Planned |
 | `rize entries list` | Filter by range, project, client, category, app, status, billable and search. Newest first, `--limit` 1 to 5000. | `query_time_entries` | Yes | Shipped |
 | `rize entries show <id>` | One entry with its apps, events and AI suggestion; window titles with `--full`. | `get_entry_detail` | Yes | Shipped |
@@ -120,7 +123,7 @@ stay reachable through `rize settings set`.
 | Area | Rule |
 | --- | --- |
 | Output | Plain aligned tables, no color. Durations as `3h 25m`, times local. |
-| `--json` | One envelope for every command, errors included: `schemaVersion`, `ok`, `data`, `error { code, message }`. Adding a field is compatible; removing or renaming one bumps `schemaVersion`. |
+| `--json` | One envelope for every command, errors included: `schemaVersion`, `ok`, `data`, `error { code, message }`. Adding a field is compatible; removing or renaming one bumps `schemaVersion` (now 3: a timer segment's `recordedAt` became `startedAt` and `endedAt`). The app and `rize` must also agree on the protocol version (now 3), or `rize` stops with exit 4. |
 | Exit codes | 0 success, 1 operation failed, 2 invalid arguments (including an unconfirmed deletion), 3 app needed but not running, 4 incompatible versions (the running app speaks another rize protocol, or the stored data is from another app version). |
 | Error codes | `INVALID_ARGUMENT`, `NOT_FOUND`, `AMBIGUOUS` (with `candidates`), `NO_DATA`, `APP_NOT_RUNNING`, `INCOMPATIBLE`, `FAILED`. `NO_DATA` means the app never ran on this machine. |
 | Dates | A bare date covers the whole local day (`--to 2026-09-30` includes that day); offset-less times are local. `today`, `yesterday`, weekday names, `this-week`, `last-week`, `this-month` and `last-month` work for `--from`, `--to` and `--period`; `--last 7d` (or `90m`, `12h`, `2w`) runs up to now. Weeks start on Monday. Ranges default to today. |

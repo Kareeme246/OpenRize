@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::{
     AppCommand, CategoriesCommand, ClientsCommand, Command, EntriesCommand, Group, Per,
-    ProjectsCommand, SettingsCommand, TimersCommand, TrackCommand,
+    ProjectsCommand, SegmentsCommand, SettingsCommand, TimersCommand, TrackCommand,
 };
 
 /// Keys that carry window titles or URLs, left out unless `--full`.
@@ -104,6 +104,10 @@ pub fn show(command: Option<&Command>, data: &Value, full: bool) {
             | TimersCommand::Reset { .. }
             | TimersCommand::Rename { .. }
             | TimersCommand::Rm { .. } => timers(data),
+            TimersCommand::Segments { command } => match command {
+                SegmentsCommand::List { .. } => segments(data),
+                SegmentsCommand::Add { .. } | SegmentsCommand::Edit { .. } => timers(data),
+            },
         },
         Some(Command::Entries { command }) => match command {
             EntriesCommand::List { .. } => entries(data),
@@ -415,6 +419,43 @@ fn status(data: &Value) {
     if !running.is_empty() {
         println!("Timers: {}", running.join(", "));
     }
+}
+
+fn segments(timer: &Value) {
+    let list = timer["segments"].as_array().cloned().unwrap_or_default();
+    let rows: Vec<Vec<String>> = list
+        .iter()
+        .map(|segment| {
+            vec![
+                text(&segment["id"]),
+                format!(
+                    "{} {}",
+                    day(ms(&segment["startedAt"])),
+                    clock(ms(&segment["startedAt"]))
+                ),
+                format!(
+                    "{} {}",
+                    day(ms(&segment["endedAt"])),
+                    clock(ms(&segment["endedAt"]))
+                ),
+                duration(ms(&segment["durationMs"])),
+            ]
+        })
+        .collect();
+    if rows.is_empty() {
+        println!(
+            "{} has no segments. Add one with `rize timers segments add`.",
+            text(&timer["label"])
+        );
+        return;
+    }
+    table(&["SEGMENT", "START", "END", "LENGTH"], rows);
+    println!(
+        "{}: {} in {}",
+        text(&timer["label"]),
+        duration(ms(&timer["accumulatedMs"])),
+        count(&timer["segments"], "segment", "segments")
+    );
 }
 
 fn timers(data: &Value) {

@@ -75,7 +75,7 @@ fn invalid_arguments_exit_2_with_an_envelope() {
         let (envelope, exit) = fixture.json(&args);
         assert_eq!(exit, 2, "{args:?}: {envelope}");
         assert_eq!(code(&envelope), "INVALID_ARGUMENT", "{args:?}");
-        assert_eq!(envelope["schemaVersion"], 2);
+        assert_eq!(envelope["schemaVersion"], 3);
     }
 }
 

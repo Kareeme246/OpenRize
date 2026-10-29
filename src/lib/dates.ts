@@ -13,6 +13,21 @@ export function localDateString(date: Date): string {
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
+/** Local `YYYY-MM-DDTHH:MM:SS`, the value format of `<input type="datetime-local" step="1">`. */
+export function localDateTimeString(epochMs: number): string {
+  const date = new Date(epochMs);
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  return `${localDateString(date)}T${time}`;
+}
+
+/** Epoch ms of a local `datetime-local` value, or null when it is blank or invalid. */
+export function parseLocalDateTime(value: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(value)) return null;
+  const epochMs = new Date(value).getTime();
+  return Number.isNaN(epochMs) ? null : epochMs;
+}
+
 /** Local midnight of a `YYYY-MM-DD`, or of today when absent or invalid. */
 export function parseLocalDate(value?: string): Date {
   if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) {

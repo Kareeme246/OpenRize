@@ -25,7 +25,7 @@ use crate::protocol::{
 use crate::reports::{self, ExportFormat, GroupBy};
 use crate::settings::Settings;
 use crate::state::{AppState, StoragePaths};
-use crate::timers::{now_epoch_ms, Timer};
+use crate::timers::{check_span, now_epoch_ms, Timer};
 use crate::{EntryFilter, NONE};
 
 /// What only the running app can do, and how it shows a change at once.
@@ -167,6 +167,50 @@ impl Context<'_> {
             O::TimerDelete { timer } => {
                 let id = self.timer(&timer)?;
                 to_value(lock(&self.state.store)?.delete(&id).map_err(fail)?)
+            }
+            O::TimerSegments { timer } => {
+                let id = self.timer(&timer)?;
+                to_value(self.timer_by_id(&id)?)
+            }
+            O::TimerSegmentAdd {
+                timer,
+                started_at,
+                ended_at,
+            } => {
+                let id = self.timer(&timer)?;
+                check_span(started_at, ended_at).map_err(invalid)?;
+                to_value(
+                    lock(&self.state.store)?
+                        .add_segment(&id, started_at, ended_at)
+                        .map_err(fail)?,
+                )
+            }
+            O::TimerSegmentEdit {
+                timer,
+                segment,
+                started_at,
+                ended_at,
+            } => {
+                let id = self.timer(&timer)?;
+                if started_at.is_none() && ended_at.is_none() {
+                    return Err(invalid("nothing to change; pass --from, --to or both"));
+                }
+                let current = self
+                    .timer_by_id(&id)?
+                    .segments
+                    .into_iter()
+                    .find(|existing| existing.id == segment)
+                    .ok_or_else(|| not_found("segment", &segment.to_string()))?;
+                check_span(
+                    started_at.unwrap_or(current.started_at),
+                    ended_at.unwrap_or(current.ended_at),
+                )
+                .map_err(invalid)?;
+                to_value(
+                    lock(&self.state.store)?
+                        .update_segment(&id, segment, started_at, ended_at)
+                        .map_err(fail)?,
+                )
             }
             O::EntriesList { filter, limit } => {
                 if !(1..=MAX_LIST).contains(&limit) {
@@ -434,11 +478,7 @@ impl Context<'_> {
         match operation {
             O::TimerReset { timer } | O::TimerDelete { timer } => {
                 let id = self.timer(timer)?;
-                let timer = self
-                    .timers()?
-                    .into_iter()
-                    .find(|timer| timer.id == id)
-                    .ok_or_else(|| not_found("timer", &id))?;
+                let timer = self.timer_by_id(&id)?;
                 let effect = if matches!(operation, O::TimerReset { .. }) {
                     "reset"
                 } else {
@@ -596,6 +636,13 @@ impl Context<'_> {
 
     fn timers(&self) -> Result<Vec<Timer>, ApiError> {
         lock(&self.state.store)?.snapshot().map_err(fail)
+    }
+
+    fn timer_by_id(&self, id: &str) -> Result<Timer, ApiError> {
+        self.timers()?
+            .into_iter()
+            .find(|timer| timer.id == id)
+            .ok_or_else(|| not_found("timer", id))
     }
 
     fn read<T>(

@@ -1,10 +1,16 @@
 //! Timer store — the single source of truth for stopwatch state.
 //!
-//! Clock policy (decision D2): the *persisted* anchor is a wall-clock epoch in
-//! milliseconds, because an `Instant` cannot survive a restart. While the
-//! process is alive, `now` comes from a monotonic `Instant` anchored to a
-//! startup epoch, so a system-clock change mid-session cannot corrupt a running
-//! stopwatch.
+//! Clock policy: every instant is a wall-clock epoch in milliseconds, stamped
+//! from `now_epoch_ms` and nothing else. The stopwatch card, `rize` and the
+//! tray all read the wall clock, and a run is `now - started_at`, so a start
+//! stamped from any other clock (a monotonic `Instant` stops ticking while a
+//! Mac sleeps) would make the card read the gap between the two clocks the
+//! moment Start was pressed.
+//!
+//! A timer's time is its segments, each a start and an end like a time entry,
+//! plus the run in progress. The run in progress is also a start and an end
+//! (`run_span`: started_at and now), and that one span is what the live
+//! reading, the pause and the save all use.
 //!
 //! Persistence policy: timers live in a `timers` table in
 //! the same SQLite file activity capture already uses (`activity.db`), each
@@ -13,10 +19,11 @@
 
 use std::fs;
 use std::path::Path;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, Row};
-use serde::Serialize;
+use serde::ser::SerializeStruct;
+use serde::{Serialize, Serializer};
 
 use crate::activity::DB_FILE;
 
@@ -36,13 +43,32 @@ pub struct Timer {
     pub ordinal: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+/// A stretch of time on a timer, defined as a time entry is: a start and an
+/// end in epoch milliseconds. Its length is the difference, never stored.
+#[derive(Debug, Clone)]
 pub struct TimerSegment {
     pub id: i64,
-    pub duration_ms: u64,
-    /// Epoch milliseconds at which the segment was recorded.
-    pub recorded_at: u64,
+    pub started_at: u64,
+    pub ended_at: u64,
+}
+
+impl TimerSegment {
+    pub fn duration_ms(&self) -> u64 {
+        self.ended_at.saturating_sub(self.started_at)
+    }
+}
+
+/// The JSON carries the derived `durationMs` beside the start and end, so a
+/// reader never has to subtract.
+impl Serialize for TimerSegment {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut segment = serializer.serialize_struct("TimerSegment", 4)?;
+        segment.serialize_field("id", &self.id)?;
+        segment.serialize_field("startedAt", &self.started_at)?;
+        segment.serialize_field("endedAt", &self.ended_at)?;
+        segment.serialize_field("durationMs", &self.duration_ms())?;
+        segment.end()
+    }
 }
 
 /// A snapshot of a timer taken on demand: what it read, under which name, and
@@ -61,7 +87,7 @@ pub struct TimerSavedState {
 
 /// Selects a timer with its total computed from its segments.
 const TIMER_SELECT: &str = "SELECT id, label,
-       COALESCE((SELECT SUM(duration_ms) FROM timer_segments WHERE timer_id = timers.id), 0),
+       COALESCE((SELECT SUM(ended_at - started_at) FROM timer_segments WHERE timer_id = timers.id), 0),
        started_at, created_at, ordinal
      FROM timers";
 
@@ -70,10 +96,23 @@ impl Timer {
         self.started_at.is_some()
     }
 
+    /// The run in progress as a start and an end: when it started and `now`,
+    /// or `None` while paused. The one computation behind the live reading,
+    /// the pause and the save.
+    pub fn run_span_at(&self, now: u64) -> Option<(u64, u64)> {
+        self.started_at.map(|started| run_span(started, now))
+    }
+
     /// Total time at `now`: the segments plus the run in progress, if any.
     pub fn elapsed_at(&self, now: u64) -> u64 {
-        self.accumulated_ms + self.started_at.map_or(0, |start| now.saturating_sub(start))
+        self.accumulated_ms + self.run_span_at(now).map_or(0, |(start, end)| end - start)
     }
+}
+
+/// A run that started at `started_at`, ended at `now`. A clock that stepped
+/// back leaves a zero-length run, never a negative one.
+fn run_span(started_at: u64, now: u64) -> (u64, u64) {
+    (started_at, now.max(started_at))
 }
 
 /// Wall-clock milliseconds since the Unix epoch.
@@ -84,28 +123,7 @@ pub fn now_epoch_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Monotonic time anchored to a wall-clock origin captured at process start.
-#[derive(Debug)]
-struct Clock {
-    origin: Instant,
-    origin_epoch_ms: u64,
-}
-
-impl Clock {
-    fn new() -> Self {
-        Self {
-            origin: Instant::now(),
-            origin_epoch_ms: now_epoch_ms(),
-        }
-    }
-
-    fn now_ms(&self) -> u64 {
-        self.origin_epoch_ms + self.origin.elapsed().as_millis() as u64
-    }
-}
-
 pub struct TimerStore {
-    clock: Clock,
     conn: Connection,
 }
 
@@ -120,10 +138,7 @@ impl TimerStore {
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
             .map_err(|error| error.to_string())?;
         crate::migrations::run_migrations(&mut conn).map_err(|error| error.to_string())?;
-        Ok(Self {
-            clock: Clock::new(),
-            conn,
-        })
+        Ok(Self { conn })
     }
 
     pub fn snapshot(&self) -> Result<Vec<Timer>, String> {
@@ -149,7 +164,7 @@ impl TimerStore {
     // the public ones stamp the real clock.
 
     pub fn create(&mut self, label: &str) -> Result<Vec<Timer>, String> {
-        let now = self.clock.now_ms();
+        let now = now_epoch_ms();
         self.create_at(label, now)
     }
 
@@ -181,7 +196,7 @@ impl TimerStore {
     }
 
     pub fn start(&mut self, id: &str) -> Result<Vec<Timer>, String> {
-        let now = self.clock.now_ms();
+        let now = now_epoch_ms();
         self.start_at(id, now)
     }
 
@@ -199,20 +214,23 @@ impl TimerStore {
     }
 
     pub fn pause(&mut self, id: &str) -> Result<Vec<Timer>, String> {
-        let now = self.clock.now_ms();
+        let now = now_epoch_ms();
         self.pause_at(id, now)
     }
 
     pub fn pause_at(&mut self, id: &str, now: u64) -> Result<Vec<Timer>, String> {
         let timer = self.find(id)?;
-        if let Some(started) = timer.started_at {
-            self.conn
-                .execute(
-                    "UPDATE timers SET started_at = NULL WHERE id = ?1",
-                    params![id],
-                )
-                .map_err(|error| error.to_string())?;
-            self.insert_segment(id, now.saturating_sub(started), now)?;
+        if let Some((started_at, ended_at)) = timer.run_span_at(now) {
+            // One transaction, so a pause can never stop the clock without
+            // keeping the time it ran.
+            let tx = self.conn.transaction().map_err(|error| error.to_string())?;
+            tx.execute(
+                "UPDATE timers SET started_at = NULL WHERE id = ?1",
+                params![id],
+            )
+            .map_err(|error| error.to_string())?;
+            insert_segment(&tx, id, started_at, ended_at)?;
+            tx.commit().map_err(|error| error.to_string())?;
         }
         self.snapshot()
     }
@@ -284,42 +302,47 @@ impl TimerStore {
         self.reorder(&ids)
     }
 
-    /// Adds a stretch of time to the total.
-    pub fn add_segment(&mut self, id: &str, duration_ms: u64) -> Result<Vec<Timer>, String> {
-        let now = self.clock.now_ms();
-        self.add_segment_at(id, duration_ms, now)
-    }
-
-    pub fn add_segment_at(
+    /// Adds a stretch of time to the total, from `started_at` to `ended_at`.
+    pub fn add_segment(
         &mut self,
         id: &str,
-        duration_ms: u64,
-        now: u64,
+        started_at: u64,
+        ended_at: u64,
     ) -> Result<Vec<Timer>, String> {
         self.find(id)?;
-        check_duration(duration_ms)?;
-        self.insert_segment(id, duration_ms, now)?;
+        check_span(started_at, ended_at)?;
+        insert_segment(&self.conn, id, started_at, ended_at)?;
         self.snapshot()
     }
 
+    /// Changes a segment's start and/or end; whichever is `None` stays as it
+    /// is, and the pair that results has to be a valid span.
     pub fn update_segment(
         &mut self,
         id: &str,
         segment_id: i64,
-        duration_ms: u64,
+        started_at: Option<u64>,
+        ended_at: Option<u64>,
     ) -> Result<Vec<Timer>, String> {
-        self.find(id)?;
-        check_duration(duration_ms)?;
-        let changed = self
-            .conn
+        let timer = self.find(id)?;
+        if started_at.is_none() && ended_at.is_none() {
+            return Err("nothing to change: give a new start, a new end, or both".to_string());
+        }
+        let current = timer
+            .segments
+            .iter()
+            .find(|segment| segment.id == segment_id)
+            .ok_or_else(|| unknown_segment(segment_id))?;
+        let started_at = started_at.unwrap_or(current.started_at);
+        let ended_at = ended_at.unwrap_or(current.ended_at);
+        check_span(started_at, ended_at)?;
+        self.conn
             .execute(
-                "UPDATE timer_segments SET duration_ms = ?1 WHERE id = ?2 AND timer_id = ?3",
-                params![duration_ms as i64, segment_id, id],
+                "UPDATE timer_segments SET started_at = ?1, ended_at = ?2
+                 WHERE id = ?3 AND timer_id = ?4",
+                params![started_at as i64, ended_at as i64, segment_id, id],
             )
             .map_err(|error| error.to_string())?;
-        if changed == 0 {
-            return Err(unknown_segment(segment_id));
-        }
         self.snapshot()
     }
 
@@ -341,7 +364,7 @@ impl TimerStore {
     /// Records the timer's reading right now. The timer itself is untouched,
     /// so this works the same whether it is running, paused or at rest.
     pub fn save_state(&mut self, id: &str) -> Result<TimerSavedState, String> {
-        let now = self.clock.now_ms();
+        let now = now_epoch_ms();
         self.save_state_at(id, now)
     }
 
@@ -411,31 +434,20 @@ impl TimerStore {
         self.snapshot()
     }
 
-    fn insert_segment(&self, id: &str, duration_ms: u64, now: u64) -> Result<(), String> {
-        self.conn
-            .execute(
-                "INSERT INTO timer_segments (timer_id, duration_ms, recorded_at)
-                 VALUES (?1, ?2, ?3)",
-                params![id, duration_ms as i64, now as i64],
-            )
-            .map(|_| ())
-            .map_err(|error| error.to_string())
-    }
-
     fn segments_of(&self, id: &str) -> Result<Vec<TimerSegment>, String> {
         let mut statement = self
             .conn
             .prepare(
-                "SELECT id, duration_ms, recorded_at FROM timer_segments
-                 WHERE timer_id = ?1 ORDER BY recorded_at ASC, id ASC",
+                "SELECT id, started_at, ended_at FROM timer_segments
+                 WHERE timer_id = ?1 ORDER BY started_at ASC, id ASC",
             )
             .map_err(|error| error.to_string())?;
         let segments = statement
             .query_map(params![id], |row| {
                 Ok(TimerSegment {
                     id: row.get(0)?,
-                    duration_ms: row.get::<_, i64>(1)? as u64,
-                    recorded_at: row.get::<_, i64>(2)? as u64,
+                    started_at: row.get::<_, i64>(1)? as u64,
+                    ended_at: row.get::<_, i64>(2)? as u64,
                 })
             })
             .map_err(|error| error.to_string())?
@@ -520,9 +532,31 @@ fn timer_from_row(row: &Row<'_>) -> rusqlite::Result<Timer> {
     })
 }
 
-fn check_duration(duration_ms: u64) -> Result<(), String> {
-    if duration_ms == 0 {
-        return Err("a segment needs some time in it".to_string());
+fn insert_segment(
+    conn: &Connection,
+    id: &str,
+    started_at: u64,
+    ended_at: u64,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO timer_segments (timer_id, started_at, ended_at) VALUES (?1, ?2, ?3)",
+        params![id, started_at as i64, ended_at as i64],
+    )
+    .map(|_| ())
+    .map_err(|error| error.to_string())
+}
+
+/// A segment is a start and an end, and may be zero length; it cannot end
+/// before it starts.
+pub fn check_span(started_at: u64, ended_at: u64) -> Result<(), String> {
+    if ended_at < started_at {
+        return Err(
+            "a segment cannot end before it starts: set the end to the start or later, or move the start earlier"
+                .to_string(),
+        );
+    }
+    if ended_at > i64::MAX as u64 {
+        return Err("that time is too far in the future to store".to_string());
     }
     Ok(())
 }
@@ -551,6 +585,57 @@ mod tests {
     }
 
     #[test]
+    fn a_timer_started_at_a_known_instant_reads_now_minus_that_instant_and_nothing_else() {
+        let mut store = store("reads-now-minus-start");
+        let id = store.create_at("Stopwatch", 1_000).unwrap()[0].id.clone();
+
+        // Never run: zero, whatever the clock says.
+        let fresh = store.snapshot().unwrap().remove(0);
+        assert_eq!(fresh.elapsed_at(0), 0);
+        assert_eq!(fresh.elapsed_at(1_000), 0);
+        assert_eq!(fresh.elapsed_at(u64::MAX), 0);
+
+        // Running: exactly `now - started_at`, second by second.
+        store.start_at(&id, 50_000).unwrap();
+        let running = store.snapshot().unwrap().remove(0);
+        for seconds in 0..4 {
+            assert_eq!(
+                running.elapsed_at(50_000 + seconds * 1_000),
+                seconds * 1_000
+            );
+        }
+        // A clock that stepped back never reads negative or wraps.
+        assert_eq!(running.elapsed_at(49_000), 0);
+
+        // Pausing keeps what the display showed, to the millisecond.
+        let shown = running.elapsed_at(53_250);
+        store.pause_at(&id, 53_250).unwrap();
+        let paused = store.snapshot().unwrap().remove(0);
+        assert_eq!(paused.elapsed_at(900_000), shown);
+        assert_eq!(paused.segments[0].started_at, 50_000);
+        assert_eq!(paused.segments[0].ended_at, 53_250);
+    }
+
+    #[test]
+    fn start_is_stamped_from_the_wall_clock_the_card_reads() {
+        // `Start` used to be stamped from a monotonic `Instant` anchored at
+        // launch, which stops ticking while a Mac sleeps: after a 7h16m45s
+        // sleep the card (wall clock) read 7:16:45 the moment a stopwatch
+        // started, then fell back to 0:00 on Pause. A fresh process cannot
+        // show that drift, so this pins the contract the fix restored: the
+        // public `start` stamps `now_epoch_ms`, the clock the card reads.
+        let mut store = store("start-uses-wall-clock");
+        let id = store.create("Stopwatch").unwrap()[0].id.clone();
+        let before = now_epoch_ms();
+        let timer = store.start(&id).unwrap().remove(0);
+        let after = now_epoch_ms();
+
+        let started = timer.started_at.expect("running");
+        assert!((before..=after).contains(&started), "stamped {started}");
+        assert!(timer.elapsed_at(after) <= after - before);
+    }
+
+    #[test]
     fn pause_accumulates_only_the_time_that_ran() {
         let mut store = store("pause");
         let id = store.create_at("Write the handoff", 1_000).unwrap()[0]
@@ -574,22 +659,98 @@ mod tests {
         let id = store.create_at("Edit me", 1_000).unwrap()[0].id.clone();
         store.start_at(&id, 1_000).unwrap();
         store.pause_at(&id, 61_000).unwrap();
-        store.add_segment_at(&id, 30_000, 70_000).unwrap();
+        store.add_segment(&id, 70_000, 100_000).unwrap();
 
         let timer = store.snapshot().unwrap().remove(0);
         assert_eq!(timer.accumulated_ms, 90_000);
         assert_eq!(timer.segments.len(), 2);
+        assert_eq!(
+            (timer.segments[0].started_at, timer.segments[0].ended_at),
+            (1_000, 61_000)
+        );
+        assert_eq!(timer.segments[1].duration_ms(), 30_000);
 
         let first = timer.segments[0].id;
         let second = timer.segments[1].id;
-        store.update_segment(&id, first, 10_000).unwrap();
+        // Change only the end, then only the start, then both.
+        store
+            .update_segment(&id, first, None, Some(11_000))
+            .unwrap();
+        assert_eq!(store.snapshot().unwrap()[0].accumulated_ms, 40_000);
+        store.update_segment(&id, first, Some(6_000), None).unwrap();
+        assert_eq!(store.snapshot().unwrap()[0].accumulated_ms, 35_000);
+        store
+            .update_segment(&id, first, Some(1_000), Some(11_000))
+            .unwrap();
         assert_eq!(store.snapshot().unwrap()[0].accumulated_ms, 40_000);
 
         store.delete_segment(&id, second).unwrap();
         assert_eq!(store.snapshot().unwrap()[0].accumulated_ms, 10_000);
 
-        assert!(store.add_segment_at(&id, 0, 80_000).is_err());
-        assert!(store.update_segment(&id, second, 5_000).is_err());
+        assert!(store.update_segment(&id, second, Some(1), None).is_err());
+    }
+
+    #[test]
+    fn a_segment_may_be_zero_length_but_never_negative() {
+        let mut store = store("segment-validation");
+        let id = store.create_at("Strict", 0).unwrap()[0].id.clone();
+
+        store.add_segment(&id, 5_000, 5_000).unwrap();
+        let timer = store.snapshot().unwrap().remove(0);
+        assert_eq!(timer.accumulated_ms, 0);
+        assert_eq!(timer.segments.len(), 1);
+
+        let refused = store.add_segment(&id, 5_001, 5_000).unwrap_err();
+        assert!(refused.contains("cannot end before it starts"), "{refused}");
+        assert_eq!(store.snapshot().unwrap()[0].segments.len(), 1);
+
+        // An edit is checked as the pair it leaves behind, so moving only the
+        // start past the end, or only the end before the start, is refused.
+        let segment = timer.segments[0].id;
+        assert!(store
+            .update_segment(&id, segment, Some(5_001), None)
+            .is_err());
+        assert!(store
+            .update_segment(&id, segment, None, Some(4_999))
+            .is_err());
+        assert!(store.update_segment(&id, segment, None, None).is_err());
+        assert_eq!(
+            store.snapshot().unwrap()[0].segments[0].started_at,
+            5_000,
+            "a refused edit leaves the segment alone"
+        );
+        assert!(store.add_segment("nope", 1, 2).is_err());
+    }
+
+    #[test]
+    fn pausing_the_same_instant_it_started_records_a_zero_length_segment() {
+        let mut store = store("zero-run");
+        let id = store.create_at("Blink", 0).unwrap()[0].id.clone();
+        store.start_at(&id, 9_000).unwrap();
+        // A clock that stepped back mid-run clamps to zero, not a refusal.
+        store.pause_at(&id, 8_000).unwrap();
+        let timer = store.snapshot().unwrap().remove(0);
+        assert_eq!(timer.accumulated_ms, 0);
+        assert_eq!(
+            (timer.segments[0].started_at, timer.segments[0].ended_at),
+            (9_000, 9_000)
+        );
+        assert!(!timer.is_running());
+    }
+
+    #[test]
+    fn the_live_reading_the_pause_and_the_save_agree() {
+        let mut store = store("one-computation");
+        let id = store.create_at("Agree", 0).unwrap()[0].id.clone();
+        store.add_segment(&id, 0, 10_000).unwrap();
+        store.start_at(&id, 20_000).unwrap();
+
+        let now = 27_345;
+        let live = store.snapshot().unwrap()[0].elapsed_at(now);
+        let saved = store.save_state_at(&id, now).unwrap().elapsed_ms;
+        store.pause_at(&id, now).unwrap();
+        let stored = store.snapshot().unwrap()[0].accumulated_ms;
+        assert_eq!((live, saved, stored), (17_345, 17_345, 17_345));
     }
 
     #[test]
@@ -926,8 +1087,9 @@ mod tests {
         assert_eq!(timers[0].started_at, Some(1700000050000));
         assert!(timers[0].is_running());
         assert_eq!(timers[0].segments.len(), 2);
-        assert_eq!(timers[0].segments[0].duration_ms, 60000);
-        assert_eq!(timers[0].segments[1].duration_ms, 120000);
+        let segment = |id: i64| timers[0].segments.iter().find(|s| s.id == id).unwrap();
+        assert_eq!(segment(1).duration_ms(), 60000);
+        assert_eq!(segment(2).duration_ms(), 120000);
         let s1 = store.saved_states("t1").expect("saved states t1");
         assert_eq!(s1.len(), 1);
         assert_eq!(s1[0].label, "Checkpoint 1");
@@ -949,12 +1111,125 @@ mod tests {
         assert!(!timers[2].is_running());
         assert_eq!(timers[2].segments.len(), 1);
 
-        // Also verify PRAGMA user_version is 11
+        // Every segment now ends when it was recorded and starts its old
+        // length before that.
+        assert_eq!(
+            (segment(1).started_at, segment(1).ended_at),
+            (1700000010000 - 60000, 1700000010000)
+        );
+        assert_eq!(
+            (segment(2).started_at, segment(2).ended_at),
+            (1700000020000 - 120000, 1700000020000)
+        );
+
         let conn = Connection::open(dir.join(DB_FILE)).unwrap();
         let version: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 11);
+        assert_eq!(version, crate::migrations::SCHEMA_VERSION);
+    }
+
+    /// A database in the shape before segments were a start and an end:
+    /// `duration_ms` and `recorded_at`, user_version 11.
+    fn seed_length_based_segments(dir: &Path) -> Vec<(String, i64)> {
+        let mut conn = Connection::open(dir.join(DB_FILE)).unwrap();
+        crate::migrations::run_migrations(&mut conn).unwrap();
+        conn.execute_batch(
+            "DROP TABLE timer_segments;
+             CREATE TABLE timer_segments (
+               id          INTEGER PRIMARY KEY AUTOINCREMENT,
+               timer_id    TEXT NOT NULL,
+               duration_ms INTEGER NOT NULL,
+               recorded_at INTEGER NOT NULL
+             );
+             INSERT INTO timers VALUES ('t1', 'Paused', 0, NULL, 1700000000000, 0);
+             INSERT INTO timers VALUES ('t2', 'Running', 0, 1700000500000, 1700000000000, 1);
+             INSERT INTO timers VALUES ('t3', 'Empty', 0, NULL, 1700000000000, 2);
+             INSERT INTO timer_segments (id, timer_id, duration_ms, recorded_at) VALUES
+               (1, 't1', 3600000, 1700003600000),
+               (2, 't1', 0, 1700003700000),
+               (3, 't1', 1234567, 1700010000000),
+               (4, 't2', 90000, 1700000100000);
+             PRAGMA user_version = 11;",
+        )
+        .unwrap();
+        totals_by_timer(&conn, "SUM(duration_ms)")
+    }
+
+    fn totals_by_timer(conn: &Connection, sum: &str) -> Vec<(String, i64)> {
+        conn.prepare(&format!(
+            "SELECT timer_id, {sum} FROM timer_segments GROUP BY timer_id ORDER BY timer_id"
+        ))
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+    }
+
+    #[test]
+    fn segments_migrate_to_start_and_end_without_changing_any_total() {
+        let dir = temp_dir("start-end-migration");
+        let before = seed_length_based_segments(&dir);
+        assert_eq!(
+            before,
+            [("t1".into(), 4_834_567), ("t2".into(), 90_000)],
+            "the seed is what the old code stored"
+        );
+
+        let store = TimerStore::load(&dir).expect("timer store");
+        let timers = store.snapshot().unwrap();
+        let after: Vec<(String, i64)> = timers
+            .iter()
+            .filter(|timer| !timer.segments.is_empty())
+            .map(|timer| (timer.id.clone(), timer.accumulated_ms as i64))
+            .collect();
+        assert_eq!(after, before);
+        assert_eq!(timers[2].accumulated_ms, 0);
+
+        // The end is when the stretch was recorded; the start is its old
+        // length before that. Ids and the running timer's start survive.
+        let spans: Vec<(i64, u64, u64)> = timers[0]
+            .segments
+            .iter()
+            .map(|segment| (segment.id, segment.started_at, segment.ended_at))
+            .collect();
+        assert_eq!(
+            spans,
+            [
+                (1, 1700000000000, 1700003600000),
+                (2, 1700003700000, 1700003700000),
+                (3, 1700008765433, 1700010000000),
+            ]
+        );
+        assert_eq!(timers[1].started_at, Some(1700000500000));
+        assert_eq!(timers[1].elapsed_at(1700000502000), 92_000);
+
+        let conn = Connection::open(dir.join(DB_FILE)).unwrap();
+        assert_eq!(totals_by_timer(&conn, "SUM(ended_at - started_at)"), before);
+    }
+
+    #[test]
+    fn the_start_and_end_migration_is_idempotent_and_safe_on_the_new_shape() {
+        let dir = temp_dir("start-end-idempotent");
+        let before = seed_length_based_segments(&dir);
+
+        // Opening twice runs the migration once, then not at all.
+        for _ in 0..2 {
+            let store = TimerStore::load(&dir).expect("timer store");
+            assert_eq!(store.snapshot().unwrap()[0].accumulated_ms, 4_834_567);
+        }
+
+        // A database that already has the new columns but still reads as the
+        // older version (restored mid-upgrade, say) keeps its rows untouched.
+        let mut conn = Connection::open(dir.join(DB_FILE)).unwrap();
+        conn.execute_batch("PRAGMA user_version = 11;").unwrap();
+        crate::migrations::run_migrations(&mut conn).unwrap();
+        assert_eq!(totals_by_timer(&conn, "SUM(ended_at - started_at)"), before);
+        let version: i32 = conn
+            .query_row("PRAGMA user_version;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, crate::migrations::SCHEMA_VERSION);
     }
 
     #[test]
@@ -987,7 +1262,8 @@ mod tests {
         assert_eq!(timers[0].label, "Pre-segment timer");
         assert_eq!(timers[0].accumulated_ms, 3600000);
         assert_eq!(timers[0].segments.len(), 1);
-        assert_eq!(timers[0].segments[0].duration_ms, 3600000);
-        assert_eq!(timers[0].segments[0].recorded_at, 1000);
+        assert_eq!(timers[0].segments[0].duration_ms(), 3600000);
+        // It predates segments, so it ends when the timer was created.
+        assert_eq!(timers[0].segments[0].ended_at, 3600000);
     }
 }

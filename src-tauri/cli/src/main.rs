@@ -186,6 +186,25 @@ enum TimersCommand {
         #[command(subcommand)]
         command: SegmentsCommand,
     },
+    /// Timers that belong to one piece of work, run and reported as a set
+    Group {
+        #[command(subcommand)]
+        command: GroupCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum GroupCommand {
+    /// Every group with its timers, how many are running and the combined time
+    List,
+    /// Put a timer in a group (a name that matches an existing group joins it)
+    Add { timer: String, group: String },
+    /// Take a timer out of its group
+    Rm { timer: String },
+    /// Start every paused timer in a group
+    Start { group: String },
+    /// Pause every running timer in a group
+    Pause { group: String },
 }
 
 #[derive(Subcommand, Debug)]
@@ -796,6 +815,23 @@ fn run(args: &Args) -> Result<Outcome, Response> {
                     timer: timer.clone(),
                 })
             }
+            TimersCommand::Group { command } => match command {
+                GroupCommand::List => ask(Operation::TimersList {}),
+                GroupCommand::Add { timer, group } => ask(Operation::TimerGroup {
+                    timer: timer.clone(),
+                    group: Some(group.clone()),
+                }),
+                GroupCommand::Rm { timer } => ask(Operation::TimerGroup {
+                    timer: timer.clone(),
+                    group: None,
+                }),
+                GroupCommand::Start { group } => ask(Operation::TimerGroupStart {
+                    group: group.clone(),
+                }),
+                GroupCommand::Pause { group } => ask(Operation::TimerGroupPause {
+                    group: group.clone(),
+                }),
+            },
             TimersCommand::Segments { command } => match command {
                 SegmentsCommand::List { timer } => ask(Operation::TimerSegments {
                     timer: timer.clone(),

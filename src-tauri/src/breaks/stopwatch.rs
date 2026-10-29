@@ -157,6 +157,7 @@ mod tests {
             started_at,
             created_at: 0,
             ordinal: 0,
+            group: None,
         }
     }
 

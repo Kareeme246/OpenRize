@@ -18,6 +18,10 @@ export interface TimersApi {
   /** Resets without a toast, once the time has been logged elsewhere. */
   clear: (id: string) => void;
   rename: (id: string, label: string) => void;
+  /** Puts a timer in a group, or takes it out when `group` is null. */
+  setGroup: (id: string, group: string | null) => void;
+  startGroup: (group: string) => void;
+  pauseGroup: (group: string) => void;
   addSegment: (id: string, startedAt: number, endedAt: number) => void;
   updateSegment: (id: string, segmentId: number, edit: SegmentEdit) => void;
   deleteSegment: (id: string, segmentId: number) => void;
@@ -126,6 +130,25 @@ export function useTimers(): TimersApi {
       confirm(api.renameTimer(id, label), `Renamed to "${label}"`),
     [confirm],
   );
+  const setGroup = useCallback(
+    (id: string, group: string | null) =>
+      confirm(
+        api.setTimerGroup(id, group),
+        group === null
+          ? `Removed "${labelOf(id)}" from its group`
+          : `Added "${labelOf(id)}" to ${group.trim()}`,
+      ),
+    [confirm, labelOf],
+  );
+  // Like a single Start and Pause, the cards show the result.
+  const startGroup = useCallback(
+    (group: string) => void send(api.startTimerGroup(group)),
+    [send],
+  );
+  const pauseGroup = useCallback(
+    (group: string) => void send(api.pauseTimerGroup(group)),
+    [send],
+  );
   const addSegment = useCallback(
     (id: string, startedAt: number, endedAt: number) =>
       confirm(
@@ -190,6 +213,9 @@ export function useTimers(): TimersApi {
     reset,
     clear,
     rename,
+    setGroup,
+    startGroup,
+    pauseGroup,
     addSegment,
     updateSegment,
     deleteSegment,

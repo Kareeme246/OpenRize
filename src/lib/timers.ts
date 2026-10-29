@@ -3,10 +3,22 @@
  * The Rust struct carries #[serde(rename_all = "camelCase")], so the JSON keys
  * arriving over IPC match these field names exactly.
  */
+/**
+ * A stretch of a timer's time, defined as a time entry is: a start and an end
+ * in epoch milliseconds. `durationMs` is `endedAt - startedAt`, derived by
+ * Rust, never edited.
+ */
 export interface TimerSegment {
   id: number;
+  startedAt: number;
+  endedAt: number;
   durationMs: number;
-  recordedAt: number;
+}
+
+/** The boundaries of a segment to change; one left out stays as it is. */
+export interface SegmentEdit {
+  startedAt?: number;
+  endedAt?: number;
 }
 
 /** A snapshot taken on demand; `savedAt` is epoch milliseconds. */
@@ -32,9 +44,10 @@ export interface Timer {
 
 /**
  * The frontend needs elapsed time to draw a number; Rust owns the timestamps
- * that make it correct. The equivalent clamp on the Rust side is the
- * `saturating_sub` in `TimerStore::pause_at` — keep the two consistent if this
- * ever gains a second caller.
+ * that make it correct. The run in progress is `now - startedAt`, the same
+ * span `Timer::run_span_at` hands the pause and the save in Rust, which is
+ * why `startedAt` must come from the wall clock `now` is read from. Keep the
+ * two consistent if this ever gains a second caller.
  */
 export function elapsedMs(timer: Timer, now: number): number {
   if (timer.startedAt === null) return timer.accumulatedMs;

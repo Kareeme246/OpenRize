@@ -206,10 +206,29 @@ fn a_timer_reset_preview_matches_the_real_reset() {
     let store = Store::new();
     seed(&store);
 
+    store.ok(&[
+        "timers",
+        "segments",
+        "add",
+        "deep",
+        "--from",
+        "2026-09-01T09:00",
+        "--for",
+        "30m",
+    ]);
     let preview = store.dry(&["timers", "reset", "deep"]);
     assert_eq!(preview["effect"], "reset");
     assert_eq!(preview["timer"]["label"], "Deep work");
     assert!(preview["timer"]["startedAt"].is_number());
+    // What would be lost is shown as it is stored: a start, an end and the
+    // length between them.
+    let segment = &preview["timer"]["segments"][0];
+    assert_eq!(segment["durationMs"], 1_800_000);
+    assert_eq!(
+        segment["endedAt"].as_u64().unwrap() - segment["startedAt"].as_u64().unwrap(),
+        1_800_000
+    );
+    assert_eq!(preview["timer"]["accumulatedMs"], 1_800_000);
 
     store.ok(&["timers", "reset", "deep", "--yes"]);
     let after = store.ok(&["timers", "list"]);

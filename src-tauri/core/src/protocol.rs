@@ -15,11 +15,15 @@ use crate::models::{
 };
 use crate::EntryFilter;
 
-/// Bumped whenever an operation or its answer changes incompatibly.
-pub const PROTOCOL_VERSION: u32 = 2;
+/// Bumped whenever an operation or its answer changes incompatibly. 3: every
+/// answer carrying a timer now describes its segments by `startedAt` and
+/// `endedAt` (no `recordedAt`), so an app and a `rize` that disagree about
+/// segments stop at the version check instead of misreading each other.
+pub const PROTOCOL_VERSION: u32 = 3;
 /// The `--json` envelope's version. Adding a field keeps it; removing or
-/// renaming one bumps it.
-pub const SCHEMA_VERSION: u32 = 2;
+/// renaming one bumps it. 3: a timer segment's `durationMs` and `recordedAt`
+/// became `startedAt` and `endedAt` (`durationMs` stays, derived from them).
+pub const SCHEMA_VERSION: u32 = 3;
 /// Why a command that changes nothing destructive cannot take `--dry-run`;
 /// the core and `rize` give the same words.
 pub const DRY_RUN_UNSUPPORTED: &str = "--dry-run only previews commands that delete, reset or rebuild; this one would run for real. Run it without --dry-run.";
@@ -100,6 +104,24 @@ pub enum Operation {
     },
     TimerDelete {
         timer: String,
+    },
+    /// One timer with its segments, each a start and an end.
+    TimerSegments {
+        timer: String,
+    },
+    /// Adds a segment from `started_at` to `ended_at` (epoch milliseconds,
+    /// `ended_at >= started_at`).
+    TimerSegmentAdd {
+        timer: String,
+        started_at: u64,
+        ended_at: u64,
+    },
+    /// Changes a segment's start and/or end; the one left out stays.
+    TimerSegmentEdit {
+        timer: String,
+        segment: i64,
+        started_at: Option<u64>,
+        ended_at: Option<u64>,
     },
     EntriesList {
         filter: EntryFilter,
@@ -202,7 +224,8 @@ pub enum Operation {
     /// `EntriesDelete`, `EntriesRebuild`, `ProjectDelete`, `ClientDelete`,
     /// `CategoryDelete`) can be previewed; anything else, or a nested
     /// preview, is `INVALID_ARGUMENT`. This adds an operation and changes no
-    /// existing request or answer, so `PROTOCOL_VERSION` stays as it is.
+    /// existing request or answer. (The protocol version moved to 3 for the
+    /// segment change, not for this.)
     Preview {
         operation: Box<Operation>,
     },

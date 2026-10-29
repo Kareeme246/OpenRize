@@ -5,6 +5,13 @@ All notable changes are documented here. Entries are generated from commit histo
 ## [unreleased]
 
 ### Features
+- Verification skill, feature map, skill lint and dry-run levers (#159)
+
+### Bug Fixes
+- **timers:** Stamp Start from the wall clock and store segments as a start and an end (#160)
+## [0.9.43] - 2026-10-27
+
+### Features
 - **permissions:** Require a relaunch after Accessibility is allowed in a running app (#150)
 - **permissions:** Ask for Accessibility on first run and show its real state in Settings (#151)
 - **settings:** Add dev-only tools to simulate permissions and re-run onboarding (#155)
@@ -18,6 +25,9 @@ All notable changes are documented here. Entries are generated from commit histo
 - **permissions:** Name the real permissions on the first-run screen (#153)
 - **merge:** Always show merge up and down, drop the merge shortcut, and merge overlaps (#154)
 - **permissions:** Show Granted or Not granted on the onboarding cards and offer Grant only until granted (#156)
+
+### Documentation
+- Update changelog for v0.9.43
 
 ### Maintenance
 - **release:** Bump actions to Node 24 majors and pin Ubuntu LTS runner (#147)

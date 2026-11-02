@@ -404,6 +404,15 @@ impl Admission {
     }
 }
 
+/// Replaces this user's home folder with `~` wherever it appears in `text`,
+/// for anything shown to or sent by the user (the bug report form).
+pub fn sanitize_text(text: &str) -> String {
+    match dirs::home_dir() {
+        Some(home) if !home.as_os_str().is_empty() => text.replace(&*home.to_string_lossy(), "~"),
+        _ => text.to_string(),
+    }
+}
+
 // --- Files --------------------------------------------------------------
 
 /// Directory where crash reports are stored under the install root.
@@ -564,6 +573,16 @@ pub fn now_epoch_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_home_folder_is_replaced_with_a_tilde() {
+        let Some(home) = dirs::home_dir() else {
+            return;
+        };
+        let text = format!("failed to open {}\\notes.txt", home.display());
+        assert_eq!(sanitize_text(&text), "failed to open ~\\notes.txt");
+        assert_eq!(sanitize_text("no paths here"), "no paths here");
+    }
 
     fn temp_root(name: &str) -> PathBuf {
         let dir =

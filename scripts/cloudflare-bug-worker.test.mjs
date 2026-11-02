@@ -10,13 +10,15 @@ test("formatIssueBody formats full markdown correctly", () => {
     stepsToReproduce: "1. Start timer\n2. Close lid\n3. Reopen",
     additionalNotes: "Using MacBook Pro M3",
     diagnostics: {
-      appVersion: "0.9.35",
-      os: "macos",
-      osVersion: "15.0.0",
-      arch: "aarch64",
-      locale: "en-US",
-      appDataDir: "~/Library/Application Support/com.offlinestudios.openrize",
-      settings: {
+      environment: {
+        appVersion: "0.9.52",
+        os: "windows",
+        osVersion: "25H2 (build 26300)",
+        arch: "x86_64",
+        locale: "en-US",
+        dataFolder: "local",
+      },
+      preferences: {
         theme: "dark",
         trayEnabled: true,
       },
@@ -33,13 +35,69 @@ test("formatIssueBody formats full markdown correctly", () => {
 
   const md = formatIssueBody(payload);
   assert.ok(md.includes("### What happened?\nTimer crashed after sleep"));
-  assert.ok(md.includes("### What did you expect to happen?\nTimer should continue smoothly"));
-  assert.ok(md.includes("### Steps to reproduce\n1. Start timer\n2. Close lid\n3. Reopen"));
-  assert.ok(md.includes("### Additional context / notes\nUsing MacBook Pro M3"));
-  assert.ok(md.includes("**App Version:** `v0.9.35`"));
-  assert.ok(md.includes("**OS:** `macos 15.0.0 (aarch64)`"));
+  assert.ok(
+    md.includes(
+      "### What did you expect to happen?\nTimer should continue smoothly",
+    ),
+  );
+  assert.ok(
+    md.includes(
+      "### Steps to reproduce\n1. Start timer\n2. Close lid\n3. Reopen",
+    ),
+  );
+  assert.ok(
+    md.includes("### Additional context / notes\nUsing MacBook Pro M3"),
+  );
+  assert.ok(md.includes("**App Version:** `v0.9.52`"));
+  assert.ok(md.includes("**OS:** `windows 25H2 (build 26300) (x86_64)`"));
+  assert.ok(md.includes("**Data folder:** `local`"));
+  assert.ok(md.includes("**Install ID:** `0192e472...`"));
   assert.ok(md.includes("<summary>App Settings</summary>"));
   assert.ok(md.includes("<summary>Recent Local Crashes (1)</summary>"));
+});
+
+test("formatIssueBody leaves out sections the user did not attach", () => {
+  const md = formatIssueBody({
+    installId: "0192e472-87a4-783a-8b1e-0123456789ab",
+    whatHappened: "A glitch",
+    whatExpected: "No glitch",
+    stepsToReproduce: "Click button",
+    diagnostics: { preferences: { theme: "dark" } },
+  });
+  assert.ok(md.includes("<summary>App Settings</summary>"));
+  assert.ok(!md.includes("**App Version:**"));
+  assert.ok(!md.includes("Recent Local Crashes"));
+});
+
+test("formatIssueBody keeps crash text inside its code block", () => {
+  const md = formatIssueBody({
+    installId: "id",
+    whatHappened: "x",
+    whatExpected: "y",
+    stepsToReproduce: "z",
+    diagnostics: {
+      environment: { appVersion: "1`\n## injected", os: "windows" },
+      recentCrashes: [{ id: "c", message: "boom ```\n## Fake heading" }],
+    },
+  });
+  assert.ok(!md.includes("\n## injected"));
+  // The fence around the crash JSON is longer than the backticks inside it.
+  assert.ok(md.includes("````json"));
+});
+
+test("worker rejects non-string required fields with 400", async () => {
+  const req = new Request("https://example.com/report", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      installId: "id",
+      whatHappened: { not: "text" },
+      whatExpected: "e",
+      stepsToReproduce: "s",
+    }),
+  });
+  const res = await worker.fetch(req, {}, {});
+  assert.equal(res.status, 400);
 });
 
 test("formatIssueBody handles omitted diagnostics", () => {

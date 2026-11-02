@@ -83,7 +83,7 @@ pub fn set_crash_root(root: &Path) {
     }
 }
 
-fn crash_root() -> Option<PathBuf> {
+pub(crate) fn crash_root() -> Option<PathBuf> {
     CRASH_ROOT.read().ok().and_then(|lock| lock.clone())
 }
 

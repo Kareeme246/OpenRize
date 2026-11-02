@@ -36,7 +36,45 @@ const MAX_REPORTS_PER_WINDOW = 5;
 const memoryRateLimits = new Map();
 
 /**
+ * Text that is safe inside an inline code span: no backticks or line breaks.
+ * The client is OpenRize, but the endpoint is public.
+ */
+function inline(value, fallback = "unknown") {
+  const text = String(value ?? "")
+    .replace(/[`\r\n]+/g, " ")
+    .trim()
+    .slice(0, 200);
+  return text || fallback;
+}
+
+/**
+ * A fenced code block whose fence is longer than any run of backticks in the
+ * text, so crash text cannot close the block and write Markdown around it.
+ */
+function fenced(text, language = "") {
+  const longest = Math.max(
+    0,
+    ...(text.match(/`+/g) ?? []).map((run) => run.length),
+  );
+  const fence = "`".repeat(Math.max(3, longest + 1));
+  return [`${fence}${language}`, text, fence];
+}
+
+function details(summary, text, language) {
+  return [
+    "<details>",
+    `<summary>${summary}</summary>`,
+    "",
+    ...fenced(text, language),
+    "</details>",
+    "",
+  ];
+}
+
+/**
  * Formats user bug report and diagnostics into markdown for the GitHub issue.
+ * Diagnostics arrive as separate optional sections (`environment`,
+ * `preferences`, `recentCrashes`): the user chose which to attach.
  */
 export function formatIssueBody(payload) {
   const parts = [];
@@ -62,36 +100,41 @@ export function formatIssueBody(payload) {
   parts.push("---");
   parts.push("");
 
-  if (payload.diagnostics) {
-    const diag = payload.diagnostics;
+  const diag = payload.diagnostics;
+  const env = diag?.environment;
+  const crashes = Array.isArray(diag?.recentCrashes) ? diag.recentCrashes : [];
+  if (env || diag?.preferences || crashes.length > 0) {
     parts.push("### Diagnostics");
-    parts.push(`- **App Version:** \`v${diag.appVersion || "unknown"}\``);
-    parts.push(`- **OS:** \`${diag.os || "unknown"} ${diag.osVersion || ""} (${diag.arch || ""})\``);
-    parts.push(`- **Locale:** \`${diag.locale || "unknown"}\``);
-    parts.push(`- **Install ID:** \`${payload.installId ? payload.installId.slice(0, 8) + "..." : "none"}\``);
-    parts.push(`- **App Data Dir:** \`${diag.appDataDir || "standard"}\``);
+    if (env) {
+      parts.push(`- **App Version:** \`v${inline(env.appVersion)}\``);
+      parts.push(
+        `- **OS:** \`${inline(env.os)} ${inline(env.osVersion, "")} (${inline(env.arch, "")})\``,
+      );
+      parts.push(`- **Locale:** \`${inline(env.locale)}\``);
+      parts.push(`- **Data folder:** \`${inline(env.dataFolder)}\``);
+    }
+    parts.push(
+      `- **Install ID:** \`${payload.installId ? `${inline(payload.installId).slice(0, 8)}...` : "none"}\``,
+    );
     parts.push("");
 
-    if (diag.settings) {
-      parts.push("<details>");
-      parts.push("<summary>App Settings</summary>");
-      parts.push("");
-      parts.push("```json");
-      parts.push(JSON.stringify(diag.settings, null, 2));
-      parts.push("```");
-      parts.push("</details>");
-      parts.push("");
+    if (diag.preferences) {
+      parts.push(
+        ...details(
+          "App Settings",
+          JSON.stringify(diag.preferences, null, 2),
+          "json",
+        ),
+      );
     }
-
-    if (Array.isArray(diag.recentCrashes) && diag.recentCrashes.length > 0) {
-      parts.push("<details>");
-      parts.push(`<summary>Recent Local Crashes (${diag.recentCrashes.length})</summary>`);
-      parts.push("");
-      parts.push("```json");
-      parts.push(JSON.stringify(diag.recentCrashes, null, 2));
-      parts.push("```");
-      parts.push("</details>");
-      parts.push("");
+    if (crashes.length > 0) {
+      parts.push(
+        ...details(
+          `Recent Local Crashes (${crashes.length})`,
+          JSON.stringify(crashes, null, 2),
+          "json",
+        ),
+      );
     }
   } else {
     parts.push("### Diagnostics");
@@ -111,7 +154,9 @@ async function checkRateLimit(key, env) {
 
   if (env?.RATE_LIMIT_KV) {
     const currentStr = await env.RATE_LIMIT_KV.get(key);
-    let current = currentStr ? JSON.parse(currentStr) : { count: 0, resetAt: now + RATE_LIMIT_WINDOW_SECONDS };
+    let current = currentStr
+      ? JSON.parse(currentStr)
+      : { count: 0, resetAt: now + RATE_LIMIT_WINDOW_SECONDS };
 
     if (now > current.resetAt) {
       current = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_SECONDS };
@@ -123,14 +168,19 @@ async function checkRateLimit(key, env) {
 
     current.count += 1;
     const ttl = Math.max(60, current.resetAt - now);
-    await env.RATE_LIMIT_KV.put(key, JSON.stringify(current), { expirationTtl: ttl });
+    await env.RATE_LIMIT_KV.put(key, JSON.stringify(current), {
+      expirationTtl: ttl,
+    });
     return true;
   }
 
   // Fallback to in-memory limiter
   const entry = memoryRateLimits.get(key);
   if (!entry || now > entry.resetAt) {
-    memoryRateLimits.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_SECONDS });
+    memoryRateLimits.set(key, {
+      count: 1,
+      resetAt: now + RATE_LIMIT_WINDOW_SECONDS,
+    });
     return true;
   }
 
@@ -143,7 +193,7 @@ async function checkRateLimit(key, env) {
 }
 
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
     // 1. CORS Preflight
     if (request.method === "OPTIONS") {
       return new Response(null, {
@@ -159,36 +209,67 @@ export default {
 
     // 2. Reject non-POST
     if (request.method !== "POST") {
-      return new Response(JSON.stringify({ error: "Method not allowed. Use POST." }), {
-        status: 405,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      });
+      return new Response(
+        JSON.stringify({ error: "Method not allowed. Use POST." }),
+        {
+          status: 405,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        },
+      );
     }
 
     // 3. Payload size check
-    const contentLength = Number.parseInt(request.headers.get("content-length") || "0", 10);
+    const contentLength = Number.parseInt(
+      request.headers.get("content-length") || "0",
+      10,
+    );
     if (contentLength > MAX_PAYLOAD_BYTES) {
-      return new Response(JSON.stringify({ error: "Bug report exceeds maximum size limit (64 KB)." }), {
-        status: 413,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      });
+      return new Response(
+        JSON.stringify({
+          error: "Bug report exceeds maximum size limit (64 KB).",
+        }),
+        {
+          status: 413,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        },
+      );
     }
 
     let rawBody;
     try {
       rawBody = await request.text();
     } catch {
-      return new Response(JSON.stringify({ error: "Could not read request body." }), {
-        status: 400,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      });
+      return new Response(
+        JSON.stringify({ error: "Could not read request body." }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        },
+      );
     }
 
     if (rawBody.length > MAX_PAYLOAD_BYTES) {
-      return new Response(JSON.stringify({ error: "Bug report exceeds maximum size limit (64 KB)." }), {
-        status: 413,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      });
+      return new Response(
+        JSON.stringify({
+          error: "Bug report exceeds maximum size limit (64 KB).",
+        }),
+        {
+          status: 413,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        },
+      );
     }
 
     let payload;
@@ -197,25 +278,43 @@ export default {
     } catch {
       return new Response(JSON.stringify({ error: "Invalid JSON payload." }), {
         status: 400,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
       });
     }
 
     // 4. Validate required fields
-    if (!payload.installId || !payload.whatHappened || !payload.whatExpected || !payload.stepsToReproduce) {
+    const required = [
+      payload?.installId,
+      payload?.whatHappened,
+      payload?.whatExpected,
+      payload?.stepsToReproduce,
+    ];
+    if (
+      required.some((value) => typeof value !== "string" || value.trim() === "")
+    ) {
       return new Response(
         JSON.stringify({
-          error: "Missing required fields: installId, whatHappened, whatExpected, or stepsToReproduce.",
+          error:
+            "Missing required fields: installId, whatHappened, whatExpected, or stepsToReproduce.",
         }),
         {
           status: 400,
-          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
         },
       );
     }
 
     // 5. Rate limiting
-    const clientIp = request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for") || "unknown";
+    const clientIp =
+      request.headers.get("cf-connecting-ip") ||
+      request.headers.get("x-forwarded-for") ||
+      "unknown";
     const ipRateKey = `ratelimit:ip:${clientIp}`;
     const installRateKey = `ratelimit:install:${payload.installId}`;
 
@@ -230,7 +329,10 @@ export default {
         }),
         {
           status: 429,
-          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
         },
       );
     }
@@ -244,7 +346,10 @@ export default {
         }),
         {
           status: 500,
-          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
         },
       );
     }
@@ -255,21 +360,24 @@ export default {
     const issueBody = formatIssueBody(payload);
 
     try {
-      const ghResponse = await fetch("https://api.github.com/repos/Kareeme246/OpenRize/issues", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${env.GITHUB_TOKEN}`,
-          Accept: "application/vnd.github+json",
-          "User-Agent": "OpenRize-Bug-Report-Worker",
-          "X-GitHub-Api-Version": "2022-11-28",
-          "Content-Type": "application/json",
+      const ghResponse = await fetch(
+        "https://api.github.com/repos/Kareeme246/OpenRize/issues",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+            Accept: "application/vnd.github+json",
+            "User-Agent": "OpenRize-Bug-Report-Worker",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            title: issueTitle,
+            body: issueBody,
+            labels: ["bug", "in-app-report"],
+          }),
         },
-        body: JSON.stringify({
-          title: issueTitle,
-          body: issueBody,
-          labels: ["bug", "in-app-report"],
-        }),
-      });
+      );
 
       if (!ghResponse.ok) {
         const ghErrorText = await ghResponse.text().catch(() => "");
@@ -280,7 +388,10 @@ export default {
           }),
           {
             status: 502,
-            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+            },
           },
         );
       }
@@ -294,18 +405,25 @@ export default {
         }),
         {
           status: 201,
-          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
         },
       );
     } catch (err) {
       console.error("Failed to connect to GitHub API:", err);
       return new Response(
         JSON.stringify({
-          error: "Network error reaching GitHub API. Please copy your report using the button below.",
+          error:
+            "Network error reaching GitHub API. Please copy your report using the button below.",
         }),
         {
           status: 502,
-          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
         },
       );
     }

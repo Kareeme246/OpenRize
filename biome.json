@@ -16,6 +16,8 @@
       "scripts/publish-r2/tsconfig.json",
       "scripts/lint-skills/**/*.ts",
       "scripts/lint-skills/tsconfig.json",
+      "scripts/cloudflare-bug-worker.js",
+      "scripts/cloudflare-bug-worker.test.mjs",
       "package.json",
       "tsconfig.json",
       "tsconfig.tests.json",

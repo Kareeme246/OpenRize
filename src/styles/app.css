@@ -284,10 +284,16 @@ html.reminder-window body {
   }
 }
 
-/* Slim scrollbars across the app (reduced thickness by half) */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--line-strong) transparent;
+/* Slim scrollbars across the app (reduced thickness by half). The
+   ::-webkit-scrollbar rules style Chromium (WebView2) and WebKit (macOS). Chromium
+   121+ also reads scrollbar-width/scrollbar-color, and once those are set it
+   ignores ::-webkit-scrollbar, so the standard properties are only used where
+   the webkit pseudo-elements are not supported (Firefox). */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
 }
 
 ::-webkit-scrollbar {

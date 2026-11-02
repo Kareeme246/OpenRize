@@ -8,8 +8,9 @@
 //!
 //! What the sampler is told is smoothed by [`UrlTracker`], which holds no
 //! COM state: a read that fails keeps the last URL for a grace period, a new
-//! URL must be read twice before it replaces the old one, and a window whose
-//! bar cannot be found is retried rarely instead of every second.
+//! URL must be read twice before it replaces the old one (unless the window's
+//! title changed, which says the page did), and a window whose bar cannot be
+//! found is retried rarely instead of every second.
 
 use std::collections::HashMap;
 use std::ffi::c_void;
@@ -64,8 +65,9 @@ const SEARCH_MAX_NODES: usize = 600;
 enum Reading {
     /// The bar's text, normalized; `None` when it holds no web page.
     Page(Option<String>),
-    /// The user is typing in the bar, so its text is not the page's.
-    Typing,
+    /// The bar has keyboard focus. Its text, trimmed, is what the user is
+    /// editing; `None` when it could not be read.
+    Typing(Option<String>),
     /// No bar could be found or read.
     Missing,
 }
@@ -79,6 +81,11 @@ struct UrlTracker {
     confirmed: Option<Instant>,
     /// A different URL seen on the last reads, and how many agreed.
     pending: Option<(Option<String>, u8)>,
+    /// The window title at the last request, to notice the page changing.
+    title: Option<String>,
+    /// The title changed since the last read, so `shown` may be the previous
+    /// page's: the next read replaces it without a second look.
+    retitled: bool,
     requested: Option<Instant>,
     misses: u32,
     retry_at: Option<Instant>,
@@ -95,8 +102,22 @@ impl UrlTracker {
             self.shown = None;
             self.confirmed = None;
             self.pending = None;
+            self.title = None;
+            self.retitled = false;
         }
         self.requested = Some(now);
+    }
+
+    /// The window's title as the sampler sees it. A new title means a tab
+    /// switch or navigation, and the bar already shows the new page, so the
+    /// next read need not be confirmed by a second one.
+    fn retitle(&mut self, title: &str) {
+        if self.title.as_deref().is_some_and(|last| last != title) {
+            self.retitled = true;
+        }
+        if self.title.as_deref() != Some(title) {
+            self.title = Some(title.to_string());
+        }
     }
 
     /// Whether the worker should read this window now.
@@ -106,7 +127,7 @@ impl UrlTracker {
 
     /// No read has vouched for `shown` lately, so a result is worth waiting for.
     fn unread(&self, now: Instant) -> bool {
-        !self.fresh(now, GRACE)
+        self.retitled || !self.fresh(now, GRACE)
     }
 
     fn fresh(&self, now: Instant, grace: Duration) -> bool {
@@ -128,17 +149,49 @@ impl UrlTracker {
                 }
                 return;
             }
-            Reading::Typing => self.pending = None,
+            Reading::Typing(text) => {
+                if self.editing(text.as_deref()) {
+                    self.pending = None;
+                } else {
+                    // A new tab's empty bar, or text unrelated to the page.
+                    self.see(None, now);
+                }
+            }
             Reading::Page(url) => self.see(url, now),
         }
+        self.retitled = false;
         self.misses = 0;
         self.retry_at = None;
         self.confirmed = Some(now);
     }
 
+    /// Whether the focused bar holds the user's edit of the page being shown,
+    /// so that page still stands. An empty bar (a new tab) or text that has
+    /// nothing to do with the page does not keep the previous URL.
+    fn editing(&self, text: Option<&str>) -> bool {
+        let Some(text) = text.map(str::trim) else {
+            return true;
+        };
+        if text.is_empty() {
+            return false;
+        }
+        let Some(shown) = &self.shown else {
+            return true;
+        };
+        // The page changed under the bar (a new tab took the focus).
+        if self.retitled {
+            return false;
+        }
+        normalize_address(text).is_some() || {
+            let (shown, text) = (bare(shown), text.to_lowercase());
+            shown.contains(&text) || text.contains(&shown)
+        }
+    }
+
     fn see(&mut self, url: Option<String>, now: Instant) {
-        // Nothing to protect once the previous URL has lapsed or never was.
-        if !self.fresh(now, GRACE) || url == self.shown {
+        // Nothing to protect once the previous URL has lapsed or never was,
+        // and a retitled window is a different page.
+        if self.retitled || !self.fresh(now, GRACE) || url == self.shown {
             self.shown = url;
             self.pending = None;
             return;
@@ -155,11 +208,18 @@ impl UrlTracker {
     }
 }
 
-/// The URL shown in a browser window, without ever waiting long for it.
-pub(super) fn url_of(window: HWND) -> Option<String> {
+/// The URL shown in a browser window with the given title, without ever
+/// waiting long for it. A title that changed since the last call replaces
+/// the shown URL on the next read instead of the second, and the sampler
+/// waits briefly for that read.
+pub(super) fn url_of_titled(window: HWND, title: &str) -> Option<String> {
+    shared_url_of(window, Some(title))
+}
+
+fn shared_url_of(window: HWND, title: Option<&str>) -> Option<String> {
     static READER: OnceLock<Option<Arc<Shared>>> = OnceLock::new();
     let shared = READER.get_or_init(Shared::start).as_ref()?;
-    shared.url_of(window.0 as isize)
+    shared.url_of(window.0 as isize, title)
 }
 
 /// What the sampler and the worker thread share. Windows are keyed by the
@@ -206,7 +266,7 @@ impl Shared {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn url_of(&self, window: isize) -> Option<String> {
+    fn url_of(&self, window: isize, title: Option<&str>) -> Option<String> {
         let now = Instant::now();
         let mut state = self.lock();
         state.forget_idle(now);
@@ -215,6 +275,9 @@ impl Shared {
             .is_some_and(|since| now.duration_since(since) > STALL_AFTER);
         let tracker = state.windows.entry(window).or_default();
         tracker.touch(now);
+        if let Some(title) = title {
+            tracker.retitle(title);
+        }
         let (due, unread) = (tracker.due(now), tracker.unread(now));
         if due {
             state.wanted = Some(window);
@@ -382,13 +445,15 @@ impl Automation {
         unsafe {
             let bar = bar.BuildUpdatedCache(&self.value).ok()?;
             // While the user types in the bar it holds their text, not the page.
+            let text = bar
+                .GetCachedPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
+                .ok()
+                .and_then(|pattern| pattern.CachedValue().ok())
+                .map(|text| text.to_string());
             if bar.CachedHasKeyboardFocus().ok()?.as_bool() {
-                return Some(Reading::Typing);
+                return Some(Reading::Typing(text.map(|text| text.trim().to_string())));
             }
-            let pattern: IUIAutomationValuePattern =
-                bar.GetCachedPatternAs(UIA_ValuePatternId).ok()?;
-            let text = pattern.CachedValue().ok()?.to_string();
-            Some(Reading::Page(normalize_address(&text)))
+            Some(Reading::Page(normalize_address(&text?)))
         }
     }
 
@@ -548,7 +613,8 @@ fn normalize_address(text: &str) -> Option<String> {
     if text.is_empty() || text.contains(char::is_whitespace) {
         return None;
     }
-    let url = if text.contains("://") {
+    let scheme = text.contains("://");
+    let url = if scheme {
         text.to_string()
     } else {
         format!("https://{text}")
@@ -556,7 +622,19 @@ fn normalize_address(text: &str) -> Option<String> {
     let parsed = url::Url::parse(&url).ok()?;
     let web = matches!(parsed.scheme(), "http" | "https");
     let host = parsed.host_str()?;
-    (web && (host.contains('.') || host == "localhost")).then_some(url)
+    // A dotless host ("jira", "server:8080") is a page only when the text
+    // says so with a scheme or a port; a lone word is a search.
+    let named = host.contains('.') || host == "localhost" || scheme || parsed.port().is_some();
+    (web && named).then_some(url)
+}
+
+/// A URL without its scheme, "www." and trailing slash, lower-cased, as the
+/// address bar shows it while being edited.
+fn bare(url: &str) -> String {
+    let url = url.to_lowercase();
+    let url = url.split_once("://").map_or(url.as_str(), |(_, rest)| rest);
+    let url = url.strip_prefix("www.").unwrap_or(url);
+    url.trim_end_matches('/').to_string()
 }
 
 #[cfg(test)]
@@ -569,6 +647,10 @@ mod tests {
 
     fn page(url: &str) -> Reading {
         Reading::Page(Some(url.to_string()))
+    }
+
+    fn typing(text: &str) -> Reading {
+        Reading::Typing(Some(text.to_string()))
     }
 
     /// A tracker read once at `start`, showing `url`.
@@ -601,6 +683,31 @@ mod tests {
         assert_eq!(normalize_address("file:///C:/notes.html"), None);
         assert_eq!(normalize_address("newtab"), None);
         assert_eq!(normalize_address("rust"), None);
+        assert_eq!(normalize_address("jira"), None);
+        assert_eq!(normalize_address("jira/"), None);
+    }
+
+    #[test]
+    fn dotless_hosts_need_a_scheme_or_a_port() {
+        assert_eq!(
+            normalize_address("http://jira/").as_deref(),
+            Some("http://jira/")
+        );
+        assert_eq!(
+            normalize_address("https://intranet/wiki").as_deref(),
+            Some("https://intranet/wiki")
+        );
+        assert_eq!(
+            normalize_address("server:8080").as_deref(),
+            Some("https://server:8080")
+        );
+        assert_eq!(
+            normalize_address("localhost:3000").as_deref(),
+            Some("https://localhost:3000")
+        );
+        // Other schemes stay out, whatever the host looks like.
+        assert_eq!(normalize_address("chrome://newtab"), None);
+        assert_eq!(normalize_address("ftp://server/"), None);
     }
 
     #[test]
@@ -715,7 +822,7 @@ mod tests {
         // Focus in the bar drops a half-seen switch and holds the URL, even
         // past the grace period, for as long as the typing lasts.
         for second in 2..30 {
-            tracker.record(Reading::Typing, start + secs(second));
+            tracker.record(typing("a.exam"), start + secs(second));
             assert_eq!(
                 tracker.url(start + secs(second), false).as_deref(),
                 Some("https://a.example/")
@@ -726,6 +833,84 @@ mod tests {
             tracker.url(start + secs(30), false).as_deref(),
             Some("https://a.example/")
         );
+    }
+
+    #[test]
+    fn an_empty_focused_bar_is_a_new_tab_with_no_url() {
+        let start = Instant::now();
+        let mut tracker = showing("https://a.example/", start);
+        // Ctrl+T focuses an empty bar: no page, read twice like any change.
+        tracker.record(typing(""), start + secs(1));
+        assert!(tracker.url(start + secs(1), false).is_some());
+        tracker.record(typing(""), start + secs(2));
+        assert_eq!(tracker.url(start + secs(2), false), None);
+        // Typing a URL there keeps showing no page until it is loaded.
+        tracker.record(typing("b.example"), start + secs(3));
+        assert_eq!(tracker.url(start + secs(3), false), None);
+    }
+
+    #[test]
+    fn text_unrelated_to_the_page_does_not_keep_its_url() {
+        let start = Instant::now();
+        let mut tracker = showing("https://www.github.com/openrize", start);
+        // An edit of the shown address, or any address, holds the page.
+        for text in [
+            "git",
+            "github.com/open",
+            "github.com/openrize/issues",
+            "other.org",
+        ] {
+            tracker.record(typing(text), start + secs(1));
+            assert!(tracker.url(start + secs(1), false).is_some(), "{text}");
+        }
+        // A search typed over it, or text that cannot be read, is not an edit
+        // of the page; unreadable text is given the benefit of the doubt.
+        tracker.record(Reading::Typing(None), start + secs(2));
+        assert!(tracker.url(start + secs(2), false).is_some());
+        tracker.record(typing("how to rust"), start + secs(3));
+        assert!(tracker.url(start + secs(3), false).is_some());
+        tracker.record(typing("how to rust"), start + secs(4));
+        assert_eq!(tracker.url(start + secs(4), false), None);
+    }
+
+    #[test]
+    fn a_new_title_replaces_the_url_on_the_next_read() {
+        let start = Instant::now();
+        let mut tracker = showing("https://a.example/", start);
+        tracker.retitle("A");
+        tracker.touch(start + secs(1));
+        tracker.retitle("A");
+        assert!(!tracker.unread(start + secs(1)));
+        // A tab switch: the sampler waits for a read, which needs no second.
+        tracker.touch(start + secs(2));
+        tracker.retitle("B");
+        assert!(tracker.unread(start + secs(2)));
+        assert_eq!(
+            tracker.url(start + secs(2), false).as_deref(),
+            Some("https://a.example/")
+        );
+        tracker.record(page("https://b.example/"), start + secs(2));
+        assert_eq!(
+            tracker.url(start + secs(2), false).as_deref(),
+            Some("https://b.example/")
+        );
+        assert!(!tracker.unread(start + secs(2)));
+        // Without a new title a different URL still needs two reads.
+        tracker.record(page("https://c.example/"), start + secs(3));
+        assert_eq!(
+            tracker.url(start + secs(3), false).as_deref(),
+            Some("https://b.example/")
+        );
+    }
+
+    #[test]
+    fn a_new_title_under_a_focused_bar_drops_the_old_url_at_once() {
+        let start = Instant::now();
+        let mut tracker = showing("https://a.example/", start);
+        tracker.retitle("A");
+        tracker.retitle("New Tab");
+        tracker.record(typing("a.exam"), start + secs(1));
+        assert_eq!(tracker.url(start + secs(1), false), None);
     }
 
     #[test]
@@ -866,7 +1051,7 @@ mod tests {
         }
     }
 
-    /// Asks `url_of` about each open browser window once a second for a few
+    /// Asks `shared_url_of` about each open browser window once a second for a few
     /// seconds, as the sampler does. Run by hand:
     /// `cargo test --lib address_bar::tests::live_urls -- --ignored --nocapture`
     #[test]
@@ -875,7 +1060,7 @@ mod tests {
         for (window, exe) in browser_windows() {
             for tick in 0..4 {
                 let started = Instant::now();
-                let url = url_of(window);
+                let url = shared_url_of(window, None);
                 println!(
                     "{exe} {:#x} tick {tick}: {url:?} (sampler waited {:?})",
                     window.0 as isize,

@@ -13,6 +13,7 @@ import {
   type PermissionCardView,
 } from "../lib/onboarding";
 import { ACCESSIBILITY_ID, roleLabel, TONE_CLASS } from "../lib/permissions";
+import { TRAY_PLACE } from "../lib/platform";
 import type { PermissionInfo } from "../lib/types";
 
 const AUTOMATION_ID = "automation";
@@ -121,8 +122,8 @@ function Screen({
           )}
           {failed && (
             <p className="text-[12px] text-rose-500" role="alert">
-              OpenRize couldn't restart itself. Quit it from the menu bar and
-              open it again.
+              OpenRize couldn't restart itself. Quit it from the {TRAY_PLACE}{" "}
+              and open it again.
             </p>
           )}
           <button

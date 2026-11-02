@@ -7,6 +7,10 @@ use windows::Win32::System::Threading::{
     GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
+/// Windows has no per-process energy counter, so the sampler stays off and
+/// the UI hides the monitor.
+pub const HAS_ENERGY_COUNTER: bool = false;
+
 /// Kernel plus user CPU time. Windows has no per-process energy counter,
 /// so `billed_energy_nj` stays 0 and the sampler estimates from CPU time.
 pub fn read_proc_rusage(pid: i32) -> Option<ProcessRusage> {
@@ -45,4 +49,11 @@ pub fn read_battery_info() -> BatteryInfo {
         battery_percent: (has_battery && status.BatteryLifePercent <= 100)
             .then(|| f64::from(status.BatteryLifePercent)),
     }
+}
+
+/// Windows' Battery Saver, its counterpart to Low Power Mode.
+pub fn low_power_mode() -> bool {
+    let mut status = SYSTEM_POWER_STATUS::default();
+    // SAFETY: fills the struct on this stack.
+    unsafe { GetSystemPowerStatus(&mut status) }.is_ok() && status.SystemStatusFlag == 1
 }

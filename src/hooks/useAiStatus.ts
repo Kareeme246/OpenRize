@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import * as api from "../lib/api";
-import { EXPECTS_ON_DEVICE_ML } from "../lib/platform";
+import {
+  EXPECTS_ON_DEVICE_ML,
+  UNSUPPORTED_OS_MODEL_REASON,
+} from "../lib/platform";
 import type { AiStatus } from "../lib/types";
 import { useTauriEvent } from "./useTauriEvent";
 
@@ -58,7 +61,7 @@ export function llmUnavailableReason(status: AiStatus): string | null {
     case "deviceNotEligible":
       return "This Mac doesn't support Apple Intelligence";
     case "unsupportedOS":
-      return "The on-device model needs macOS 26 or later";
+      return UNSUPPORTED_OS_MODEL_REASON;
     default:
       return "The on-device model isn't available";
   }

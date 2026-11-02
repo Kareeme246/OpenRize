@@ -302,10 +302,7 @@ async fn find_update(app: &AppHandle) -> Result<Option<(Update, Vec<ReleaseNotes
     let builder = {
         let app = app.clone();
         builder.on_before_exit(move || {
-            crate::breaks::on_exit(&app);
-            if let Ok(mut store) = app.state::<crate::AppState>().activity.lock() {
-                let _ = store.close_active_segment(crate::timers::now_epoch_ms());
-            }
+            crate::flush_on_exit(&app);
             app.cleanup_before_exit();
         })
     };

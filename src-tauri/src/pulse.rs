@@ -29,22 +29,17 @@ use tauri::{AppHandle, Manager, Rect, WebviewUrl, WebviewWindow, WebviewWindowBu
 
 pub mod placement;
 
+#[cfg_attr(target_os = "macos", path = "pulse/macos.rs")]
+#[cfg_attr(windows, path = "pulse/windows.rs")]
+#[cfg_attr(not(any(target_os = "macos", windows)), path = "pulse/unsupported.rs")]
+mod platform;
+
 pub const LABEL: &str = "pulse";
 
 /// Logical points, matching the approved mock.
 const WIDTH: f64 = 320.0;
 /// A placeholder until the page reports its real height.
 const INITIAL_HEIGHT: f64 = 360.0;
-/// Space between the menu bar and the panel's top edge.
-#[cfg(not(windows))]
-const GAP: f64 = 6.0;
-/// Closest the panel may sit to a screen edge.
-#[cfg(not(windows))]
-const EDGE: f64 = 8.0;
-/// Space between the taskbar, the screen edge and the panel, as the native
-/// Windows 11 flyouts leave.
-#[cfg(windows)]
-const FLYOUT_MARGIN: f64 = 12.0;
 
 /// A click on the icon also takes focus from the open panel, so the blur that
 /// hides it lands just before the click that would reopen it. A click this
@@ -106,7 +101,7 @@ pub fn toggle(app: &AppHandle, icon: Rect) {
             let _ = window.hide();
         }
         Some(Toggle::Open(height)) => {
-            place(app, &window, icon, height);
+            platform::place(app, &window, icon, height);
             reveal(&window);
         }
         Some(Toggle::WaitForSize) | None => {}
@@ -131,7 +126,7 @@ pub fn resize(app: &AppHandle, height: f64) {
         placement.icon.map(|icon| (icon, show))
     });
     if let Some(Some((icon, show))) = placed {
-        place(app, &window, icon, height);
+        platform::place(app, &window, icon, height);
         if show {
             reveal(&window);
         }
@@ -195,162 +190,13 @@ fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .visible(false)
         .focused(false)
         .build()?;
-    make_panel(&window);
+    crate::panel::make_panel(&window, crate::panel::Kind::Pulse);
     Ok(window)
-}
-
-/// Turns the window into a panel that can be key (it takes typing and its
-/// blur closes it) but never main, so window managers that track the main
-/// window leave it alone. It opens on whichever Space is current, like a
-/// native menu, including a full-screen app's: without `FullScreenAuxiliary`,
-/// showing the panel there would switch the display away from that app.
-#[cfg(target_os = "macos")]
-fn make_panel(window: &WebviewWindow) {
-    use objc2::runtime::{AnyClass, AnyObject};
-    use objc2::{define_class, ClassType, MainThreadOnly};
-    use objc2_app_kit::{NSPanel, NSWindowCollectionBehavior};
-
-    define_class!(
-        // SAFETY: NSPanel has no subclassing requirements, the class adds no
-        // instance variables, and it overrides nothing but two predicates.
-        #[unsafe(super(NSPanel))]
-        #[thread_kind = MainThreadOnly]
-        #[name = "OpenRizePulsePanel"]
-        struct PulsePanel;
-
-        impl PulsePanel {
-            #[unsafe(method(canBecomeKeyWindow))]
-            fn can_become_key_window(&self) -> bool {
-                true
-            }
-
-            #[unsafe(method(canBecomeMainWindow))]
-            fn can_become_main_window(&self) -> bool {
-                false
-            }
-        }
-    );
-
-    let target = window.clone();
-    let _ = window.run_on_main_thread(move || {
-        let Ok(pointer) = target.ns_window() else {
-            return;
-        };
-        let object = pointer.cast::<AnyObject>();
-        let class: &AnyClass = PulsePanel::class();
-        // SAFETY: `ns_window` is the live NSWindow behind this Tauri window and
-        // this runs on the main thread. The swap is the one the reminder panel
-        // makes (see `breaks::surface`): an NSPanel subclass with no extra
-        // instance variables, overriding the predicates tao's subclass used.
-        unsafe { objc2::ffi::object_setClass(object, class) };
-        // SAFETY: the object is now a `PulsePanel`, an NSPanel.
-        let panel = unsafe { &*object.cast::<NSPanel>() };
-        // Panels hide when the app deactivates; the blur handler already
-        // hides this one, and two paths racing to hide it confuse the toggle.
-        panel.setHidesOnDeactivate(false);
-        panel.setCollectionBehavior(
-            panel.collectionBehavior()
-                | NSWindowCollectionBehavior::CanJoinAllSpaces
-                | NSWindowCollectionBehavior::FullScreenAuxiliary,
-        );
-    });
-}
-
-#[cfg(not(target_os = "macos"))]
-fn make_panel(window: &WebviewWindow) {
-    let _ = window.set_visible_on_all_workspaces(true);
 }
 
 fn reveal(window: &WebviewWindow) {
     let _ = window.show();
     let _ = window.set_focus();
-}
-
-/// Centres the panel on the icon, kept inside the screen's usable area: under
-/// the menu bar item, or above it when there is no room below.
-#[cfg(not(windows))]
-fn place(app: &AppHandle, window: &WebviewWindow, icon: Rect, height: f64) {
-    let anchor = anchor(app, icon);
-    let (scale, area) = match app.monitor_from_point(anchor.x, anchor.top).ok().flatten() {
-        Some(monitor) => {
-            let area = monitor.work_area();
-            let left = f64::from(area.position.x);
-            let top = f64::from(area.position.y);
-            (
-                monitor.scale_factor(),
-                Area {
-                    left,
-                    top,
-                    right: left + f64::from(area.size.width),
-                    bottom: top + f64::from(area.size.height),
-                },
-            )
-        }
-        None => (
-            window.scale_factor().unwrap_or(1.0),
-            Area {
-                left: f64::MIN,
-                top: f64::MIN,
-                right: f64::MAX,
-                bottom: f64::MAX,
-            },
-        ),
-    };
-
-    let (width, tall) = placement::physical_size((WIDTH, height), scale);
-    let gap = GAP * scale;
-    let edge = EDGE * scale;
-    let max_left = (area.right - width - edge).max(area.left + edge);
-    let panel_x = (anchor.x - width / 2.0).clamp(area.left + edge, max_left);
-    let below = anchor.bottom + gap;
-    let panel_y = if below + tall <= area.bottom {
-        below
-    } else {
-        (anchor.top - gap - tall).max(area.top + edge)
-    };
-
-    placement::set_bounds(window, scale, (panel_x, panel_y), (WIDTH, height));
-}
-
-/// Puts the panel in the work-area corner beside the taskbar, on the monitor
-/// that holds the icon. Where the icon is only picks the corner: an icon in
-/// the overflow flyout sits mid-screen, and the panel should still hug the
-/// taskbar once that flyout closes.
-#[cfg(windows)]
-fn place(app: &AppHandle, window: &WebviewWindow, icon: Rect, height: f64) {
-    let anchor = anchor(app, icon);
-    let centre = (anchor.x, (anchor.top + anchor.bottom) / 2.0);
-    let monitor = app
-        .monitor_from_point(centre.0, centre.1)
-        .ok()
-        .flatten()
-        .or_else(|| {
-            let cursor = app.cursor_position().ok()?;
-            app.monitor_from_point(cursor.x, cursor.y).ok().flatten()
-        })
-        .or_else(|| app.primary_monitor().ok().flatten());
-    let Some(monitor) = monitor else {
-        return;
-    };
-    let scale = monitor.scale_factor();
-    let work = monitor.work_area();
-    let (x, y) = placement::flyout_origin(
-        placement::PixelRect::new(*monitor.position(), *monitor.size()),
-        placement::PixelRect::new(work.position, work.size),
-        centre,
-        placement::physical_size((WIDTH, height), scale),
-        FLYOUT_MARGIN * scale,
-    );
-    placement::set_bounds(window, scale, (x.round(), y.round()), (WIDTH, height));
-}
-
-/// A screen's usable area in physical pixels.
-#[cfg(not(windows))]
-struct Area {
-    left: f64,
-    top: f64,
-    right: f64,
-    bottom: f64,
 }
 
 /// The icon's horizontal centre and vertical extent in physical pixels.

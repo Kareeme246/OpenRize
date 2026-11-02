@@ -9,36 +9,85 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use windows::core::{w, Interface, BOOL, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
+use windows::Win32::Media::Audio::{EDataFlow, ERole, IMMDeviceEnumerator};
 use windows::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
 };
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
 };
+use windows::Win32::System::Diagnostics::ToolHelp::PROCESSENTRY32W;
 use windows::Win32::System::RemoteDesktop::{
     WTSActive, WTSFreeMemory, WTSQuerySessionInformationW, WTSSessionInfoEx, WTSINFOEXW,
     WTS_CURRENT_SESSION, WTS_SESSIONSTATE_LOCK,
 };
 use windows::Win32::System::Threading::{
-    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    GetCurrentProcess, OpenProcess, ProcessPowerThrottling, QueryFullProcessImageNameW,
+    SetProcessInformation, PROCESS_NAME_WIN32, PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+    PROCESS_POWER_THROTTLING_EXECUTION_SPEED, PROCESS_POWER_THROTTLING_STATE,
+    PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumChildWindows, GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW,
+    EnumChildWindows, GetClassNameW, GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW,
     GetWindowThreadProcessId,
 };
 
 use super::{domain_of, WindowSample};
 
-/// Windows does not throttle a background thread the way App Nap does.
+/// Keeps Windows from throttling the sampler. Windows 11 may put a process
+/// with no visible window (the app lives in the tray) into EcoQoS, which slows
+/// its threads and coalesces its timers, so the process opts out of execution
+/// speed throttling while capture runs.
 pub struct AppNapAssertion;
 
 impl AppNapAssertion {
     pub fn begin(_reason: &str) -> Self {
+        // Opting out is best effort: Windows before 10 1709 lacks the call.
+        if let Err(error) = set_execution_speed_throttling(Some(false)) {
+            eprintln!("could not opt out of power throttling: {error}");
+        }
         Self
+    }
+}
+
+impl Drop for AppNapAssertion {
+    fn drop(&mut self) {
+        // Hand the decision back to the system.
+        let _ = set_execution_speed_throttling(None);
+    }
+}
+
+/// Sets this process's execution speed throttling: forced on or off, or, with
+/// `None`, left to the system.
+fn set_execution_speed_throttling(forced: Option<bool>) -> windows::core::Result<()> {
+    let state = PROCESS_POWER_THROTTLING_STATE {
+        Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        ControlMask: if forced.is_some() {
+            PROCESS_POWER_THROTTLING_EXECUTION_SPEED
+        } else {
+            0
+        },
+        StateMask: if forced == Some(true) {
+            PROCESS_POWER_THROTTLING_EXECUTION_SPEED
+        } else {
+            0
+        },
+    };
+    // SAFETY: GetCurrentProcess returns a pseudo handle that needs no closing,
+    // and the buffer is a PROCESS_POWER_THROTTLING_STATE of the size passed.
+    unsafe {
+        SetProcessInformation(
+            GetCurrentProcess(),
+            ProcessPowerThrottling,
+            (&state as *const PROCESS_POWER_THROTTLING_STATE).cast(),
+            size_of::<PROCESS_POWER_THROTTLING_STATE>() as u32,
+        )
     }
 }
 
@@ -319,8 +368,6 @@ fn session_is_inactive() -> bool {
     away
 }
 
-use windows::Win32::Media::Audio::{EDataFlow, ERole, IMMDeviceEnumerator};
-
 /// Milliseconds since the last keyboard or mouse input.
 pub fn idle_ms() -> u64 {
     use windows::Win32::System::SystemInformation::{GetTickCount, GetTickCount64};
@@ -361,14 +408,16 @@ fn idle_between(now_tick: u32, last_input_tick: u32, uptime_ms: u64) -> u64 {
 /// Whether the foreground app is being watched or listened to, the Windows
 /// counterpart of macOS reading the front app's display-sleep assertion.
 ///
-/// Windows has no per-process view of display requests without admin rights,
-/// only the system-wide one, which any background app can hold. So the
-/// request must be backed by something that ties it to the foreground app:
-/// the foreground window is fullscreen, or the foreground app (the same
+/// A fullscreen foreground window, game or presentation counts on its own:
+/// the shell already tells those apart from a background app, and games and
+/// slides often never raise a display request. Otherwise Windows has no
+/// per-process view of display requests without admin rights, only the
+/// system-wide one, which any background app can hold. So the request must be
+/// backed by something that ties it to the foreground app: it (the same
 /// process, another process of the same executable as in a multi-process
 /// browser, or a descendant process such as a WebView2 host) has an audio
 /// session playing sound or capturing the microphone. The cheap checks run
-/// first, so a tick costs one system call unless a display request exists.
+/// first, so a tick costs two system calls unless a display request exists.
 fn keeps_display_awake(pid: u32) -> bool {
     watching(display_required, foreground_is_fullscreen, || {
         foreground_is_playing_or_recording(pid)
@@ -382,7 +431,7 @@ fn watching(
     fullscreen: impl FnOnce() -> bool,
     audio: impl FnOnce() -> bool,
 ) -> bool {
-    display_required() && (fullscreen() || audio())
+    fullscreen() || (display_required() && audio())
 }
 
 /// Some process holds the display on (ES_DISPLAY_REQUIRED), whether through
@@ -446,8 +495,8 @@ fn foreground_is_playing_or_recording(foreground_pid: u32) -> bool {
     let Some(devices) = audio_devices() else {
         return false;
     };
-    // Walked only when a session is not found by pid or executable name.
-    let mut parents: Option<HashMap<u32, u32>> = None;
+    // Fetched only when a session is not found by pid or executable name.
+    let mut parents: Option<Rc<ParentMap>> = None;
     let mut belongs = |pid: u32| {
         pid == foreground_pid
             || process_path(pid)
@@ -455,7 +504,7 @@ fn foreground_is_playing_or_recording(foreground_pid: u32) -> bool {
             || descends_from(
                 pid,
                 foreground_pid,
-                parents.get_or_insert_with(process_parents),
+                parents.get_or_insert_with(cached_process_parents),
             )
     };
     [
@@ -538,32 +587,101 @@ unsafe fn device_has_session(
     }
 }
 
+/// How long a process-parent map is reused. A call or media session is looked
+/// at every tick while it lasts, and a snapshot of every process is far
+/// costlier than the tick; a process started within this window is found by
+/// the next map instead.
+const PARENTS_TTL: Duration = Duration::from_secs(5);
+
+/// Parent of every running process.
+type ParentMap = HashMap<u32, u32>;
+
+thread_local! {
+    /// The last `process_parents` result and when it was taken.
+    static PARENTS: RefCell<Option<(Instant, Rc<ParentMap>)>> = const { RefCell::new(None) };
+    /// The last process whose path could not be opened, and its executable name.
+    static PROTECTED_NAMES: RefCell<Option<(u32, String)>> = const { RefCell::new(None) };
+}
+
+/// `process_parents`, reused for `PARENTS_TTL`.
+fn cached_process_parents() -> Rc<ParentMap> {
+    PARENTS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some((taken, parents)) = cache.as_ref() {
+            if taken.elapsed() < PARENTS_TTL {
+                return Rc::clone(parents);
+            }
+        }
+        let parents = Rc::new(process_parents());
+        *cache = Some((Instant::now(), Rc::clone(&parents)));
+        parents
+    })
+}
+
 /// Parent of every running process, from one snapshot.
-fn process_parents() -> HashMap<u32, u32> {
+fn process_parents() -> ParentMap {
+    let mut parents = HashMap::new();
+    each_process(|entry| {
+        parents.insert(entry.th32ProcessID, entry.th32ParentProcessID);
+        true
+    });
+    parents
+}
+
+/// The executable name (not the path) of a running process, read from a
+/// process snapshot. Unlike `process_path` it needs no access to the process,
+/// so it also names SYSTEM, protected and elevated ones.
+fn process_exe_name(pid: u32) -> Option<String> {
+    if let Some(name) = PROTECTED_NAMES.with(|last| {
+        last.borrow()
+            .as_ref()
+            .filter(|(cached, _)| *cached == pid)
+            .map(|(_, name)| name.clone())
+    }) {
+        return Some(name);
+    }
+    let mut name = None;
+    each_process(|entry| {
+        if entry.th32ProcessID != pid {
+            return true;
+        }
+        let file = &entry.szExeFile;
+        let length = file
+            .iter()
+            .position(|&unit| unit == 0)
+            .unwrap_or(file.len());
+        name = Some(String::from_utf16_lossy(&file[..length]));
+        false
+    });
+    if let Some(name) = &name {
+        PROTECTED_NAMES.with(|last| *last.borrow_mut() = Some((pid, name.clone())));
+    }
+    name
+}
+
+/// Calls `visit` on each running process of one snapshot until it returns
+/// false.
+fn each_process(mut visit: impl FnMut(&PROCESSENTRY32W) -> bool) {
     use windows::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-        TH32CS_SNAPPROCESS,
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
     };
 
-    let mut parents = HashMap::new();
     // SAFETY: the snapshot handle is closed before returning, and the entry
     // is sized as the API requires.
     unsafe {
         let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
-            return parents;
+            return;
         };
         let mut entry = PROCESSENTRY32W {
             dwSize: size_of::<PROCESSENTRY32W>() as u32,
             ..Default::default()
         };
         let mut more = Process32FirstW(snapshot, &mut entry).is_ok();
-        while more {
-            parents.insert(entry.th32ProcessID, entry.th32ParentProcessID);
+        while more && visit(&entry) {
             more = Process32NextW(snapshot, &mut entry).is_ok();
         }
         let _ = CloseHandle(snapshot);
     }
-    parents
 }
 
 /// Whether `ancestor` is among the first few parents of `pid`.
@@ -612,33 +730,46 @@ mod presence_tests {
     #[test]
     fn a_display_request_alone_is_not_watching() {
         assert!(!watching(|| true, || false, || false));
-        assert!(watching(|| true, || true, || false));
         assert!(watching(|| true, || false, || true));
     }
 
     #[test]
-    fn without_a_display_request_nothing_else_is_asked() {
-        let asked = Cell::new(0);
-        let probe = || {
-            asked.set(asked.get() + 1);
-            true
-        };
-        assert!(!watching(|| false, probe, probe));
-        assert_eq!(asked.get(), 0);
+    fn fullscreen_is_watching_without_a_display_request() {
+        // A game or presentation that never raises ES_DISPLAY_REQUIRED.
+        assert!(watching(|| false, || true, || false));
+        assert!(watching(|| true, || true, || false));
     }
 
     #[test]
-    fn audio_is_not_asked_once_fullscreen_settles_it() {
+    fn audio_without_a_display_request_is_not_watching() {
         let asked = Cell::new(false);
-        assert!(watching(
-            || true,
-            || true,
+        assert!(!watching(
+            || false,
+            || false,
             || {
                 asked.set(true);
                 true
             }
         ));
         assert!(!asked.get());
+    }
+
+    #[test]
+    fn nothing_else_is_asked_once_fullscreen_settles_it() {
+        let asked = Cell::new(0);
+        let probe = || {
+            asked.set(asked.get() + 1);
+            true
+        };
+        assert!(watching(probe, || true, probe));
+        assert_eq!(asked.get(), 0);
+    }
+
+    #[test]
+    fn a_protected_process_is_named_by_its_executable() {
+        assert_eq!(exe_stem("LogonUI.exe"), "LogonUI");
+        assert_eq!(exe_stem("consent.exe"), "consent");
+        assert_eq!(exe_stem("System"), "System");
     }
 
     #[test]
@@ -687,20 +818,23 @@ pub fn read_active_window() -> Option<WindowSample> {
     }
     let title = window_title(window);
 
-    let mut pid = process_id(window)?;
-    let mut path = process_path(pid)?;
-    if file_name(&path).eq_ignore_ascii_case(FRAME_HOST) {
-        if let Some(app_pid) = hosted_app_pid(window, pid) {
-            pid = app_pid;
-            path = process_path(pid)?;
-        }
+    let frame_pid = process_id(window)?;
+    let mut process = identify(frame_pid)?;
+    if process.executable == FRAME_HOST {
+        // Never the frame host itself, or every packaged app would merge into
+        // one "Application Frame Host". An unresolved frame reads as no
+        // sample, which the store takes as no change: the previous app keeps
+        // the time until the app behind the frame can be named.
+        process = identify(hosted_app_pid(window, frame_pid)?)?;
     }
-
-    let executable = file_name(&path).to_lowercase();
-    let app = app_name(&path);
+    let Process {
+        pid,
+        app,
+        executable,
+    } = process;
     let url = BROWSERS
         .contains(&executable.as_str())
-        .then(|| address_bar::url_of(window))
+        .then(|| address_bar::url_of_titled(window, &title))
         .flatten();
     let domain = url.as_deref().and_then(domain_of);
 
@@ -723,8 +857,47 @@ fn window_title(window: HWND) -> String {
         return String::new();
     }
     let mut buffer = vec![0u16; length as usize + 1];
+    // SAFETY: the buffer is one unit longer than the title was a moment ago;
+    // GetWindowTextW truncates to it and returns the units copied.
     let copied = unsafe { GetWindowTextW(window, &mut buffer) };
     String::from_utf16_lossy(&buffer[..copied.max(0) as usize])
+}
+
+/// Who a window's process is: what the sample records for it.
+struct Process {
+    pid: u32,
+    /// What the user would call the app.
+    app: String,
+    /// The lowercased executable name, the stable identity of the app.
+    executable: String,
+}
+
+/// Names a process. When its path cannot be opened (SYSTEM, protected and some
+/// elevated processes such as LogonUI or consent.exe refuse even limited
+/// query rights) the executable name comes from a process snapshot instead,
+/// so the same app reads the same either way and the window is still seen.
+fn identify(pid: u32) -> Option<Process> {
+    if let Some(path) = process_path(pid) {
+        return Some(Process {
+            pid,
+            app: app_name(&path),
+            executable: file_name(&path).to_lowercase(),
+        });
+    }
+    let name = process_exe_name(pid)?;
+    Some(Process {
+        pid,
+        app: exe_stem(&name),
+        executable: name.to_lowercase(),
+    })
+}
+
+/// An executable's name without the extension.
+fn exe_stem(name: &str) -> String {
+    Path::new(name)
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_else(|| name.to_string())
 }
 
 fn process_id(window: HWND) -> Option<u32> {
@@ -753,12 +926,20 @@ fn process_path(pid: u32) -> Option<String> {
     }
 }
 
-/// The process behind a packaged app's frame: the first child window that
-/// belongs to some other process than the frame host.
+/// The window class of a packaged app's own window inside its frame.
+const CORE_WINDOW: &str = "Windows.UI.Core.CoreWindow";
+
+/// The process behind a packaged app's frame: the child window of class
+/// `CORE_WINDOW` if there is one, else the first child window that belongs to
+/// some other process than the frame host. `None` if the app is not (yet)
+/// there, as while it starts or is suspended.
 fn hosted_app_pid(frame: HWND, host_pid: u32) -> Option<u32> {
     struct Search {
         host_pid: u32,
+        /// A child of another process, whatever its class.
         found: Option<u32>,
+        /// A `CORE_WINDOW` child of another process.
+        core: Option<u32>,
     }
 
     unsafe extern "system" fn visit(child: HWND, state: LPARAM) -> BOOL {
@@ -766,8 +947,12 @@ fn hosted_app_pid(frame: HWND, host_pid: u32) -> Option<u32> {
         let search = unsafe { &mut *(state.0 as *mut Search) };
         match process_id(child) {
             Some(pid) if pid != search.host_pid => {
-                search.found = Some(pid);
-                BOOL(0)
+                if window_class(child) == CORE_WINDOW {
+                    search.core = Some(pid);
+                    return BOOL(0);
+                }
+                search.found.get_or_insert(pid);
+                BOOL(1)
             }
             _ => BOOL(1),
         }
@@ -776,6 +961,7 @@ fn hosted_app_pid(frame: HWND, host_pid: u32) -> Option<u32> {
     let mut search = Search {
         host_pid,
         found: None,
+        core: None,
     };
     // SAFETY: `visit` only runs during this call, while `search` lives.
     unsafe {
@@ -785,7 +971,15 @@ fn hosted_app_pid(frame: HWND, host_pid: u32) -> Option<u32> {
             LPARAM(&mut search as *mut Search as isize),
         );
     }
-    search.found
+    search.core.or(search.found)
+}
+
+fn window_class(window: HWND) -> String {
+    let mut buffer = [0u16; 64];
+    // SAFETY: fills the buffer and returns the units copied, 0 for a stale
+    // handle; a longer class name is truncated.
+    let copied = unsafe { GetClassNameW(window, &mut buffer) };
+    String::from_utf16_lossy(&buffer[..copied.max(0) as usize])
 }
 
 fn file_name(path: &str) -> &str {

@@ -26,7 +26,7 @@ import * as api from "./lib/api";
 import { currentCalendarDay, localDateString } from "./lib/dates";
 import { isTyping } from "./lib/entries";
 import { relaunchModalOpen } from "./lib/onboarding";
-import { hasPrimaryModifier } from "./lib/platform";
+import { hasPrimaryModifier, REDO_KEY } from "./lib/platform";
 import type { ActivitySnapshot, ActivityTick, Route } from "./lib/types";
 import { Apps } from "./pages/Apps";
 import { Calendar } from "./pages/Calendar";
@@ -173,17 +173,20 @@ export default function App() {
   // remains available after navigating away from the page that made it.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      const key = event.key.toLowerCase();
+      // Shift+Z redoes everywhere; Ctrl+Y redoes where REDO_KEY says so.
+      const redo = event.shiftKey ? key === "z" : key === REDO_KEY;
+      const undo = !event.shiftKey && key === "z";
       if (
         !hasPrimaryModifier(event) ||
         event.altKey ||
-        event.key.toLowerCase() !== "z" ||
+        !(undo || redo) ||
         isTyping(event.target)
       )
         return;
       event.preventDefault();
       if (undoBusy.current) return;
       undoBusy.current = true;
-      const redo = event.shiftKey;
       void api
         .undo(redo)
         .then((label) =>

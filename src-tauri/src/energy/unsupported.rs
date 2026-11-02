@@ -2,6 +2,9 @@
 
 use super::*;
 
+/// No telemetry here, so the sampler stays off.
+pub const HAS_ENERGY_COUNTER: bool = false;
+
 pub fn read_proc_rusage(_pid: i32) -> Option<ProcessRusage> {
     Some(ProcessRusage::default())
 }
@@ -11,4 +14,8 @@ pub fn read_battery_info() -> BatteryInfo {
         on_battery: false,
         battery_percent: None,
     }
+}
+
+pub fn low_power_mode() -> bool {
+    false
 }

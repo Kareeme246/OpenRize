@@ -102,7 +102,8 @@ pub fn resize(app: &AppHandle, width: f64, height: f64) {
         let _ = window.show();
         // The window server only learns a window's "does not activate the
         // app" tag once the window exists on screen, so state it again now.
-        prevent_activation(&window);
+        // On Windows this re-asserts the topmost flag the show may have lost.
+        crate::panel::prevent_activation(&window);
     }
 }
 
@@ -194,101 +195,8 @@ fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         // Dev builds stay capturable so `pnpm dev:drive` can screenshot it.
         .content_protected(!cfg!(debug_assertions))
         .build()?;
-    make_non_activating(&window);
+    crate::panel::make_panel(&window, crate::panel::Kind::Reminder);
     Ok(window)
-}
-
-#[cfg(target_os = "macos")]
-fn prevent_activation(window: &WebviewWindow) {
-    use objc2_app_kit::{NSPanel, NSWindowStyleMask};
-    use objc2_foundation::NSObjectProtocol;
-
-    let target = window.clone();
-    let _ = window.run_on_main_thread(move || {
-        let Ok(pointer) = target.ns_window() else {
-            return;
-        };
-        // SAFETY: `make_non_activating` made this window an NSPanel, and this
-        // runs on the main thread.
-        let panel = unsafe { &*pointer.cast::<NSPanel>() };
-        let mask = panel.styleMask();
-        panel.setStyleMask(mask - NSWindowStyleMask::NonactivatingPanel);
-        panel.setStyleMask(mask | NSWindowStyleMask::NonactivatingPanel);
-        // The style mask alone does not stop a click from activating the app
-        // (the mask bit is only honoured when the window is created with it).
-        // AppKit's own flag for it is private, so it is used only when present.
-        let selector = objc2::sel!(_setPreventsActivation:);
-        if panel.respondsToSelector(selector) {
-            // SAFETY: the selector takes one BOOL and returns nothing.
-            let _: () = unsafe { objc2::msg_send![panel, _setPreventsActivation: true] };
-        }
-    });
-}
-
-/// Nothing to repeat on Windows: WS_EX_NOACTIVATE is a style of the window, not
-/// a tag the window server learns late.
-#[cfg(not(target_os = "macos"))]
-fn prevent_activation(_window: &WebviewWindow) {}
-
-#[cfg(target_os = "macos")]
-fn make_non_activating(window: &WebviewWindow) {
-    use objc2::runtime::{AnyClass, AnyObject};
-    use objc2::{define_class, ClassType, MainThreadOnly};
-    use objc2_app_kit::{NSPanel, NSWindowCollectionBehavior, NSWindowStyleMask};
-
-    define_class!(
-        // SAFETY: NSPanel has no subclassing requirements, the class adds no
-        // instance variables, and it overrides nothing but two predicates.
-        #[unsafe(super(NSPanel))]
-        #[thread_kind = MainThreadOnly]
-        #[name = "OpenRizeReminderPanel"]
-        struct ReminderPanel;
-
-        impl ReminderPanel {
-            #[unsafe(method(canBecomeKeyWindow))]
-            fn can_become_key_window(&self) -> bool {
-                false
-            }
-
-            #[unsafe(method(canBecomeMainWindow))]
-            fn can_become_main_window(&self) -> bool {
-                false
-            }
-        }
-    );
-
-    let target = window.clone();
-    let _ = window.run_on_main_thread(move || {
-        let Ok(pointer) = target.ns_window() else {
-            return;
-        };
-        let object = pointer.cast::<AnyObject>();
-        let class: &AnyClass = ReminderPanel::class();
-        // SAFETY: `ns_window` is the live NSWindow behind this Tauri window and
-        // this runs on the main thread. Swapping an NSWindow to an NSPanel
-        // subclass with no extra instance variables is how the
-        // `tauri-nspanel` crate makes windows non-activating; the panel then
-        // overrides the predicates tao's own subclass used for focusability.
-        unsafe { objc2::ffi::object_setClass(object, class) };
-        // SAFETY: the object is now a `ReminderPanel`, an NSPanel.
-        let panel = unsafe { &*object.cast::<NSPanel>() };
-        panel.setStyleMask(panel.styleMask() | NSWindowStyleMask::NonactivatingPanel);
-        panel.setFloatingPanel(true);
-        panel.setHidesOnDeactivate(false);
-        panel.setBecomesKeyOnlyIfNeeded(true);
-        panel.setCollectionBehavior(
-            panel.collectionBehavior()
-                | NSWindowCollectionBehavior::CanJoinAllSpaces
-                | NSWindowCollectionBehavior::FullScreenAuxiliary
-                | NSWindowCollectionBehavior::Stationary
-                | NSWindowCollectionBehavior::IgnoresCycle,
-        );
-    });
-}
-
-#[cfg(not(target_os = "macos"))]
-fn make_non_activating(window: &WebviewWindow) {
-    let _ = window.set_visible_on_all_workspaces(true);
 }
 
 #[cfg(test)]

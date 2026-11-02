@@ -19,10 +19,24 @@ fn main_app_service() -> Option<Retained<AnyObject>> {
     unsafe { msg_send![class, mainAppService] }
 }
 
+/// Maps `SMAppServiceStatus`. `NotFound` (3) means macOS has no record of
+/// the service, which for the main app just means it was never
+/// registered, so it reads as off.
+fn from_status(status: isize) -> LoginItemState {
+    match status {
+        1 => LoginItemState::Enabled,
+        2 => LoginItemState::RequiresApproval,
+        _ => LoginItemState::Disabled,
+    }
+}
+
+/// Nothing to migrate: only the Windows registration has an older format.
+pub fn refresh() {}
+
 pub fn state() -> LoginItemState {
     match main_app_service() {
         // SAFETY: `status` is a plain NSInteger property getter.
-        Some(service) => LoginItemState::from_status(unsafe { msg_send![&service, status] }),
+        Some(service) => from_status(unsafe { msg_send![&service, status] }),
         None => LoginItemState::Unsupported,
     }
 }
@@ -44,4 +58,17 @@ pub fn set(enabled: bool) -> Result<(), String> {
         let description: Retained<NSString> = unsafe { msg_send![&error, localizedDescription] };
         description.to_string()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_codes_map_to_states() {
+        assert_eq!(from_status(0), LoginItemState::Disabled);
+        assert_eq!(from_status(1), LoginItemState::Enabled);
+        assert_eq!(from_status(2), LoginItemState::RequiresApproval);
+        assert_eq!(from_status(3), LoginItemState::Disabled);
+    }
 }

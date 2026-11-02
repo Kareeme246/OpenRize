@@ -1,12 +1,15 @@
 //! Window geometry shared by the Pulse and reminder panels.
 //!
 //! Everything here is plain numbers in physical pixels so it can be tested
-//! without a display; the one function that touches a window is `set_bounds`.
+//! without a display; the functions that touch a window are `set_bounds` and
+//! `place_under_icon`.
 //! Windows is the only user of the taskbar maths (macOS anchors Pulse under
-//! its menu bar item, see `pulse::place`).
+//! its menu bar item, see `place_under_icon`).
 
 #[cfg(any(windows, test))]
 use tauri::PhysicalSize;
+#[cfg(not(windows))]
+use tauri::{AppHandle, Rect};
 use tauri::{LogicalSize, PhysicalPosition, WebviewWindow};
 
 /// A rectangle in physical pixels.
@@ -100,6 +103,69 @@ pub fn flyout_origin(
     };
     // A panel larger than the work area keeps its top-left corner on screen.
     (x.max(at_left), y.max(at_top))
+}
+
+/// Space between the menu bar and the panel's top edge.
+#[cfg(not(windows))]
+const GAP: f64 = 6.0;
+/// Closest the panel may sit to a screen edge.
+#[cfg(not(windows))]
+const EDGE: f64 = 8.0;
+
+/// A screen's usable area in physical pixels.
+#[cfg(not(windows))]
+struct Area {
+    left: f64,
+    top: f64,
+    right: f64,
+    bottom: f64,
+}
+
+/// Centres the panel on the icon, kept inside the screen's usable area: under
+/// the menu bar item, or above it when there is no room below. Used where
+/// Pulse hangs off a menu bar rather than a taskbar (see `pulse::platform`).
+#[cfg(not(windows))]
+pub fn place_under_icon(app: &AppHandle, window: &WebviewWindow, icon: Rect, height: f64) {
+    let anchor = super::anchor(app, icon);
+    let (scale, area) = match app.monitor_from_point(anchor.x, anchor.top).ok().flatten() {
+        Some(monitor) => {
+            let area = monitor.work_area();
+            let left = f64::from(area.position.x);
+            let top = f64::from(area.position.y);
+            (
+                monitor.scale_factor(),
+                Area {
+                    left,
+                    top,
+                    right: left + f64::from(area.size.width),
+                    bottom: top + f64::from(area.size.height),
+                },
+            )
+        }
+        None => (
+            window.scale_factor().unwrap_or(1.0),
+            Area {
+                left: f64::MIN,
+                top: f64::MIN,
+                right: f64::MAX,
+                bottom: f64::MAX,
+            },
+        ),
+    };
+
+    let (width, tall) = physical_size((super::WIDTH, height), scale);
+    let gap = GAP * scale;
+    let edge = EDGE * scale;
+    let max_left = (area.right - width - edge).max(area.left + edge);
+    let panel_x = (anchor.x - width / 2.0).clamp(area.left + edge, max_left);
+    let below = anchor.bottom + gap;
+    let panel_y = if below + tall <= area.bottom {
+        below
+    } else {
+        (anchor.top - gap - tall).max(area.top + edge)
+    };
+
+    set_bounds(window, scale, (panel_x, panel_y), (super::WIDTH, height));
 }
 
 /// Whether moving a window between monitors at these scale factors fires a DPI

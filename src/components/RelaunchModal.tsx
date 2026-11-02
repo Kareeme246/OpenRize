@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useRelaunch } from "../hooks/useRelaunch";
+import { TRAY_PLACE } from "../lib/platform";
 
 /**
  * Held over the whole window from the moment Accessibility is allowed in a
@@ -52,8 +53,8 @@ function Screen() {
         </p>
         {failed && (
           <p className="mt-2 text-[12px] text-rose-500" role="alert">
-            OpenRize couldn't restart itself. Quit it from the menu bar and open
-            it again.
+            OpenRize couldn't restart itself. Quit it from the {TRAY_PLACE} and
+            open it again.
           </p>
         )}
         <div className="mt-4 flex justify-end">

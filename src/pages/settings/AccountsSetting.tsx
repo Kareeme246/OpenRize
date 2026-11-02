@@ -13,7 +13,7 @@ import {
 } from "../../lib/accounts";
 import * as api from "../../lib/api";
 import { describeError } from "../../lib/api";
-import { THIS_COMPUTER } from "../../lib/platform";
+import { THIS_COMPUTER, TRASH } from "../../lib/platform";
 import { SettingGroup } from "./SettingParts";
 
 const ROW_BUTTON =
@@ -89,7 +89,7 @@ export function AccountsSetting() {
                     ? "Switch to another account first"
                     : account.missing
                       ? "Forget this account"
-                      : "Move this account's data to the Trash"
+                      : `Move this account's data to the ${TRASH}`
                 }
               >
                 <button
@@ -135,7 +135,7 @@ export function AccountsSetting() {
       {deleting && (
         <ConfirmDialog
           title={`Delete ${deleting.name}?`}
-          body={`${deleting.name}'s time entries, projects, clients, invoices and stopwatches move to the Trash as one folder. You can put it back from the Trash until you empty it.`}
+          body={`${deleting.name}'s time entries, projects, clients, invoices and stopwatches move to the ${TRASH} as one folder. You can put it back from the ${TRASH} until you empty it.`}
           confirmLabel={`Delete ${deleting.name}`}
           onCancel={() => setDeleting(null)}
           onConfirm={() => remove(deleting)}

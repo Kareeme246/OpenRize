@@ -105,13 +105,20 @@ pub fn read_battery_info() -> BatteryInfo {
     native::read_battery_info()
 }
 
+/// Whether the platform's battery saver (Low Power Mode, Battery Saver) is on.
+pub fn low_power_mode() -> bool {
+    native::low_power_mode()
+}
+
+/// Whether the platform reports per-process energy. Without one the sampler
+/// would only write CPU-time guesses, so it is not started (see
+/// `HAS_ENERGY_MONITOR` in src/lib/platform.ts for the matching UI gate).
+pub const HAS_ENERGY_COUNTER: bool = native::HAS_ENERGY_COUNTER;
+
 // --- Background energy sampler -----------------------------------------------
 
-/// Windows has no per-process energy counter, so it ships without the monitor
-/// (the UI hides it, see `HAS_ENERGY_MONITOR` in src/lib/platform.ts) and the
-/// sampler would only burn a thread and write CPU-time guesses.
 pub fn spawn_sampler(app: AppHandle, db_path: PathBuf) {
-    if cfg!(windows) {
+    if !HAS_ENERGY_COUNTER {
         return;
     }
     let running = Arc::new(AtomicBool::new(true));

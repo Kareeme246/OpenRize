@@ -4,6 +4,7 @@ mod ai;
 #[cfg(target_os = "macos")]
 mod ax;
 mod breaks;
+mod caption;
 mod capture;
 mod cli_install;
 mod commands;
@@ -96,6 +97,10 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
             cli_install::install_bundled_cli();
+            // Before the window is shown or any saved size is applied to it.
+            if let Some(main) = app.get_webview_window("main") {
+                caption::prepare(&main);
+            }
             login_item::refresh();
             // Everything stays on this machine: Local AppData on Windows. Older
             // builds used Roaming (`app_data_dir`), so existing data is moved
@@ -215,6 +220,8 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
+            caption::set_maximize_button,
+            caption::show_system_menu,
             commands::list_timers,
             commands::create_timer,
             commands::start_timer,

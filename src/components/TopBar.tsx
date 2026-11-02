@@ -1,7 +1,13 @@
-import type { ReactNode } from "react";
-import { HAS_NATIVE_CAPTION, TOP_BAR_PADDING_LEFT } from "../lib/platform";
+import { type ReactNode, useRef } from "react";
+import {
+  DRAWS_CAPTION_BUTTONS,
+  HAS_NATIVE_CAPTION,
+  TOP_BAR_PADDING_LEFT,
+  TOP_BAR_PADDING_RIGHT,
+} from "../lib/platform";
 import type { Route } from "../lib/types";
 import { AccountSwitcher } from "./AccountSwitcher";
+import { CaptionButtons, useWindowMenu } from "./CaptionButtons";
 import { Tooltip } from "./Tooltip";
 
 interface TopBarProps {
@@ -18,7 +24,9 @@ interface TopBarProps {
  * The app's own bar. On macOS `titleBarStyle: "Overlay"` (tauri.conf.json)
  * draws the webview under a transparent title bar, so this row *is* the title
  * bar and must leave room for the traffic lights on the left, and it names the
- * app. Elsewhere it is a slimmer toolbar under the native caption, which
+ * app. On Windows the native caption is removed (src-tauri/src/caption.rs), so
+ * the row is the title bar there too, with the window buttons drawn at its
+ * right end. Elsewhere it is a slimmer toolbar under the native caption, which
  * already names the app and carries the window buttons.
  */
 export function TopBar({
@@ -30,12 +38,15 @@ export function TopBar({
   onToggleSidebar,
   onNavigate,
 }: TopBarProps) {
+  const bar = useRef<HTMLElement>(null);
+  useWindowMenu(bar);
   return (
     <header
       data-tauri-drag-region={HAS_NATIVE_CAPTION ? undefined : "deep"}
-      className={`flex shrink-0 items-center gap-2 border-b border-line bg-bar pr-3 ${
+      ref={bar}
+      className={`flex shrink-0 items-center gap-2 border-b border-line bg-bar ${
         HAS_NATIVE_CAPTION ? "h-10" : "h-11"
-      } ${TOP_BAR_PADDING_LEFT}`}
+      } ${TOP_BAR_PADDING_LEFT} ${TOP_BAR_PADDING_RIGHT}`}
     >
       <div className="flex flex-1 items-center gap-2">
         <NavArrow
@@ -75,6 +86,8 @@ export function TopBar({
           <div className="flex-1" />
         </>
       )}
+
+      {DRAWS_CAPTION_BUTTONS && <CaptionButtons />}
     </header>
   );
 }

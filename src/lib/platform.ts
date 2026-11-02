@@ -62,10 +62,45 @@ export const TRASH = byPlatform({
 /**
  * Whether the OS draws its own window caption (title and window buttons)
  * above the webview. macOS overlays its title bar on the webview instead
- * (`titleBarStyle: "Overlay"` in tauri.conf.json), so the app's own bar is
- * the title bar there.
+ * (`titleBarStyle: "Overlay"` in tauri.conf.json) and Windows has its caption
+ * removed (src-tauri/src/caption.rs), so the app's own bar is the title bar on
+ * both.
  */
 export const HAS_NATIVE_CAPTION = byPlatform({
+  macos: false,
+  windows: false,
+  linux: true,
+});
+
+/**
+ * Whether the app draws the minimize, maximize and close buttons itself, at
+ * the right end of its top bar. macOS draws its traffic lights over the
+ * webview, so only a platform whose caption was removed needs them.
+ */
+export const DRAWS_CAPTION_BUTTONS = byPlatform({
+  macos: false,
+  windows: true,
+  linux: false,
+});
+
+/**
+ * Whether a right click on the top bar opens the system window menu (Restore,
+ * Move, Size, Minimize, Maximize, Close), as it does on a native caption. Only
+ * where the app's bar replaces a caption the OS removed.
+ */
+export const BAR_OPENS_WINDOW_MENU = byPlatform({
+  macos: false,
+  windows: true,
+  linux: false,
+});
+
+/**
+ * Whether the window's own theme is kept in step with the app's. Besides a
+ * caption it decides the scheme of what the OS draws for the window (native
+ * menus, the webview's context menu), so Windows keeps it even without a
+ * caption. macOS has none of that to follow.
+ */
+export const SYNCS_WINDOW_THEME = byPlatform({
   macos: false,
   windows: true,
   linux: true,
@@ -79,6 +114,16 @@ export const TOP_BAR_PADDING_LEFT = byPlatform({
   macos: "pl-[84px]",
   windows: "pl-3",
   linux: "pl-3",
+});
+
+/**
+ * Right padding of the app's top bar. Windows' caption buttons run to the
+ * window's edge, so the bar leaves no gap there.
+ */
+export const TOP_BAR_PADDING_RIGHT = byPlatform({
+  macos: "pr-3",
+  windows: "pr-0",
+  linux: "pr-3",
 });
 
 /**

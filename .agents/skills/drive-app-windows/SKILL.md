@@ -285,6 +285,10 @@ that, never silently.
 - **Rust changes need `stop` then `start`.** The instance runs `tauri dev
   --no-watch`: the frontend hot-reloads, but a Rust change only shows up in a
   fresh instance. Each worktree builds into its own `src-tauri/target`, so its first `start` pays the full compile.
+- **App restarts keep the session.** Adding or switching an account restarts the app,
+  which ends `tauri dev`; the driver starts Vite itself, so the restarted app still loads,
+  and it follows the app to its new process (`list`, `tree`, `rize` and `stop` keep working).
+  `wait` for a marker after triggering one: the window is gone for a few seconds.
 - **The webview can reload under you.** Vite HMR is live, so editing `src/` while
   a session runs may remount React and drop you back on the Calendar. `wait` for a marker
   on the page you expect.

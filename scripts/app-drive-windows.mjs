@@ -44,6 +44,9 @@ const WORKSPACE_KEY = createHash("sha1").update(REPO_ROOT.toLowerCase()).digest(
 const SESSION_ROOT = join(tmpdir(), "openrize-app-drive", WORKSPACE_KEY);
 const SHOT_DIR = join(tmpdir(), "openrize-dev-screenshot");
 const TAURI_JS = join(REPO_ROOT, "node_modules", "@tauri-apps", "cli", "tauri.js");
+const VITE_JS = join(REPO_ROOT, "node_modules", "vite", "bin", "vite.js");
+/** The binary every session in this checkout runs (one live session per checkout). */
+const APP_EXE = join(REPO_ROOT, "src-tauri", "target", "debug", "openrize.exe");
 
 // How long `start` waits for the app. A warm src-tauri/target gets there in
 // seconds; the first cold `cargo build` of the dependency tree takes minutes.
@@ -155,10 +158,45 @@ function allSessionIds() {
   return readdirSync(SESSION_ROOT).filter((name) => /^d\d+$/.test(name));
 }
 
+/**
+ * Running processes of this checkout's app binary. An app restart (switching
+ * accounts, installing an update) replaces the app with a new process whose
+ * command line carries neither the session's identifier nor its ports, and
+ * ends `tauri dev`; the binary's path is what still identifies it.
+ */
+function appProcesses() {
+  const path = APP_EXE.replace(/'/g, "''");
+  const out = powershell(
+    `Get-CimInstance Win32_Process -Filter "Name='openrize.exe'" | Where-Object { $_.ExecutablePath -eq '${path}' } | ` +
+      "Select-Object ProcessId, ParentProcessId, CommandLine | ConvertTo-Json -Compress",
+  );
+  if (!out) return [];
+  const parsed = JSON.parse(out);
+  return Array.isArray(parsed) ? parsed : [parsed];
+}
+
+/**
+ * Alive while `tauri dev` runs, or, once an app restart has ended it, while the
+ * restarted app does (its Vite server is ours and outlives `tauri dev`). Only
+ * one session per checkout can be live, so a running copy of this checkout's
+ * binary belongs to it; the session follows the app to its new pid.
+ */
+function sessionAlive(meta) {
+  if (pidAlive(meta.pid)) return true;
+  if (!meta.vitePid || !pidAlive(meta.vitePid)) return false;
+  const app = appProcesses()[0];
+  if (!app) return false;
+  if (app.ProcessId !== meta.appPid) {
+    meta.appPid = app.ProcessId;
+    writeFileSync(join(sessionDir(meta.id), "meta.json"), JSON.stringify(meta, null, 2));
+  }
+  return true;
+}
+
 function liveSessions() {
   return allSessionIds()
     .map(readMeta)
-    .filter((meta) => meta && pidAlive(meta.pid));
+    .filter((meta) => meta && sessionAlive(meta));
 }
 
 function resolveSession(options) {
@@ -166,7 +204,7 @@ function resolveSession(options) {
   if (wanted) {
     const meta = readMeta(wanted);
     if (!meta) die(`no such session: ${wanted}`);
-    if (!pidAlive(meta.pid)) die(`session ${wanted} is no longer running`);
+    if (!sessionAlive(meta)) die(`session ${wanted} is no longer running`);
     return meta;
   }
   const live = liveSessions();
@@ -698,10 +736,15 @@ async function startSession() {
   //                      builds used app_data_dir) and the WebView2 user-data folder
   //   XDG_CONFIG_HOME -> where settings.json lives, which is not identifier-scoped
   //                      and would otherwise be the real user's settings
+  //
+  // Vite is started here rather than as tauri's beforeDevCommand (null removes
+  // it from the merged config): `tauri dev` ends when its app process exits,
+  // which an app restart (an account switch, an update) does, and would take
+  // the dev server with it, leaving the restarted app with nothing to load.
   const overrides = JSON.stringify({
     identifier,
     build: {
-      beforeDevCommand: `pnpm exec vite --port ${port} --strictPort`,
+      beforeDevCommand: null,
       devUrl: `http://localhost:${port}`,
     },
   });
@@ -716,6 +759,16 @@ async function startSession() {
   const logPath = join(dir, "dev.log");
   const log = openSync(logPath, "w");
   console.error(`==> starting isolated instance ${id} on port ${port} (webview debug port ${cdpPort})`);
+  const viteLog = openSync(join(dir, "vite.log"), "w");
+  const vite = spawn(process.execPath, [VITE_JS, "--port", String(port), "--strictPort"], {
+    cwd: REPO_ROOT,
+    env,
+    detached: true,
+    stdio: ["ignore", viteLog, viteLog],
+    windowsHide: true,
+  });
+  vite.unref();
+  closeSync(viteLog);
   const child = spawn(process.execPath, [TAURI_JS, "dev", "--no-watch", "-c", overrides], {
     cwd: REPO_ROOT,
     env,
@@ -733,6 +786,7 @@ async function startSession() {
     cdpPort,
     pid: child.pid,
     appPid: null,
+    vitePid: vite.pid,
     identifier,
     // The folder holding the databases (the key the feature docs and `rize`
     // passthrough use). Local AppData now; older builds used the roaming folder.
@@ -787,6 +841,12 @@ async function waitUntilDrivable(meta, logPath) {
 function stopSession(meta) {
   taskkillTree(meta.pid);
   if (meta.appPid && pidAlive(meta.appPid)) taskkillTree(meta.appPid);
+  if (meta.vitePid && pidAlive(meta.vitePid)) taskkillTree(meta.vitePid);
+  // An app restarted inside the session runs this checkout's binary with no
+  // identifier or port on its command line. Unless another session from this
+  // checkout is live (then the binary is its app), it is this session's.
+  const others = liveSessions().filter((other) => other.id !== meta.id);
+  if (others.length === 0) for (const app of appProcesses()) taskkillTree(app.ProcessId);
   // Orphans whose parents died first are out of reach of /T: find them by
   // their command line instead, which carries this session's identifier/ports.
   // A session whose meta could not be read has neither, so there is nothing to sweep.

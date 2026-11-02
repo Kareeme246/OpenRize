@@ -111,7 +111,7 @@ fn canonical(data_dir: &Path) -> PathBuf {
 /// is taken from the spelling the file system itself reports: its casing, no
 /// trailing separator, no `.` or `..`, no 8.3 short names. A path that does not
 /// exist yet keeps its own spelling below the nearest folder that does. The
-/// folder the app opens (`%APPDATA%\<identifier>`) is already written that way,
+/// folder the app opens (`%LOCALAPPDATA%\<identifier>`) is already written that way,
 /// so it hashes exactly as it did before this normalisation and an older `rize`
 /// still finds a newer app; only variant spellings, which never matched the
 /// app's pipe, now do.

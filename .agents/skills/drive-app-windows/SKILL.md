@@ -209,8 +209,9 @@ Each session gets:
 - **its own free port**, chosen at random and checked before use, for Vite, and
   another for the WebView2 debugging port (bound to 127.0.0.1 only);
 - **its own Tauri `identifier`** (`com.offlinestudios.openrize.driveNNNNN`), which
-  scopes `%APPDATA%\<identifier>` (databases), `%LOCALAPPDATA%\<identifier>`
-  (logs and the WebView2 profile) and the single-instance lock;
+  scopes `%LOCALAPPDATA%\<identifier>` (databases, logs and the WebView2 profile;
+  builds before the move to Local AppData kept the databases in
+  `%APPDATA%\<identifier>`) and the single-instance lock;
 - **its own `XDG_CONFIG_HOME`** in the session temp dir, because the settings
   directory is not identifier-scoped. Without this an agent clicking through
   Settings would rewrite the human's real preferences;
@@ -220,7 +221,7 @@ Each session gets:
 
 `stop` runs `taskkill /T /F` on the tree, sweeps any orphaned process whose
 command line carries the session's identifier or ports, and deletes the
-session's `%APPDATA%`, `%LOCALAPPDATA%` and temp directories. It refuses to
+session's `%LOCALAPPDATA%` (and legacy `%APPDATA%`) and temp directories. It refuses to
 delete any directory whose name is not `com.offlinestudios.openrize.drive<digits>`.
 
 Concurrency: agents in **different worktrees** run side by side (separate ports,
@@ -232,7 +233,8 @@ the first (or use another worktree).
 
 **Never touch the real identifier `com.offlinestudios.openrize`**: not its
 `%APPDATA%`/`%LOCALAPPDATA%` folders, not the installed app in
-`%LOCALAPPDATA%\openrize`, not the user's settings file, not their running
+`%LOCALAPPDATA%\openrize`, not the user's settings file (in the `config` folder
+of their `%LOCALAPPDATA%\com.offlinestudios.openrize`), not their running
 OpenRize. Do not launch the app any other way for testing.
 
 ## Verifying a change

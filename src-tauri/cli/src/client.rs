@@ -5,10 +5,12 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use openrize_core::accounts;
+use openrize_core::data_location;
 use openrize_core::ipc::{self, Endpoint};
 use openrize_core::paths;
 use openrize_core::protocol::{code, Hello, Operation, Request, Response};
@@ -22,9 +24,17 @@ const QUIT_TIMEOUT: Duration = Duration::from_secs(30);
 /// Lets a dev or test build point rize at a specific app binary.
 const APP_ENV: &str = "RIZE_APP";
 
-pub struct Client {
+/// The folder rize works on and the app endpoint that folder names.
+struct Target {
     data_dir: PathBuf,
     endpoint: Endpoint,
+}
+
+pub struct Client {
+    target: Mutex<Target>,
+    /// Whether the folder was worked out (no `--data-dir`), so it can change
+    /// when the app launched by `start_app` moves the data on its first run.
+    follows_app: bool,
 }
 
 impl Client {
@@ -34,6 +44,7 @@ impl Client {
 
     /// `root` is the installed app's data directory, if the OS has one.
     fn in_root(data_dir: Option<&Path>, root: Option<PathBuf>) -> Result<Self, String> {
+        let follows_app = data_dir.is_none();
         let data_dir = match data_dir {
             Some(dir) => std::path::absolute(dir).map_err(|e| e.to_string())?,
             // The folder the app has open: the account it remembers, or the
@@ -41,18 +52,51 @@ impl Client {
             None => accounts::resolve(&root.ok_or("no home directory; pass --data-dir")?).dir,
         };
         let endpoint = Endpoint::new(&data_dir)?;
-        Ok(Self { data_dir, endpoint })
+        Ok(Self {
+            target: Mutex::new(Target { data_dir, endpoint }),
+            follows_app,
+        })
+    }
+
+    fn target(&self) -> MutexGuard<'_, Target> {
+        self.target
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn data_dir(&self) -> PathBuf {
+        self.target().data_dir.clone()
+    }
+
+    /// The first run of an updated Windows app moves the data from the roaming
+    /// folder rize found it in to the local one, and serves from there. Looks
+    /// again, so a rize that started the app (or waited for it) follows.
+    fn follow_app(&self) {
+        if !self.follows_app {
+            return;
+        }
+        let Some(root) = paths::app_data_dir() else {
+            return;
+        };
+        let data_dir = accounts::resolve(&root).dir;
+        let mut target = self.target();
+        if data_dir != target.data_dir {
+            if let Ok(endpoint) = Endpoint::new(&data_dir) {
+                *target = Target { data_dir, endpoint };
+            }
+        }
     }
 
     pub fn running(&self) -> bool {
-        self.endpoint.connect().is_ok()
+        self.target().endpoint.connect().is_ok()
     }
 
     /// Asks the running app, or answers from the stored data when it is
     /// closed. An operation that needs the app fails with `APP_NOT_RUNNING`.
     pub fn request(&self, operation: Operation) -> Response {
         let request = Request::new(operation);
-        if let Ok(stream) = self.endpoint.connect() {
+        let connected = self.target().endpoint.connect();
+        if let Ok(stream) = connected {
             return ipc::exchange(stream, &request)
                 .unwrap_or_else(|error| Response::error(code::FAILED, error));
         }
@@ -62,13 +106,25 @@ impl Client {
                 "OpenRize is not running. Start it with `rize app start`.",
             );
         }
-        if !self.data_dir.join(paths::DATABASE_FILE).is_file() {
+        // A move the app did not finish leaves the database possibly apart
+        // from its journal; only the app, starting, may touch it then.
+        if self.follows_app
+            && paths::local_data_dir().is_some_and(|local| data_location::move_unfinished(&local))
+        {
+            return Response::error(
+                code::FAILED,
+                "OpenRize was stopped while moving its data to a new folder. \
+                 Start the app with `rize app start` to finish the move.",
+            );
+        }
+        let data_dir = self.data_dir();
+        if !data_dir.join(paths::DATABASE_FILE).is_file() {
             return Response::error(code::NO_DATA, NO_DATA);
         }
-        match state::lock_stores(&self.data_dir, false) {
+        match state::lock_stores(&data_dir, false) {
             Ok(Some(lock)) => {
-                let response = match AppState::open_existing(&self.data_dir) {
-                    Ok(state) => rpc::answer(&state, None, &self.data_dir, request),
+                let response = match AppState::open_existing(&data_dir) {
+                    Ok(state) => rpc::answer(&state, None, &data_dir, request),
                     Err(error) => Response::failure(error),
                 };
                 drop(lock);
@@ -77,6 +133,7 @@ impl Client {
             // The app was starting while we looked; it has the stores now.
             Ok(None) => match self.wait_for_app(LAUNCH_TIMEOUT) {
                 Ok(()) => self
+                    .target()
                     .endpoint
                     .call(&request)
                     .unwrap_or_else(|error| Response::error(code::FAILED, error)),
@@ -94,7 +151,7 @@ impl Client {
             return Ok(false);
         }
         let executable = app_executable().map_err(|error| {
-            if self.data_dir.join(paths::DATABASE_FILE).is_file() {
+            if self.data_dir().join(paths::DATABASE_FILE).is_file() {
                 error
             } else {
                 NO_DATA.into()
@@ -115,7 +172,8 @@ impl Client {
         }
         let deadline = Instant::now() + QUIT_TIMEOUT;
         while Instant::now() < deadline {
-            if !self.running() && matches!(state::lock_stores(&self.data_dir, false), Ok(Some(_))) {
+            if !self.running() && matches!(state::lock_stores(&self.data_dir(), false), Ok(Some(_)))
+            {
                 return response;
             }
             thread::sleep(Duration::from_millis(100));
@@ -135,6 +193,7 @@ impl Client {
     fn wait_for_app(&self, timeout: Duration) -> Result<(), String> {
         let deadline = Instant::now() + timeout;
         while Instant::now() < deadline {
+            self.follow_app();
             if self.running() {
                 return Ok(());
             }
@@ -322,22 +381,27 @@ mod tests {
 
         // Before any account, and with one chosen, the folder is the app's.
         let before = Client::in_root(None, Some(root.clone())).unwrap();
-        assert_eq!(before.data_dir, root);
+        assert_eq!(before.data_dir(), root);
 
         let account = accounts::create(&root, "Kareem").unwrap();
         accounts::set_current(&root, Some(&account.id)).unwrap();
         let open = Client::in_root(None, Some(root.clone())).unwrap();
-        assert_eq!(open.data_dir, accounts::data_dir(&root, Some(&account.id)));
+        assert_eq!(
+            open.data_dir(),
+            accounts::data_dir(&root, Some(&account.id))
+        );
 
         // Signed out again, and an explicit directory always wins.
         accounts::set_current(&root, None).unwrap();
         assert_eq!(
-            Client::in_root(None, Some(root.clone())).unwrap().data_dir,
+            Client::in_root(None, Some(root.clone()))
+                .unwrap()
+                .data_dir(),
             root
         );
         let other = root.join("elsewhere");
         let explicit = Client::in_root(Some(&other), Some(root.clone())).unwrap();
-        assert_eq!(explicit.data_dir, other);
+        assert_eq!(explicit.data_dir(), other);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

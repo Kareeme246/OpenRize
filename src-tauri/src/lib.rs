@@ -121,7 +121,14 @@ pub fn run() {
         .setup(move |app| {
             install_bundled_cli();
             login_item::refresh();
-            let root = app.path().app_data_dir()?;
+            // Everything stays on this machine: Local AppData on Windows. Older
+            // builds used Roaming (`app_data_dir`), so existing data is moved
+            // across first, before any store or lock. On macOS and Linux both
+            // are the same folder and this changes nothing.
+            let root = openrize_core::data_location::adopt(
+                &app.path().app_data_dir()?,
+                &app.path().app_local_data_dir()?,
+            );
             std::fs::create_dir_all(&root)?;
             // Before any store opens: repairs the account list, finishes a
             // requested move of existing data, and says which folder to open.

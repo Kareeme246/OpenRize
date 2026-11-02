@@ -27,8 +27,8 @@ use windows::Win32::UI::Accessibility::{
     IUIAutomationCondition, IUIAutomationElement, IUIAutomationValuePattern, TreeScope_Children,
     UIA_AutomationIdPropertyId, UIA_ClassNamePropertyId, UIA_ComboBoxControlTypeId,
     UIA_ControlTypePropertyId, UIA_DocumentControlTypeId, UIA_EditControlTypeId,
-    UIA_HasKeyboardFocusPropertyId, UIA_ValuePatternId, UIA_ValueValuePropertyId,
-    UIA_CONTROLTYPE_ID,
+    UIA_HasKeyboardFocusPropertyId, UIA_NamePropertyId, UIA_ValuePatternId,
+    UIA_ValueValuePropertyId, UIA_CONTROLTYPE_ID,
 };
 
 /// A failed read keeps the last URL this long before the window has none.
@@ -89,6 +89,10 @@ struct UrlTracker {
     requested: Option<Instant>,
     misses: u32,
     retry_at: Option<Instant>,
+    /// Whether the window's accessible name marks it private. A window is
+    /// private or not for its whole life, so it is read once and kept, even
+    /// across the long gaps that make `touch` forget the page.
+    private: Option<bool>,
 }
 
 impl UrlTracker {
@@ -217,9 +221,26 @@ pub(super) fn url_of_titled(window: HWND, title: &str) -> Option<String> {
 }
 
 fn shared_url_of(window: HWND, title: Option<&str>) -> Option<String> {
-    static READER: OnceLock<Option<Arc<Shared>>> = OnceLock::new();
-    let shared = READER.get_or_init(Shared::start).as_ref()?;
-    shared.url_of(window.0 as isize, title)
+    shared()?.url_of(window.0 as isize, title)
+}
+
+static READER: OnceLock<Option<Arc<Shared>>> = OnceLock::new();
+
+fn shared() -> Option<&'static Arc<Shared>> {
+    READER.get_or_init(Shared::start).as_ref()
+}
+
+/// Whether a browser window is a private one. The title settles most
+/// browsers (Edge's `[InPrivate]`, the Firefox family's `Private Browsing`);
+/// Chrome does not put Incognito in the title, so the window's accessible
+/// name, which the worker reads once per window, is asked as well. Never
+/// waits: until the worker has read the window the answer is the title's.
+pub(super) fn is_private_window(window: HWND, executable: &str, title: &str) -> bool {
+    openrize_core::capture::title_marks_private(executable, title)
+        || READER
+            .get()
+            .and_then(Option::as_ref)
+            .is_some_and(|shared| shared.is_private(window.0 as isize))
 }
 
 /// What the sampler and the worker thread share. Windows are keyed by the
@@ -298,11 +319,18 @@ impl Shared {
             .and_then(|tracker| tracker.url(Instant::now(), stalled))
     }
 
+    fn is_private(&self, window: isize) -> bool {
+        self.lock()
+            .windows
+            .get(&window)
+            .is_some_and(|tracker| tracker.private == Some(true))
+    }
+
     /// The worker thread: reads the window the sampler asked about last.
     fn run(&self) {
         let mut reader = Reader::default();
         loop {
-            let (window, ticket) = {
+            let (window, ticket, learn_private) = {
                 let mut state = self.lock();
                 let window = loop {
                     if let Some(window) = state.wanted.take() {
@@ -314,15 +342,27 @@ impl Shared {
                         .unwrap_or_else(PoisonError::into_inner);
                 };
                 state.busy_since = Some(Instant::now());
-                (window, state.issued)
+                let learn_private = state
+                    .windows
+                    .get(&window)
+                    .is_some_and(|tracker| tracker.private.is_none());
+                (window, state.issued, learn_private)
             };
             let reading = reader.read(window);
+            let private = if learn_private {
+                reader.window_private(window)
+            } else {
+                None
+            };
 
             let mut state = self.lock();
             state.busy_since = None;
             state.finished = ticket;
             if let Some(tracker) = state.windows.get_mut(&window) {
                 tracker.record(reading, Instant::now());
+                if private.is_some() {
+                    tracker.private = private;
+                }
             }
             reader
                 .bars
@@ -388,8 +428,22 @@ impl Reader {
     }
 }
 
+impl Reader {
+    /// Whether the window's accessible name marks it private; `None` when it
+    /// could not be read, so the next read tries again.
+    fn window_private(&mut self, window: isize) -> Option<bool> {
+        let automation = self.automation.as_ref()?;
+        // SAFETY: a COM call on a live automation object; the handle is only
+        // given to UI Automation, which rejects a stale one.
+        let name = unsafe { automation.window_name(HWND(window as *mut c_void)) }?;
+        Some(openrize_core::capture::chromium_name_marks_private(&name))
+    }
+}
+
 struct Automation {
     automation: IUIAutomation,
+    /// Just the window's name, for [`Self::window_name`].
+    named: IUIAutomationCacheRequest,
     /// Properties of the controls the search looks at, fetched with the
     /// children so the search needs one call per parent, not several per child.
     search: IUIAutomationCacheRequest,
@@ -423,6 +477,8 @@ impl Automation {
             ] {
                 search.AddProperty(property).ok()?;
             }
+            let named = automation.CreateCacheRequest().ok()?;
+            named.AddProperty(UIA_NamePropertyId).ok()?;
             let value = automation.CreateCacheRequest().ok()?;
             value.AddProperty(UIA_HasKeyboardFocusPropertyId).ok()?;
             value.AddProperty(UIA_ValueValuePropertyId).ok()?;
@@ -430,10 +486,26 @@ impl Automation {
             let controls = automation.ControlViewCondition().ok()?;
             Some(Self {
                 automation,
+                named,
                 search,
                 value,
                 controls,
             })
+        }
+    }
+
+    /// The name UI Automation gives the window itself: its title, and for
+    /// Chrome the profile or Incognito marker the title lacks.
+    ///
+    /// # Safety
+    /// `window` is only handed to UI Automation, which rejects a stale handle.
+    unsafe fn window_name(&self, window: HWND) -> Option<String> {
+        unsafe {
+            let root = self
+                .automation
+                .ElementFromHandleBuildCache(window, &self.named)
+                .ok()?;
+            root.CachedName().ok().map(|name| name.to_string())
         }
     }
 
@@ -1068,6 +1140,39 @@ mod tests {
                 );
                 std::thread::sleep(secs(1));
             }
+        }
+    }
+
+    /// Prints, for every open browser window, its executable, title, what the
+    /// window's accessible name says, and whether it counts as private. Open a
+    /// private window in each browser first. Run by hand:
+    /// `cargo test --lib address_bar::tests::live_private -- --ignored --nocapture`
+    #[test]
+    #[ignore = "reads the live UI of the browsers that are open"]
+    fn live_private() {
+        let automation = Automation::new().expect("UI Automation");
+        for (window, exe) in browser_windows() {
+            let title = super::super::window_title(window);
+            if title.is_empty() {
+                continue;
+            }
+            // The sampler's path: the worker learns the window's name on its
+            // first reads, so ask a few times as the sampler would.
+            let mut private = false;
+            for _ in 0..4 {
+                let _ = shared_url_of(window, Some(&title));
+                std::thread::sleep(Duration::from_millis(400));
+                private = is_private_window(window, &exe, &title);
+            }
+            // SAFETY: a COM call on a live automation object.
+            let name = unsafe { automation.window_name(window) };
+            println!(
+                "{exe} {:#x}\n  title    = {title:?}\n  uia name = {name:?}\n  title says private: {}\n  name says private:  {}\n  classified private: {private}",
+                window.0 as isize,
+                openrize_core::capture::title_marks_private(&exe, &title),
+                name.as_deref()
+                    .is_some_and(openrize_core::capture::chromium_name_marks_private),
+            );
         }
     }
 }

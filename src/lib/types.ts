@@ -458,6 +458,8 @@ export interface ActivitySegment {
   url?: string | null;
   domain?: string | null;
   entryId?: string | null;
+  /** Captured in a private browsing window; its title and address are erased once its entry is classified. */
+  private?: boolean;
 }
 
 export interface ActivitySnapshot {

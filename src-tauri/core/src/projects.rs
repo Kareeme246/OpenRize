@@ -161,7 +161,7 @@ pub struct HintPreview {
 fn segments_since(conn: &Connection, since_ms: u64) -> Result<Vec<ActivitySegment>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id
+            "SELECT id, app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id, private
              FROM segments
              WHERE started_at >= ?1 AND kind != ?2
              ORDER BY started_at ASC;",
@@ -569,6 +569,11 @@ pub fn discover(conn: &Connection, since_ms: u64) -> Result<Vec<ProjectSuggestio
 
     let mut clusters: HashMap<String, Cluster> = HashMap::new();
     for segment in segments_since(conn, since_ms)? {
+        // A suggestion shown as evidence ("seen in <repo>") would put a private
+        // window's page back on screen, and accepting it would store it as a rule.
+        if segment.private {
+            continue;
+        }
         let ms = segment_ms(&segment);
         if ms == 0 {
             continue;
@@ -1036,6 +1041,7 @@ mod tests {
             url: None,
             domain: None,
             entry_id: None,
+            private: false,
         }
     }
 

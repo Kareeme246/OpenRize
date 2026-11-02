@@ -1,7 +1,7 @@
 use rusqlite::{params, Connection, Result};
 
 /// The `user_version` `run_migrations` leaves a database at.
-pub const SCHEMA_VERSION: i32 = 13;
+pub const SCHEMA_VERSION: i32 = 14;
 
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     let current_version: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
@@ -432,6 +432,21 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
     }
 
+    // A segment captured in a private browsing window is marked, so its
+    // detail can be erased once its entry is classified (`activity::redact`),
+    // and so it never enters the title search index.
+    if current_version < 14 {
+        let tx = conn.transaction()?;
+        if !table_has_column(&tx, "segments", "private")? {
+            tx.execute_batch(
+                "ALTER TABLE segments ADD COLUMN private INTEGER NOT NULL DEFAULT 0;",
+            )?;
+        }
+        tx.execute_batch(PRIVATE_SEGMENTS_V14)?;
+        tx.execute("PRAGMA user_version = 14;", [])?;
+        tx.commit()?;
+    }
+
     Ok(())
 }
 
@@ -440,6 +455,29 @@ fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool
     let mut cols = stmt.query_map([], |row| row.get::<_, String>(1))?;
     Ok(cols.any(|col| col.as_deref() == Ok(column)))
 }
+
+/// Private segments stay out of `segments_fts`: the index keeps trigrams of
+/// every title until it is merged, so erasing a title from `segments` would
+/// not erase it from there. A segment is indexed only while it is not
+/// private, and it never changes its mind after it is written. The partial
+/// index is what the redaction sweep walks; private rows are few.
+const PRIVATE_SEGMENTS_V14: &str = "
+CREATE INDEX IF NOT EXISTS idx_segments_private_detail ON segments (ended_at)
+  WHERE private = 1 AND (url IS NOT NULL OR domain IS NOT NULL OR title <> 'Private window');
+DROP TRIGGER IF EXISTS segments_fts_insert;
+DROP TRIGGER IF EXISTS segments_fts_delete;
+DROP TRIGGER IF EXISTS segments_fts_update;
+CREATE TRIGGER segments_fts_insert AFTER INSERT ON segments BEGIN
+  INSERT INTO segments_fts (rowid, title) SELECT new.id, new.title WHERE new.private = 0;
+END;
+CREATE TRIGGER segments_fts_delete AFTER DELETE ON segments BEGIN
+  INSERT INTO segments_fts (segments_fts, rowid, title) SELECT 'delete', old.id, old.title WHERE old.private = 0;
+END;
+CREATE TRIGGER segments_fts_update AFTER UPDATE OF title, private ON segments BEGIN
+  INSERT INTO segments_fts (segments_fts, rowid, title) SELECT 'delete', old.id, old.title WHERE old.private = 0;
+  INSERT INTO segments_fts (rowid, title) SELECT new.id, new.title WHERE new.private = 0;
+END;
+";
 
 /// A timer segment becomes a start and an end, as a time entry is, instead of
 /// a length. `recorded_at` is when the stretch was recorded, which for a pause
@@ -1145,7 +1183,7 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "CREATE TABLE time_entries (id TEXT PRIMARY KEY, invoice_id TEXT, source TEXT NOT NULL DEFAULT 'auto');
-             CREATE TABLE segments (entry_id TEXT);
+             CREATE TABLE segments (id INTEGER PRIMARY KEY, title TEXT, url TEXT, domain TEXT, ended_at INTEGER, entry_id TEXT);
              CREATE TABLE suggestions (entry_id TEXT);
              CREATE TABLE entry_events (entry_id TEXT);
              CREATE TABLE entry_embeddings (entry_id TEXT);
@@ -1249,7 +1287,7 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "CREATE TABLE time_entries (id TEXT PRIMARY KEY, invoice_id TEXT, source TEXT NOT NULL DEFAULT 'auto');
-             CREATE TABLE segments (entry_id TEXT);
+             CREATE TABLE segments (id INTEGER PRIMARY KEY, title TEXT, url TEXT, domain TEXT, ended_at INTEGER, entry_id TEXT);
              CREATE TABLE suggestions (entry_id TEXT);
              CREATE TABLE entry_events (entry_id TEXT);
              CREATE TABLE entry_embeddings (entry_id TEXT);
@@ -1739,6 +1777,7 @@ mod tests {
             started_at: 10,
             ended_at: Some(10),
             entry_id: None,
+            private: false,
         };
         let entries = crate::entry_builder::build_entries(
             &[segment],
@@ -2078,5 +2117,117 @@ mod tests {
 
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod private_segments_tests {
+    use super::*;
+
+    /// A database as v13 left it: no `private` column, and the original
+    /// search-index triggers that mirror every title.
+    fn v13_database() -> Connection {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        conn.execute_batch(
+            "DROP INDEX idx_segments_private_detail;
+             DROP TRIGGER segments_fts_insert;
+             DROP TRIGGER segments_fts_delete;
+             DROP TRIGGER segments_fts_update;
+             ALTER TABLE segments DROP COLUMN private;
+             CREATE TRIGGER segments_fts_insert AFTER INSERT ON segments BEGIN
+               INSERT INTO segments_fts (rowid, title) VALUES (new.id, new.title);
+             END;
+             CREATE TRIGGER segments_fts_delete AFTER DELETE ON segments BEGIN
+               INSERT INTO segments_fts (segments_fts, rowid, title) VALUES ('delete', old.id, old.title);
+             END;
+             CREATE TRIGGER segments_fts_update AFTER UPDATE OF title ON segments BEGIN
+               INSERT INTO segments_fts (segments_fts, rowid, title) VALUES ('delete', old.id, old.title);
+               INSERT INTO segments_fts (rowid, title) VALUES (new.id, new.title);
+             END;
+             INSERT INTO segments (app, title, kind, started_at, ended_at)
+               VALUES ('Code', 'budget spreadsheet', 'activity', 0, 60000);
+             PRAGMA user_version = 13;",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn indexed(conn: &Connection, word: &str) -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM segments_fts WHERE segments_fts MATCH ?1",
+            [word],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn v14_marks_existing_segments_normal_and_keeps_them_searchable() {
+        let mut conn = v13_database();
+        run_migrations(&mut conn).unwrap();
+
+        let version: i32 = conn
+            .query_row("PRAGMA user_version;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 14);
+        let private: i64 = conn
+            .query_row("SELECT private FROM segments", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(private, 0);
+        assert_eq!(indexed(&conn, "budget"), 1);
+
+        // The upgraded schema is the fresh one.
+        let mut fresh = Connection::open_in_memory().unwrap();
+        run_migrations(&mut fresh).unwrap();
+        let columns = |conn: &Connection| {
+            let mut statement = conn.prepare("PRAGMA table_info(segments)").unwrap();
+            let mut columns: Vec<String> = statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<Result<_>>()
+                .unwrap();
+            columns.sort();
+            columns
+        };
+        assert_eq!(columns(&conn), columns(&fresh));
+
+        // Running it again changes nothing.
+        run_migrations(&mut conn).unwrap();
+        assert_eq!(indexed(&conn, "budget"), 1);
+    }
+
+    #[test]
+    fn private_segments_stay_out_of_the_search_index_for_their_whole_life() {
+        let mut conn = v13_database();
+        run_migrations(&mut conn).unwrap();
+        conn.execute(
+            "INSERT INTO segments (app, title, kind, started_at, ended_at, private)
+             VALUES ('Zen', 'confidential memo', 'activity', 0, 60000, 1)",
+            [],
+        )
+        .unwrap();
+        assert_eq!(indexed(&conn, "confidential"), 0);
+
+        // Erasing its title, and deleting it, leave the index consistent.
+        conn.execute(
+            "UPDATE segments SET title = 'Private window' WHERE private = 1",
+            [],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM segments WHERE private = 1", [])
+            .unwrap();
+        assert_eq!(indexed(&conn, "budget"), 1);
+        conn.execute(
+            "INSERT INTO segments_fts(segments_fts) VALUES('integrity-check')",
+            [],
+        )
+        .unwrap();
+
+        // A normal segment still moves through the index as before.
+        conn.execute("UPDATE segments SET title = 'forecast model'", [])
+            .unwrap();
+        assert_eq!(indexed(&conn, "budget"), 0);
+        assert_eq!(indexed(&conn, "forecast"), 1);
     }
 }

@@ -54,14 +54,37 @@ permissions/onboarding gating, `useTauriEvent` usage, font stacks, shortcut labe
 - [x] PLT-7b `energy::spawn_sampler` `cfg!(windows)` early return → per-platform const.
 - [~] PAR-6 `rize` version guard runs only on macOS; read file version on Windows. Not applicable: Windows installers postdate the 0.8.10 floor.
 
-## Needs a product decision
-- [?] PLT-1 / PAR-1 Windows AI is rules-only (no learning/kNN). Pure-Rust lexical tier?
-- [?] PLT-4 Databases live in Roaming AppData; move to Local with a migration?
-- [?] CAP-2 `bundle_id` is just the exe name (java, python, PWAs merge). Changing it splits history.
-- [?] CAP-7 Modern Standby never sends PBT_APMSUSPEND; break engine misses sleep.
-- [?] CAP-8 Incognito/private windows recorded on both platforms.
-- [?] PLT-10 / PAR-5 Re-run CLI PATH install at every launch on Windows (macOS relinks each launch).
-- [?] PLT-11 NSIS installer is not Authenticode-signed (SmartScreen warning).
+## Decided 2026-11-02
+- [ ] PLT-1 / PAR-1 Windows AI is rules-only. Superseded by the local-models design
+  (`docs/design/local-models.md`).
+- [x] PLT-4 All data and settings in Local AppData with a crash-safe one-time migration (#164, 0.9.48).
+- [x] CAP-2 Per-app identity for web apps and shared runtime hosts; ordinary apps keep their ids
+  (#166, 0.9.50).
+- [x] CAP-8 Private windows are tracked; their titles/URLs/domains are erased once the entry is
+  classified, or after a day, on both platforms (0.9.51). Edge InPrivate and Zen/Firefox private
+  windows are detected from the title; Chrome-family incognito is unverified; Safari has no signal.
+- [x] PLT-10 / PAR-5 rize's folder is re-ensured on the user PATH at every launch of an installed
+  release build (#165, 0.9.49).
+- [ ] Windows wastes work on `embed` jobs: with no embedding model each one fails its three
+  attempts (`ai/worker.rs` `embed_only`). Fixed by the local-models design (phase 1 stops queueing
+  them without an embedder).
+
+## Open bugs (known, not being fixed now)
+- CAP-7 Modern Standby laptops never send `PBT_APMSUSPEND`, so sleep is not seen as a suspend:
+  the break engine's sleep handling (#117) and the explicit segment close on suspend do not run.
+  Only the 10 s gap rule and the display-off flag protect the data. Candidate fix:
+  `PowerRegisterSuspendResumeNotification` or Modern Standby's display/presence notifications.
+- PLT-11 The Windows installer is not Authenticode-signed, so SmartScreen warns on first install.
+  Accepted for now; the in-app updater is still protected by the minisign signature.
+
+## Windows drive tooling (found while driving 0.9.47)
+- [ ] An app restart inside a drive session (account switch, update) ends `tauri dev`, which takes
+  the Vite server with it: the restarted app keeps the CDP port but loads nothing, and the driver
+  reports the session dead.
+- [ ] `stop` does not find the restarted app (its command line carries no identifier or port), so
+  it survives, holds the session's data folder, and the delete fails with EPERM.
+- [x] Skills lint fails on a Windows checkout (it now skips build output): the macOS skill references
+  `src-tauri/target/debug/openrize`, which is `openrize.exe` here and absent before a build.
 
 ## Deferred (low value or unverified)
 BRK-4 tray bitmap sizing, BRK-7 Pulse foreground-lock guard, BRK-9 auto-hide taskbar inset,

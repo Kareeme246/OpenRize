@@ -81,6 +81,19 @@ pub struct Decision {
     pub tier: &'static str,
 }
 
+impl Decision {
+    /// Keeps what a rule matched out of the "Why" line. A rule's pattern is a
+    /// site or a title the user wrote, and a hit on a private window would
+    /// otherwise write that the window was there into the stored suggestion.
+    pub fn hide_rule_details(&mut self) {
+        for signal in &mut self.signals {
+            if signal.kind == "rule" {
+                signal.text = "A rule matched part of this block".to_string();
+            }
+        }
+    }
+}
+
 pub const TIER_RULE: &str = "rule";
 pub const TIER_PERSONAL: &str = "personal";
 pub const TIER_MODEL: &str = "model";

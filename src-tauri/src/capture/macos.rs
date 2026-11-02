@@ -101,18 +101,24 @@ pub fn read_active_window() -> Option<WindowSample> {
     // so Screen Recording permission is not needed.
     let title = window_title(pid, bundle_id.as_deref());
 
-    let (url, domain) = if let Some(ref bid) = bundle_id {
-        get_browser_url_and_domain(bid, &app_name)
-    } else {
-        (None, None)
+    let browser = match bundle_id {
+        Some(ref bid) => get_browser_window(bid, &app_name),
+        None => BrowserWindow::NONE,
     };
+    // A Chromium window says so when asked; Firefox-family and Edge windows
+    // say so in their title, which is the only signal for those.
+    let private = browser.incognito
+        || bundle_id
+            .as_deref()
+            .is_some_and(|bid| openrize_core::capture::title_marks_private(bid, &title));
 
     Some(WindowSample {
         app: app_name,
         title,
         bundle_id,
-        url,
-        domain,
+        url: browser.url,
+        domain: browser.domain,
+        private,
         keeps_display_awake: keeps_display_awake(pid),
     })
 }
@@ -295,30 +301,57 @@ fn keeps_display_awake(pid: libc::pid_t) -> bool {
     })
 }
 
-fn get_browser_url_and_domain(bundle_id: &str, app_name: &str) -> (Option<String>, Option<String>) {
+/// What asking a browser about its front window answered.
+struct BrowserWindow {
+    url: Option<String>,
+    domain: Option<String>,
+    /// The window is a private (incognito) one.
+    incognito: bool,
+}
+
+impl BrowserWindow {
+    const NONE: Self = Self {
+        url: None,
+        domain: None,
+        incognito: false,
+    };
+}
+
+/// The script that asks a Chromium browser for its front window's URL and
+/// mode, one per line. Only a Chromium window has a `mode` ("normal" or
+/// "incognito"); a browser that does not answer it is read as normal, so the
+/// URL is never lost to it.
+fn chromium_script(app: &str) -> String {
+    format!(
+        r#"tell application "{app}"
+    if (count of windows) > 0 then
+        set windowMode to "normal"
+        try
+            set windowMode to (mode of front window) as text
+        end try
+        return (URL of active tab of front window) & linefeed & windowMode
+    end if
+end tell"#
+    )
+}
+
+fn get_browser_window(bundle_id: &str, app_name: &str) -> BrowserWindow {
+    // Safari has no private flag in its scripting dictionary, so a Safari
+    // private window cannot be told from a normal one this way.
+    const SAFARI: &str = r#"tell application "Safari" to if (count of documents) > 0 then return URL of front document"#;
     let script = match bundle_id {
-        "com.apple.Safari" => {
-            r#"tell application "Safari" to if (count of documents) > 0 then return URL of front document"#
-        }
-        "com.google.Chrome" => {
-            r#"tell application "Google Chrome" to if (count of windows) > 0 then return URL of active tab of front window"#
-        }
-        "com.brave.Browser" => {
-            r#"tell application "Brave Browser" to if (count of windows) > 0 then return URL of active tab of front window"#
-        }
-        "com.microsoft.edgemac" => {
-            r#"tell application "Microsoft Edge" to if (count of windows) > 0 then return URL of active tab of front window"#
-        }
-        "company.thebrowser.Browser" => {
-            r#"tell application "Arc" to if (count of windows) > 0 then return URL of active tab of front window"#
-        }
+        "com.apple.Safari" => SAFARI.to_string(),
+        "com.google.Chrome" => chromium_script("Google Chrome"),
+        "com.brave.Browser" => chromium_script("Brave Browser"),
+        "com.microsoft.edgemac" => chromium_script("Microsoft Edge"),
+        "company.thebrowser.Browser" => chromium_script("Arc"),
         _ => {
             if app_name == "Safari" {
-                r#"tell application "Safari" to if (count of documents) > 0 then return URL of front document"#
+                SAFARI.to_string()
             } else if app_name == "Google Chrome" {
-                r#"tell application "Google Chrome" to if (count of windows) > 0 then return URL of active tab of front window"#
+                chromium_script("Google Chrome")
             } else {
-                return (None, None);
+                return BrowserWindow::NONE;
             }
         }
     };
@@ -331,15 +364,18 @@ fn get_browser_url_and_domain(bundle_id: &str, app_name: &str) -> (Option<String
 
     if let Some(out) = output {
         if out.status.success() {
-            let raw_url = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if raw_url.starts_with("http://") || raw_url.starts_with("https://") {
-                let domain = domain_of(&raw_url);
-                return (Some(raw_url), domain);
-            }
+            let reply =
+                openrize_core::capture::parse_browser_reply(&String::from_utf8_lossy(&out.stdout));
+            let domain = reply.url.as_deref().and_then(domain_of);
+            return BrowserWindow {
+                url: reply.url,
+                domain,
+                incognito: reply.incognito,
+            };
         }
     }
 
-    (None, None)
+    BrowserWindow::NONE
 }
 
 /// App Nap assertion: prevents OS from throttling background sampler while capture is active.

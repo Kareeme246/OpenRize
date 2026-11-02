@@ -1,6 +1,6 @@
 [package]
 name = "openrize-cli"
-version = "0.9.48"
+version = "0.9.49"
 edition = "2021"
 license = "AGPL-3.0-only"
 description = "rize, OpenRize from the terminal"
@@ -19,14 +19,6 @@ clap_complete = "4"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-
-[target.'cfg(windows)'.dependencies]
-# Same versions the app uses, for `install-path` writing the user PATH.
-windows-registry = "0.6"
-windows = { version = "0.61", features = [
-  "Win32_Foundation",
-  "Win32_UI_WindowsAndMessaging",
-] }
 
 [dev-dependencies]
 rusqlite = { version = "0.40.2", features = ["bundled"] }

@@ -22,9 +22,11 @@
 !define OPENRIZE_EXEC_TIMEOUT 30000
 
 !macro NSIS_HOOK_POSTINSTALL
-  ; Puts rize on the user PATH, as the Mac app does at launch. It adds this
-  ; folder only if it is missing, so in-app updates (which run this again) and
-  ; reinstalls change nothing. nsExec runs it hidden and waits, at most
+  ; Puts rize on the user PATH at install time, so the entry exists before the
+  ; app is ever opened. The app also re-checks it at every launch (see
+  ; src/cli_install/windows.rs), so this is not the only place PATH is set. It
+  ; adds this folder only if it is missing, so in-app updates (which run this
+  ; again) and reinstalls change nothing. nsExec runs it hidden and waits, at most
   ; OPENRIZE_EXEC_TIMEOUT for any output.
   ${If} ${FileExists} "$INSTDIR\rize.exe"
     nsExec::Exec /TIMEOUT=${OPENRIZE_EXEC_TIMEOUT} '"$INSTDIR\rize.exe" install-path'

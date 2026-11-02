@@ -17,8 +17,10 @@ command, or changes the app command behind one, updates its row here.
   rize exits with "This laptop doesn't have any rize data. Are you sure you've installed the app
   before?"; with one from another app version, it fails with `INCOMPATIBLE` and leaves it alone.
 
-There are two ways to get rize: it comes bundled with the app (`rize install-path` puts it on
-PATH), or the curl installer (`install.sh`) installs it on its own. A standalone rize finds the
+There are two ways to get rize: it comes bundled with the app (the app links it into
+`~/.local/bin` on macOS, or puts its folder on the user PATH on Windows, at every launch;
+`rize install-path` does the same by hand), or the curl installer (`install.sh`) installs it on
+its own. A standalone rize finds the
 installed app only to launch it (`rize app start`, `rize track start`).
 
 `rize app start` only launches the app (in the background, no window). Tracking is its own

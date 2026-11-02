@@ -41,34 +41,13 @@ fn glyph(active: bool) -> Image<'static> {
     } else {
         tauri::include_image!("icons/tray-idle.png")
     };
-    #[cfg(windows)]
-    if !taskbar_is_light() {
-        return whitened(&template);
-    }
-    template
+    platform::tint(template)
 }
 
-/// Windows draws tray icons as they are, so the black template is painted
-/// white on a dark taskbar.
-#[cfg(windows)]
-fn whitened(template: &Image<'_>) -> Image<'static> {
-    let mut rgba = template.rgba().to_vec();
-    for pixel in rgba.as_chunks_mut::<4>().0 {
-        pixel[..3].fill(u8::MAX);
-    }
-    Image::new_owned(rgba, template.width(), template.height())
-}
-
-/// The taskbar follows the "default Windows mode", which is dark unless the
-/// user picked light; read on every icon change, so a switch shows up the
-/// next time the icon changes state.
-#[cfg(windows)]
-fn taskbar_is_light() -> bool {
-    windows_registry::CURRENT_USER
-        .open(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
-        .and_then(|key| key.get_u32("SystemUsesLightTheme"))
-        .is_ok_and(|light| light == 1)
-}
+#[cfg_attr(target_os = "macos", path = "tray/macos.rs")]
+#[cfg_attr(windows, path = "tray/windows.rs")]
+#[cfg_attr(not(any(target_os = "macos", windows)), path = "tray/unsupported.rs")]
+mod platform;
 
 pub fn init(app: &AppHandle, timers: &[Timer]) -> tauri::Result<()> {
     // No menu here: see `show_menu`.
@@ -114,6 +93,31 @@ pub fn refresh(app: &AppHandle, timers: &[Timer]) -> tauri::Result<()> {
     // list is broadcast for the frontend to adopt.
     let _ = app.emit(crate::EVENT_TIMERS_CHANGED, timers);
     Ok(())
+}
+
+/// Repaints just the glyph, for when the colour it should have changed without
+/// any timer changing (a Windows light/dark switch). Windows reports the
+/// app's theme, so a change to the taskbar's colour alone (Settings >
+/// Personalization > Colours, "Choose your default Windows mode") may not
+/// reach here and shows up at the next icon change instead.
+pub fn restyle(app: &AppHandle) {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return;
+    };
+    let glyph = glyph(any_running(&current_timers(app)));
+    if let Err(error) = tray.set_icon_with_as_template(Some(glyph), true) {
+        eprintln!("could not repaint the tray icon: {error}");
+    }
+}
+
+/// The stored timers as they are now; empty if the store is unavailable.
+fn current_timers(app: &AppHandle) -> Vec<Timer> {
+    app.state::<AppState>()
+        .store
+        .lock()
+        .ok()
+        .and_then(|store| store.snapshot().ok())
+        .unwrap_or_default()
 }
 
 pub fn show_main_window(app: &AppHandle) {
@@ -178,22 +182,34 @@ fn disabled(app: &AppHandle, id: &str, text: &str) -> tauri::Result<tauri::menu:
     MenuItemBuilder::with_id(id, text).enabled(false).build(app)
 }
 
-/// Mouse down, like a native menu-bar item: the panel or menu opens as the
-/// button goes down, not after it comes back up.
+/// The panel opens as the left button goes down, like a native menu-bar item,
+/// not after it comes back up. The right button opens the menu on
+/// `platform::MENU_BUTTON_STATE`: down on macOS, up on Windows, where the
+/// shell's own icons open theirs on release. A double click (Windows only) is
+/// the shell convention for "open the app".
 fn on_tray_icon_event(tray: &TrayIcon, event: TrayIconEvent) {
-    let TrayIconEvent::Click {
-        rect,
-        button,
-        button_state: MouseButtonState::Down,
-        ..
-    } = event
-    else {
-        return;
-    };
-    match button {
-        MouseButton::Left => crate::pulse::toggle(tray.app_handle(), rect),
-        MouseButton::Right => show_menu(tray),
-        MouseButton::Middle => {}
+    let app = tray.app_handle();
+    match event {
+        TrayIconEvent::Click {
+            rect,
+            button: MouseButton::Left,
+            button_state: MouseButtonState::Down,
+            ..
+        } => crate::pulse::toggle(app, rect),
+        TrayIconEvent::Click {
+            button: MouseButton::Right,
+            button_state,
+            ..
+        } if button_state == platform::MENU_BUTTON_STATE => show_menu(tray),
+        TrayIconEvent::DoubleClick {
+            button: MouseButton::Left,
+            ..
+        } => {
+            // The first click of the double click opened the panel.
+            crate::pulse::hide(app);
+            show_main_window(app);
+        }
+        _ => {}
     }
 }
 
@@ -204,13 +220,7 @@ fn on_tray_icon_event(tray: &TrayIcon, event: TrayIconEvent) {
 fn show_menu(tray: &TrayIcon) {
     let app = tray.app_handle();
     crate::pulse::hide(app);
-    let timers = app
-        .state::<AppState>()
-        .store
-        .lock()
-        .ok()
-        .and_then(|store| store.snapshot().ok())
-        .unwrap_or_default();
+    let timers = current_timers(app);
     let menu = match build_menu(app, &timers) {
         Ok(menu) => menu,
         Err(error) => {

@@ -53,8 +53,8 @@ const KEYED_OPTIONS = 3;
 const ROW_OPTIONS = 4;
 /**
  * Hides an action button's inline shortcut where the action row is too narrow
- * for even its compact form beside the other buttons ("Ctrl+⌫" is wider than
- * "⌘⌫"); the tooltip still carries it.
+ * for it beside the other buttons ("Ctrl+Backspace" is wider than "⌘⌫"); the
+ * tooltip still carries it.
  */
 const INLINE_SHORTCUT: Record<Platform, string> = {
   macos: "@max-[16rem]:hidden",
@@ -583,7 +583,7 @@ export function EntryReviewPanel({
                   <span
                     className={`ml-1 text-[10px] opacity-70 ${INLINE_SHORTCUT[PLATFORM]}`}
                   >
-                    {shortcutLabel("Enter", { compact: true })}
+                    {shortcutLabel("Enter")}
                   </span>
                 )}
               </button>
@@ -617,7 +617,7 @@ export function EntryReviewPanel({
                   <span
                     className={`ml-1 text-[10px] opacity-70 ${INLINE_SHORTCUT[PLATFORM]}`}
                   >
-                    {shortcutLabel("Backspace", { compact: true })}
+                    {shortcutLabel("Backspace")}
                   </span>
                 </button>
               </Tooltip>

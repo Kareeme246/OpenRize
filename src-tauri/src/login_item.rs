@@ -14,28 +14,16 @@ use serde::Serialize;
 /// What Settings shows for the login item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
 pub enum LoginItemState {
     Enabled,
     Disabled,
     /// Registered, but the user has to allow it in System Settings first.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     RequiresApproval,
     /// macOS older than 13, or a platform without an implementation.
     #[cfg_attr(windows, allow(dead_code))]
     Unsupported,
-}
-
-impl LoginItemState {
-    /// Maps `SMAppServiceStatus`. `NotFound` (3) means macOS has no record of
-    /// the service, which for the main app just means it was never
-    /// registered, so it reads as off.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    fn from_status(status: isize) -> Self {
-        match status {
-            1 => Self::Enabled,
-            2 => Self::RequiresApproval,
-            _ => Self::Disabled,
-        }
-    }
 }
 
 #[cfg_attr(target_os = "macos", path = "login_item/macos.rs")]
@@ -50,10 +38,9 @@ pub fn state() -> LoginItemState {
     imp::state()
 }
 
-/// Windows only: rewrites a Run value an earlier version wrote without
+/// Windows: rewrites a Run value an earlier version wrote without
 /// `--background`, run at startup so users who never open Settings are
-/// migrated too. A no-op when nothing is registered.
-#[cfg(windows)]
+/// migrated too. A no-op when nothing is registered, and on other platforms.
 pub fn refresh() {
     imp::refresh();
 }
@@ -78,17 +65,6 @@ pub fn set(enabled: bool) -> Result<LoginItemState, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn status_codes_map_to_states() {
-        assert_eq!(LoginItemState::from_status(0), LoginItemState::Disabled);
-        assert_eq!(LoginItemState::from_status(1), LoginItemState::Enabled);
-        assert_eq!(
-            LoginItemState::from_status(2),
-            LoginItemState::RequiresApproval
-        );
-        assert_eq!(LoginItemState::from_status(3), LoginItemState::Disabled);
-    }
 
     #[test]
     fn states_serialize_for_the_frontend() {

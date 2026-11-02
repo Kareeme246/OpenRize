@@ -38,10 +38,11 @@ import {
 } from "../lib/permissions";
 import {
   FILE_MANAGER,
+  HAS_APPLE_INTELLIGENCE,
   HAS_ENERGY_MONITOR,
   HAS_PERMISSIONS,
+  LOGIN_ITEM_UNAVAILABLE,
   OS_NAME,
-  PLATFORM,
   shortcutLabel,
   THIS_COMPUTER,
   TRAY_ICON,
@@ -274,9 +275,7 @@ function LaunchAtLoginRow({
       title="Launch at login"
       description={
         state === "unsupported"
-          ? PLATFORM === "macos"
-            ? "Needs macOS 13 or later"
-            : `Not available on ${OS_NAME} yet`
+          ? LOGIN_ITEM_UNAVAILABLE
           : pending
             ? "Allow OpenRize under Login Items in System Settings to finish"
             : "Start OpenRize in the background when you log in"
@@ -1360,7 +1359,11 @@ export function Settings({
           >
             <SettingsSectionHeading
               title="Overview"
-              description="System permissions, updates, and your current version."
+              description={
+                HAS_PERMISSIONS
+                  ? "System permissions, updates, and your current version."
+                  : "Updates and your current version."
+              }
             />
             {overviewError && (
               <div className="rounded-lg border border-danger/30 bg-danger/10 p-3 text-[12px] text-danger">
@@ -1740,7 +1743,7 @@ export function Settings({
                       {reviewedLabel(aiStatus)}
                     </span>
                   </SettingRow>
-                  {PLATFORM === "macos" && (
+                  {HAS_APPLE_INTELLIGENCE && (
                     <AppleIntelligenceRow
                       status={aiStatus}
                       onError={setAiError}

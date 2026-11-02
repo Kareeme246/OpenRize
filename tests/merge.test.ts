@@ -6,6 +6,7 @@ import {
   mergeBlocks,
   mergeCandidates,
 } from "../src/lib/merge.ts";
+import { PLATFORM } from "../src/lib/platform.ts";
 import type { TimeEntry } from "../src/lib/types";
 
 const MINUTE = 60_000;
@@ -280,9 +281,13 @@ test("the other entry shortcuts are unchanged", () => {
   assert.equal(key("s", { metaKey: true }), undefined);
   assert.equal(key("s", { altKey: true }), undefined);
   assert.equal(key("Escape"), "close");
-  assert.equal(key("Enter", { metaKey: true }), "accept");
-  assert.equal(key("Enter", { ctrlKey: true }), "accept");
+  // Only the platform's own modifier counts: Cmd on macOS, Ctrl elsewhere.
+  const primary = PLATFORM === "macos" ? { metaKey: true } : { ctrlKey: true };
+  const other = PLATFORM === "macos" ? { ctrlKey: true } : { metaKey: true };
+  assert.equal(key("Enter", primary), "accept");
+  assert.equal(key("Enter", other), undefined);
   assert.equal(key("Enter"), undefined);
-  assert.equal(key("Backspace", { metaKey: true }), "reject");
+  assert.equal(key("Backspace", primary), "reject");
+  assert.equal(key("Backspace", other), undefined);
   assert.equal(key("Backspace"), undefined);
 });

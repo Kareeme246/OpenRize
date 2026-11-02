@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { HAS_NATIVE_CAPTION, PLATFORM } from "../lib/platform";
+import { HAS_NATIVE_CAPTION, TOP_BAR_PADDING_LEFT } from "../lib/platform";
 import type { Route } from "../lib/types";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { Tooltip } from "./Tooltip";
@@ -32,10 +32,10 @@ export function TopBar({
 }: TopBarProps) {
   return (
     <header
-      data-tauri-drag-region="deep"
+      data-tauri-drag-region={HAS_NATIVE_CAPTION ? undefined : "deep"}
       className={`flex shrink-0 items-center gap-2 border-b border-line bg-bar pr-3 ${
         HAS_NATIVE_CAPTION ? "h-10" : "h-11"
-      } ${PLATFORM === "macos" ? "pl-[84px]" : "pl-3"}`}
+      } ${TOP_BAR_PADDING_LEFT}`}
     >
       <div className="flex flex-1 items-center gap-2">
         <NavArrow

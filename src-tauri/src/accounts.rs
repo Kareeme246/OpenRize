@@ -394,7 +394,7 @@ fn move_to_trash(path: &Path) -> Result<(), String> {
     }
     context
         .delete(path)
-        .map_err(|error| format!("Couldn't move the account to the Trash: {error}"))
+        .map_err(|error| format!("Couldn't move the account to the Trash or Recycle Bin: {error}"))
 }
 
 /// The user saw the missing-account dialog and chose to keep it listed.

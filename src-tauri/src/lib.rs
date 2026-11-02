@@ -11,6 +11,7 @@ mod energy;
 mod invoices;
 mod login_item;
 mod onboarding;
+mod panel;
 mod permissions;
 mod pulse;
 mod rpc;
@@ -119,7 +120,6 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
             install_bundled_cli();
-            #[cfg(windows)]
             login_item::refresh();
             let root = app.path().app_data_dir()?;
             std::fs::create_dir_all(&root)?;
@@ -186,11 +186,16 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| match event {
-            // The panel has no close control; anything that asks just hides it.
-            WindowEvent::CloseRequested { api, .. } if window.label() == pulse::LABEL => {
+            // The panels have no close control; anything that asks (Alt+F4, the
+            // taskbar) just hides them rather than ending the app.
+            WindowEvent::CloseRequested { api, .. }
+                if matches!(window.label(), pulse::LABEL | breaks::surface::LABEL) =>
+            {
                 api.prevent_close();
                 let _ = window.hide();
             }
+            // The glyph colour follows the theme on Windows.
+            WindowEvent::ThemeChanged(_) => tray::restyle(window.app_handle()),
             // Closing is a preference: either end the app, or hide to the menu
             // bar so a background tracker keeps running. With the tray off a
             // hidden window would be unreachable, so that combination quits.
@@ -373,16 +378,21 @@ pub fn run() {
             // macOS: clicking the dock icon with no visible window reopens it.
             #[cfg(target_os = "macos")]
             RunEvent::Reopen { .. } => tray::show_main_window(app),
-            // Close the open segment at the real quit time. Left open, the
-            // next launch can only close it at its own start, losing its time.
-            RunEvent::Exit => {
-                breaks::on_exit(app);
-                if let Ok(mut store) = app.state::<AppState>().activity.lock() {
-                    let _ = store.close_active_segment(timers::now_epoch_ms());
-                }
-            }
+            // Flush open state at the real quit time.
+            RunEvent::Exit => flush_on_exit(app),
             _ => {}
         });
+}
+
+/// Ends an open break and closes the open activity segment at the real quit
+/// time. Left open, the next launch can only close it at its own start,
+/// losing its time. Shared with the Windows updater, which exits the process
+/// without a `RunEvent::Exit`.
+pub(crate) fn flush_on_exit(app: &tauri::AppHandle) {
+    breaks::on_exit(app);
+    if let Ok(mut store) = app.state::<AppState>().activity.lock() {
+        let _ = store.close_active_segment(timers::now_epoch_ms());
+    }
 }
 
 /// Deletes activity history past the retention window once an hour. Startup

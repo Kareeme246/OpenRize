@@ -48,7 +48,7 @@ import {
   workDuration,
 } from "../lib/entries";
 import { formatDuration, formatTime, plural } from "../lib/format";
-import { shortcutLabel } from "../lib/platform";
+import { hasPrimaryModifier, shortcutLabel } from "../lib/platform";
 import { formatTargetHours, targetMsFor } from "../lib/settings";
 import type {
   CalendarScale,
@@ -379,7 +379,7 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (isTyping(event.target)) return;
       if (
-        (event.metaKey || event.ctrlKey) &&
+        hasPrimaryModifier(event) &&
         event.shiftKey &&
         event.key === "Enter"
       ) {
@@ -558,7 +558,7 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
                 >
                   Approve all{" "}
                   <span className="text-[10px] opacity-70">
-                    {shortcutLabel("Enter", { shift: true, compact: true })}
+                    {shortcutLabel("Enter", { shift: true })}
                   </span>
                 </button>
               </Tooltip>

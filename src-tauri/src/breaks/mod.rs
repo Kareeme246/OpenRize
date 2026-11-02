@@ -22,6 +22,7 @@
 //! store locks. Nothing holds an activity lock while asking for the engine.
 
 pub mod engine;
+mod sound;
 pub mod stopwatch;
 pub mod store;
 pub mod surface;
@@ -262,28 +263,7 @@ pub fn dev_sample(app: &AppHandle) -> Result<BreakState, String> {
 
 /// Plays the reminder chime (the setting's "Preview" button uses it too).
 pub fn chime() {
-    #[cfg(target_os = "macos")]
-    {
-        use objc2_app_kit::NSSound;
-        use objc2_foundation::NSString;
-        if let Some(sound) = NSSound::soundNamed(&NSString::from_str("Glass")) {
-            sound.play();
-        }
-    }
-    #[cfg(windows)]
-    {
-        use windows::core::w;
-        use windows::Win32::Media::Audio::{PlaySoundW, SND_ALIAS, SND_ASYNC, SND_NODEFAULT};
-        // SAFETY: plays a named system sound asynchronously; the alias is a
-        // static string.
-        unsafe {
-            let _ = PlaySoundW(
-                w!("SystemNotification"),
-                None,
-                SND_ALIAS | SND_ASYNC | SND_NODEFAULT,
-            );
-        }
-    }
+    sound::play_chime();
 }
 
 /// Runs `act` on the engine under its lock, applies the effects it returns,

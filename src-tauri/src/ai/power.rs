@@ -1,7 +1,8 @@
-//! When background retraining is allowed: only while the Mac is idle, on AC
-//! power, and not in Low Power Mode, so learning never costs the user
-//! battery or a stutter while they work. "Retrain now" in Settings skips
-//! this gate, since the user asked for it.
+//! When background retraining is allowed: only while the computer is idle, on
+//! AC power, and not in its battery saver (Low Power Mode on macOS, Battery
+//! Saver on Windows), so learning never costs the user battery or a stutter
+//! while they work. "Retrain now" in Settings skips this gate, since the user
+//! asked for it.
 
 use std::time::Duration;
 
@@ -19,90 +20,24 @@ impl Conditions {
     pub fn read() -> Self {
         Self {
             idle: Duration::from_millis(crate::activity::read_idle_ms()),
-            on_ac: on_ac_power(),
-            low_power: low_power_mode(),
+            // A machine without a battery reports no battery power, so it counts as on AC.
+            on_ac: !crate::energy::read_battery_info().on_battery,
+            low_power: crate::energy::low_power_mode(),
         }
     }
 
     /// Why background retraining has to wait, or `None` when it may run.
     pub fn blocker(&self) -> Option<&'static str> {
         if self.low_power {
-            Some("waiting for Low Power Mode to turn off")
+            Some("waiting for power saving to turn off")
         } else if !self.on_ac {
-            Some("waiting for the Mac to be on power")
+            Some("waiting for power")
         } else if self.idle < MIN_IDLE {
-            Some("waiting for the Mac to be idle")
+            Some("waiting for the computer to be idle")
         } else {
             None
         }
     }
-}
-
-#[cfg(target_os = "macos")]
-mod iokit {
-    use core_foundation_sys::base::CFTypeRef;
-    use core_foundation_sys::string::CFStringRef;
-
-    #[link(name = "IOKit", kind = "framework")]
-    extern "C" {
-        /// Create rule: the caller releases the snapshot.
-        pub fn IOPSCopyPowerSourcesInfo() -> CFTypeRef;
-        /// Get rule: the string belongs to the snapshot.
-        pub fn IOPSGetProvidingPowerSourceType(snapshot: CFTypeRef) -> CFStringRef;
-    }
-}
-
-/// Whether the Mac draws from AC (or a UPS) rather than its battery. A Mac
-/// without a battery reports AC.
-#[cfg(target_os = "macos")]
-fn on_ac_power() -> bool {
-    use core_foundation::base::TCFType;
-    use core_foundation::string::CFString;
-    use core_foundation_sys::base::CFRelease;
-
-    // SAFETY: IOPSCopyPowerSourcesInfo returns an owned snapshot (or null),
-    // which is released below; the providing type is borrowed from it and
-    // copied into a Rust string before the release.
-    unsafe {
-        let snapshot = iokit::IOPSCopyPowerSourcesInfo();
-        if snapshot.is_null() {
-            return true;
-        }
-        let kind = iokit::IOPSGetProvidingPowerSourceType(snapshot);
-        let on_battery = !kind.is_null() && CFString::wrap_under_get_rule(kind) == "Battery Power";
-        CFRelease(snapshot);
-        !on_battery
-    }
-}
-
-#[cfg(windows)]
-fn on_ac_power() -> bool {
-    !crate::energy::read_battery_info().on_battery
-}
-
-#[cfg(not(any(target_os = "macos", windows)))]
-fn on_ac_power() -> bool {
-    true
-}
-
-#[cfg(target_os = "macos")]
-fn low_power_mode() -> bool {
-    objc2_foundation::NSProcessInfo::processInfo().isLowPowerModeEnabled()
-}
-
-/// Windows' Battery Saver, its counterpart to Low Power Mode.
-#[cfg(windows)]
-fn low_power_mode() -> bool {
-    use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
-
-    let mut status = SYSTEM_POWER_STATUS::default();
-    // SAFETY: fills the struct on this stack.
-    unsafe { GetSystemPowerStatus(&mut status) }.is_ok() && status.SystemStatusFlag == 1
-}
-
-#[cfg(not(any(target_os = "macos", windows)))]
-fn low_power_mode() -> bool {
-    false
 }
 
 #[cfg(test)]
@@ -131,7 +66,7 @@ mod tests {
         assert!(conditions(10, true, true)
             .blocker()
             .unwrap()
-            .contains("Low Power"));
+            .contains("saving"));
     }
 
     #[test]

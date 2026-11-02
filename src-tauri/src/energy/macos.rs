@@ -2,6 +2,9 @@
 
 use super::*;
 
+/// macOS reports per-process energy through `proc_pid_rusage`.
+pub const HAS_ENERGY_COUNTER: bool = true;
+
 #[repr(C)]
 #[derive(Default, Debug, Clone, Copy)]
 pub struct RusageInfoV4 {
@@ -160,4 +163,8 @@ pub fn read_battery_info() -> BatteryInfo {
             battery_percent,
         }
     }
+}
+
+pub fn low_power_mode() -> bool {
+    objc2_foundation::NSProcessInfo::processInfo().isLowPowerModeEnabled()
 }

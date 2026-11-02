@@ -52,6 +52,13 @@ export const THIS_COMPUTER = byPlatform({
   linux: "this computer",
 });
 
+/** The OS's bin for deleted files, which removals move things into. */
+export const TRASH = byPlatform({
+  macos: "Trash",
+  windows: "Recycle Bin",
+  linux: "Trash",
+});
+
 /**
  * Whether the OS draws its own window caption (title and window buttons)
  * above the webview. macOS overlays its title bar on the webview instead
@@ -62,6 +69,16 @@ export const HAS_NATIVE_CAPTION = byPlatform({
   macos: false,
   windows: true,
   linux: true,
+});
+
+/**
+ * Left padding of the app's top bar. On macOS it clears the traffic lights,
+ * which the overlaid title bar draws over the webview's left edge.
+ */
+export const TOP_BAR_PADDING_LEFT = byPlatform({
+  macos: "pl-[84px]",
+  windows: "pl-3",
+  linux: "pl-3",
 });
 
 /**
@@ -92,6 +109,20 @@ export const EXPECTS_ON_DEVICE_ML = byPlatform({
   linux: false,
 });
 
+/** Apple Intelligence, the on-device model that the AI engine can use. */
+export const HAS_APPLE_INTELLIGENCE = byPlatform({
+  macos: true,
+  windows: false,
+  linux: false,
+});
+
+/** Why the on-device model is unavailable on an OS that cannot run it at all. */
+export const UNSUPPORTED_OS_MODEL_REASON = byPlatform({
+  macos: "The on-device model needs macOS 26 or later",
+  windows: "The on-device model isn't available on this platform",
+  linux: "The on-device model isn't available on this platform",
+});
+
 /** The OS setting that throttles background work to save battery. */
 export const POWER_SAVING_MODE = byPlatform({
   macos: "Low Power Mode",
@@ -99,8 +130,24 @@ export const POWER_SAVING_MODE = byPlatform({
   linux: "power saver",
 });
 
+/** Why launch at login is unavailable, for the OSes that do not offer it yet. */
+export const LOGIN_ITEM_UNAVAILABLE = byPlatform({
+  macos: "Needs macOS 13 or later",
+  windows: "Not available on Windows yet",
+  linux: "Not available on Linux yet",
+});
+
+/**
+ * The modifier keys a shortcut reads. Structural, so a `KeyboardEvent` and a
+ * plain object both fit, and this module needs no DOM types to be imported.
+ */
+export interface PrimaryModifierKeys {
+  metaKey: boolean;
+  ctrlKey: boolean;
+}
+
 /** The modifier app shortcuts use (and not the other one). */
-export function hasPrimaryModifier(event: KeyboardEvent): boolean {
+export function hasPrimaryModifier(event: PrimaryModifierKeys): boolean {
   return byPlatform({
     macos: event.metaKey && !event.ctrlKey,
     windows: event.ctrlKey && !event.metaKey,
@@ -108,29 +155,30 @@ export function hasPrimaryModifier(event: KeyboardEvent): boolean {
   });
 }
 
-/** Keys with a symbol, which macOS always writes and a compact label uses. */
-const KEY_SYMBOLS: Record<string, string> = { Enter: "↵", Backspace: "⌫" };
+/**
+ * The letter that redoes with the primary modifier alone (no Shift). Windows
+ * editors redo with Ctrl+Y; macOS redoes with Shift+Z only.
+ */
+export const REDO_KEY = byPlatform<string | undefined>({
+  macos: undefined,
+  windows: "y",
+  linux: "y",
+});
+
+/** Keys macOS writes as symbols. Other platforms spell them out. */
+const MAC_KEY_SYMBOLS: Record<string, string> = { Enter: "↵", Backspace: "⌫" };
 
 /**
- * A shortcut as the platform writes it: "⌘⇧↵" or "Ctrl+Shift+Enter".
- * `compact` writes a key as its symbol where it has one ("Ctrl+⌫"), for a
- * label inside a button; tooltips and prose keep the full name.
+ * A shortcut as the platform writes it: "⌘⇧↵" on macOS, "Ctrl+Shift+Enter"
+ * elsewhere.
  */
 export function shortcutLabel(
   key: string,
-  {
-    shift = false,
-    compact = false,
-  }: { shift?: boolean; compact?: boolean } = {},
+  { shift = false }: { shift?: boolean } = {},
 ): string {
-  const symbol = KEY_SYMBOLS[key] ?? key;
-  const ctrl = [
-    "Ctrl",
-    ...(shift ? ["Shift"] : []),
-    compact ? symbol : key,
-  ].join("+");
+  const ctrl = ["Ctrl", ...(shift ? ["Shift"] : []), key].join("+");
   return byPlatform({
-    macos: `⌘${shift ? "⇧" : ""}${symbol}`,
+    macos: `⌘${shift ? "⇧" : ""}${MAC_KEY_SYMBOLS[key] ?? key}`,
     windows: ctrl,
     linux: ctrl,
   });

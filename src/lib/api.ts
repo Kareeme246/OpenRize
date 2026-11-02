@@ -17,6 +17,7 @@ import type {
   AppRecord,
   BillableEntry,
   BugDiagnostics,
+  BugReportDraft,
   BugReportPayload,
   BugReportResponse,
   Category,
@@ -873,14 +874,23 @@ export function recordClientCrash(crash: ClientCrash): Promise<void> {
 
 // --- Bug reporting ---
 
+/** What the form can offer to attach. Nothing is sent. */
 export function getBugReportDiagnostics(
   locale?: string,
 ): Promise<BugDiagnostics> {
   return invoke<BugDiagnostics>("get_bug_report_diagnostics", { locale });
 }
 
+/** The exact report a draft would send. Nothing is sent. */
+export function previewBugReport(
+  draft: BugReportDraft,
+): Promise<BugReportPayload> {
+  return invoke<BugReportPayload>("preview_bug_report", { draft });
+}
+
+/** Sends the draft to the bug report endpoint; only the Send button calls it. */
 export function submitBugReport(
-  payload: BugReportPayload,
+  draft: BugReportDraft,
 ): Promise<BugReportResponse> {
-  return invoke<BugReportResponse>("submit_bug_report", { payload });
+  return invoke<BugReportResponse>("submit_bug_report", { draft });
 }

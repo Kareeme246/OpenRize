@@ -131,13 +131,7 @@ pub fn run() {
             let state = AppState::load(&dir)
                 .map_err(|error| -> Box<dyn std::error::Error> { error.into() })?;
             let timers = state.store.lock().map_err(|e| e.to_string())?.snapshot()?;
-            let mut preferences = state.settings_snapshot();
-            if preferences.install_id.trim().is_empty() {
-                preferences.install_id = uuid::Uuid::now_v7().to_string();
-                if let Ok(mut store) = state.settings.lock() {
-                    let _ = store.set(preferences.clone());
-                }
-            }
+            let preferences = state.settings_snapshot();
             app.manage(state);
             app.manage(ai::AiRuntime::default());
             app.manage(pulse::PulseState::default());
@@ -375,6 +369,7 @@ pub fn run() {
             accounts::dismiss_paused,
             commands::record_client_crash,
             commands::get_bug_report_diagnostics,
+            commands::preview_bug_report,
             commands::submit_bug_report,
         ])
         .build(tauri::generate_context!())

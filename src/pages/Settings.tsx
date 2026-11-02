@@ -1112,16 +1112,6 @@ export function Settings({
 
   const [showBugReportSheet, setShowBugReportSheet] = useState(false);
 
-  useEffect(() => {
-    const handleOpenBugReport = (): void => {
-      setShowBugReportSheet(true);
-    };
-    window.addEventListener("open-bug-report", handleOpenBugReport);
-    return () => {
-      window.removeEventListener("open-bug-report", handleOpenBugReport);
-    };
-  }, []);
-
   const [activeSection, setActiveSection] =
     useState<SettingsSection>("overview");
   const contentRef = useRef<HTMLDivElement>(null);
@@ -1388,7 +1378,7 @@ export function Settings({
             <SettingGroup title="Help & support">
               <SettingRow
                 title="Report a bug"
-                description="Encountered an issue or glitch? Submit a report directly with steps to reproduce and diagnostics."
+                description="Describe a problem and choose what to attach. You see exactly what will be sent, and nothing leaves this computer until you press Send."
               >
                 <button
                   type="button"
@@ -1669,18 +1659,6 @@ export function Settings({
                   label="Anonymous crash reporting"
                   onChange={(crashReporting) => update({ crashReporting })}
                 />
-              </SettingRow>
-              <SettingRow
-                title="Report a bug"
-                description="Submit an in-app report directly with steps to reproduce and optional diagnostics."
-              >
-                <button
-                  type="button"
-                  onClick={() => setShowBugReportSheet(true)}
-                  className="shrink-0 rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] font-medium text-fg-muted hover:bg-surface-strong hover:text-fg transition-colors cursor-pointer"
-                >
-                  Report a bug…
-                </button>
               </SettingRow>
             </SettingGroup>
           </section>

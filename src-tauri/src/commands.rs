@@ -1402,6 +1402,7 @@ pub fn record_client_crash(
 
 // --- Bug reporting ------------------------------------------------------
 
+/// What the form can offer to attach. Read-only; nothing is sent.
 #[tauri::command]
 pub fn get_bug_report_diagnostics(
     app: AppHandle,
@@ -1410,9 +1411,21 @@ pub fn get_bug_report_diagnostics(
     crate::bug_report::collect_diagnostics(&app, locale)
 }
 
+/// The exact report a draft would send, for the form's preview. Nothing is sent.
+#[tauri::command]
+pub fn preview_bug_report(
+    app: AppHandle,
+    draft: crate::bug_report::BugReportDraft,
+) -> Result<crate::bug_report::BugReportPayload, String> {
+    crate::bug_report::build_payload(&app, &draft)
+}
+
+/// Sends the draft to the bug report endpoint. Only the Send button calls this.
 #[tauri::command]
 pub async fn submit_bug_report(
-    payload: crate::bug_report::BugReportPayload,
+    app: AppHandle,
+    draft: crate::bug_report::BugReportDraft,
 ) -> Result<crate::bug_report::BugReportResponse, String> {
-    crate::bug_report::submit_bug_report(&payload).await
+    let payload = crate::bug_report::build_payload(&app, &draft)?;
+    crate::bug_report::send(&payload).await
 }

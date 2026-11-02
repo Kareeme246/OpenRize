@@ -827,7 +827,18 @@ export interface ClientCrash {
 
 // --- Bug reporting (src-tauri/src/bug_report.rs) ---
 
-export interface DiagnosticSettings {
+export type DataFolder = "local" | "legacyRoaming" | "other";
+
+export interface BugEnvironment {
+  appVersion: string;
+  os: string;
+  osVersion: string;
+  arch: string;
+  locale: string;
+  dataFolder: DataFolder;
+}
+
+export interface BugPreferences {
   theme: string;
   accent: string;
   shape: string;
@@ -846,24 +857,49 @@ export interface DiagnosticSettings {
   crashReporting: boolean;
 }
 
-export interface BugDiagnostics {
+export interface BugCrashSummary {
+  id: string;
+  timestampMs: number;
   appVersion: string;
-  os: string;
-  osVersion: string;
-  arch: string;
-  locale: string;
-  appDataDir: string;
-  settings: DiagnosticSettings;
-  recentCrashes: CrashReportSummary[];
+  source: string;
+  message: string;
 }
 
+/** Everything the form can offer to attach. */
+export interface BugDiagnostics {
+  environment: BugEnvironment;
+  preferences: BugPreferences;
+  recentCrashes: BugCrashSummary[];
+}
+
+export interface BugAttachments {
+  environment: boolean;
+  preferences: boolean;
+  crashIds: string[];
+}
+
+/** What the form holds; Rust builds the report from it. */
+export interface BugReportDraft {
+  whatHappened: string;
+  whatExpected: string;
+  stepsToReproduce: string;
+  additionalNotes?: string;
+  attachments: BugAttachments;
+  locale?: string;
+}
+
+/** The request body, exactly as it is sent. */
 export interface BugReportPayload {
   installId: string;
   whatHappened: string;
   whatExpected: string;
   stepsToReproduce: string;
   additionalNotes?: string;
-  diagnostics?: BugDiagnostics | null;
+  diagnostics?: {
+    environment?: BugEnvironment;
+    preferences?: BugPreferences;
+    recentCrashes?: BugCrashSummary[];
+  };
 }
 
 export interface BugReportResponse {

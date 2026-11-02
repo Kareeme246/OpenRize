@@ -233,7 +233,6 @@ export interface Settings {
   stopwatchReminder: StopwatchReminder;
   notificationPlacement: NotificationPlacement;
   crashReporting: boolean;
-  installId: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -254,7 +253,6 @@ export const DEFAULT_SETTINGS: Settings = {
   stopwatchReminder: { enabled: true, afterMinutes: 180 },
   notificationPlacement: "bottomRight",
   crashReporting: false,
-  installId: "",
 };
 
 /** A working day's share of the weekly target, in milliseconds. */

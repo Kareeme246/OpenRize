@@ -4,38 +4,13 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ToastProvider } from "./hooks/useToast";
-import * as api from "./lib/api";
+import { installCrashHandlers } from "./lib/crashReporting";
 import Pulse from "./Pulse";
 import Reminder from "./Reminder";
 import "./styles/app.css";
 
-// Capture unhandled window errors and promise rejections into local crash reports
-window.addEventListener("error", (event) => {
-  api
-    .recordClientCrash(
-      "frontend_error",
-      event.message || "Unknown window error",
-      undefined,
-      {
-        filename: event.filename,
-        lineno: event.lineno,
-        colno: event.colno,
-      },
-    )
-    .catch(() => undefined);
-});
-
-window.addEventListener("unhandledrejection", (event) => {
-  const reason = event.reason;
-  const message =
-    reason instanceof Error
-      ? reason.message
-      : String(reason ?? "Unhandled promise rejection");
-  const stack = reason instanceof Error ? reason.stack : undefined;
-  api
-    .recordClientCrash("unhandled_rejection", message, undefined, { stack })
-    .catch(() => undefined);
-});
+// Uncaught errors and unhandled rejections become local crash reports.
+installCrashHandlers();
 
 // One bundle, three windows: the menu-bar panel is the `pulse` window and the
 // top-right break panel is the `reminder` window.
@@ -56,7 +31,7 @@ function Root() {
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <ErrorBoundary>
+    <ErrorBoundary compact={label !== "main"}>
       <Root />
     </ErrorBoundary>
   </React.StrictMode>,

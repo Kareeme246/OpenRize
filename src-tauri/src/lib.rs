@@ -101,12 +101,13 @@ pub fn run() {
                 &app.path().app_local_data_dir()?,
             );
             std::fs::create_dir_all(&root)?;
+            // Per install, beside the accounts: see `openrize_core::crashes`.
+            crashes::set_crash_root(&root);
             // Before any store opens: repairs the account list and finishes a requested move.
             let launch = openrize_core::accounts::launch(&root);
             let dir = launch.resolved.dir.clone();
             let handoff = launch.handoff.clone();
             app.manage(accounts::ActiveAccount::new(root, &launch));
-            crashes::set_crash_data_dir(&dir);
             // Waits out a `rize` edit made while the app was closed, then
             // keeps the stores for as long as the app runs.
             std::fs::create_dir_all(&dir)?;
@@ -150,9 +151,7 @@ pub fn run() {
             if let Err(error) = commands::sweep_retention(app.handle()) {
                 eprintln!("retention sweep failed: {error}");
             }
-            if preferences.crash_reporting {
-                crashes::dispatch_pending_reports(dir.clone());
-            }
+            crashes::dispatch_pending_reports(app.handle().clone());
             rpc::serve(app.handle().clone(), dir);
             // A switch restarts with the original arguments, so a window that was
             // showing must come back even if this copy began in the background.

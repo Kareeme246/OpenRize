@@ -296,6 +296,13 @@ test("path: an inline-code repo path must exist in the verification skills", () 
   );
 });
 
+test("path: build output is not checked, since it exists only after a build", () => {
+  const drive = ".agents/skills/drive-app/SKILL.md";
+  const skill = SKILL.replace("name: demo", "name: drive-app");
+  const text = `${skill}\nNo \`src-tauri/target/debug/openrize\` yet.\n`;
+  assert.deepEqual(only(lintRepo(repo({ [drive]: text })), "path"), []);
+});
+
 test("path: other skills may name paths this repository does not have", () => {
   const text = `${SKILL}\nSee \`src/pages/Missing.tsx\`.\n`;
   assert.deepEqual(only(lintRepo(repo({ [SKILL_FILE]: text })), "path"), []);

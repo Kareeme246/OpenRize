@@ -73,6 +73,8 @@ const IDENT_RE = /^[a-z][a-z0-9-]*$/;
 const KEBAB_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 const REPO_PATH_RE =
   /^(\.agents|\.github|scripts|src|src-tauri|docs|tests)\/[A-Za-z0-9_./-]+$/;
+/** Build output: present only after a build, and named per OS (`openrize.exe`). */
+const BUILD_OUTPUT_RE = /^src-tauri\/target(\/|$)/;
 const PNPM_BUILTINS = new Set(["install", "exec", "run", "dlx"]);
 const RIZE_GLOBAL_FLAGS = new Set([
   "--json",
@@ -552,7 +554,9 @@ export function rulePath(root: string, file: string, text: string): Finding[] {
   for (const line of scanLines(text)) {
     if (line.kind !== "text") continue;
     for (const span of codeSpans(line.text)) {
-      if (!REPO_PATH_RE.test(span.text)) continue;
+      if (!REPO_PATH_RE.test(span.text) || BUILD_OUTPUT_RE.test(span.text)) {
+        continue;
+      }
       const path = span.text.replace(/\/$/, "");
       if (!existsSync(join(root, path))) {
         out.push(

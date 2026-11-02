@@ -3164,7 +3164,7 @@ dependencies = [
 
 [[package]]
 name = "openrize"
-version = "0.9.48"
+version = "0.9.49"
 dependencies = [
  "block2",
  "chrono",
@@ -3200,7 +3200,7 @@ dependencies = [
 
 [[package]]
 name = "openrize-cli"
-version = "0.9.48"
+version = "0.9.49"
 dependencies = [
  "chrono",
  "clap",
@@ -3210,13 +3210,11 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
- "windows 0.61.3",
- "windows-registry",
 ]
 
 [[package]]
 name = "openrize-core"
-version = "0.9.48"
+version = "0.9.49"
 dependencies = [
  "chrono",
  "dirs",
@@ -3229,6 +3227,7 @@ dependencies = [
  "uuid",
  "widestring",
  "windows 0.61.3",
+ "windows-registry",
 ]
 
 [[package]]

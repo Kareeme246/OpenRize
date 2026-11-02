@@ -22,6 +22,8 @@ pub mod rpc;
 pub mod settings;
 pub mod state;
 pub mod timers;
+#[cfg(windows)]
+pub mod user_path;
 
 /// Canonical installed app identity, also used by independent clients.
 pub const APP_IDENTIFIER: &str = "com.offlinestudios.openrize";

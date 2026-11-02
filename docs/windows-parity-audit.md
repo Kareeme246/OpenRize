@@ -78,11 +78,10 @@ permissions/onboarding gating, `useTauriEvent` usage, font stacks, shortcut labe
   Accepted for now; the in-app updater is still protected by the minisign signature.
 
 ## Windows drive tooling (found while driving 0.9.47)
-- [ ] An app restart inside a drive session (account switch, update) ends `tauri dev`, which takes
-  the Vite server with it: the restarted app keeps the CDP port but loads nothing, and the driver
-  reports the session dead.
-- [ ] `stop` does not find the restarted app (its command line carries no identifier or port), so
-  it survives, holds the session's data folder, and the delete fails with EPERM.
+- [x] An app restart inside a drive session (account switch, update) ends `tauri dev`, which took
+  the Vite server with it. The driver now runs Vite itself and follows the restarted app.
+- [x] `stop` did not find the restarted app (its command line carries no identifier or port). It
+  now also stops this checkout's own `openrize.exe` when no other session from it is live.
 - [x] Skills lint fails on a Windows checkout (it now skips build output): the macOS skill references
   `src-tauri/target/debug/openrize`, which is `openrize.exe` here and absent before a build.
 

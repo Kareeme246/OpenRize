@@ -486,7 +486,8 @@ pub struct Settings {
     pub breaks: BreakSettings,
     pub stopwatch_reminder: StopwatchReminder,
     pub notification_placement: NotificationPlacement,
-    /// Whether to send anonymous crash reports to the built-in endpoint.
+    /// Whether crash reports saved on this machine are sent to the built-in
+    /// endpoint. Off until the user turns it on; see `crashes.rs`.
     pub crash_reporting: bool,
 }
 

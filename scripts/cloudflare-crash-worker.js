@@ -1,122 +1,146 @@
 /**
- * Cloudflare Worker: OpenRize Lightweight Crash Ingestion Endpoint
+ * Cloudflare Worker: OpenRize crash report intake.
  *
- * This Worker runs entirely on Cloudflare's Free Tier (100,000 requests/day).
- * It receives sanitized crash reports from OpenRize desktop clients and
- * can log them, store them in KV / R2, or forward them to a Discord/Slack webhook.
+ * Self-contained: paste this file into a Worker, no build step or packages.
+ * It accepts the reports the app sends only after the user turned crash
+ * reporting on (src-tauri/src/crashes.rs, shape in src-tauri/core/src/crashes.rs)
+ * and keeps exactly the fields the app sends, and no others.
  *
- * --- QUICK SETUP (Cloudflare Dashboard) ---
- * 1. Log into your Cloudflare dashboard (https://dash.cloudflare.com/).
- * 2. Go to "Workers & Pages" -> "Create application" -> "Create Worker".
- * 3. Give it a name (e.g. `openrize-crashes`) and click "Deploy".
- * 4. Click "Edit code", replace the contents with this entire file, and click "Deploy".
- * 5. Copy the Worker URL (e.g. `https://openrize-crashes.<your-subdomain>.workers.dev`)
- *    and paste it into OpenRize Settings > Data & storage > Ingestion endpoint!
+ * Privacy rules this Worker holds to:
+ * - It stores and logs only the allow-listed fields below, each type-checked
+ *   and length-capped. Anything else in a request is dropped, never kept.
+ * - It never reads or stores the sender's IP address, headers or cookies. The
+ *   one thing it logs per report is the report's own id, source and version.
+ * - Reports expire from KV after 30 days.
+ * - It sets no CORS headers: only the desktop app posts here, and a web page
+ *   must not be able to.
  *
- * --- OPTIONAL INTEGRATIONS ---
- * • KV Storage: Bind a KV namespace variable `CRASHES_KV` in Worker Settings > Variables.
- * • Discord/Slack: Add an environment secret `WEBHOOK_URL` in Worker Settings > Variables.
+ * Setup (Cloudflare dashboard):
+ * 1. Workers & Pages -> Create -> Create Worker, name it `openrize-crashes`.
+ * 2. Edit code, replace the contents with this file, Deploy.
+ * 3. The app posts to the address compiled into it (CRASH_ENDPOINT in
+ *    src-tauri/src/crashes.rs). A fork points it at its own Worker by building
+ *    with OPENRIZE_CRASH_ENDPOINT set to `https://<worker>.workers.dev/report`.
+ *
+ * Optional storage and alerts (Worker Settings -> Bindings / Variables):
+ * - KV namespace bound as `CRASHES_KV`: each report is kept 30 days.
+ * - R2 bucket bound as `CRASHES_BUCKET`: each report is kept as JSON, until
+ *   you delete it.
+ * - Secret `WEBHOOK_URL` (a Discord or Slack-compatible webhook): a short alert
+ *   with the report's version, platform and failure description.
  */
+
+const MAX_BODY_BYTES = 64 * 1024;
+const KV_TTL_SECONDS = 60 * 60 * 24 * 30;
+const ID_PATTERN = /^[0-9a-fA-F-]{8,64}$/;
+const SOURCES = new Set(["backend_panic", "frontend_error", "unhandled_rejection"]);
+
+/** A string field, trimmed to `max` characters, or null when it is not one. */
+function text(value, max) {
+  return typeof value === "string" ? value.slice(0, max) : null;
+}
+
+/**
+ * The report as the app defines it, rebuilt field by field. Returns null when
+ * a required field is missing or malformed.
+ */
+function parseReport(payload) {
+  if (typeof payload !== "object" || payload === null) return null;
+  const id = text(payload.id, 64);
+  const source = text(payload.source, 32);
+  const message = text(payload.message, 500);
+  const appVersion = text(payload.appVersion, 32);
+  if (!id || !ID_PATTERN.test(id) || !SOURCES.has(source) || !message || !appVersion) {
+    return null;
+  }
+  const timestampMs = Number.isFinite(payload.timestampMs) ? payload.timestampMs : Date.now();
+  return {
+    id,
+    timestampMs,
+    appVersion,
+    os: text(payload.os, 32) ?? "",
+    osVersion: text(payload.osVersion, 64) ?? "",
+    arch: text(payload.arch, 32) ?? "",
+    source,
+    message,
+    backtrace: text(payload.backtrace, 16 * 1024),
+    componentStack: text(payload.componentStack, 8 * 1024),
+  };
+}
+
+function reply(status, body) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+/** Text safe to put in a Discord or Slack message: no formatting, no mentions. */
+function plain(value) {
+  return value.replace(/[`*_~<>@|\\]/g, " ");
+}
 
 export default {
   async fetch(request, env, ctx) {
-    // 1. Handle CORS Preflight
-    if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, User-Agent",
-          "Access-Control-Max-Age": "86400",
-        },
-      });
-    }
-
-    // 2. Reject non-POST requests
     if (request.method !== "POST") {
-      return new Response(JSON.stringify({ error: "Method not allowed. Use POST." }), {
-        status: 405,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      });
+      return reply(405, { error: "Use POST." });
     }
 
+    const declared = Number(request.headers.get("Content-Length") ?? 0);
+    if (declared > MAX_BODY_BYTES) {
+      return reply(413, { error: "Report too large." });
+    }
+    const body = await request.text();
+    if (body.length > MAX_BODY_BYTES) {
+      return reply(413, { error: "Report too large." });
+    }
+
+    let report;
     try {
-      const payload = await request.json();
-
-      // Validate required fields
-      if (!payload.id || !payload.message || !payload.appVersion) {
-        return new Response(JSON.stringify({ error: "Invalid crash report payload." }), {
-          status: 400,
-          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-        });
-      }
-
-      const timestamp = new Date(payload.timestampMs || Date.now()).toISOString();
-      console.log(
-        `[CRASH RECEIVED] ID: ${payload.id} | Source: ${payload.source} | App: v${payload.appVersion} | OS: ${payload.os} ${payload.osVersion} (${payload.arch}) | Message: ${payload.message}`
-      );
-
-      // Optional: Store in Cloudflare KV if bound (expires after 30 days)
-      if (env.CRASHES_KV) {
-        ctx.waitUntil(
-          env.CRASHES_KV.put(`crash:${payload.id}`, JSON.stringify(payload), {
-            expirationTtl: 60 * 60 * 24 * 30,
-            metadata: {
-              appVersion: payload.appVersion,
-              source: payload.source,
-              timestamp,
-            },
-          })
-        );
-      }
-
-      // Optional: Store in Cloudflare R2 if bound
-      if (env.CRASHES_BUCKET) {
-        const dateKey = timestamp.split("T")[0];
-        ctx.waitUntil(
-          env.CRASHES_BUCKET.put(`${dateKey}/${payload.id}.json`, JSON.stringify(payload, null, 2), {
-            httpMetadata: { contentType: "application/json" },
-          })
-        );
-      }
-
-      // Optional: Forward alert to Discord / Slack webhook if configured
-      if (env.WEBHOOK_URL) {
-        const preview = (payload.message || "Unknown error").slice(0, 500);
-        const webhookBody = {
-          content: `🚨 **OpenRize Crash Report**\n• **ID:** \`${payload.id}\`\n• **Source:** \`${payload.source}\`\n• **Version:** \`v${payload.appVersion}\` (${payload.os} ${payload.osVersion})\n• **Time:** ${timestamp}\n\`\`\`\n${preview}\n\`\`\``,
-        };
-
-        ctx.waitUntil(
-          fetch(env.WEBHOOK_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(webhookBody),
-          }).catch((err) => console.error("Webhook notification failed:", err))
-        );
-      }
-
-      return new Response(
-        JSON.stringify({
-          status: "received",
-          id: payload.id,
-          timestamp,
-        }),
-        {
-          status: 200,
-          headers: {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-          },
-        }
-      );
-    } catch (err) {
-      console.error("Failed to parse crash report JSON:", err);
-      return new Response(JSON.stringify({ error: "Invalid JSON body." }), {
-        status: 400,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      });
+      report = parseReport(JSON.parse(body));
+    } catch {
+      return reply(400, { error: "Invalid JSON body." });
     }
+    if (!report) {
+      return reply(400, { error: "Invalid crash report." });
+    }
+
+    const timestamp = new Date(report.timestampMs).toISOString();
+    console.log(`crash ${report.id} ${report.source} v${report.appVersion}`);
+
+    if (env.CRASHES_KV) {
+      ctx.waitUntil(
+        env.CRASHES_KV.put(`crash:${report.id}`, JSON.stringify(report), {
+          expirationTtl: KV_TTL_SECONDS,
+        }),
+      );
+    }
+
+    if (env.CRASHES_BUCKET) {
+      ctx.waitUntil(
+        env.CRASHES_BUCKET.put(`${timestamp.slice(0, 10)}/${report.id}.json`, JSON.stringify(report), {
+          httpMetadata: { contentType: "application/json" },
+        }),
+      );
+    }
+
+    if (env.WEBHOOK_URL) {
+      const alert = [
+        "OpenRize crash report",
+        `ID: ${report.id}`,
+        `Source: ${report.source}`,
+        `Version: v${plain(report.appVersion)} (${plain(report.os)} ${plain(report.osVersion)})`,
+        `Failure: ${plain(report.message)}`,
+      ].join("\n");
+      ctx.waitUntil(
+        fetch(env.WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: alert }),
+        }).catch(() => console.error("Webhook notification failed")),
+      );
+    }
+
+    return reply(200, { status: "received", id: report.id });
   },
 };

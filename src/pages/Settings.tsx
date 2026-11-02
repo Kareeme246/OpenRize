@@ -1635,7 +1635,7 @@ export function Settings({
             <SettingGroup title="Privacy & diagnostics">
               <SettingRow
                 title="Anonymous crash reporting"
-                description="Automatically submit anonymous crash diagnostics if an unexpected error occurs. Window titles, browser URLs, and personal data are never included."
+                description="When something breaks, OpenRize saves a short report on this device: the app version, your OS and where in the code it failed. Turn this on to also send those reports (and any already saved) to the developers. Window titles, web addresses, names, descriptions and file paths are never included. Off by default."
               >
                 <Toggle
                   checked={settings.crashReporting}

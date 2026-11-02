@@ -20,6 +20,7 @@ import type {
   CategoryRemoval,
   CategoryStats,
   Client,
+  ClientCrash,
   DevToolsInfo,
   EnergySummary,
   EntryDetail,
@@ -856,16 +857,13 @@ export function installUpdate(): Promise<void> {
 
 // --- Crash diagnostics ---
 
-export function recordClientCrash(
-  source: string,
-  message: string,
-  componentStack?: string,
-  metadata?: Record<string, unknown>,
-): Promise<void> {
+/** Hands a UI failure to Rust, which reduces it to what a report may hold. */
+export function recordClientCrash(crash: ClientCrash): Promise<void> {
   return invoke<void>("record_client_crash", {
-    source,
-    message,
-    componentStack,
-    metadata,
+    source: crash.source,
+    name: crash.name,
+    message: crash.message,
+    stack: crash.stack,
+    componentStack: crash.componentStack,
   });
 }

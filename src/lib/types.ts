@@ -811,26 +811,16 @@ export interface DevToolsInfo {
 
 // --- Crash diagnostics (src-tauri/core/src/crashes.rs) ---
 
-export interface CrashReportSummary {
-  id: string;
-  timestampMs: number;
-  appVersion: string;
-  os: string;
-  source: string;
-  message: string;
-}
-
-export interface CrashReport {
-  id: string;
-  timestampMs: number;
-  appVersion: string;
-  os: string;
-  osVersion: string;
-  arch: string;
-  source: string;
-  message: string;
-  backtrace?: string | null;
-  componentStack?: string | null;
-  metadata?: Record<string, unknown> | null;
-  sent?: boolean;
+/**
+ * What the UI knows about a failure. Rust keeps none of it verbatim: the
+ * message and stacks can quote the user's data, so a report holds only the
+ * error's name, a fixed description and anonymous frames.
+ */
+export interface ClientCrash {
+  source: "frontend_error" | "unhandled_rejection";
+  /** The error class (`TypeError`); absent when what was thrown is no `Error`. */
+  name?: string;
+  message?: string;
+  stack?: string;
+  componentStack?: string;
 }

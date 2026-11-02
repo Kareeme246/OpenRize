@@ -1149,11 +1149,7 @@ pub(crate) fn apply_settings_change(app: &AppHandle, previous: &Settings, next: 
     }
 
     if next.crash_reporting && !previous.crash_reporting {
-        if let Some(dir) =
-            crate::crashes::get_crash_data_dir().or_else(|| app.path().app_data_dir().ok())
-        {
-            crate::crashes::dispatch_pending_reports(dir);
-        }
+        crate::crashes::dispatch_pending_reports(app.clone());
     }
 
     let _ = app.emit(crate::EVENT_SETTINGS_CHANGED, next);
@@ -1382,24 +1378,24 @@ pub fn preview_break_chime() {
 
 // --- Crash diagnostics --------------------------------------------------
 
+/// Records a failure the UI caught (see `openrize_core::crashes` for what is
+/// kept). Everything is optional text from the page and is reduced in Rust,
+/// so a UI bug cannot put free text into a report.
 #[tauri::command]
 pub fn record_client_crash(
     app: AppHandle,
     source: String,
-    message: String,
+    name: Option<String>,
+    message: Option<String>,
+    stack: Option<String>,
     component_stack: Option<String>,
-    metadata: Option<serde_json::Value>,
-) -> Result<openrize_core::crashes::CrashReport, String> {
-    let report = crate::crashes::create_client_report(source, message, component_stack, metadata);
-    let dir = crate::crashes::get_crash_data_dir()
-        .or_else(|| app.path().app_data_dir().ok())
-        .ok_or_else(|| "Could not determine app data directory".to_string())?;
-    openrize_core::crashes::save_report(&dir, &report).map_err(|e| e.to_string())?;
-
-    let state = app.state::<AppState>();
-    if state.settings_snapshot().crash_reporting {
-        crate::crashes::spawn_dispatch(dir, report.clone());
-    }
-
-    Ok(report)
+) -> Result<(), String> {
+    crate::crashes::record_client_crash(
+        &app,
+        &source,
+        name.as_deref(),
+        message.as_deref(),
+        stack.as_deref(),
+        component_stack.as_deref(),
+    )
 }

@@ -258,7 +258,11 @@ function removeDir(path) {
   rmSync(path, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
 }
 
-/** The directories Tauri creates for an identifier. Refuses anything that is not ours. */
+/**
+ * The directories Tauri creates for an identifier. Refuses anything that is not ours.
+ * Roaming first, local second. The data lives in the second; the first is only
+ * swept so sessions from before the move to Local AppData still clean up.
+ */
 function identifierDirs(identifier) {
   if (!IDENTIFIER_RE.test(identifier)) die(`refusing to touch data for identifier ${identifier}`);
   const dirs = [];
@@ -690,8 +694,8 @@ async function startSession() {
   mkdirSync(join(dir, "shots"), { recursive: true });
 
   // Isolation, both parts required:
-  //   identifier      -> Tauri's app_data_dir / app_local_data_dir and the
-  //                      WebView2 user-data folder, i.e. the activity database
+  //   identifier      -> Tauri's app_local_data_dir (the activity database; older
+  //                      builds used app_data_dir) and the WebView2 user-data folder
   //   XDG_CONFIG_HOME -> where settings.json lives, which is not identifier-scoped
   //                      and would otherwise be the real user's settings
   const overrides = JSON.stringify({
@@ -722,7 +726,7 @@ async function startSession() {
   child.unref();
   closeSync(log);
 
-  const [appData, localData] = identifierDirs(identifier);
+  const [, localData] = identifierDirs(identifier);
   const meta = {
     id,
     port,
@@ -730,7 +734,9 @@ async function startSession() {
     pid: child.pid,
     appPid: null,
     identifier,
-    appData,
+    // The folder holding the databases (the key the feature docs and `rize`
+    // passthrough use). Local AppData now; older builds used the roaming folder.
+    appData: localData,
     localData,
     configHome: join(dir, "config"),
     repoRoot: REPO_ROOT,

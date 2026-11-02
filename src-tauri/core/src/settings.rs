@@ -2,7 +2,8 @@
 //!
 //! Storage policy: a single JSON file under the XDG config home
 //! (`$XDG_CONFIG_HOME/openrize/settings.json`, or `~/.config/openrize/...`;
-//! on Windows `%APPDATA%\openrize\settings.json`).
+//! on Windows `%LOCALAPPDATA%\com.offlinestudios.openrize\config\settings.json`,
+//! which stays on the machine and goes with the app's data when it is deleted).
 //! Preferences are config, not data: they survive deleting the app-data
 //! directory, and they are portable between machines the way `.dotfiles` are.
 //!
@@ -17,7 +18,9 @@ use std::sync::Once;
 
 use serde::{Deserialize, Serialize};
 
+use crate::paths;
 use crate::timers::now_epoch_ms;
+use crate::APP_IDENTIFIER;
 
 const FILE_NAME: &str = "settings.json";
 
@@ -539,7 +542,9 @@ impl Settings {
 /// conventional `.config` location on every platform. Windows is the exception
 /// to the fallback: `HOME` exists only in shells like Git Bash, so honoring it
 /// would give the app (launched from Explorer) and `rize` different files.
-/// There the fallback is the roaming `%APPDATA%\openrize`, and the first call
+/// There the fallback is the `config` folder inside the app's Local AppData
+/// folder (Roaming would sync the file off the machine, and the plain
+/// `%LOCALAPPDATA%\openrize` is the installer's folder), and the first call
 /// moves a settings file left in an older location over (`migrate_legacy`).
 pub fn config_dir() -> PathBuf {
     let env = ConfigEnv::from_process();
@@ -559,7 +564,11 @@ struct ConfigEnv {
     xdg: Option<OsString>,
     home: Option<OsString>,
     userprofile: Option<OsString>,
-    /// Windows roaming AppData, where the platform keeps per-user config.
+    /// Windows Local AppData (`%LOCALAPPDATA%`): settings live in the app's
+    /// folder inside it, per-user and never synced. Its `openrize` folder is
+    /// the installed app, so a settings file there is only ever a legacy one.
+    local: Option<PathBuf>,
+    /// Windows roaming AppData, where builds before Local AppData kept them.
     roaming: Option<PathBuf>,
 }
 
@@ -569,6 +578,11 @@ impl ConfigEnv {
             xdg: std::env::var_os("XDG_CONFIG_HOME"),
             home: std::env::var_os("HOME"),
             userprofile: std::env::var_os("USERPROFILE"),
+            local: if cfg!(windows) {
+                dirs::data_local_dir()
+            } else {
+                None
+            },
             roaming: if cfg!(windows) {
                 dirs::config_dir()
             } else {
@@ -582,12 +596,16 @@ impl ConfigEnv {
     }
 
     fn resolve(&self, windows: bool) -> PathBuf {
+        if windows && !self.has_xdg() {
+            if let Some(local) = &self.local {
+                return local.join(APP_IDENTIFIER).join(paths::CONFIG_DIR);
+            }
+        }
         let base = self
             .xdg
             .as_ref()
             .filter(|value| !value.is_empty())
             .map(PathBuf::from)
-            .or_else(|| self.roaming.clone().filter(|_| windows))
             .or_else(|| {
                 self.home
                     .as_ref()
@@ -598,20 +616,25 @@ impl ConfigEnv {
         base.join("openrize")
     }
 
-    /// Where Windows builds before the roaming location kept settings: the app
-    /// launched from Explorer (no `HOME`) wrote the first, `rize` run from Git
-    /// Bash (`HOME` set) the second.
+    /// Where earlier Windows builds kept settings: the roaming folder, then
+    /// `%LOCALAPPDATA%\openrize` (the installer's folder, so only its
+    /// settings file is ever taken), and before those the profile, where the
+    /// app launched from Explorer (no `HOME`) wrote the first and `rize` run
+    /// from Git Bash (`HOME` set) the second. `migrate_legacy` takes the most
+    /// recently written.
     fn legacy_dirs(&self) -> Vec<PathBuf> {
-        match &self.userprofile {
-            Some(profile) => {
-                let profile = PathBuf::from(profile);
-                vec![
-                    profile.join("openrize"),
-                    profile.join(".config").join("openrize"),
-                ]
-            }
-            None => Vec::new(),
+        let mut dirs: Vec<PathBuf> = self
+            .roaming
+            .iter()
+            .chain(self.local.iter())
+            .map(|base| base.join("openrize"))
+            .collect();
+        if let Some(profile) = &self.userprofile {
+            let profile = PathBuf::from(profile);
+            dirs.push(profile.join("openrize"));
+            dirs.push(profile.join(".config").join("openrize"));
         }
+        dirs
     }
 }
 
@@ -1265,20 +1288,26 @@ mod tests {
     }
 
     #[test]
-    fn config_dir_prefers_xdg_then_roaming_on_windows_and_home_elsewhere() {
+    fn config_dir_prefers_xdg_then_local_on_windows_and_home_elsewhere() {
         let env = ConfigEnv {
             xdg: os("/x"),
             home: os("/h"),
             userprofile: os("/u"),
+            local: Some(PathBuf::from("/local")),
             roaming: Some(PathBuf::from("/roaming")),
         };
         assert_eq!(env.resolve(true), PathBuf::from("/x/openrize"));
         assert_eq!(env.resolve(false), PathBuf::from("/x/openrize"));
 
         let env = ConfigEnv { xdg: os(""), ..env };
-        // HOME (set by Git Bash) must not move Windows off the roaming dir.
-        assert_eq!(env.resolve(true), PathBuf::from("/roaming/openrize"));
-        // The other platforms ignore the roaming slot entirely.
+        // HOME (set by Git Bash) must not move Windows off the local dir, and
+        // neither roaming (synced off the machine) nor the installer's own
+        // `openrize` folder is where settings go.
+        assert_eq!(
+            env.resolve(true),
+            PathBuf::from("/local/com.offlinestudios.openrize/config")
+        );
+        // The other platforms ignore the Windows slots entirely.
         assert_eq!(env.resolve(false), PathBuf::from("/h/.config/openrize"));
 
         let env = ConfigEnv { home: None, ..env };
@@ -1289,19 +1318,87 @@ mod tests {
     }
 
     #[test]
-    fn legacy_dirs_are_the_two_old_profile_locations() {
+    fn legacy_dirs_are_roaming_the_install_folder_and_the_two_old_profile_locations() {
         let env = ConfigEnv {
             userprofile: os("/u"),
+            roaming: Some(PathBuf::from("/roaming")),
+            local: Some(PathBuf::from("/local")),
             ..ConfigEnv::default()
         };
         assert_eq!(
             env.legacy_dirs(),
             vec![
+                PathBuf::from("/roaming/openrize"),
+                PathBuf::from("/local/openrize"),
                 PathBuf::from("/u/openrize"),
                 PathBuf::from("/u/.config/openrize")
             ]
         );
+        let profile_only = ConfigEnv {
+            userprofile: os("/u"),
+            ..ConfigEnv::default()
+        };
+        assert_eq!(profile_only.legacy_dirs().len(), 2);
         assert!(ConfigEnv::default().legacy_dirs().is_empty());
+    }
+
+    #[test]
+    fn the_install_folder_gives_up_only_its_settings_file() {
+        let root = temp_dir("migrate-install");
+        let new = root.join("local").join("id").join("config");
+        let install = root.join("local").join("openrize");
+        fs::create_dir_all(&install).unwrap();
+        fs::write(install.join(FILE_NAME), r#"{"accent":"orange"}"#).unwrap();
+        fs::write(install.join("openrize.exe"), "binary").unwrap();
+        fs::write(install.join("uninstall.exe"), "binary").unwrap();
+
+        migrate_legacy(&new, std::slice::from_ref(&install));
+
+        assert_eq!(
+            SettingsStore::load(&new).unwrap().snapshot().accent,
+            Accent::Orange
+        );
+        assert!(!install.join(FILE_NAME).exists());
+        assert!(install.join("openrize.exe").is_file());
+        assert!(install.join("uninstall.exe").is_file());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn roaming_settings_move_to_local_and_the_newest_legacy_wins() {
+        let root = temp_dir("migrate-roaming");
+        let local = root.join("local").join("openrize");
+        let roaming = root.join("roaming").join("openrize");
+        let profile = root.join("profile").join("openrize");
+        fs::create_dir_all(&roaming).unwrap();
+        fs::create_dir_all(&profile).unwrap();
+        fs::write(profile.join(FILE_NAME), r#"{"accent":"purple"}"#).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        fs::write(roaming.join(FILE_NAME), r#"{"accent":"blue"}"#).unwrap();
+        let env = ConfigEnv {
+            userprofile: os(root.join("profile").to_str().unwrap()),
+            roaming: Some(root.join("roaming")),
+            ..ConfigEnv::default()
+        };
+        // The profile copy is .../profile/openrize, one of the legacy dirs.
+        migrate_legacy(&local, &env.legacy_dirs());
+        assert_eq!(
+            SettingsStore::load(&local).unwrap().snapshot().accent,
+            Accent::Blue
+        );
+        assert!(!roaming.exists(), "the emptied roaming folder is removed");
+        assert!(profile.join(FILE_NAME).is_file(), "older copies stay");
+
+        // Already there (and local data present): roaming is not consulted again.
+        fs::create_dir_all(&roaming).unwrap();
+        fs::write(roaming.join(FILE_NAME), r#"{"accent":"orange"}"#).unwrap();
+        migrate_legacy(&local, &env.legacy_dirs());
+        assert_eq!(
+            SettingsStore::load(&local).unwrap().snapshot().accent,
+            Accent::Blue
+        );
+        assert!(roaming.join(FILE_NAME).is_file());
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

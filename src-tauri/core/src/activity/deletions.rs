@@ -122,7 +122,7 @@ impl Deletion {
                 return Err(LOCKED.to_string());
             }
             let mut statement = conn.prepare(
-                "SELECT id, app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id FROM segments WHERE entry_id = ?1;"
+                "SELECT id, app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id, private FROM segments WHERE entry_id = ?1;"
             ).map_err(|error| error.to_string())?;
             let segments = statement
                 .query_map([id], segment_from_row)
@@ -299,7 +299,7 @@ impl Deletion {
                 .iter()
                 .filter(|entry| entry.after.deleted.is_some())
             {
-                let mut statement = conn.prepare("SELECT id, app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id FROM segments WHERE entry_id = ?1;")
+                let mut statement = conn.prepare("SELECT id, app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id, private FROM segments WHERE entry_id = ?1;")
                     .map_err(|error| error.to_string())?;
                 let rows = statement
                     .query_map([&entry.id], segment_from_row)
@@ -402,8 +402,8 @@ impl Deletion {
         }
         for segment in &self.segments {
             if undo {
-                conn.execute("INSERT INTO segments (id, app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13);",
-                    params![segment.id, segment.app, segment.title, segment.kind, segment.label, segment.started_at as i64, segment.ended_at.map(|value| value as i64), segment.reviewed, segment.app_id, segment.bundle_id, segment.url, segment.domain, segment.entry_id])
+                conn.execute("INSERT INTO segments (id, app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id, private) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14);",
+                    params![segment.id, segment.app, segment.title, segment.kind, segment.label, segment.started_at as i64, segment.ended_at.map(|value| value as i64), segment.reviewed, segment.app_id, segment.bundle_id, segment.url, segment.domain, segment.entry_id, segment.private])
                     .map_err(|error| error.to_string())?;
             } else {
                 conn.execute(

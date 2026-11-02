@@ -10,7 +10,7 @@ use std::time::Duration;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::Serialize;
 
-use crate::capture::WindowSample;
+use crate::capture::{strip_url_detail, WindowSample};
 use crate::models::{
     AppContribution, AppRecord, Category, CategoryRemoval, Client, EntryDetail, EntryEvent,
     NewCategory, NewClient, NewProject, NewTimeEntry, Project, TimeEntry, TitleItem,
@@ -20,6 +20,9 @@ use crate::timers::now_epoch_ms;
 
 pub const SAMPLE_SECS: u64 = 1;
 pub const APP_SWITCH_GRACE_MS: u64 = 20_000;
+/// How long after a segment opens a browser may still report that its window
+/// is private. The report can lag the window by a few reads.
+const LATE_PRIVATE_MS: u64 = 15_000;
 pub const DEFAULT_IDLE_THRESHOLD_MS: u64 = 5 * 60 * 1000;
 pub const DB_FILE: &str = crate::paths::DATABASE_FILE;
 
@@ -170,6 +173,7 @@ struct Current {
     url: Option<String>,
     domain: Option<String>,
     entry_id: Option<String>,
+    private: bool,
 }
 
 impl Current {
@@ -188,6 +192,7 @@ impl Current {
             url: self.url.clone(),
             domain: self.domain.clone(),
             entry_id: self.entry_id.clone(),
+            private: self.private,
         }
     }
 }
@@ -250,6 +255,8 @@ mod claim;
 mod deletions;
 pub use deletions::{CategoryPreview, DeletionPreview};
 mod history;
+mod redact;
+pub use redact::{redact_private_detail, scrub_wal};
 #[cfg(test)]
 mod merge_regressions;
 #[cfg(test)]
@@ -314,7 +321,7 @@ impl ActivityStore {
     }
 
     pub fn from_conn(mut conn: Connection) -> Result<Self, String> {
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA optimize;")
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON; PRAGMA optimize;")
             .map_err(|error| error.to_string())?;
         conn.busy_timeout(BUSY_TIMEOUT)
             .map_err(|error| error.to_string())?;
@@ -352,7 +359,11 @@ impl ActivityStore {
                 [],
             )
             .map_err(|error| error.to_string())?;
-        store.rollup_old_segments(now_epoch_ms())?;
+        let now = now_epoch_ms();
+        store.rollup_old_segments(now)?;
+        // Approvals the CLI made while the app was closed, and anything past
+        // the backstop.
+        redact::redact_private_detail(&store.conn, now)?;
         Ok(store)
     }
 
@@ -433,6 +444,8 @@ impl ActivityStore {
         if sample.as_ref().is_some_and(|s| s.keeps_display_awake) {
             self.watched_at_ms = Some(now);
         }
+        // Normalized once, so the comparisons below see what is stored.
+        let sample = sample.map(WindowSample::for_storage);
         // Watching a video gives no input, so while an activity segment is
         // open, the foreground app keeping the display awake counts as the
         // user being there: idle runs from the last input or the last moment
@@ -500,6 +513,7 @@ impl ActivityStore {
                 cur.label.clone(),
                 cur.bundle_id.clone(),
                 cur.url.clone(),
+                cur.private,
             )
         });
 
@@ -519,6 +533,7 @@ impl ActivityStore {
                         None,
                         None,
                         None,
+                        false,
                     )
                 } else if let Some(sample) = sample {
                     self.open(
@@ -530,12 +545,13 @@ impl ActivityStore {
                         sample.bundle_id.as_deref(),
                         sample.url.as_deref(),
                         sample.domain.as_deref(),
+                        sample.private,
                     )
                 } else {
                     Ok(false)
                 }
             }
-            Some((app, title, kind, label, bundle_id, url)) => {
+            Some((app, title, kind, label, bundle_id, url, private)) => {
                 if idle {
                     self.pending_switch = None;
                     if kind != KIND_ACTIVITY {
@@ -562,6 +578,7 @@ impl ActivityStore {
                         None,
                         None,
                         None,
+                        false,
                     );
                 }
 
@@ -581,6 +598,7 @@ impl ActivityStore {
                             sample.bundle_id.as_deref(),
                             sample.url.as_deref(),
                             sample.domain.as_deref(),
+                            sample.private,
                         ),
                         None => Ok(true),
                     };
@@ -598,9 +616,25 @@ impl ActivityStore {
                             // User is in the current app (or returned to it from a brief detour).
                             self.pending_switch = None;
 
+                            // A window's privacy can reach us a moment after the window
+                            // does (the browser answers late). The segment it opened as a
+                            // normal one is then the same window, so it is marked private
+                            // instead of being left as a normal piece.
+                            let (url, private) = if sample.private
+                                && !private
+                                && self.current.as_ref().is_some_and(|cur| {
+                                    now.saturating_sub(cur.started_at) <= LATE_PRIVATE_MS
+                                }) {
+                                self.mark_current_private()?;
+                                (self.current.as_ref().and_then(|cur| cur.url.clone()), true)
+                            } else {
+                                (url, private)
+                            };
+
                             if sample.title != title
                                 || sample.url != url
                                 || sample.bundle_id != bundle_id
+                                || sample.private != private
                             {
                                 self.close_current(now)?;
                                 self.open(
@@ -612,6 +646,7 @@ impl ActivityStore {
                                     sample.bundle_id.as_deref(),
                                     sample.url.as_deref(),
                                     sample.domain.as_deref(),
+                                    sample.private,
                                 )
                             } else {
                                 Ok(false)
@@ -651,6 +686,7 @@ impl ActivityStore {
                                                 sample.bundle_id.as_deref(),
                                                 sample.url.as_deref(),
                                                 sample.domain.as_deref(),
+                                                sample.private,
                                             )
                                         } else {
                                             self.pending_switch = Some(PendingSwitch {
@@ -694,7 +730,7 @@ impl ActivityStore {
         let display = label.map(str::trim).filter(|text| !text.is_empty());
         let app = if kind == KIND_FOCUS { "Focus" } else { "Break" };
         let title = display.unwrap_or(app);
-        self.open(app, title, kind, display, now, None, None, None)
+        self.open(app, title, kind, display, now, None, None, None, false)
     }
 
     pub fn stop_session(&mut self, now: u64) -> Result<bool, String> {
@@ -770,6 +806,8 @@ impl ActivityStore {
     }
 
     pub fn purge_older_than(&mut self, days: u32, now: u64) -> Result<u64, String> {
+        // Whatever private detail is due goes whether or not history is kept.
+        redact::redact_private_detail(&self.conn, now)?;
         if days == 0 {
             return Ok(0);
         }
@@ -838,12 +876,13 @@ impl ActivityStore {
         bundle_id: Option<&str>,
         url: Option<&str>,
         domain: Option<&str>,
+        private: bool,
     ) -> Result<bool, String> {
         self.conn
             .execute(
-                "INSERT INTO segments (app, title, kind, label, started_at, ended_at, reviewed, bundle_id, url, domain)
-                 VALUES (?1, ?2, ?3, ?4, ?5, NULL, 0, ?6, ?7, ?8)",
-                params![app, title, kind, label, now as i64, bundle_id, url, domain],
+                "INSERT INTO segments (app, title, kind, label, started_at, ended_at, reviewed, bundle_id, url, domain, private)
+                 VALUES (?1, ?2, ?3, ?4, ?5, NULL, 0, ?6, ?7, ?8, ?9)",
+                params![app, title, kind, label, now as i64, bundle_id, url, domain, private],
             )
             .map_err(|error| error.to_string())?;
 
@@ -853,7 +892,10 @@ impl ActivityStore {
         // domain (when present) takes priority over the bundle id as the
         // identifier; errors here are swallowed because a failed apps-table
         // upsert must not stop the segment itself from being recorded.
+        // A private window is not a site the user visits: it is recorded as
+        // the browser, so no private domain is left in the apps list.
         if kind == KIND_ACTIVITY {
+            let domain = domain.filter(|_| !private);
             let identifier = domain.unwrap_or(bundle_id.unwrap_or(app));
             let app_kind = if domain.is_some() { "site" } else { "app" };
             let app_id = uuid::Uuid::now_v7().to_string();
@@ -878,8 +920,26 @@ impl ActivityStore {
             url: url.map(str::to_string),
             domain: domain.map(str::to_string),
             entry_id: None,
+            private,
         });
         Ok(true)
+    }
+
+    /// Marks the open segment as a private window's, and trims its address.
+    fn mark_current_private(&mut self) -> Result<(), String> {
+        let Some(current) = self.current.as_mut() else {
+            return Ok(());
+        };
+        let url = current.url.as_deref().map(strip_url_detail);
+        self.conn
+            .execute(
+                "UPDATE segments SET private = 1, url = ?1 WHERE id = ?2",
+                params![url, current.id],
+            )
+            .map_err(|error| error.to_string())?;
+        current.private = true;
+        current.url = url;
+        Ok(())
     }
 
     fn close_current(&mut self, now: u64) -> Result<bool, String> {
@@ -1599,7 +1659,7 @@ impl ActivityStore {
         ).map_err(|e| e.to_string())?;
 
         let mut stmt = self.conn.prepare(
-            "SELECT id, app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id
+            "SELECT id, app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id, private
              FROM segments
              WHERE entry_id = ?1 OR (entry_id IS NULL AND started_at >= ?2 AND ended_at <= ?3 AND kind != 'break')
              ORDER BY started_at ASC;",
@@ -2129,7 +2189,7 @@ impl ActivityStore {
         let segments: Vec<SegmentInput> = {
             let mut stmt = tx
                 .prepare(
-                    "SELECT id, app, title, kind, label, started_at, ended_at, entry_id
+                    "SELECT id, app, title, kind, label, started_at, ended_at, entry_id, private
                      FROM segments
                      WHERE started_at >= ?1 AND started_at <= ?2
                      ORDER BY started_at ASC;",
@@ -2146,6 +2206,7 @@ impl ActivityStore {
                         started_at: row.get::<_, i64>(5)? as u64,
                         ended_at: row.get::<_, Option<i64>>(6)?.map(|v| v as u64),
                         entry_id: row.get(7)?,
+                        private: row.get::<_, i64>(8)? != 0,
                     })
                 })
                 .map_err(|e| e.to_string())?;
@@ -2264,6 +2325,9 @@ impl ActivityStore {
         changed |= crate::ai::store::enqueue_unclassified(&tx, start_ms, end_ms, now)? > 0;
 
         tx.commit().map_err(|e| e.to_string())?;
+        // Entries that just closed or were approved may have had a private
+        // window in them; whatever is due to be forgotten is forgotten here.
+        redact::redact_private_detail(&self.conn, now)?;
         Ok(changed)
     }
 
@@ -2449,6 +2513,7 @@ impl ActivityStore {
                         bundle_id: cur.bundle_id.clone(),
                         url: cur.url.clone(),
                         domain: cur.domain.clone(),
+                        private: cur.private,
                         keeps_display_awake: false,
                     };
                     if self.is_sample_excluded(&cur_sample) {
@@ -2502,6 +2567,7 @@ pub fn segment_from_row(row: &Row<'_>) -> rusqlite::Result<ActivitySegment> {
         url: row.get(10).ok(),
         domain: row.get(11).ok(),
         entry_id: row.get(12).ok(),
+        private: row.get::<_, i64>(13)? != 0,
     })
 }
 
@@ -2605,7 +2671,7 @@ fn fetch_segments(
 ) -> Result<Vec<ActivitySegment>, String> {
     let mut statement = conn
         .prepare(
-            "SELECT id, app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id
+            "SELECT id, app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id, private
              FROM segments
              WHERE ended_at IS NULL OR (ended_at >= ?1 AND started_at < ?2)
              ORDER BY started_at ASC",
@@ -2718,6 +2784,7 @@ mod tests {
             bundle_id: None,
             url: None,
             domain: None,
+            private: false,
             keeps_display_awake: false,
         })
     }
@@ -4382,6 +4449,7 @@ mod tests {
             bundle_id: Some("com.agilebits.onepassword7".to_string()),
             url: None,
             domain: None,
+            private: false,
             keeps_display_awake: false,
         });
 

@@ -453,6 +453,7 @@ fn tracking_never_extends_or_rebuilds_an_approved_entry() {
             bundle_id: None,
             url: None,
             domain: None,
+            private: false,
             keeps_display_awake: false,
         })
     };

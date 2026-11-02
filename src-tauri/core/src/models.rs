@@ -16,6 +16,11 @@ pub struct ActivitySegment {
     pub url: Option<String>,
     pub domain: Option<String>,
     pub entry_id: Option<String>,
+    /// Captured in a private browsing window. Its title, URL and domain are
+    /// erased once its entry is classified (see `activity::redact`), leaving
+    /// `PRIVATE_TITLE`; the app and the times stay.
+    #[serde(default)]
+    pub private: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

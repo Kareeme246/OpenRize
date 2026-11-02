@@ -842,6 +842,7 @@ pub fn read_active_window() -> Option<WindowSample> {
     let domain = url.as_deref().and_then(domain_of);
 
     Some(WindowSample {
+        private: address_bar::is_private_window(window, &executable, &title),
         app: identity.name,
         title,
         // The executable name is the stable identity: the full path moves

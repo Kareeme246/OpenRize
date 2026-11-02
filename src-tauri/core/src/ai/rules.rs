@@ -250,6 +250,7 @@ mod tests {
             url: domain.map(|d| format!("https://{d}/file")),
             domain: domain.map(str::to_string),
             entry_id: None,
+            private: false,
         }
     }
 

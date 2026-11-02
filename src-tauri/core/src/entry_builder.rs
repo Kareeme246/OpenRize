@@ -35,6 +35,9 @@ pub struct SegmentInput {
     pub started_at: u64,
     pub ended_at: Option<u64>,
     pub entry_id: Option<String>,
+    /// Captured in a private window: its title never reaches a description.
+    #[serde(default)]
+    pub private: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -275,7 +278,9 @@ fn generate_description(segments: &[&SegmentInput]) -> String {
             .saturating_sub(seg.started_at);
         *app_counts.entry(seg.app.clone()).or_insert(0) += dur;
 
-        let clean_title = seg.title.trim();
+        // What a private window showed is not written into the entry, which
+        // outlives the segment's detail.
+        let clean_title = if seg.private { "" } else { seg.title.trim() };
         // A title equal to the app name is uninformative in a description
         // like "Slack: Slack", so it's dropped; titles are capped at 3 per
         // app to keep the generated description short.
@@ -318,6 +323,7 @@ mod tests {
             started_at: start,
             ended_at: Some(end),
             entry_id: None,
+            private: false,
         }
     }
 

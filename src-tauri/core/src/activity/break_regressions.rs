@@ -14,6 +14,7 @@ fn background_sample() -> Option<WindowSample> {
         bundle_id: None,
         url: None,
         domain: None,
+        private: false,
         keeps_display_awake: true,
     })
 }

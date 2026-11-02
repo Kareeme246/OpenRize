@@ -19,6 +19,7 @@ fn sample(title: &str) -> Option<WindowSample> {
         bundle_id: None,
         url: None,
         domain: None,
+        private: false,
         keeps_display_awake: false,
     })
 }

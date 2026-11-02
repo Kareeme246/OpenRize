@@ -1403,7 +1403,7 @@ impl ActivityStore {
         let segment = self
             .conn
             .query_row(
-                "SELECT id, app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id
+                "SELECT id, app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id, private
                  FROM segments WHERE id = ?1 AND entry_id IS ?2;",
                 params![id, entry_id],
                 segment_from_row,
@@ -1417,8 +1417,8 @@ impl ActivityStore {
             .map_err(|e| e.to_string())?;
         self.conn
             .execute(
-                "INSERT INTO segments (app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12);",
+                "INSERT INTO segments (app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id, private)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13);",
                 params![
                     segment.app,
                     segment.title,
@@ -1432,6 +1432,7 @@ impl ActivityStore {
                     segment.url,
                     segment.domain,
                     owner,
+                    segment.private,
                 ],
             )
             .map_err(|e| e.to_string())?;
@@ -1456,7 +1457,7 @@ impl ActivityStore {
         let mut statement = self
             .conn
             .prepare(
-                "SELECT id, app, title, kind, label, started_at, ended_at, entry_id
+                "SELECT id, app, title, kind, label, started_at, ended_at, entry_id, private
                  FROM segments WHERE entry_id = ?1 ORDER BY started_at;",
             )
             .map_err(|e| e.to_string())?;
@@ -1474,6 +1475,7 @@ impl ActivityStore {
                             .map_or(entry.ended_at, |end| end as u64),
                     ),
                     entry_id: row.get(7)?,
+                    private: row.get::<_, i64>(8)? != 0,
                 })
             })
             .map_err(|e| e.to_string())?

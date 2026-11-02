@@ -356,6 +356,13 @@ impl Worker {
                 {
                     eprintln!("ai worker: {error}");
                 }
+                // The entry has been read; erase what any private window in it
+                // showed (see `activity::redact`).
+                match self.write(|conn| activity::redact_private_detail(conn, now)) {
+                    Ok(0) => {}
+                    Ok(_) => self.emit_entries_changed(),
+                    Err(error) => eprintln!("ai worker: erasing private detail: {error}"),
+                }
             }
             Err(error) => {
                 eprintln!("ai worker: {} {} failed: {error}", job.kind, job.entry_id);
@@ -389,7 +396,7 @@ impl Worker {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id
+                "SELECT id, app, title, kind, label, started_at, ended_at, reviewed, app_id, bundle_id, url, domain, entry_id, private
                  FROM segments
                  WHERE entry_id = ?1 OR (entry_id IS NULL AND started_at >= ?2 AND ended_at <= ?3 AND kind != 'break')
                  ORDER BY started_at ASC;",
@@ -745,7 +752,7 @@ impl Worker {
                 .to_string(),
             None => "No project".to_string(),
         };
-        let category_decision = arbiter::decide(
+        let mut category_decision = arbiter::decide(
             &Evidence {
                 field: Field::Category,
                 rule: rule_category.as_ref(),
@@ -759,7 +766,7 @@ impl Worker {
             },
             &name,
         );
-        let project_decision = if want_project {
+        let mut project_decision = if want_project {
             arbiter::decide(
                 &Evidence {
                     field: Field::Project,
@@ -778,8 +785,20 @@ impl Worker {
             None
         };
 
+        // A private window's detail is read for this classification and then
+        // forgotten, so nothing stored may repeat it: not a rule's pattern in
+        // the "Why" line, not a sentence written from its titles.
+        let any_private = segments.iter().any(|segment| segment.private);
+        if any_private {
+            for decision in [&mut category_decision, &mut project_decision]
+                .into_iter()
+                .flatten()
+            {
+                decision.hide_rule_details();
+            }
+        }
         let model_version = model_version(caps.as_ref(), &self.conn);
-        let has_titles = features::has_titles(&segments);
+        let has_titles = features::has_titles(&segments) && !any_private;
         let outcome = Outcome {
             category: category_decision,
             project: project_decision,
@@ -1602,6 +1621,7 @@ mod tests {
             url: None,
             domain: None,
             entry_id: None,
+            private: false,
         };
         let found = mentions(
             &projects,

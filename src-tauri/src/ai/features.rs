@@ -20,6 +20,7 @@ use chrono::{Local, TimeZone};
 
 use crate::activity::{ActivitySegment, KIND_BREAK};
 use crate::models::Dominant;
+use openrize_core::capture::PRIVATE_TITLE;
 
 /// About 700 tokens, the entry's share of the model's 4,096-token context.
 const MAX_TEXT_CHARS: usize = 2_800;
@@ -101,10 +102,11 @@ pub fn is_tracker_segment(segment: &ActivitySegment) -> bool {
 
 /// A block has meaningful titles when it holds at least one non-tracker
 /// segment with a domain or a window title other than its app name (including
-/// after stripping a terminal host prefix).
+/// after stripping a terminal host prefix). A private window never counts: what
+/// it showed must not be put into an entry's description.
 pub fn has_titles(segments: &[ActivitySegment]) -> bool {
     segments.iter().any(|segment| {
-        if segment.kind == KIND_BREAK || is_tracker_segment(segment) {
+        if segment.kind == KIND_BREAK || segment.private || is_tracker_segment(segment) {
             return false;
         }
         if segment
@@ -119,12 +121,25 @@ pub fn has_titles(segments: &[ActivitySegment]) -> bool {
     })
 }
 
-pub fn extract(
+/// What a block's segments add up to: time per app with its titles and
+/// domains, the dominant app or site, and the active time.
+struct Usage {
+    apps: Vec<AppUsage>,
+    dominant: Option<Dominant>,
+    active_ms: u64,
+}
+
+/// Adds up the block. With `scrub_private`, a private window counts as its
+/// app alone: no title, no domain, and it never makes a site the dominant
+/// key. What is stored or learned from must be built this way; only the
+/// one-shot prompt to the on-device model may see what a private window
+/// showed, and only until the entry is classified.
+fn usage(
     started_at: u64,
     ended_at: u64,
     segments: &[ActivitySegment],
-    previous: Option<PreviousEntry<'_>>,
-) -> EntryFeatures {
+    scrub_private: bool,
+) -> Usage {
     let mut apps: Vec<AppUsage> = Vec::new();
     let mut keys: HashMap<(String, String), (String, u64)> = HashMap::new();
     let mut active_ms = 0u64;
@@ -154,17 +169,24 @@ pub fn extract(
         };
         let app = &mut apps[index];
         app.ms += ms;
+        // A private window whose detail was already erased reads as the
+        // marker; it says nothing, so it is never a title.
+        let detail = !(segment.private && (scrub_private || segment.title == PRIVATE_TITLE));
+        let domain = segment
+            .domain
+            .as_deref()
+            .filter(|d| !d.is_empty() && detail);
         let title = strip_host_prefix(segment.title.trim());
-        if !title.is_empty() && title != segment.app {
+        if detail && !title.is_empty() && title != segment.app {
             add_ms(&mut app.titles, title, ms);
         }
-        if let Some(domain) = segment.domain.as_deref().filter(|d| !d.is_empty()) {
+        if let Some(domain) = domain {
             add_ms(&mut app.domains, domain, ms);
         }
 
         // Rule suggestions key on a domain when there is one (figma.com is
         // more specific than "Safari"), else on the app's bundle id.
-        let (kind, key, label) = match segment.domain.as_deref().filter(|d| !d.is_empty()) {
+        let (kind, key, label) = match domain {
             Some(domain) => ("domain", domain.to_string(), domain.to_string()),
             None => (
                 "app",
@@ -198,10 +220,18 @@ pub fn extract(
                 0.0
             },
         });
+    Usage {
+        apps,
+        dominant,
+        active_ms,
+    }
+}
 
+/// The apps of a block as lines: share, domains, titles.
+fn render(usage: &Usage) -> String {
     let mut content = String::new();
-    for app in apps.iter().take(MAX_APPS) {
-        let share = percent(app.ms, active_ms);
+    for app in usage.apps.iter().take(MAX_APPS) {
+        let share = percent(app.ms, usage.active_ms);
         let mut line = format!("{} {share}%", app.name);
         let domains: Vec<&str> = app
             .domains
@@ -229,14 +259,34 @@ pub fn extract(
     if content.is_empty() {
         content.push_str("No app activity\n");
     }
-    let content = truncate(content.trim_end(), MAX_TEXT_CHARS);
+    truncate(content.trim_end(), MAX_TEXT_CHARS)
+}
+
+/// Renders a block for every tier. `text` goes to the Foundation Model for
+/// this one classification and is never stored, so it may carry what a
+/// private window showed. `content` and `dominant` are what get stored
+/// (`entry_embeddings.features`), embedded, trained on and shown as the "Why"
+/// line, so a private window is only its app there.
+pub fn extract(
+    started_at: u64,
+    ended_at: u64,
+    segments: &[ActivitySegment],
+    previous: Option<PreviousEntry<'_>>,
+) -> EntryFeatures {
+    let kept = usage(started_at, ended_at, segments, true);
+    let content = render(&kept);
+    let prompt = if segments.iter().any(|s| s.private) {
+        render(&usage(started_at, ended_at, segments, false))
+    } else {
+        content.clone()
+    };
 
     let mut text = format!(
         "{}–{} ({} min)\n{}",
         local_time(started_at, "%a %H:%M"),
         local_time(ended_at, "%H:%M"),
         ended_at.saturating_sub(started_at) / 60_000,
-        content
+        prompt
     );
     if let Some(previous) = previous {
         text.push_str(&format!(
@@ -250,8 +300,8 @@ pub fn extract(
     EntryFeatures {
         text,
         content,
-        dominant,
-        active_ms,
+        dominant: kept.dominant,
+        active_ms: kept.active_ms,
     }
 }
 
@@ -306,6 +356,7 @@ mod tests {
             url: None,
             domain: domain.map(str::to_string),
             entry_id: None,
+            private: false,
         }
     }
 
@@ -397,5 +448,60 @@ mod tests {
         // Non-app title present -> true
         let wezterm_title = seg("WezTerm", "cargo build", None, 0, 100_000);
         assert!(has_titles(&[wezterm_title]));
+    }
+
+    fn private_seg(title: &str, domain: Option<&str>, start: u64, end: u64) -> ActivitySegment {
+        let mut segment = seg("Zen", title, domain, start, end);
+        segment.private = true;
+        segment
+    }
+
+    #[test]
+    fn a_private_window_is_only_its_app_in_what_is_stored() {
+        let segments = vec![
+            seg("Xcode", "activity.rs - OpenRize", None, 0, 400_000),
+            private_seg(
+                "quarterly layoffs plan",
+                Some("hr.example"),
+                400_000,
+                1_000_000,
+            ),
+        ];
+        let features = extract(0, 1_000_000, &segments, None);
+
+        // What is embedded, stored and trained on has no title or site.
+        assert_eq!(
+            features.content,
+            "Zen 60%\nXcode 40%: \"activity.rs - OpenRize\""
+        );
+        let dominant = features.dominant.expect("a dominant app");
+        assert_eq!(
+            (dominant.kind.as_str(), dominant.label.as_str()),
+            ("app", "Zen")
+        );
+        // The one-shot prompt to the model still gets it to classify with.
+        assert!(features.text.contains("quarterly layoffs plan"));
+        assert!(features.text.contains("hr.example"));
+        // Time is counted whole.
+        assert_eq!(features.active_ms, 1_000_000);
+    }
+
+    #[test]
+    fn a_private_window_already_erased_adds_no_marker_text() {
+        let segments = vec![private_seg(PRIVATE_TITLE, None, 0, 600_000)];
+        let features = extract(0, 600_000, &segments, None);
+        assert_eq!(features.content, "Zen 100%");
+        assert!(features.text.ends_with("\nZen 100%"));
+        assert!(!has_titles(&segments));
+    }
+
+    #[test]
+    fn a_private_window_never_counts_as_titled() {
+        assert!(!has_titles(&[private_seg(
+            "secret",
+            Some("a.example"),
+            0,
+            1
+        )]));
     }
 }

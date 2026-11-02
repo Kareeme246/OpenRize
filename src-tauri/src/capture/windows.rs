@@ -1,6 +1,7 @@
 //! Windows capture: the foreground window through Win32, its app named from
-//! the executable's version resource, and a browser's URL read from its
-//! address bar through UI Automation.
+//! the executable's version resource (and told apart from others that share
+//! its executable, see `identity`), and a browser's URL read from its address
+//! bar through UI Automation.
 //!
 //! Sampling runs on the activity sampler thread, which owns per-thread caches;
 //! UI Automation runs on its own worker so a hung browser cannot stall it.
@@ -832,18 +833,21 @@ pub fn read_active_window() -> Option<WindowSample> {
         app,
         executable,
     } = process;
-    let url = BROWSERS
-        .contains(&executable.as_str())
-        .then(|| address_bar::url_of_titled(window, &title))
-        .flatten();
+    let identity = identity::identify(window, pid, &executable, &app);
+    // A web app's window has no address bar, and its name is the app's.
+    let url = (BROWSERS.contains(&executable.as_str())
+        && !identity::is_web_app(&executable, &identity))
+    .then(|| address_bar::url_of_titled(window, &title))
+    .flatten();
     let domain = url.as_deref().and_then(domain_of);
 
     Some(WindowSample {
-        app,
+        app: identity.name,
         title,
         // The executable name is the stable identity: the full path moves
-        // with every update of apps that install into versioned folders.
-        bundle_id: Some(executable),
+        // with every update of apps that install into versioned folders. Only
+        // an executable that hosts many apps is qualified (see `identity`).
+        bundle_id: Some(identity.id),
         url,
         domain,
         keeps_display_awake: keeps_display_awake(pid),
@@ -1057,6 +1061,11 @@ fn wide(text: &str) -> Vec<u16> {
 // on its own worker thread rather than on the sampler.
 #[path = "windows/address_bar.rs"]
 mod address_bar;
+
+// Names an app finely enough to tell the web apps of one browser, or the
+// programs of one script host, apart.
+#[path = "windows/identity.rs"]
+mod identity;
 
 #[cfg(test)]
 mod tests {

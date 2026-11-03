@@ -20,17 +20,33 @@
 //! of displayed confidence on the accept/reject history (`calibration.rs`).
 //! `metrics.rs` reports how well all of it is working.
 //!
-//! Everything except the ML calls runs in Rust. The ML calls go to the Swift
-//! sidecar `openrize-ml` over JSON lines on stdio (`sidecar.rs`). Nothing
-//! here makes a network call.
+//! Everything except the ML calls runs in Rust. The language model sits
+//! behind one `provider::Provider` (a single LLM is active at a time): Apple's
+//! via the Swift sidecar `openrize-ml` over JSON lines on stdio (`apple.rs`,
+//! `sidecar.rs`), and later local models via an OpenAI-compatible
+//! `llama-server`; see `docs/design/local-models.md`. `pipeline.rs` is the
+//! pure labeling step the worker and the benchmark share. Nothing here makes a
+//! network call.
 //!
 //! The data side (`rules`, `knn`, `calibration`, `arbiter`, `store`) lives in
 //! `openrize_core::ai`, so `rize` can record approvals and corrections with
 //! the app closed; it is re-exported here.
 
+pub mod apple;
+#[cfg(test)]
+mod bench;
 pub mod features;
 pub mod metrics;
+// Wired into the worker by the runtime PR (row 2 of the delivery plan in
+// docs/design/local-models.md); until then only the golden-set benchmark
+// starts a local model.
+#[cfg_attr(not(test), allow(dead_code))]
+pub mod openai;
+pub mod pipeline;
 pub mod power;
+pub mod provider;
+#[cfg_attr(not(test), allow(dead_code))]
+pub mod runtime;
 pub mod sidecar;
 pub mod worker;
 

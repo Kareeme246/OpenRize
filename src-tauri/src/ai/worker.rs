@@ -17,13 +17,17 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
-use super::arbiter::{self, Decision, Evidence, Label, Votes};
+use super::apple::{self, AppleProvider};
+use super::arbiter::{Decision, Label};
 use super::calibration::Calibrator;
 use super::features::{self, EntryFeatures, PreviousEntry};
 use super::knn;
+use super::pipeline;
 use super::power::Conditions;
+use super::prompt::Choice;
+use super::provider::{EmbedModel, Provider, ProviderId};
 use super::rules;
-use super::sidecar::{self, Capabilities, Sidecar};
+use super::sidecar::{self, Capabilities};
 use super::store::{self, Job, JOB_CLASSIFY};
 use super::{update_status, AiRuntime, Field, EVENT_SUGGESTION_READY, PREFILL_THRESHOLD};
 use crate::activity::{self, ActivitySegment};
@@ -51,11 +55,6 @@ const HOLDOUT_ONE_IN: u64 = 5;
 const CALIBRATION_CHECK_EVERY: Duration = Duration::from_secs(60);
 /// New verdicts that trigger refitting the calibration curve.
 const CALIBRATION_REFIT_AFTER: u32 = 10;
-/// With more choices than this, only the fast tiers' top picks are sent to
-/// the model, to stay inside its 4,096-token context.
-const MAX_LLM_CATEGORIES: usize = 16;
-const MAX_LLM_PROJECTS: usize = 15;
-const FEW_SHOT_EXAMPLES: usize = 4;
 /// A previous entry this close before the current one is context.
 const CONTEXT_GAP_MS: u64 = 15 * 60 * 1000;
 const BACKFILL_WINDOW_MS: u64 = 7 * 24 * 60 * 60 * 1000;
@@ -73,17 +72,10 @@ pub fn spawn(app: AppHandle, db_path: PathBuf, ml_dir: PathBuf) {
         .expect("spawn ai worker");
 }
 
-struct Choice {
-    id: String,
-    name: String,
-    description: Option<String>,
-    hint: Option<String>,
-}
-
 struct Worker {
     app: AppHandle,
     conn: Connection,
-    sidecar: Sidecar,
+    apple: AppleProvider,
     ml_dir: PathBuf,
     last_rebuild: Option<Instant>,
     last_probe: Option<Instant>,
@@ -107,7 +99,7 @@ impl Worker {
         Self {
             app,
             conn,
-            sidecar: Sidecar::new(),
+            apple: AppleProvider::new(),
             ml_dir,
             last_rebuild: None,
             last_probe: None,
@@ -142,7 +134,7 @@ impl Worker {
                     }
                 }
             }
-            if self.sidecar.stop_if_idle() {
+            if self.apple.stop_if_idle() {
                 update_status(&self.app, |s| s.sidecar = "stopped".to_string());
             }
             self.reprobe_if_due();
@@ -204,7 +196,7 @@ impl Worker {
 
     fn probe(&mut self) {
         self.last_probe = Some(Instant::now());
-        if !self.sidecar.is_installed() {
+        if !self.apple.is_installed() {
             update_status(&self.app, |s| {
                 s.engine = "rules".to_string();
                 s.llm = "unsupportedOS".to_string();
@@ -212,7 +204,7 @@ impl Worker {
             });
             return;
         }
-        match self.sidecar.probe() {
+        match self.apple.sidecar_mut().probe() {
             Ok(_) => self.apply_capabilities(),
             Err(error) => update_status(&self.app, |s| {
                 s.engine = "rules".to_string();
@@ -224,7 +216,7 @@ impl Worker {
 
     fn reprobe_if_due(&mut self) {
         let llm_ready = self.applied.as_ref().is_some_and(|c| c.llm == "available");
-        if llm_ready || !self.sidecar.is_installed() {
+        if llm_ready || !self.apple.is_installed() {
             return;
         }
         if self
@@ -239,11 +231,11 @@ impl Worker {
     /// Foundation Model has just become available, re-queues the entries the
     /// fallback engine handled.
     fn apply_capabilities(&mut self) {
-        let Some(caps) = self.sidecar.capabilities().cloned() else {
+        let Some(caps) = self.apple.sidecar_capabilities().cloned() else {
             return;
         };
         let was_ready = self.applied.as_ref().map(|c| c.llm == "available");
-        let running = self.sidecar.is_running();
+        let running = self.apple.is_running();
         update_status(&self.app, |s| {
             s.engine = if caps.llm == "available" {
                 "full"
@@ -280,8 +272,8 @@ impl Worker {
             .ok()
             .flatten()
             .is_some();
-        let running = self.sidecar.is_running();
-        let installed = self.sidecar.is_installed();
+        let running = self.apple.is_running();
+        let installed = self.apple.is_installed();
         update_status(&self.app, |s| {
             s.queued = queued;
             s.outcomes = outcomes;
@@ -300,12 +292,12 @@ impl Worker {
 
     /// Capabilities, starting the sidecar if needed. `None` means only T0.
     fn capabilities(&mut self) -> Option<Capabilities> {
-        if !self.sidecar.is_installed() {
+        if !self.apple.is_installed() {
             return None;
         }
-        match self.sidecar.probe() {
+        match self.apple.sidecar_mut().probe() {
             Ok(caps) => {
-                if self.applied.as_ref() != Some(&caps) || !self.sidecar.is_running() {
+                if self.applied.as_ref() != Some(&caps) || !self.apple.is_running() {
                     self.apply_capabilities();
                 } else {
                     update_status(&self.app, |s| s.sidecar = "running".to_string());
@@ -329,7 +321,7 @@ impl Worker {
         {
             let runtime = self.app.state::<AiRuntime>();
             runtime.set_busy(true);
-            runtime.set_sidecar_pid(self.sidecar.pid());
+            runtime.set_sidecar_pid(self.apple.pid());
         }
 
         let now = now_epoch_ms();
@@ -346,7 +338,7 @@ impl Worker {
         {
             let runtime = self.app.state::<AiRuntime>();
             runtime.set_busy(false);
-            runtime.set_sidecar_pid(self.sidecar.pid());
+            runtime.set_sidecar_pid(self.apple.pid());
         }
         let now = now_epoch_ms();
         match result {
@@ -458,28 +450,20 @@ impl Worker {
         &mut self,
         entry_id: &str,
         features: &EntryFeatures,
-        caps: Option<&Capabilities>,
+        embed: Option<&EmbedModel>,
     ) -> Result<Option<Vec<f32>>, String> {
         let hash = text_hash(&features.content);
         if let Some(vector) = store::embedding_for(&self.conn, entry_id, &hash)? {
             return Ok(Some(vector));
         }
-        let Some(caps) = caps.filter(|c| c.embed) else {
+        let Some(embed) = embed else {
             return Ok(None);
         };
-        #[derive(Deserialize)]
-        struct Embedded {
-            vectors: Vec<Option<Vec<f32>>>,
-        }
-        let reply: Embedded = self.sidecar.call(
-            "embed",
-            json!({ "texts": [features.content] }),
-            sidecar::TIMEOUT_QUICK,
-        )?;
-        let Some(vector) = reply.vectors.into_iter().next().flatten() else {
+        let vectors = self.apple.embed(std::slice::from_ref(&features.content))?;
+        let Some(vector) = vectors.into_iter().next().flatten() else {
             return Ok(None);
         };
-        let model = format!("nlembedding-en-r{}", caps.embed_revision);
+        let model = embed.model.clone();
         let now = now_epoch_ms();
         self.write(|conn| {
             store::upsert_embedding(
@@ -501,7 +485,7 @@ impl Worker {
         struct Predicted {
             hypotheses: Vec<HashMap<String, f64>>,
         }
-        let reply: Result<Predicted, String> = self.sidecar.call(
+        let reply: Result<Predicted, String> = self.apple.sidecar_mut().call(
             "personal_predict",
             json!({ "model": artifact.path, "texts": [text] }),
             sidecar::TIMEOUT_QUICK,
@@ -537,7 +521,7 @@ impl Worker {
         if caps.as_ref().is_none_or(|c| !c.embed) {
             return Err("no embedding model available".to_string());
         }
-        self.vector_for(&entry.id, &features, caps.as_ref())
+        self.vector_for(&entry.id, &features, embed_model(caps.as_ref()).as_ref())
             .map(|_| ())
     }
 
@@ -589,221 +573,56 @@ impl Worker {
 
         // T1
         let caps = self.capabilities();
-        let vector = match self.vector_for(&entry.id, &features, caps.as_ref()) {
-            Ok(vector) => vector,
-            Err(error) => {
-                eprintln!("ai worker: embedding failed: {error}");
-                None
-            }
-        };
+        let vector =
+            match self.vector_for(&entry.id, &features, embed_model(caps.as_ref()).as_ref()) {
+                Ok(vector) => vector,
+                Err(error) => {
+                    eprintln!("ai worker: embedding failed: {error}");
+                    None
+                }
+            };
         let pool =
             store::labeled_pool(&self.conn, now.saturating_sub(knn::LOOKBACK_MS), &entry.id)?;
-        let neighbors = vector
-            .as_deref()
-            .map(|v| knn::nearest(v, &pool, knn::K))
-            .unwrap_or_default();
-        let live_category_ids: HashSet<&str> = categories.iter().map(|c| c.id.as_str()).collect();
-        let category_neighbors: Vec<(Label, f32)> = neighbors
-            .iter()
-            .filter(|n| {
-                n.item
-                    .category_id
-                    .as_deref()
-                    .is_some_and(|id| live_category_ids.contains(id))
-            })
-            .map(|n| (n.item.category_id.clone(), n.similarity))
-            .collect();
-
-        let live_project_ids: HashSet<&str> = projects.iter().map(|c| c.id.as_str()).collect();
-        let project_neighbors: Vec<(Label, f32)> = neighbors
-            .iter()
-            .filter(|n| {
-                n.item
-                    .project_id
-                    .as_deref()
-                    .is_some_and(|id| live_project_ids.contains(id))
-            })
-            .map(|n| (n.item.project_id.clone(), n.similarity))
-            .collect();
-
         let personal_category = caps
             .is_some()
             .then(|| self.personal_predict(Field::Category, &features.content))
-            .flatten()
-            .map(|dist| {
-                dist.into_iter()
-                    .filter(|(label, _)| {
-                        label
-                            .as_deref()
-                            .is_some_and(|id| live_category_ids.contains(id))
-                    })
-                    .collect::<HashMap<Label, f64>>()
-            })
-            .filter(|dist| !dist.is_empty());
+            .flatten();
         let personal_project = (caps.is_some() && want_project)
             .then(|| self.personal_predict(Field::Project, &features.content))
-            .flatten()
-            .map(|dist| {
-                dist.into_iter()
-                    .filter(|(label, _)| {
-                        label
-                            .as_deref()
-                            .is_some_and(|id| live_project_ids.contains(id))
-                    })
-                    .collect::<HashMap<Label, f64>>()
-            })
-            .filter(|dist| !dist.is_empty());
-        let labeled = store::labeled_count(&self.conn)?;
+            .flatten();
+        let labeled_count = store::labeled_count(&self.conn)?;
         let calibrator = store::active_calibration(&self.conn)?;
 
-        // T2
-        let t1_category = arbiter::t1_top(&category_neighbors, personal_category.as_ref(), labeled);
-        let t1_project = arbiter::t1_top(&project_neighbors, personal_project.as_ref(), labeled);
-        let mut llm_category: Option<Votes> = None;
-        let mut llm_project: Option<Votes> = None;
-        let mut description: Option<String> = None;
-        if caps.as_ref().is_some_and(|c| c.llm == "available") {
-            let mut cat_counts: HashMap<&str, usize> = HashMap::new();
-            let mut proj_counts: HashMap<&str, usize> = HashMap::new();
-            for item in &pool {
-                if let Some(id) = item.category_id.as_deref() {
-                    *cat_counts.entry(id).or_default() += 1;
-                }
-                if let Some(id) = item.project_id.as_deref() {
-                    *proj_counts.entry(id).or_default() += 1;
-                }
-            }
-            let cold_categories: HashSet<&str> = categories
-                .iter()
-                .filter(|c| cat_counts.get(c.id.as_str()).copied().unwrap_or(0) < 5)
-                .map(|c| c.id.as_str())
-                .collect();
-            let cold_projects: HashSet<&str> = projects
-                .iter()
-                .filter(|p| proj_counts.get(p.id.as_str()).copied().unwrap_or(0) < 5)
-                .map(|p| p.id.as_str())
-                .collect();
-
-            let request = LlmRequest {
-                features: &features.text,
-                categories: shortlist(
-                    &categories,
-                    MAX_LLM_CATEGORIES,
-                    &category_neighbors,
-                    &cold_categories,
-                ),
-                projects: want_project.then(|| {
-                    shortlist(
-                        &projects,
-                        MAX_LLM_PROJECTS,
-                        &project_neighbors,
-                        &cold_projects,
-                    )
-                }),
-                examples: few_shot(&neighbors, &categories, &projects, want_project),
-                custom: &settings.ai_custom_prompt,
-            };
-            match self.llm(&request, 1, None) {
-                Ok(first) => {
-                    let (mut category_votes, mut project_votes, first_description) = first;
-                    description = first_description;
-                    // Adaptive sampling: one call normally, two more when the
-                    // model disagrees with (or has nothing to check against)
-                    // the fast tiers, so vote share can measure its certainty.
-                    let disagrees = |votes: &Votes, t1: &Option<Label>| match t1 {
-                        Some(t1) => votes.top() != Some(t1),
-                        None => true,
-                    };
-                    let unsure = (rule_category.is_none()
-                        && disagrees(&category_votes, &t1_category))
-                        || (want_project
-                            && rule_project.is_none()
-                            && disagrees(&project_votes, &t1_project));
-                    if unsure {
-                        match self.llm(&request, 2, Some(0.9)) {
-                            Ok((more_category, more_project, _)) => {
-                                merge_votes(&mut category_votes, more_category);
-                                merge_votes(&mut project_votes, more_project);
-                            }
-                            Err(error) => eprintln!("ai worker: extra samples failed: {error}"),
-                        }
-                    }
-                    llm_category = Some(category_votes);
-                    llm_project = want_project.then_some(project_votes);
-                }
-                Err(error) => {
-                    eprintln!("ai worker: foundation model failed: {error}");
-                    update_status(&self.app, |s| s.last_error = Some(error));
-                }
-            }
-        }
-
-        // Arbiter
-        let names: HashMap<&str, &str> = categories
-            .iter()
-            .chain(projects.iter())
-            .map(|c| (c.id.as_str(), c.name.as_str()))
-            .collect();
-        let name = |label: &Label| match label {
-            Some(id) => names
-                .get(id.as_str())
-                .copied()
-                .unwrap_or("Unknown")
-                .to_string(),
-            None => "No project".to_string(),
-        };
-        let mut category_decision = arbiter::decide(
-            &Evidence {
-                field: Field::Category,
-                rule: rule_category.as_ref(),
-                neighbors: category_neighbors,
-                personal: personal_category,
-                llm: llm_category,
-                mentions: HashMap::new(),
-                labeled,
+        // T2 and the arbiter
+        let llm = if caps.is_some() { self.llm() } else { None };
+        let labeled = pipeline::label(
+            pipeline::Inputs {
+                features: &features,
+                segments: &segments,
+                categories: &categories,
+                projects: &projects,
+                want_project,
+                rule_category: rule_category.as_ref(),
+                rule_project: rule_project.as_ref(),
+                vector: vector.as_deref(),
+                pool: &pool,
+                personal_category,
+                personal_project,
+                labeled: labeled_count,
                 calibration: calibrator.as_ref(),
-                dominant: features.dominant.as_ref(),
+                custom: &settings.ai_custom_prompt,
             },
-            &name,
+            llm,
         );
-        let mut project_decision = if want_project {
-            arbiter::decide(
-                &Evidence {
-                    field: Field::Project,
-                    rule: rule_project.as_ref(),
-                    neighbors: project_neighbors,
-                    personal: personal_project,
-                    llm: llm_project,
-                    mentions: mentions(&projects, &segments),
-                    labeled,
-                    calibration: calibrator.as_ref(),
-                    dominant: features.dominant.as_ref(),
-                },
-                &name,
-            )
-        } else {
-            None
-        };
-
-        // A private window's detail is read for this classification and then
-        // forgotten, so nothing stored may repeat it: not a rule's pattern in
-        // the "Why" line, not a sentence written from its titles.
-        let any_private = segments.iter().any(|segment| segment.private);
-        if any_private {
-            for decision in [&mut category_decision, &mut project_decision]
-                .into_iter()
-                .flatten()
-            {
-                decision.hide_rule_details();
-            }
+        if let Some(error) = labeled.llm.as_ref().and_then(|t| t.error.clone()) {
+            update_status(&self.app, |s| s.last_error = Some(error));
         }
-        let model_version = model_version(caps.as_ref(), &self.conn);
-        let has_titles = features::has_titles(&segments) && !any_private;
+        let model_version = model_version(caps.as_ref(), &self.apple.id(), &self.conn);
         let outcome = Outcome {
-            category: category_decision,
-            project: project_decision,
+            category: labeled.category,
+            project: labeled.project,
             want_project,
-            description: if has_titles { description } else { None },
+            description: labeled.description,
             rule_category: rule_category.is_some(),
             rule_project: rule_project.is_some(),
         };
@@ -826,49 +645,12 @@ impl Worker {
         Ok(())
     }
 
-    fn llm(
-        &mut self,
-        request: &LlmRequest<'_>,
-        samples: u32,
-        temperature: Option<f64>,
-    ) -> Result<(Votes, Votes, Option<String>), String> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Classified {
-            category_votes: HashMap<String, u32>,
-            project_votes: Option<HashMap<String, u32>>,
-            description: Option<String>,
-            samples: u32,
-        }
-        let choice = |c: &&Choice| json!({ "id": c.id, "name": c.name, "description": c.description, "hint": c.hint });
-        let mut params = json!({
-            "features": request.features,
-            "categories": request.categories.iter().map(choice).collect::<Vec<Value>>(),
-            "examples": request.examples,
-            "customInstructions": request.custom,
-            "samples": samples,
-        });
-        if let Some(projects) = &request.projects {
-            params["projects"] = Value::Array(projects.iter().map(choice).collect());
-        }
-        if let Some(temperature) = temperature {
-            params["temperature"] = json!(temperature);
-        }
-        let reply: Classified = self
-            .sidecar
-            .call("classify", params, sidecar::TIMEOUT_CLASSIFY)?;
-        let votes = |counts: HashMap<String, u32>| Votes {
-            counts: counts
-                .into_iter()
-                .map(|(id, n)| (store::label_from_model(&id), n))
-                .collect(),
-            samples: reply.samples,
-        };
-        Ok((
-            votes(reply.category_votes),
-            votes(reply.project_votes.unwrap_or_default()),
-            reply.description.filter(|d| !d.is_empty()),
-        ))
+    /// The single active-LLM slot: Apple's model when the sidecar reports it
+    /// ready. The setting that lets the user pick Apple, a local model or
+    /// none arrives with the picker (see `docs/design/local-models.md`).
+    fn llm(&mut self) -> Option<&mut dyn Provider> {
+        let ready = self.apple.capabilities().is_ok_and(|c| c.llm.is_ready());
+        ready.then_some(&mut self.apple as &mut dyn Provider)
     }
 
     // --- Personal model retraining -------------------------------------------
@@ -887,7 +669,7 @@ impl Worker {
             return;
         }
         self.last_retrain_check = Some(Instant::now());
-        if !self.sidecar.is_installed() {
+        if !self.apple.is_installed() {
             if requested {
                 update_status(&self.app, |s| {
                     s.retrain = "idle".to_string();
@@ -918,7 +700,7 @@ impl Worker {
         {
             let runtime = self.app.state::<AiRuntime>();
             runtime.set_busy(true);
-            runtime.set_sidecar_pid(self.sidecar.pid());
+            runtime.set_sidecar_pid(self.apple.pid());
         }
         let mut notes = Vec::new();
         for field in due {
@@ -956,7 +738,7 @@ impl Worker {
         {
             let runtime = self.app.state::<AiRuntime>();
             runtime.set_busy(false);
-            runtime.set_sidecar_pid(self.sidecar.pid());
+            runtime.set_sidecar_pid(self.apple.pid());
         }
         self.refresh_counts();
     }
@@ -1021,7 +803,7 @@ impl Worker {
         let out = self
             .ml_dir
             .join(format!("{kind}-{}.mlmodelc", uuid::Uuid::now_v7()));
-        let trained: Result<Trained, String> = self.sidecar.call(
+        let trained: Result<Trained, String> = self.apple.sidecar_mut().call(
             "train",
             json!({ "dataset": dataset, "out": out }),
             sidecar::TIMEOUT_TRAIN,
@@ -1131,7 +913,8 @@ impl Worker {
         }
         let texts: Vec<&str> = holdout.iter().map(|(text, _)| *text).collect();
         let reply: Predicted = self
-            .sidecar
+            .apple
+            .sidecar_mut()
             .call(
                 "personal_predict",
                 json!({ "model": model, "texts": texts }),
@@ -1151,14 +934,6 @@ impl Worker {
             .count();
         Some(correct as f64 / holdout.len() as f64)
     }
-}
-
-struct LlmRequest<'a> {
-    features: &'a str,
-    categories: Vec<&'a Choice>,
-    projects: Option<Vec<&'a Choice>>,
-    examples: Vec<Value>,
-    custom: &'a str,
 }
 
 struct Outcome {
@@ -1298,124 +1073,12 @@ fn persist(
     tx.commit().map_err(|e| e.to_string())
 }
 
-/// With too many choices for the model's context, keep cold choices (so new
-/// categories get a chance) and the fast tiers' top picks, truncated to `max`.
-fn shortlist<'a>(
-    choices: &'a [Choice],
-    max: usize,
-    neighbors: &[(Label, f32)],
-    cold: &HashSet<&str>,
-) -> Vec<&'a Choice> {
-    if choices.len() <= max {
-        return choices.iter().collect();
-    }
-    let mut score: HashMap<&str, f32> = HashMap::new();
-    for (label, similarity) in neighbors {
-        if let Some(id) = label {
-            *score.entry(id.as_str()).or_default() += similarity;
-        }
-    }
-    let mut ranked: Vec<&Choice> = choices.iter().collect();
-    ranked.sort_by(|a, b| {
-        let a_cold = cold.contains(a.id.as_str());
-        let b_cold = cold.contains(b.id.as_str());
-        if a_cold != b_cold {
-            return b_cold.cmp(&a_cold);
-        }
-        let a_score = score.get(a.id.as_str()).copied().unwrap_or(0.0);
-        let b_score = score.get(b.id.as_str()).copied().unwrap_or(0.0);
-        b_score.total_cmp(&a_score)
-    });
-    ranked.truncate(max);
-    ranked
+/// The embedding model the sidecar reported, if it can embed.
+fn embed_model(caps: Option<&Capabilities>) -> Option<EmbedModel> {
+    caps.and_then(|c| apple::capabilities_of(c).embed)
 }
 
-/// The closest approved entries, as few-shot examples for the model.
-/// Corrections come first: an entry the user had to fix is exactly where the
-/// model needs the hint.
-fn few_shot(
-    neighbors: &[knn::Neighbor<'_>],
-    categories: &[Choice],
-    projects: &[Choice],
-    want_project: bool,
-) -> Vec<Value> {
-    let name = |choices: &[Choice], id: &Option<String>| {
-        id.as_ref()
-            .and_then(|id| choices.iter().find(|c| &c.id == id))
-            .map(|c| c.name.clone())
-    };
-    let (corrected, rest): (Vec<_>, Vec<_>) = neighbors.iter().partition(|n| n.item.corrected);
-    corrected
-        .into_iter()
-        .chain(rest)
-        .filter_map(|n| {
-            let category = name(categories, &n.item.category_id)?;
-            let project = want_project
-                .then(|| name(projects, &n.item.project_id))
-                .flatten();
-            Some(json!({ "features": n.item.features, "category": category, "project": project }))
-        })
-        .take(FEW_SHOT_EXAMPLES)
-        .collect()
-}
-
-/// Share of active time whose title, URL, or domain names each project (its
-/// name, or one of its comma- or line-separated AI hints).
-fn mentions(projects: &[Choice], segments: &[ActivitySegment]) -> HashMap<Label, f64> {
-    let mut active_ms = 0u64;
-    let mut covered: HashMap<Label, u64> = HashMap::new();
-    let needles: Vec<(&Choice, Vec<String>)> = projects
-        .iter()
-        .map(|project| {
-            let mut words = vec![project.name.to_lowercase()];
-            if let Some(hints) = &project.hint {
-                words.extend(
-                    hints
-                        .split([',', '\n'])
-                        .map(|w| w.trim().to_lowercase())
-                        .filter(|w| !w.is_empty()),
-                );
-            }
-            words.retain(|w| w.chars().count() >= 3);
-            (project, words)
-        })
-        .collect();
-    for segment in segments.iter().filter(|s| s.kind != activity::KIND_BREAK) {
-        let ms = segment
-            .ended_at
-            .unwrap_or(segment.started_at)
-            .saturating_sub(segment.started_at);
-        active_ms += ms;
-        let haystack = format!(
-            "{} {} {}",
-            segment.title,
-            segment.url.as_deref().unwrap_or(""),
-            segment.domain.as_deref().unwrap_or("")
-        )
-        .to_lowercase();
-        for (project, words) in &needles {
-            if words.iter().any(|w| haystack.contains(w.as_str())) {
-                *covered.entry(Some(project.id.clone())).or_default() += ms;
-            }
-        }
-    }
-    if active_ms == 0 {
-        return HashMap::new();
-    }
-    covered
-        .into_iter()
-        .map(|(label, ms)| (label, ms as f64 / active_ms as f64))
-        .collect()
-}
-
-fn merge_votes(into: &mut Votes, more: Votes) {
-    for (label, count) in more.counts {
-        *into.counts.entry(label).or_default() += count;
-    }
-    into.samples += more.samples;
-}
-
-fn model_version(caps: Option<&Capabilities>, conn: &Connection) -> String {
+fn model_version(caps: Option<&Capabilities>, llm: &ProviderId, conn: &Connection) -> String {
     let artifact = |kind: &str| {
         store::active_artifact(conn, kind)
             .ok()
@@ -1426,9 +1089,8 @@ fn model_version(caps: Option<&Capabilities>, conn: &Connection) -> String {
     let calibration = artifact(store::KIND_CALIBRATION);
     match caps {
         Some(caps) => format!(
-            "fm:{}:{} emb:r{} pm:{} cal:{calibration}",
-            caps.os,
-            caps.llm,
+            "{} emb:r{} pm:{} cal:{calibration}",
+            llm.tag(),
             caps.embed_revision,
             artifact(Field::Category.as_str())
         ),
@@ -1600,34 +1262,25 @@ mod tests {
     }
 
     #[test]
-    fn mentions_measure_time_naming_a_project() {
-        let projects = vec![Choice {
-            id: "p1".into(),
-            name: "OpenRize".into(),
-            description: None,
-            hint: Some("rize, tauri".into()),
-        }];
-        let seg = |title: &str, ms: u64| ActivitySegment {
-            id: 0,
-            app: "Xcode".into(),
-            title: title.into(),
-            kind: "activity".into(),
-            label: None,
-            started_at: 0,
-            ended_at: Some(ms),
-            reviewed: false,
-            app_id: None,
-            bundle_id: None,
-            url: None,
-            domain: None,
-            entry_id: None,
-            private: false,
+    fn model_version_keeps_its_format() {
+        let conn = db();
+        let caps = Capabilities {
+            llm: "available".to_string(),
+            embed: true,
+            embed_dimension: 512,
+            embed_revision: 2,
+            personal: true,
+            os: "26.1".to_string(),
+            version: "1".to_string(),
         };
-        let found = mentions(
-            &projects,
-            &[seg("activity.rs - OpenRize", 750), seg("Inbox", 250)],
+        assert_eq!(
+            model_version(Some(&caps), &apple::id_for(Some(&caps)), &conn),
+            "fm:26.1:available emb:r2 pm:none cal:none"
         );
-        assert_eq!(found.get(&Some("p1".to_string())), Some(&0.75));
+        assert_eq!(
+            model_version(None, &apple::id_for(None), &conn),
+            "rules-only cal:none"
+        );
     }
 
     #[test]

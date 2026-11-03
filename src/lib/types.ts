@@ -808,3 +808,19 @@ export interface DevToolsInfo {
   /** Whether the first-run permissions screen has been re-armed for this session. */
   onboardingRerun: boolean;
 }
+
+// --- Crash diagnostics (src-tauri/core/src/crashes.rs) ---
+
+/**
+ * What the UI knows about a failure. Rust keeps none of it verbatim: the
+ * message and stacks can quote the user's data, so a report holds only the
+ * error's name, a fixed description and anonymous frames.
+ */
+export interface ClientCrash {
+  source: "frontend_error" | "unhandled_rejection";
+  /** The error class (`TypeError`); absent when what was thrown is no `Error`. */
+  name?: string;
+  message?: string;
+  stack?: string;
+  componentStack?: string;
+}

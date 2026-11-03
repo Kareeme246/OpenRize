@@ -515,6 +515,8 @@ mod tests {
     fn legacy_install(legacy: &Path) {
         fs::create_dir_all(legacy.join("accounts").join("a1")).unwrap();
         fs::create_dir_all(legacy.join("invoices")).unwrap();
+        fs::create_dir_all(legacy.join("crashes")).unwrap();
+        fs::write(legacy.join("crashes/r1.json"), "report").unwrap();
         fs::write(legacy.join("activity.db"), "db").unwrap();
         fs::write(legacy.join("activity.db-wal"), "wal").unwrap();
         fs::write(legacy.join("activity.db-shm"), "shm").unwrap();
@@ -596,6 +598,7 @@ mod tests {
             ("switch.json", "{}"),
             ("accounts/a1/activity.db", "acct"),
             ("invoices/1.pdf", "pdf"),
+            ("crashes/r1.json", "report"),
             ("EBWebView/profile", "p"),
         ] {
             assert_eq!(

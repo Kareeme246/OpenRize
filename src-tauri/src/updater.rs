@@ -353,10 +353,7 @@ pub async fn recent_release_notes(
 }
 
 async fn published_releases() -> Result<Vec<(semver::Version, ReleaseNotes)>, String> {
-    // reqwest is built without a bundled crypto provider, like the updater's.
-    if rustls::crypto::CryptoProvider::get_default().is_none() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    }
+    crate::net::ensure_crypto_provider();
     let client = reqwest::Client::builder()
         .user_agent(concat!("OpenRize/", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(20))

@@ -1,10 +1,21 @@
 //! On-device AI categorization. A worker (`worker.rs`) runs each closed entry through T0 rules, T1
-//! personal (kNN + Create ML via the sidecar) and T2 Foundation Model (absent without Apple
-//! Intelligence; fallback T0+T1); an arbiter blends them. No network. Data: `openrize_core::ai`.
+//! personal (kNN + Create ML via the sidecar) and T2 language model behind one `provider::Provider`
+//! (Apple via the sidecar today, local llama-server models later); an arbiter blends them.
 
+pub mod apple;
+#[cfg(test)]
+mod bench;
 pub mod features;
 pub mod metrics;
+// Only the golden-set benchmark starts a local model until the runtime PR (row 3 of the delivery
+// plan in docs/design/local-models.md) wires it into the worker.
+#[cfg_attr(not(test), allow(dead_code))]
+pub mod openai;
+pub mod pipeline;
 pub mod power;
+pub mod provider;
+#[cfg_attr(not(test), allow(dead_code))]
+pub mod runtime;
 pub mod sidecar;
 pub mod worker;
 

@@ -8,6 +8,16 @@ pub fn read_proc_rusage(_pid: i32) -> Option<ProcessRusage> {
     Some(ProcessRusage::default())
 }
 
+#[cfg(test)]
+pub fn resident_bytes(_pid: i32) -> Option<u64> {
+    None
+}
+
+#[cfg(test)]
+pub fn peak_memory_bytes(_pid: i32) -> Option<u64> {
+    None
+}
+
 pub fn read_battery_info() -> BatteryInfo {
     BatteryInfo {
         on_battery: false,

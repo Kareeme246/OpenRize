@@ -504,6 +504,13 @@ catalog types in `openrize-core`); React owns the picker, gallery, endpoint form
    dependency**, but the `Provider` contract returns distributions from Phase 1 so adopting one
    later is a catalog entry rather than a refactor. Alternatives: adopt Kev-0.8B as the default
    now (unproven on our data, and loses AI descriptions), or ignore decision models entirely.
+9. **Windows starts on rules (plus kNN) and offers the recommended download once**, in the AI
+   banner, with its size. No model downloads without a click. The alternatives are a download step
+   in onboarding (heavier first run) or downloading the recommended model automatically (1.3 GB
+   nobody asked for, on metered connections too).
+10. **Qwen3.5-2B is the default chat model** going into the golden set, with 0.8B and 4B as the
+   other tiers. The golden set can still replace it; this only fixes what Phase 2 builds and tests
+   against first.
 
 ## Open questions (not blocking 0.10.0)
 

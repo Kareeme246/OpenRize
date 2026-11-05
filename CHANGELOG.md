@@ -5,10 +5,30 @@ All notable changes are documented here. Entries are generated from commit histo
 ## [unreleased]
 
 ### Features
+- **timers:** Group manual stopwatches (#161)
+- **privacy:** Erase what private browser windows showed once their time is classified (#168)
+- **windows:** Put the window controls in our own top bar (#170)
+
+### Bug Fixes
+- **windows:** Close parity gaps in capture, browser URLs, tray, reminders and UI (#162)
+- **tooling:** Skip build output in the skills path lint (#163)
+- **windows:** Keep all data and settings in Local AppData (#164)
+- **windows:** Put rize back on the user PATH at every launch (#165)
+- **windows:** Tell apart web apps and apps that share a runtime (#166)
+- **tooling:** Keep Windows drive sessions alive across app restarts (#169)
+
+### Documentation
+- **ai:** Design local AI models (#167)
+## [0.9.45] - 2026-10-29
+
+### Features
 - Verification skill, feature map, skill lint and dry-run levers (#159)
 
 ### Bug Fixes
 - **timers:** Stamp Start from the wall clock and store segments as a start and an end (#160)
+
+### Documentation
+- Update changelog for v0.9.45
 ## [0.9.43] - 2026-10-27
 
 ### Features

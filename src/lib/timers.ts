@@ -40,12 +40,25 @@ export interface Timer {
   startedAt: number | null;
   createdAt: number;
   ordinal: number;
-  /** The group this timer belongs to; timers sharing a name form a group. */
-  group: string | null;
+  /**
+   * The tag this timer carries. Timers sharing a tag are linked: Rust starts
+   * or pauses them all when any one of them starts or pauses.
+   */
+  tag: string | null;
+  /** The section it sits under, or null for the trackers above every section. */
+  sectionId: string | null;
 }
 
-/** One group of timers, read as a set. */
-export interface TimerGroup {
+/** Mirror of `TimerSection`: a subheading that only arranges the page. */
+export interface TimerSection {
+  id: string;
+  name: string;
+  ordinal: number;
+  createdAt: number;
+}
+
+/** The timers that share one tag, read as a set. */
+export interface TimerTag {
   name: string;
   timers: number;
   running: number;
@@ -53,26 +66,49 @@ export interface TimerGroup {
 }
 
 /**
- * The groups among `timers`, in the order their first member appears. Names
- * are compared without regard to case, as Rust does when it joins a group.
+ * The tags among `timers`, in the order their first timer appears. Names are
+ * compared without regard to case, as Rust does when it links them.
  */
-export function timerGroups(timers: Timer[], now: number): TimerGroup[] {
-  const groups = new Map<string, TimerGroup>();
+export function timerTags(timers: Timer[], now: number): TimerTag[] {
+  const tags = new Map<string, TimerTag>();
   for (const timer of timers) {
-    if (timer.group === null) continue;
-    const key = timer.group.toLowerCase();
-    const group = groups.get(key) ?? {
-      name: timer.group,
+    if (timer.tag === null) continue;
+    const key = timer.tag.toLowerCase();
+    const tag = tags.get(key) ?? {
+      name: timer.tag,
       timers: 0,
       running: 0,
       totalMs: 0,
     };
-    group.timers += 1;
-    if (timer.startedAt !== null) group.running += 1;
-    group.totalMs += elapsedMs(timer, now);
-    groups.set(key, group);
+    tag.timers += 1;
+    if (timer.startedAt !== null) tag.running += 1;
+    tag.totalMs += elapsedMs(timer, now);
+    tags.set(key, tag);
   }
-  return [...groups.values()];
+  return [...tags.values()];
+}
+
+/**
+ * The page's lists in reading order: the trackers in no section first, then
+ * each section's, every list in the timers' own order.
+ */
+export function timerLists(
+  timers: Timer[],
+  sections: TimerSection[],
+): { section: TimerSection | null; timers: Timer[] }[] {
+  const known = new Set(sections.map((section) => section.id));
+  return [
+    {
+      section: null,
+      timers: timers.filter(
+        (timer) => timer.sectionId === null || !known.has(timer.sectionId),
+      ),
+    },
+    ...sections.map((section) => ({
+      section,
+      timers: timers.filter((timer) => timer.sectionId === section.id),
+    })),
+  ];
 }
 
 /**

@@ -1,7 +1,7 @@
 use rusqlite::{params, Connection, Result};
 
 /// The `user_version` `run_migrations` leaves a database at.
-pub const SCHEMA_VERSION: i32 = 14;
+pub const SCHEMA_VERSION: i32 = 15;
 
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     let current_version: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
@@ -425,7 +425,11 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     // share the name, so there is no groups table.
     if current_version < 13 {
         let tx = conn.transaction()?;
-        if !table_has_column(&tx, "timers", "group_name")? {
+        // A database that already has v15's `tag` keeps it: that column is
+        // this one renamed.
+        if !table_has_column(&tx, "timers", "group_name")?
+            && !table_has_column(&tx, "timers", "tag")?
+        {
             tx.execute_batch("ALTER TABLE timers ADD COLUMN group_name TEXT;")?;
         }
         tx.execute("PRAGMA user_version = 13;", [])?;
@@ -444,6 +448,44 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         }
         tx.execute_batch(PRIVATE_SEGMENTS_V14)?;
         tx.execute("PRAGMA user_version = 14;", [])?;
+        tx.commit()?;
+    }
+
+    // v15: a group becomes a tag (the same name on each timer, so a pure
+    // column rename keeps every existing group as a tag), and timers can sit
+    // under a section, an organizational subheading with its own order. A
+    // section's timers keep the one global `ordinal`, so the page reads them
+    // in that order within each section.
+    if current_version < 15 {
+        let tx = conn.transaction()?;
+        match (
+            table_has_column(&tx, "timers", "group_name")?,
+            table_has_column(&tx, "timers", "tag")?,
+        ) {
+            (true, false) => {
+                tx.execute_batch("ALTER TABLE timers RENAME COLUMN group_name TO tag;")?
+            }
+            // Both, as a database restored mid-upgrade could have: keep every
+            // name in `tag`.
+            (true, true) => tx.execute_batch(
+                "UPDATE timers SET tag = COALESCE(tag, group_name);
+                 ALTER TABLE timers DROP COLUMN group_name;",
+            )?,
+            (false, false) => tx.execute_batch("ALTER TABLE timers ADD COLUMN tag TEXT;")?,
+            (false, true) => {}
+        }
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS timer_sections (
+               id         TEXT    PRIMARY KEY,
+               name       TEXT    NOT NULL,
+               ordinal    INTEGER NOT NULL,
+               created_at INTEGER NOT NULL
+             );",
+        )?;
+        if !table_has_column(&tx, "timers", "section_id")? {
+            tx.execute_batch("ALTER TABLE timers ADD COLUMN section_id TEXT;")?;
+        }
+        tx.execute("PRAGMA user_version = 15;", [])?;
         tx.commit()?;
     }
 
@@ -1184,6 +1226,9 @@ mod tests {
         conn.execute_batch(
             "CREATE TABLE time_entries (id TEXT PRIMARY KEY, invoice_id TEXT, source TEXT NOT NULL DEFAULT 'auto');
              CREATE TABLE segments (id INTEGER PRIMARY KEY, title TEXT, url TEXT, domain TEXT, ended_at INTEGER, entry_id TEXT);
+             -- Every shipped database has the title index; v14's triggers name
+             -- it, and v15's column rename checks every trigger.
+             CREATE VIRTUAL TABLE segments_fts USING fts5(title, content='segments', content_rowid='id', tokenize='trigram');
              CREATE TABLE suggestions (entry_id TEXT);
              CREATE TABLE entry_events (entry_id TEXT);
              CREATE TABLE entry_embeddings (entry_id TEXT);
@@ -1288,6 +1333,9 @@ mod tests {
         conn.execute_batch(
             "CREATE TABLE time_entries (id TEXT PRIMARY KEY, invoice_id TEXT, source TEXT NOT NULL DEFAULT 'auto');
              CREATE TABLE segments (id INTEGER PRIMARY KEY, title TEXT, url TEXT, domain TEXT, ended_at INTEGER, entry_id TEXT);
+             -- Every shipped database has the title index; v14's triggers name
+             -- it, and v15's column rename checks every trigger.
+             CREATE VIRTUAL TABLE segments_fts USING fts5(title, content='segments', content_rowid='id', tokenize='trigram');
              CREATE TABLE suggestions (entry_id TEXT);
              CREATE TABLE entry_events (entry_id TEXT);
              CREATE TABLE entry_embeddings (entry_id TEXT);
@@ -2170,7 +2218,7 @@ mod private_segments_tests {
         let version: i32 = conn
             .query_row("PRAGMA user_version;", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 14);
+        assert_eq!(version, SCHEMA_VERSION);
         let private: i64 = conn
             .query_row("SELECT private FROM segments", [], |r| r.get(0))
             .unwrap();

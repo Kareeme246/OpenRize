@@ -1,17 +1,22 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   elapsedMs,
   formatDuration,
   type SegmentEdit,
   type Timer,
+  type TimerSection,
+  type TimerTag,
 } from "../lib/timers";
 import type { Category, Project } from "../lib/types";
 import { useDismiss } from "../pages/timesheets/useDismiss";
 import { AddTimeSheet } from "./AddTimeSheet";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { HourRing } from "./HourRing";
-import { TimerGroupSheet } from "./TimerGroupSheet";
+import { KebabMenu, type MenuEntry } from "./KebabMenu";
+import { BUTTON_SECONDARY, FIELD } from "./Page";
+import { Field, Sheet } from "./Sheet";
 import { TimerInfoSheet } from "./TimerInfoSheet";
+import { TimerTagSheet } from "./TimerTagSheet";
 import { Tooltip } from "./Tooltip";
 
 interface StopwatchCardProps {
@@ -27,9 +32,21 @@ interface StopwatchCardProps {
   /** Resets quietly once "Add to calendar" has logged the time. */
   onClear: (id: string) => void;
   onRename: (id: string, label: string) => void;
-  onSetGroup: (id: string, group: string | null) => void;
-  /** Every group name in use, offered when choosing one. */
-  groupNames: string[];
+  onSetTag: (id: string, tag: string | null) => void;
+  /** Every tag in use, with what its linked stopwatches add up to. */
+  tags: TimerTag[];
+  onStartTag: (tag: string) => void;
+  onPauseTag: (tag: string) => void;
+  /** Every section, offered by "Move to". */
+  sections: TimerSection[];
+  onMoveToSection: (id: string, sectionId: string | null) => void;
+  /** Adds a section and moves this stopwatch into it. */
+  onCreateSection: (name: string, id: string) => void;
+  /**
+   * Keeps the tag chip's row even without a tag, so rings and times line up
+   * across a row of cards when any card on the page is tagged.
+   */
+  reserveTagRow?: boolean;
   onAddSegment: (id: string, startedAt: number, endedAt: number) => void;
   onUpdateSegment: (id: string, segmentId: number, edit: SegmentEdit) => void;
   onDeleteSegment: (id: string, segmentId: number) => void;
@@ -55,8 +72,14 @@ export function StopwatchCard({
   onReset,
   onClear,
   onRename,
-  onSetGroup,
-  groupNames,
+  onSetTag,
+  tags,
+  onStartTag,
+  onPauseTag,
+  sections,
+  onMoveToSection,
+  onCreateSection,
+  reserveTagRow = false,
   onAddSegment,
   onUpdateSegment,
   onDeleteSegment,
@@ -75,9 +98,9 @@ export function StopwatchCard({
   const [draft, setDraft] = useState(timer.label);
   /** Which confirmation is up, if any. Both destroy real accumulated time. */
   const [pending, setPending] = useState<"reset" | "delete" | null>(null);
-  const [dialog, setDialog] = useState<"info" | "calendar" | "group" | null>(
-    null,
-  );
+  const [dialog, setDialog] = useState<
+    "info" | "calendar" | "tag" | "section" | null
+  >(null);
   /** Frozen when "Add to calendar" opens, so the prefilled range holds still. */
   const [calendarRange, setCalendarRange] = useState<{
     start: number;
@@ -169,19 +192,61 @@ export function StopwatchCard({
         </svg>
       </button>
 
-      <TimerMenu
-        label={timer.label}
-        canAddToCalendar={elapsed >= 60_000}
-        isFirst={isFirst}
-        isLast={isLast}
-        onMoveUp={() => onMoveUp?.(timer.id)}
-        onMoveDown={() => onMoveDown?.(timer.id)}
-        onSaveState={() => onSaveState(timer.id)}
-        onInfo={() => setDialog("info")}
-        onGroup={() => setDialog("group")}
-        onAddToCalendar={openCalendar}
-        onReset={() => setPending("reset")}
-        onDelete={() => setPending("delete")}
+      <KebabMenu
+        label={`Options for ${timer.label}`}
+        className="absolute top-2 right-2"
+        entries={[
+          { text: "Info", onSelect: () => setDialog("info") },
+          { text: "Link...", onSelect: () => setDialog("tag") },
+          {
+            text: "Move to",
+            entries: [
+              {
+                text: "No section",
+                checked: timer.sectionId === null,
+                onSelect: () => onMoveToSection(timer.id, null),
+              },
+              ...(sections.length > 0 ? (["divider"] as MenuEntry[]) : []),
+              ...sections.map(
+                (section): MenuEntry => ({
+                  text: section.name,
+                  checked: timer.sectionId === section.id,
+                  onSelect: () => onMoveToSection(timer.id, section.id),
+                }),
+              ),
+              "divider",
+              { text: "New section...", onSelect: () => setDialog("section") },
+            ],
+          },
+          "divider",
+          { text: "Save state", onSelect: () => onSaveState(timer.id) },
+          {
+            text: "Add to calendar",
+            onSelect: openCalendar,
+            disabled: elapsed < 60_000,
+            hint: "Needs at least a minute of tracked time",
+          },
+          "divider",
+          {
+            text: "Move up",
+            onSelect: () => onMoveUp?.(timer.id),
+            disabled: isFirst,
+            hint: "Already first",
+          },
+          {
+            text: "Move down",
+            onSelect: () => onMoveDown?.(timer.id),
+            disabled: isLast,
+            hint: "Already last",
+          },
+          "divider",
+          { text: "Reset to zero", onSelect: () => setPending("reset") },
+          {
+            text: "Delete",
+            onSelect: () => setPending("delete"),
+            danger: true,
+          },
+        ]}
       />
 
       <div className="flex w-full min-w-0 items-center justify-center gap-1.5 px-6">
@@ -217,13 +282,18 @@ export function StopwatchCard({
         )}
       </div>
 
-      {timer.group !== null && (
-        <div
-          data-timer-group-badge={timer.group}
-          className="-mt-1.5 max-w-full truncate rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent"
-        >
-          {timer.group}
-        </div>
+      {timer.tag !== null ? (
+        <TagChip
+          tag={
+            tags.find(
+              (tag) => tag.name.toLowerCase() === timer.tag?.toLowerCase(),
+            ) ?? { name: timer.tag, timers: 1, running: 0, totalMs: elapsed }
+          }
+          onStart={onStartTag}
+          onPause={onPauseTag}
+        />
+      ) : (
+        reserveTagRow && <div aria-hidden="true" className={TAG_ROW} />
       )}
 
       <HourRing
@@ -257,12 +327,20 @@ export function StopwatchCard({
         />
       )}
 
-      {dialog === "group" && (
-        <TimerGroupSheet
+      {dialog === "tag" && (
+        <TimerTagSheet
           label={timer.label}
-          current={timer.group}
-          groups={groupNames}
-          onSave={(group) => onSetGroup(timer.id, group)}
+          current={timer.tag}
+          tags={tags.map((tag) => tag.name)}
+          onSave={(tag) => onSetTag(timer.id, tag)}
+          onClose={() => setDialog(null)}
+        />
+      )}
+
+      {dialog === "section" && (
+        <NewSectionSheet
+          label={timer.label}
+          onCreate={(name) => onCreateSection(name, timer.id)}
           onClose={() => setDialog(null)}
         />
       )}
@@ -309,135 +387,139 @@ export function StopwatchCard({
   );
 }
 
-interface TimerMenuProps {
-  label: string;
-  canAddToCalendar: boolean;
-  isFirst: boolean;
-  isLast: boolean;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
-  onSaveState: () => void;
-  onInfo: () => void;
-  onGroup: () => void;
-  onAddToCalendar: () => void;
-  onReset: () => void;
-  onDelete: () => void;
+function LinkIcon({ className }: { className: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </svg>
+  );
 }
 
-/** The card's three-dot menu, pinned to its top right corner. */
-function TimerMenu({
-  label,
-  canAddToCalendar,
-  isFirst,
-  isLast,
-  onMoveUp,
-  onMoveDown,
-  onSaveState,
-  onInfo,
-  onGroup,
-  onAddToCalendar,
-  onReset,
-  onDelete,
-}: TimerMenuProps) {
+/** The tag chip's row: one fixed height, whether it holds a chip or not. */
+const TAG_ROW = "-mt-1.5 h-5 shrink-0";
+
+interface TagChipProps {
+  tag: TimerTag;
+  onStart: (tag: string) => void;
+  onPause: (tag: string) => void;
+}
+
+/** The card's tag, which opens what its linked stopwatches add up to. */
+function TagChip({ tag, onStart, onPause }: TagChipProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
   useDismiss(open, ref, close);
-
-  // A card near the bottom of the window opens its menu upward instead of
-  // past the edge, measured before paint so it never flickers.
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [above, setAbove] = useState(false);
-  useLayoutEffect(() => {
-    if (!open) {
-      setAbove(false);
-      return;
-    }
-    const menu = menuRef.current;
-    if (menu === null) return;
-    const { top, bottom } = menu.getBoundingClientRect();
-    const height = bottom - top;
-    const button = menu.parentElement?.getBoundingClientRect();
-    setAbove(
-      bottom > window.innerHeight - 8 &&
-        button !== undefined &&
-        button.top - height > 8,
-    );
-  }, [open]);
-
-  const item = (
-    text: string,
-    action: () => void,
-    options: { danger?: boolean; disabled?: boolean; hint?: string } = {},
-  ) => (
-    <button
-      type="button"
-      role="menuitem"
-      disabled={options.disabled}
-      title={options.disabled ? options.hint : undefined}
-      onClick={() => {
-        setOpen(false);
-        action();
-      }}
-      className={`flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-[12px] disabled:cursor-not-allowed disabled:opacity-40 ${
-        options.danger
-          ? "text-danger hover:bg-danger-soft"
-          : "text-fg-muted hover:bg-surface hover:text-fg disabled:hover:bg-transparent"
-      }`}
-    >
-      {text}
-    </button>
-  );
+  const running = tag.running > 0;
 
   return (
-    <div ref={ref} className="absolute top-2 right-2">
+    <div
+      ref={ref}
+      className={`relative flex max-w-full justify-center ${TAG_ROW}`}
+    >
       <button
         type="button"
-        aria-haspopup="menu"
+        data-timer-tag-badge={tag.name}
+        aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`Options for ${label}`}
+        aria-label={`Linked by ${tag.name}`}
         onClick={() => setOpen(!open)}
-        className="grid size-7 place-items-center rounded-md text-fg-faint transition-colors hover:bg-surface hover:text-fg"
+        className={`flex h-5 max-w-full items-center gap-1 rounded-full px-2 font-medium text-[11px] text-accent transition-colors ${
+          open ? "bg-accent/20" : "bg-accent/10 hover:bg-accent/20"
+        }`}
       >
-        <svg
-          viewBox="0 0 24 24"
-          className="size-4"
-          fill="currentColor"
-          aria-hidden="true"
-        >
-          <circle cx="12" cy="5" r="1.7" />
-          <circle cx="12" cy="12" r="1.7" />
-          <circle cx="12" cy="19" r="1.7" />
-        </svg>
+        <LinkIcon className="size-3 shrink-0" />
+        <span className="min-w-0 truncate">{tag.name}</span>
       </button>
       {open && (
         <div
-          ref={menuRef}
-          role="menu"
-          className={`absolute right-0 z-30 ${above ? "bottom-full mb-1" : "top-full mt-1"} w-48 rounded-lg border border-line bg-panel p-1 shadow-black/40 shadow-xl`}
+          role="dialog"
+          aria-label={`Linked by ${tag.name}`}
+          data-timer-tag-popover={tag.name}
+          className="absolute top-full z-30 mt-1.5 flex w-56 flex-col gap-2 rounded-lg border border-line bg-panel p-3 shadow-black/40 shadow-xl"
         >
-          {item("Info", onInfo)}
-          {item("Group...", onGroup)}
-          <hr className="my-1 border-line" />
-          {item("Save state", onSaveState)}
-          {item("Add to calendar", onAddToCalendar, {
-            disabled: !canAddToCalendar,
-            hint: "Needs at least a minute of tracked time",
-          })}
-          <hr className="my-1 border-line" />
-          {item("Move up", onMoveUp, {
-            disabled: isFirst,
-            hint: isFirst ? "Already first" : undefined,
-          })}
-          {item("Move down", onMoveDown, {
-            disabled: isLast,
-            hint: isLast ? "Already last" : undefined,
-          })}
-          <hr className="my-1 border-line" />
-          {item("Reset to zero", onReset)}
-          {item("Delete", onDelete, { danger: true })}
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="flex min-w-0 items-center gap-1.5 font-semibold text-[13px] text-fg-strong">
+              <LinkIcon className="size-3 shrink-0 text-accent" />
+              <span className="truncate">{tag.name}</span>
+            </span>
+            <span
+              className={`font-mono font-semibold text-[16px] tabular-nums ${
+                running ? "text-accent" : "text-fg-soft"
+              }`}
+            >
+              {formatDuration(tag.totalMs)}
+            </span>
+          </div>
+          <div className="text-[11.5px] text-fg-faint">
+            {tag.timers} linked · {tag.running} running
+          </div>
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              disabled={tag.running === tag.timers}
+              onClick={() => onStart(tag.name)}
+              className={BUTTON_SECONDARY}
+            >
+              Start all
+            </button>
+            <button
+              type="button"
+              disabled={!running}
+              onClick={() => onPause(tag.name)}
+              className={BUTTON_SECONDARY}
+            >
+              Pause all
+            </button>
+          </div>
         </div>
       )}
     </div>
+  );
+}
+
+interface NewSectionSheetProps {
+  label: string;
+  onCreate: (name: string) => void;
+  onClose: () => void;
+}
+
+/** Names a new section for "Move to", which then holds this stopwatch. */
+function NewSectionSheet({ label, onCreate, onClose }: NewSectionSheetProps) {
+  const [draft, setDraft] = useState("");
+  const name = draft.trim();
+
+  return (
+    <Sheet
+      title={`Move "${label}" to a new section`}
+      submitLabel="Create and move"
+      width="sm"
+      canSubmit={name.length > 0}
+      onSubmit={() => {
+        onCreate(name);
+        onClose();
+      }}
+      onClose={onClose}
+    >
+      <Field label="Section name" htmlFor="timer-new-section">
+        <input
+          id="timer-new-section"
+          value={draft}
+          placeholder="e.g. Client calls"
+          onChange={(event) => setDraft(event.target.value)}
+          className={FIELD}
+        />
+      </Field>
+    </Sheet>
   );
 }

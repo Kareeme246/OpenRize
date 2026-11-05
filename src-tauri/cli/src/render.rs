@@ -5,8 +5,9 @@ use chrono::{Local, TimeZone};
 use serde_json::Value;
 
 use crate::{
-    AppCommand, CategoriesCommand, ClientsCommand, Command, EntriesCommand, Group, GroupCommand,
-    Per, ProjectsCommand, SegmentsCommand, SettingsCommand, TimersCommand, TrackCommand,
+    AppCommand, CategoriesCommand, ClientsCommand, Command, EntriesCommand, Group, Per,
+    ProjectsCommand, SectionCommand, SegmentsCommand, SettingsCommand, TagCommand, TimersCommand,
+    TrackCommand,
 };
 
 /// Keys that carry window titles or URLs, left out unless `--full`.
@@ -104,12 +105,19 @@ pub fn show(command: Option<&Command>, data: &Value, full: bool) {
             | TimersCommand::Reset { .. }
             | TimersCommand::Rename { .. }
             | TimersCommand::Rm { .. } => timers(data),
-            TimersCommand::Group { command } => match command {
-                GroupCommand::List => groups(data),
-                GroupCommand::Add { .. }
-                | GroupCommand::Rm { .. }
-                | GroupCommand::Start { .. }
-                | GroupCommand::Pause { .. } => timers(data),
+            TimersCommand::Tag { command } => match command {
+                TagCommand::List => tags(data),
+                TagCommand::Add { .. }
+                | TagCommand::Rm { .. }
+                | TagCommand::Start { .. }
+                | TagCommand::Pause { .. } => timers(data),
+            },
+            TimersCommand::Section { command } => match command {
+                SectionCommand::Move { .. } => timers(data),
+                SectionCommand::List
+                | SectionCommand::New { .. }
+                | SectionCommand::Rename { .. }
+                | SectionCommand::Rm { .. } => sections(data),
             },
             TimersCommand::Segments { command } => match command {
                 SegmentsCommand::List { .. } => segments(data),
@@ -466,20 +474,20 @@ fn segments(timer: &Value) {
 }
 
 fn timers(data: &Value) {
-    let grouped = data
+    let tagged = data
         .as_array()
         .into_iter()
         .flatten()
-        .any(|timer| timer["group"].is_string());
+        .any(|timer| timer["tag"].is_string());
     let rows: Vec<Vec<String>> = data
         .as_array()
         .into_iter()
         .flatten()
         .map(|timer| {
             let mut row = vec![text(&timer["label"])];
-            if grouped {
-                row.push(match timer["group"].as_str() {
-                    Some(group) => group.to_string(),
+            if tagged {
+                row.push(match timer["tag"].as_str() {
+                    Some(tag) => tag.to_string(),
                     None => "-".into(),
                 });
             }
@@ -494,21 +502,21 @@ fn timers(data: &Value) {
         .collect();
     if rows.is_empty() {
         println!("No timers. Create one with `rize timers new <label>`.");
-    } else if grouped {
-        table(&["TIMER", "GROUP", "ELAPSED", "STATE"], rows);
+    } else if tagged {
+        table(&["TIMER", "TAG", "ELAPSED", "STATE"], rows);
     } else {
         table(&["TIMER", "ELAPSED", "STATE"], rows);
     }
 }
 
-/// Each group with how many of its timers are running and their combined time.
-fn groups(data: &Value) {
+/// Each tag with how many of its timers are running and their combined time.
+fn tags(data: &Value) {
     let mut totals: Vec<(String, usize, usize, u64)> = Vec::new();
     for timer in data.as_array().into_iter().flatten() {
-        let Some(name) = timer["group"].as_str() else {
+        let Some(name) = timer["tag"].as_str() else {
             continue;
         };
-        let at = match totals.iter().position(|(group, ..)| group == name) {
+        let at = match totals.iter().position(|(tag, ..)| tag == name) {
             Some(at) => at,
             None => {
                 totals.push((name.to_string(), 0, 0, 0));
@@ -520,7 +528,7 @@ fn groups(data: &Value) {
         totals[at].3 += elapsed(timer);
     }
     if totals.is_empty() {
-        println!("No groups. Create one with `rize timers group add <timer> <group>`.");
+        println!("No tags. Link timers with `rize timers tag add <timer> <tag>`.");
         return;
     }
     let rows = totals
@@ -534,7 +542,38 @@ fn groups(data: &Value) {
             ]
         })
         .collect();
-    table(&["GROUP", "TIMERS", "RUNNING", "TOTAL"], rows);
+    table(&["TAG", "TIMERS", "RUNNING", "TOTAL"], rows);
+}
+
+/// Each section, in page order, with the timers under it.
+fn sections(data: &Value) {
+    let timers = data["timers"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+    let rows: Vec<Vec<String>> = data["sections"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|section| {
+            let labels: Vec<String> = timers
+                .iter()
+                .filter(|timer| timer["sectionId"] == section["id"])
+                .map(|timer| text(&timer["label"]))
+                .collect();
+            vec![
+                text(&section["name"]),
+                labels.len().to_string(),
+                if labels.is_empty() {
+                    "-".into()
+                } else {
+                    labels.join(", ")
+                },
+            ]
+        })
+        .collect();
+    if rows.is_empty() {
+        println!("No sections. Add one with `rize timers section new <name>`.");
+    } else {
+        table(&["SECTION", "TIMERS", "TRACKERS"], rows);
+    }
 }
 
 fn entries(data: &Value) {

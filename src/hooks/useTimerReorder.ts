@@ -9,30 +9,53 @@ import {
 import { type TimerInsertion, timerInsertion } from "../lib/timerInsertion";
 import type { TimersApi } from "./useTimers";
 
+/** One list of cards on the page: no section (`key` null) or one section. */
+export interface TimerList {
+  key: string | null;
+  /** The section's name, for announcements; null for no section. */
+  name: string | null;
+  ids: string[];
+}
+
+/** Where a dragged card would land: a list, and a slot in its reading order. */
+export type TimerDropTarget =
+  | ({ list: string | null; empty: false } & TimerInsertion)
+  | { list: string | null; empty: true; slot: 0 };
+
+/** Lists are keyed by section id; the cards in no section use this key. */
+const LOOSE = "";
+const keyOf = (list: string | null): string => list ?? LOOSE;
+
 /** Native grip dragging keeps the layout still until drop. Menu moves use FLIP
- * once the authoritative order arrives, so both neighbours visibly swap. */
-export function useTimerReorder(api: TimersApi) {
-  const containerRef = useRef<HTMLDivElement>(null);
+ * once the authoritative order arrives, so both neighbours visibly swap. A
+ * card dragged into another list moves to that section at the slot shown. */
+export function useTimerReorder(api: TimersApi, lists: TimerList[]) {
   const scrollRef = useRef<HTMLElement>(null);
   const cardElements = useRef(new Map<string, HTMLElement>());
+  /** Each list's grid (or its empty drop box), which an indicator is drawn in. */
+  const listElements = useRef(new Map<string, HTMLElement>());
+  /** Each list's whole area, heading included, that the pointer picks it by. */
+  const zoneElements = useRef(new Map<string, HTMLElement>());
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [indicator, setIndicator] = useState<TimerInsertion | null>(null);
+  const [target, setTarget] = useState<TimerDropTarget | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const activeId = useRef<string | null>(null);
-  const slot = useRef<number | null>(null);
+  const targetRef = useRef<TimerDropTarget | null>(null);
   const pointer = useRef<{ x: number; y: number } | null>(null);
   const scrollFrame = useRef<number | null>(null);
   const liftFrame = useRef<number | null>(null);
   const beforeMove = useRef(new Map<string, DOMRect>());
   const animations = useRef<Animation[]>([]);
-  const order = api.timers.map((timer) => timer.id).join(",");
+  const order = lists
+    .map((list) => `${keyOf(list.key)}:${list.ids.join(",")}`)
+    .join("|");
 
   const clearTarget = useCallback(() => {
     if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
     scrollFrame.current = null;
     pointer.current = null;
-    slot.current = null;
-    setIndicator(null);
+    targetRef.current = null;
+    setTarget(null);
   }, []);
 
   const clearDrag = useCallback(() => {
@@ -106,13 +129,25 @@ export function useTimerReorder(api: TimersApi) {
     }
   }, [order]);
 
+  const listOf = (id: string): TimerList | undefined =>
+    lists.find((list) => list.ids.includes(id));
+
+  /** Every id in page order once `list` reads `ids`, for `api.reorder`. */
+  const pageOrder = (list: TimerList, ids: string[]): string[] =>
+    lists.flatMap((each) => (each.key === list.key ? ids : each.ids));
+
+  const where = (list: TimerList, position: number, of: number): string =>
+    `${list.name === null ? "no section" : list.name}, position ${position} of ${of}`;
+
+  /** Moves a card within its own list, by the menu or the arrow keys. */
   const move = (id: string, delta: number) => {
-    const ids = api.timers.map((timer) => timer.id);
+    const list = listOf(id);
+    if (!list) return;
+    const ids = [...list.ids];
     const from = ids.indexOf(id);
     const to = from + delta;
     if (from < 0 || to < 0 || to >= ids.length) return;
-    const timer = api.timers.find((t) => t.id === id);
-    const label = timer?.label ?? "Tracker";
+    const label = api.timers.find((t) => t.id === id)?.label ?? "Tracker";
     clearDrag();
     const previous = new Map<string, DOMRect>();
     for (const affected of [ids[from], ids[to]]) {
@@ -123,41 +158,63 @@ export function useTimerReorder(api: TimersApi) {
     animations.current = [];
     beforeMove.current = previous;
     [ids[from], ids[to]] = [ids[to], ids[from]];
-    api.reorder(ids);
-    setAnnouncement(`${label} moved to position ${to + 1} of ${ids.length}`);
+    api.reorder(pageOrder(list, ids));
+    setAnnouncement(`${label} moved to ${where(list, to + 1, ids.length)}`);
+  };
+
+  /** The list whose area holds `y`, else the nearest one. */
+  const listAt = (y: number): TimerList | null => {
+    let best: { list: TimerList; distance: number } | null = null;
+    for (const list of lists) {
+      const zone = zoneElements.current.get(keyOf(list.key));
+      if (!zone) continue;
+      const { top, bottom } = zone.getBoundingClientRect();
+      const distance = y < top ? top - y : y > bottom ? y - bottom : 0;
+      if (best === null || distance < best.distance) best = { list, distance };
+    }
+    return best?.list ?? null;
   };
 
   const updateTarget = (x: number, y: number) => {
-    const container = containerRef.current;
-    if (!container || activeId.current === null) return;
+    if (activeId.current === null) return;
+    const list = listAt(y);
+    const container = list && listElements.current.get(keyOf(list.key));
+    if (!list || !container) return;
     const bounds = container.getBoundingClientRect();
-    // Keep the padded drop zones above/below the list, but clear immediately
-    // when the pointer leaves the grid sideways, even inside the scroll area.
+    // Keep the padded drop zones above/below the lists, but clear immediately
+    // when the pointer leaves them sideways, even inside the scroll area.
     if (x < bounds.left || x > bounds.right) {
       clearTarget();
       return;
     }
-    const cards: DOMRect[] = [];
-    for (const timer of api.timers) {
-      const element = cardElements.current.get(timer.id);
-      if (!element) return;
-      cards.push(element.getBoundingClientRect());
+    let next: TimerDropTarget;
+    if (list.ids.length === 0) {
+      next = { list: list.key, empty: true, slot: 0 };
+    } else {
+      const cards: DOMRect[] = [];
+      for (const id of list.ids) {
+        const element = cardElements.current.get(id);
+        if (!element) return;
+        cards.push(element.getBoundingClientRect());
+      }
+      const style = getComputedStyle(container);
+      const insertion = timerInsertion(
+        cards,
+        bounds,
+        x,
+        y,
+        Number.parseFloat(style.columnGap),
+        Number.parseFloat(style.rowGap),
+      );
+      if (insertion === null) return;
+      next = { list: list.key, empty: false, ...insertion };
     }
-    const style = getComputedStyle(container);
-    const next = timerInsertion(
-      cards,
-      bounds,
-      x,
-      y,
-      Number.parseFloat(style.columnGap),
-      Number.parseFloat(style.rowGap),
-    );
-    if (next === null) return;
     // No DOM movement during dragging and no state update for an unchanged
     // slot, including child dragenter events and the 1 Hz timer refresh.
-    if (slot.current === next.slot) return;
-    slot.current = next.slot;
-    setIndicator(next);
+    const current = targetRef.current;
+    if (current?.list === next.list && current.slot === next.slot) return;
+    targetRef.current = next;
+    setTarget(next);
   };
 
   const scroll = () => {
@@ -236,28 +293,48 @@ export function useTimerReorder(api: TimersApi) {
     event.preventDefault();
     event.stopPropagation();
     updateTarget(event.clientX, event.clientY);
-    const targetSlot = slot.current;
+    const dropped = targetRef.current;
     const payload = event.dataTransfer.getData("text/plain");
     clearDrag(); // Synchronously disarm before committing, even if drop repeats.
-    if (payload !== id || targetSlot === null) return;
-    const ids = api.timers.map((timer) => timer.id);
-    const from = ids.indexOf(id);
-    if (from < 0 || targetSlot === from || targetSlot === from + 1) return;
-    const timer = api.timers.find((t) => t.id === id);
-    const label = timer?.label ?? "Tracker";
-    const to = targetSlot > from ? targetSlot - 1 : targetSlot;
-    ids.splice(from, 1);
+    if (payload !== id || dropped === null) return;
+    const from = listOf(id);
+    const into = lists.find((list) => list.key === dropped.list);
+    if (!from || !into) return;
+    const label = api.timers.find((t) => t.id === id)?.label ?? "Tracker";
+    if (from.key !== into.key) {
+      api.moveToSection(id, into.key, dropped.slot);
+      setAnnouncement(
+        `${label} moved to ${where(into, dropped.slot + 1, into.ids.length + 1)}`,
+      );
+      return;
+    }
+    const ids = [...from.ids];
+    const index = ids.indexOf(id);
+    if (dropped.slot === index || dropped.slot === index + 1) return;
+    const to = dropped.slot > index ? dropped.slot - 1 : dropped.slot;
+    ids.splice(index, 1);
     ids.splice(to, 0, id);
-    api.reorder(ids);
-    setAnnouncement(`${label} moved to position ${to + 1} of ${ids.length}`);
+    api.reorder(pageOrder(from, ids));
+    setAnnouncement(`${label} moved to ${where(from, to + 1, ids.length)}`);
   };
 
+  /** Registers a list's grid and its area under the list's key. */
+  const listRef =
+    (list: string | null, kind: "list" | "zone") =>
+    (element: HTMLElement | null): void => {
+      const elements = kind === "list" ? listElements : zoneElements;
+      if (element) elements.current.set(keyOf(list), element);
+      else elements.current.delete(keyOf(list));
+    };
+
   return {
-    containerRef,
     scrollRef,
     cardElements,
+    listRef,
     draggingId,
-    indicator,
+    /** The list the dragged card started in, if a drag is on. */
+    draggingFrom: draggingId === null ? undefined : listOf(draggingId)?.key,
+    target,
     announcement,
     move,
     onDragStart,

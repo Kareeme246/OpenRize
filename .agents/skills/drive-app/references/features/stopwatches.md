@@ -1,11 +1,11 @@
 ---
 id: stopwatches
 title: Stopwatches
-summary: Keep any number of named stopwatches, start and pause them, edit their segments, reorder them, and turn their time into a calendar entry.
+summary: Keep any number of named stopwatches, start and pause them, link them by tag, arrange them under sections, edit their segments, reorder them, and turn their time into a calendar entry.
 surfaces: [window, pulse, tray, reminder, cli]
 routes: [timers]
-code: [src/pages/Timers.tsx, src/components/StopwatchCard.tsx, src/components/TimerInfoSheet.tsx, src/components/TimerGroupBar.tsx, src/components/TimerGroupSheet.tsx, src/components/HourRing.tsx, src/hooks/useTimers.ts, src/hooks/useTimerReorder.ts, src/lib/timers.ts, src/lib/timerInsertion.ts, src-tauri/core/src/timers.rs, src-tauri/src/tray.rs]
-rize: ["rize timers list", "rize timers new", "rize timers start", "rize timers pause", "rize timers reset", "rize timers rename", "rize timers rm", "rize timers segments", "rize timers group"]
+code: [src/pages/Timers.tsx, src/components/StopwatchCard.tsx, src/components/TimerInfoSheet.tsx, src/components/TimerTagSheet.tsx, src/components/TimerSectionHeading.tsx, src/components/KebabMenu.tsx, src/components/HourRing.tsx, src/hooks/useTimers.ts, src/hooks/useTimerSections.ts, src/hooks/useTimerReorder.ts, src/lib/timers.ts, src/lib/timerInsertion.ts, src-tauri/core/src/timers.rs, src-tauri/src/tray.rs]
+rize: ["rize timers list", "rize timers new", "rize timers start", "rize timers pause", "rize timers reset", "rize timers rename", "rize timers rm", "rize timers segments", "rize timers tag", "rize timers section"]
 reach-macos: partial
 reach-windows: partial
 reach-rize: partial
@@ -18,16 +18,17 @@ Stopwatches is the manual-timing page, the one item in the sidebar's Manual grou
 
 ## Sub-features
 
-- create: a "New tracker name" field and a "New tracker" button; the new stopwatch starts paused at 00:00.
+- create: a "New tracker or section name" field with a "New tracker" button (also Enter) and a "New section" button; the new stopwatch starts paused at 00:00 above every section, and a new section is an empty subheading after the others.
 - start-pause: the ring button on a card ("Start tracking" while paused, "Pause tracking" while running).
 - header-counters: the page header shows the running count and the total across all stopwatches.
 - rename: double-click the name, or edit "Tracker name" in the Info sheet; a blank name reverts.
 - info-sheet: "Info" opens a sheet with Name, Details (Elapsed, Status, Created), the Segments list (change a segment's start or end, remove a segment, "Add a segment" with a start and an end), and Saved states; its button is "Done".
 - save-state: "Save state" records the time as it reads now (a toast "Saved ... at ...").
 - add-to-calendar: "Add to calendar" opens Add time prefilled with the name and the elapsed range, and resets the stopwatch once the entry is added (needs at least a minute).
-- reorder: the "Reorder NAME" handle (drag, or arrow keys while it has focus) and the menu's "Move up" and "Move down".
+- reorder: the "Reorder NAME" handle (drag, or arrow keys while it has focus) and the menu's "Move up" and "Move down", all within the card's own section; dragging a card onto another section (or into the gap above the first one) moves it there.
+- sections: plain, always-open subheadings ("Section NAME") with a count and a rule; stopwatches in no section sit above them with no heading. The heading's "Options for section NAME" menu has "Rename" (or double-click the name), "Move up", "Move down" and "Delete section" (confirmed when it holds stopwatches, which then move to the top with their time). An empty section reads "Drag a stopwatch here, or use Move to in its menu." The card menu's "Move to" shows "No section", every section (the current one checked) and "New section...", which names a section and moves the card into it. Sections never start, pause or total anything.
 - reset-delete: "Reset to zero" and "Delete", each behind a confirmation.
-- group: "Group..." in the Options menu opens a sheet with a "Group" field (existing groups appear as "Use group NAME" chips under it) and a "Save" button ("Remove from group" when the field is emptied on a grouped stopwatch); a grouped card shows its group as a badge, and a "Stopwatch groups" section above the cards has one row per group with its count, running count and combined time and the buttons "Start all in NAME" and "Pause all in NAME".
+- link: "Link..." in the Options menu opens a sheet `Link "NAME"` with a "Tag" field (existing tags appear as "Use tag NAME" chips under it) and a "Save" button ("Unlink" when the field is emptied on a tagged stopwatch). Stopwatches with the same tag are linked: starting or pausing any one of them (ring, tray, `rize timers start`/`pause`) starts or pauses them all at one instant; reset, delete and added time stay with one card. A tagged card shows a "Linked by TAG" chip that opens a popover with the linked total, "N linked · M running", "Start all" and "Pause all".
 - reveal: a timer row in the Pulse panel opens this page and focuses the card.
 - reminder: a stopwatch that has run a long time raises a reminder card with Pause and Keep going buttons, outside the main window.
 - empty-state: "No stopwatches yet".
@@ -125,15 +126,30 @@ scripts/app-drive.sh rize -- --dry-run timers rm "Deep work"
 scripts/app-drive.sh rize -- --yes timers reset "Deep work"
 ```
 
-Groups through the shell (a name matching an existing group in any case joins it; start and pause act on the whole group):
+Tags through the shell (a name matching an existing tag in any case takes its spelling; starting or pausing one tagged stopwatch acts on every one with the tag):
 
 ```bash
-scripts/app-drive.sh rize -- timers group add "Email" "Admin"
-scripts/app-drive.sh rize -- timers group list
-scripts/app-drive.sh click "Start all in Admin"
-scripts/app-drive.sh click "Pause all in Admin"
-scripts/app-drive.sh rize -- timers group start "Admin"
-scripts/app-drive.sh rize -- timers group rm "Email"
+scripts/app-drive.sh rize -- timers tag add "Email" "Admin"
+scripts/app-drive.sh rize -- timers tag list
+scripts/app-drive.sh rize -- timers start "Email"
+scripts/app-drive.sh click "Linked by Admin"
+scripts/app-drive.sh click "Pause all"
+scripts/app-drive.sh rize -- timers tag start "Admin"
+scripts/app-drive.sh rize -- timers tag rm "Email"
+```
+
+Sections, from the page and the shell:
+
+```bash
+scripts/app-drive.sh fill "New tracker or section name" "Website"
+scripts/app-drive.sh click "New section"
+scripts/app-drive.sh wait "Section Website"
+scripts/app-drive.sh click "Options for Email"
+scripts/app-drive.sh click "Move to"
+scripts/app-drive.sh click "Website"
+scripts/app-drive.sh rize -- timers section list
+scripts/app-drive.sh rize -- timers section move "Email"
+scripts/app-drive.sh rize -- timers section rm "Website"
 ```
 
 ## What proves it works
@@ -147,7 +163,8 @@ scripts/app-drive.sh rize -- timers group rm "Email"
 - Move: the order of `ordinal` in `timers list` swaps with the card order in `tree`.
 - Add to calendar: a new entry appears in `rize --json entries list --from today` whose description is the stopwatch's name, and the stopwatch returns to 00:00 with `accumulatedMs: 0`.
 - Reset and delete: the toast is brief, so rely on `timers list` (zeroed, or the element gone) and on `wait "No stopwatches yet"` after the last delete.
-- Groups: after `timers group add`, `wait "Start all in NAME"` shows the page repainted without navigating, `rize --json timers list` has the `group` on each member, and `timers group list` gives members, running count and combined total; "Start all" sets every member running at once and "Pause all" stops them all with equal elapsed times, leaving other groups alone.
+- Tags: after `timers tag add`, `wait "Linked by NAME"` shows the page repainted without navigating, `rize --json timers list` has the `tag` on each timer, and `timers tag list` gives timers, running count and combined total. Starting one tagged card gives every timer with the tag the same `startedAt`, pausing one gives each a new segment ending at the same instant, and untagged or differently tagged timers are untouched.
+- Sections: `rize --json timers section list` returns `{ sections, timers }`; a moved card's `sectionId` is the section's id, cards under a section keep their relative `ordinal` order, and deleting a section leaves its timers with `sectionId: null` and their `accumulatedMs` unchanged.
 - Visual (ring progress, running accent edge): `scripts/app-drive.sh shot`.
 
 ## Gotchas
@@ -160,14 +177,15 @@ scripts/app-drive.sh rize -- timers group rm "Email"
 - "Add to calendar" is disabled until at least a minute has elapsed (the menu item is greyed with a hint).
 - The ring display switches to hours (1:02:03) past an hour; `wait` on a short prefix like "00:0" is brittle, so prefer `rize` for exact elapsed values.
 - Timers are shared through a module cache and a single 1 Hz clock; a started stopwatch keeps running across page navigation and appears in the tray menu.
-- Reordering by drag is not drivable; the menu moves and the handle's arrow keys (when it has focus) persist the same order. `rize` has no reorder command yet.
+- Reordering by drag is not drivable; the menu moves and the handle's arrow keys (when it has focus) persist the same order, and "Move to" or `rize timers section move` moves a card between sections. `rize` has no reorder command yet.
+- "Options for section NAME" and "Section NAME" contain the section name, so a card label equal to a section name makes substring clicks ambiguous.
 - Timers are not part of the undo history ([undo and redo](undo.md)); only entry and catalog changes are.
 - Reset and delete through `rize` need `--yes` outside a terminal, or `--dry-run` to preview.
 
 ## Not reachable
 
-- Typing a name into the Group sheet depends on the driver's keystrokes, which can time out; click a "Use group NAME" chip for an existing group, or set groups with `rize timers group add`.
-- Dragging a card to reorder, and the drop-position indicator.
+- Typing a name into the Link sheet depends on the driver's keystrokes, which can time out; click a "Use tag NAME" chip for an existing tag, or set tags with `rize timers tag add`.
+- Dragging a card to reorder or into another section, and the drop-position indicator.
 - The menu-bar tray menu and glyph that reflect running stopwatches ([tray](tray.md)).
 - The stopwatch reminder card (Pause and Keep going), which lives in the separate reminder window; the macOS driver reads only the first window of the app and the Windows driver reaches it only with `-t` and its window label ([breaks](breaks.md)).
 - The Pulse panel's timer rows on macOS, where the driver reads only the first window; on Windows `-t pulse` targets that webview ([pulse](pulse.md)).

@@ -57,17 +57,23 @@ installed.
 | `rize focus start [label]` / `rize focus stop` | Start or end a manual focus session. | `start_session`, `stop_session` | Needs app | Shipped |
 | `rize timers list` | All timers with elapsed time and state. | `list_timers` | Yes | Shipped |
 | `rize timers new <label>` | Create a timer. | `create_timer` | Yes | Shipped |
-| `rize timers start` / `pause` / `reset` / `rm <timer>` | Control or delete a timer by id or label; reset and rm are confirmed. | `start_timer`, `pause_timer`, `reset_timer`, `delete_timer` | Yes | Shipped |
-| Timer reordering (CLI not yet exposed) | Persist the complete timer order or move one timer up/down; available in the Stopwatches UI. | `reorder_timers`, `move_timer` | Not yet exposed by CLI | Planned |
+| `rize timers start` / `pause` / `reset` / `rm <timer>` | Control or delete a timer by id or label; reset and rm are confirmed. Start and pause on a tagged timer start or pause every timer with that tag; reset and rm act on that timer alone. | `start_timer`, `pause_timer`, `reset_timer`, `delete_timer` | Yes | Shipped |
+| Timer reordering (CLI not yet exposed) | Persist the complete timer order or move one timer up/down within its section; available in the Stopwatches UI. | `reorder_timers`, `move_timer` | Not yet exposed by CLI | Planned |
 | `rize timers rename <timer> <label>` | Rename a timer. | `rename_timer` | Yes | Shipped |
 | `rize timers segments list <timer>` | The segments that make up a timer's total: id, start, end and length. `--json` is the timer, with `segments[]` of `id`, `startedAt`, `endedAt` and the derived `durationMs`. | `list_timers` | Yes | Shipped |
 | `rize timers segments add <timer> --from <start> (--to <end> \| --for <length>)` | Add a segment as a start and an end, as a time entry is. `--for 90m` is a shortcut that derives the end as the start plus the length; it cannot be combined with `--to`. A segment may be zero length; an end before the start is refused with `INVALID_ARGUMENT`. | `add_timer_segment` | Yes | Shipped |
 | `rize timers segments edit <timer> <segment> [--from <start>] [--to <end>]` | Change a segment's start, its end or both; the one left out stays. The result must still end at or after its start. Segment ids come from `segments list`. | `update_timer_segment` | Yes | Shipped |
 | `rize timers segments rm <timer> <segment>` | Remove one segment from a timer's total. | `delete_timer_segment` | Yes | Planned |
-| `rize timers group list` | Every group with its timers, how many are running and the combined time. `--json` is the timers, each with its `group` (or null). | `list_timers` | Yes | Shipped |
-| `rize timers group add <timer> <group>` | Put a timer in a group; a name matching an existing group (any case, or a unique prefix) joins it, otherwise a new group starts. | `set_timer_group` | Yes | Shipped |
-| `rize timers group rm <timer>` | Take a timer out of its group. | `set_timer_group` | Yes | Shipped |
-| `rize timers group start <group>` / `pause <group>` | Start every paused timer in the group, or pause every running one. | `start_timer_group`, `pause_timer_group` | Yes | Shipped |
+| `rize timers tag list` | Every tag with its timers, how many are running and the combined time. `--json` is the timers, each with its `tag` (or null). | `list_timers` | Yes | Shipped |
+| `rize timers tag add <timer> <tag>` | Tag a timer, linking it to every timer with that tag: starting or pausing one starts or pauses them all. A name matching an existing tag in any case takes its spelling. | `set_timer_tag` | Yes | Shipped |
+| `rize timers tag rm <timer>` | Remove a timer's tag, unlinking it. | `set_timer_tag` | Yes | Shipped |
+| `rize timers tag start <tag>` / `pause <tag>` | Start every paused timer with the tag, or pause every running one (a tag is matched by name or a unique prefix). | `start_timer_tag`, `pause_timer_tag` | Yes | Shipped |
+| `rize timers section list` | Every section in page order with the timers under it. `--json` is `{ sections, timers }`: each section's `id`, `name`, `ordinal` and `createdAt`, and the timers, each with its `sectionId` (or null). | `list_timer_sections`, `list_timers` | Yes | Shipped |
+| `rize timers section new <name>` | Add an empty section after the others; a name another section has (any case) is refused with `INVALID_ARGUMENT`. Answers as `section list` does. | `create_timer_section` | Yes | Shipped |
+| `rize timers section rename <section> <name>` | Rename a section, by id, name or a unique prefix. | `rename_timer_section` | Yes | Shipped |
+| `rize timers section rm <section>` | Delete a section. Its timers stay, with their time, in no section; nothing is deleted, so it is not confirmed. | `delete_timer_section` | Yes | Shipped |
+| `rize timers section move <timer> [<section>]` | Move a timer to the end of a section, or out of any section when none is named. Sections only arrange timers; they never start, pause or total them. | `move_timer_to_section` | Yes | Shipped |
+| Section reordering (CLI not yet exposed) | Persist the order of sections; available in the Stopwatches UI. | `reorder_timer_sections` | Not yet exposed by CLI | Planned |
 | `rize timers saves <timer>` / `saves add` | List a timer's saved states (label, elapsed time and when each was saved), or record one now. | `list_timer_saved_states`, `save_timer_state` | Yes | Planned |
 | `rize entries list` | Filter by range, project, client, category, app, status, billable and search. Newest first, `--limit` 1 to 5000. | `query_time_entries` | Yes | Shipped |
 | `rize entries show <id>` | One entry with its apps, events and AI suggestion; window titles with `--full`. | `get_entry_detail` | Yes | Shipped |
@@ -129,7 +135,7 @@ stay reachable through `rize settings set`.
 | Area | Rule |
 | --- | --- |
 | Output | Plain aligned tables, no color. Durations as `3h 25m`, times local. |
-| `--json` | One envelope for every command, errors included: `schemaVersion`, `ok`, `data`, `error { code, message }`. Adding a field is compatible; removing or renaming one bumps `schemaVersion` (now 3: a timer segment's `recordedAt` became `startedAt` and `endedAt`). The app and `rize` must also agree on the protocol version (now 3), or `rize` stops with exit 4. |
+| `--json` | One envelope for every command, errors included: `schemaVersion`, `ok`, `data`, `error { code, message }`. Adding a field is compatible; removing or renaming one bumps `schemaVersion` (now 4: a timer's `group` became `tag`). The app and `rize` must also agree on the protocol version (now 4: groups became tags that link start and pause, and timers gained sections), or `rize` stops with exit 4. |
 | Exit codes | 0 success, 1 operation failed, 2 invalid arguments (including an unconfirmed deletion), 3 app needed but not running, 4 incompatible versions (the running app speaks another rize protocol, or the stored data is from another app version). |
 | Error codes | `INVALID_ARGUMENT`, `NOT_FOUND`, `AMBIGUOUS` (with `candidates`), `NO_DATA`, `APP_NOT_RUNNING`, `INCOMPATIBLE`, `FAILED`. `NO_DATA` means the app never ran on this machine. |
 | Dates | A bare date covers the whole local day (`--to 2026-09-30` includes that day); offset-less times are local. `today`, `yesterday`, weekday names, `this-week`, `last-week`, `this-month` and `last-month` work for `--from`, `--to` and `--period`; `--last 7d` (or `90m`, `12h`, `2w`) runs up to now. Weeks start on Monday. Ranges default to today. |

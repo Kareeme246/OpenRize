@@ -16,10 +16,15 @@ import type {
   AiStatus,
   AppRecord,
   BillableEntry,
+  BugDiagnostics,
+  BugReportDraft,
+  BugReportPayload,
+  BugReportResponse,
   Category,
   CategoryRemoval,
   CategoryStats,
   Client,
+  ClientCrash,
   DevToolsInfo,
   EnergySummary,
   EntryDetail,
@@ -852,4 +857,40 @@ export function checkForUpdates(): Promise<UpdateStatus> {
 /** Resolves only if the install fails to restart; otherwise the app relaunches. */
 export function installUpdate(): Promise<void> {
   return invoke<void>("install_update");
+}
+
+// --- Crash diagnostics ---
+
+/** Hands a UI failure to Rust, which reduces it to what a report may hold. */
+export function recordClientCrash(crash: ClientCrash): Promise<void> {
+  return invoke<void>("record_client_crash", {
+    source: crash.source,
+    name: crash.name,
+    message: crash.message,
+    stack: crash.stack,
+    componentStack: crash.componentStack,
+  });
+}
+
+// --- Bug reporting ---
+
+/** What the form can offer to attach. Nothing is sent. */
+export function getBugReportDiagnostics(
+  locale?: string,
+): Promise<BugDiagnostics> {
+  return invoke<BugDiagnostics>("get_bug_report_diagnostics", { locale });
+}
+
+/** The exact report a draft would send. Nothing is sent. */
+export function previewBugReport(
+  draft: BugReportDraft,
+): Promise<BugReportPayload> {
+  return invoke<BugReportPayload>("preview_bug_report", { draft });
+}
+
+/** Sends the draft to the bug report endpoint; only the Send button calls it. */
+export function submitBugReport(
+  draft: BugReportDraft,
+): Promise<BugReportResponse> {
+  return invoke<BugReportResponse>("submit_bug_report", { draft });
 }

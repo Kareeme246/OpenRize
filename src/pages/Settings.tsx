@@ -6,6 +6,7 @@ import {
   ThresholdSlider,
 } from "../components/AiLearning";
 import { BatteryEnergyMonitor } from "../components/BatteryEnergyMonitor";
+import { BugReportSheet } from "../components/BugReportSheet";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Picker } from "../components/Picker";
 import {
@@ -1109,6 +1110,8 @@ export function Settings({
     resetHistory: resetEnergyHistory,
   } = useEnergy(energyDays, HAS_ENERGY_MONITOR);
 
+  const [showBugReportSheet, setShowBugReportSheet] = useState(false);
+
   const [activeSection, setActiveSection] =
     useState<SettingsSection>("overview");
   const contentRef = useRef<HTMLDivElement>(null);
@@ -1372,6 +1375,20 @@ export function Settings({
             )}
             <PermissionsSetting onError={setOverviewError} />
             <UpdatesSetting status={updates} />
+            <SettingGroup title="Help & support">
+              <SettingRow
+                title="Report a bug"
+                description="Describe a problem and choose what to attach. You see exactly what will be sent, and nothing leaves this computer until you press Send."
+              >
+                <button
+                  type="button"
+                  onClick={() => setShowBugReportSheet(true)}
+                  className="shrink-0 rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] font-medium text-fg-muted hover:bg-surface-strong hover:text-fg transition-colors cursor-pointer"
+                >
+                  Report a bug…
+                </button>
+              </SettingRow>
+            </SettingGroup>
           </section>
 
           <section
@@ -1631,6 +1648,19 @@ export function Settings({
                 />
               </SettingRow>
             </SettingGroup>
+
+            <SettingGroup title="Privacy & diagnostics">
+              <SettingRow
+                title="Anonymous crash reporting"
+                description="When something breaks, OpenRize saves a short report on this device: the app version, your OS and where in the code it failed. Turn this on to also send those reports (and any already saved) to the developers. Window titles, web addresses, names, descriptions and file paths are never included. Off by default."
+              >
+                <Toggle
+                  checked={settings.crashReporting}
+                  label="Anonymous crash reporting"
+                  onChange={(crashReporting) => update({ crashReporting })}
+                />
+              </SettingRow>
+            </SettingGroup>
           </section>
 
           <section
@@ -1865,6 +1895,9 @@ export function Settings({
               onConfirm={resetLearned}
               onCancel={() => setConfirmReset(false)}
             />
+          )}
+          {showBugReportSheet && (
+            <BugReportSheet onClose={() => setShowBugReportSheet(false)} />
           )}
         </div>
       </div>

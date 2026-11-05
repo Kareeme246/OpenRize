@@ -808,3 +808,102 @@ export interface DevToolsInfo {
   /** Whether the first-run permissions screen has been re-armed for this session. */
   onboardingRerun: boolean;
 }
+
+// --- Crash diagnostics (src-tauri/core/src/crashes.rs) ---
+
+/**
+ * What the UI knows about a failure. Rust keeps none of it verbatim: the
+ * message and stacks can quote the user's data, so a report holds only the
+ * error's name, a fixed description and anonymous frames.
+ */
+export interface ClientCrash {
+  source: "frontend_error" | "unhandled_rejection";
+  /** The error class (`TypeError`); absent when what was thrown is no `Error`. */
+  name?: string;
+  message?: string;
+  stack?: string;
+  componentStack?: string;
+}
+
+// --- Bug reporting (src-tauri/src/bug_report.rs) ---
+
+export type DataFolder = "local" | "legacyRoaming" | "other";
+
+export interface BugEnvironment {
+  appVersion: string;
+  os: string;
+  osVersion: string;
+  arch: string;
+  locale: string;
+  dataFolder: DataFolder;
+}
+
+export interface BugPreferences {
+  theme: string;
+  accent: string;
+  shape: string;
+  sizeMode: string;
+  closeBehavior: string;
+  trayEnabled: boolean;
+  retentionDays: number;
+  aiSuggest: string;
+  autoAccept: boolean;
+  autoAcceptPercent: number;
+  weeklyTargetHours: number;
+  trackingHoursEnabled: boolean;
+  breaksEnabled: boolean;
+  stopwatchReminderEnabled: boolean;
+  notificationPlacement: string;
+  crashReporting: boolean;
+}
+
+export interface BugCrashSummary {
+  id: string;
+  timestampMs: number;
+  appVersion: string;
+  source: string;
+  message: string;
+}
+
+/** Everything the form can offer to attach. */
+export interface BugDiagnostics {
+  environment: BugEnvironment;
+  preferences: BugPreferences;
+  recentCrashes: BugCrashSummary[];
+}
+
+export interface BugAttachments {
+  environment: boolean;
+  preferences: boolean;
+  crashIds: string[];
+}
+
+/** What the form holds; Rust builds the report from it. */
+export interface BugReportDraft {
+  whatHappened: string;
+  whatExpected: string;
+  stepsToReproduce: string;
+  additionalNotes?: string;
+  attachments: BugAttachments;
+  locale?: string;
+}
+
+/** The request body, exactly as it is sent. */
+export interface BugReportPayload {
+  installId: string;
+  whatHappened: string;
+  whatExpected: string;
+  stepsToReproduce: string;
+  additionalNotes?: string;
+  diagnostics?: {
+    environment?: BugEnvironment;
+    preferences?: BugPreferences;
+    recentCrashes?: BugCrashSummary[];
+  };
+}
+
+export interface BugReportResponse {
+  status: string;
+  issueNumber: number;
+  issueUrl: string;
+}

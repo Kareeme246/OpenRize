@@ -2,10 +2,15 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ToastProvider } from "./hooks/useToast";
+import { installCrashHandlers } from "./lib/crashReporting";
 import Pulse from "./Pulse";
 import Reminder from "./Reminder";
 import "./styles/app.css";
+
+// Uncaught errors and unhandled rejections become local crash reports.
+installCrashHandlers();
 
 // One bundle, three windows: the menu-bar panel is the `pulse` window and the
 // top-right break panel is the `reminder` window.
@@ -26,6 +31,8 @@ function Root() {
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <Root />
+    <ErrorBoundary compact={label !== "main"}>
+      <Root />
+    </ErrorBoundary>
   </React.StrictMode>,
 );

@@ -4,10 +4,12 @@ mod ai;
 #[cfg(target_os = "macos")]
 mod ax;
 mod breaks;
+mod bug_report;
 mod caption;
 mod capture;
 mod cli_install;
 mod commands;
+mod crashes;
 mod dev_tools;
 mod energy;
 mod invoices;
@@ -76,6 +78,7 @@ const BACKGROUND_ARG: &str = "--background";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    crashes::init_panic_hook();
     let background = std::env::args().any(|arg| arg == BACKGROUND_ARG);
     tauri::Builder::default()
         // Registered first so a second launch exits before it opens the
@@ -111,6 +114,8 @@ pub fn run() {
                 &app.path().app_local_data_dir()?,
             );
             std::fs::create_dir_all(&root)?;
+            // Per install, beside the accounts: see `openrize_core::crashes`.
+            crashes::set_crash_root(&root);
             // Before any store opens: repairs the account list, finishes a
             // requested move of existing data, and says which folder to open.
             let launch = openrize_core::accounts::launch(&root);
@@ -156,6 +161,7 @@ pub fn run() {
             if let Err(error) = commands::sweep_retention(app.handle()) {
                 eprintln!("retention sweep failed: {error}");
             }
+            crashes::dispatch_pending_reports(app.handle().clone());
             rpc::serve(app.handle().clone(), dir);
             // A switch restarts with the original arguments, so a window that was
             // showing must come back even if this copy began in the background.
@@ -361,6 +367,10 @@ pub fn run() {
             accounts::paused_on_switch,
             accounts::resume_paused,
             accounts::dismiss_paused,
+            commands::record_client_crash,
+            commands::get_bug_report_diagnostics,
+            commands::preview_bug_report,
+            commands::submit_bug_report,
         ])
         .build(tauri::generate_context!())
         .expect("error while building OpenRize")

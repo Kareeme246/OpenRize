@@ -1147,6 +1147,11 @@ pub(crate) fn apply_settings_change(app: &AppHandle, previous: &Settings, next: 
     if next.notification_placement != previous.notification_placement {
         breaks::surface::reposition(app);
     }
+
+    if next.crash_reporting && !previous.crash_reporting {
+        crate::crashes::dispatch_pending_reports(app.clone());
+    }
+
     let _ = app.emit(crate::EVENT_SETTINGS_CHANGED, next);
 }
 
@@ -1369,4 +1374,58 @@ pub fn dev_sample_break_reminder(app: AppHandle) -> Result<breaks::engine::Break
 #[tauri::command]
 pub fn preview_break_chime() {
     breaks::chime();
+}
+
+// --- Crash diagnostics --------------------------------------------------
+
+/// Records a failure the UI caught (see `openrize_core::crashes` for what is
+/// kept). Everything is optional text from the page and is reduced in Rust,
+/// so a UI bug cannot put free text into a report.
+#[tauri::command]
+pub fn record_client_crash(
+    app: AppHandle,
+    source: String,
+    name: Option<String>,
+    message: Option<String>,
+    stack: Option<String>,
+    component_stack: Option<String>,
+) -> Result<(), String> {
+    crate::crashes::record_client_crash(
+        &app,
+        &source,
+        name.as_deref(),
+        message.as_deref(),
+        stack.as_deref(),
+        component_stack.as_deref(),
+    )
+}
+
+// --- Bug reporting ------------------------------------------------------
+
+/// What the form can offer to attach. Read-only; nothing is sent.
+#[tauri::command]
+pub fn get_bug_report_diagnostics(
+    app: AppHandle,
+    locale: Option<String>,
+) -> Result<crate::bug_report::BugDiagnostics, String> {
+    crate::bug_report::collect_diagnostics(&app, locale)
+}
+
+/// The exact report a draft would send, for the form's preview. Nothing is sent.
+#[tauri::command]
+pub fn preview_bug_report(
+    app: AppHandle,
+    draft: crate::bug_report::BugReportDraft,
+) -> Result<crate::bug_report::BugReportPayload, String> {
+    crate::bug_report::build_payload(&app, &draft)
+}
+
+/// Sends the draft to the bug report endpoint. Only the Send button calls this.
+#[tauri::command]
+pub async fn submit_bug_report(
+    app: AppHandle,
+    draft: crate::bug_report::BugReportDraft,
+) -> Result<crate::bug_report::BugReportResponse, String> {
+    let payload = crate::bug_report::build_payload(&app, &draft)?;
+    crate::bug_report::send(&payload).await
 }

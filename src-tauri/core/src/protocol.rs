@@ -19,10 +19,6 @@ use crate::EntryFilter;
 /// and a `rize` that disagree stop at the version check instead of misreading
 /// each other. 3: every answer carrying a timer describes its segments by
 /// `startedAt` and `endedAt` (no `recordedAt`). 4: a timer's group became its
-/// tag (`TimerGroup*` operations are `TimerTag*`, and a timer's `group` is
-/// its `tag`), and the tag is a real link: `TimerStart` and `TimerPause` on a
-/// tagged timer start or pause every timer with that tag. Timers also gained
-/// sections (`TimerSection*`, `TimerMove`, and a timer's `sectionId`).
 pub const PROTOCOL_VERSION: u32 = 4;
 /// The `--json` envelope's version. Adding a field keeps it; removing or
 /// renaming one bumps it. 3: a timer segment's `durationMs` and `recordedAt`

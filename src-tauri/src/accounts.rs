@@ -539,17 +539,17 @@ pub fn pause_for_switch(app: &AppHandle) -> Result<(), String> {
     write_record(app, &record)
 }
 
-/// A stopwatch started by hand is no longer paused work to take up.
-pub fn forget_paused_stopwatch(app: &AppHandle, id: &str) {
+/// Stopwatches started by hand are no longer paused work to take up.
+pub fn forget_paused_stopwatches(app: &AppHandle, ids: &[String]) {
     let Some(mut record) = read_record(app) else {
         return;
     };
     let before = record.clone();
-    record.stopwatches.retain(|paused| paused != id);
+    record.stopwatches.retain(|paused| !ids.contains(paused));
     if let Some(recorded) = &mut record.break_ {
         recorded
             .paused_stopwatches
-            .retain(|(paused, _)| paused != id);
+            .retain(|(paused, _)| !ids.contains(paused));
     }
     if record != before {
         if let Err(error) = write_record(app, &record) {

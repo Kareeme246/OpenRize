@@ -15,15 +15,20 @@ use crate::models::{
 };
 use crate::EntryFilter;
 
-/// Bumped whenever an operation or its answer changes incompatibly. 3: every
-/// answer carrying a timer now describes its segments by `startedAt` and
-/// `endedAt` (no `recordedAt`), so an app and a `rize` that disagree about
-/// segments stop at the version check instead of misreading each other.
-pub const PROTOCOL_VERSION: u32 = 3;
+/// Bumped whenever an operation or its answer changes incompatibly, so an app
+/// and a `rize` that disagree stop at the version check instead of misreading
+/// each other. 3: every answer carrying a timer describes its segments by
+/// `startedAt` and `endedAt` (no `recordedAt`). 4: a timer's group became its
+/// tag (`TimerGroup*` operations are `TimerTag*`, and a timer's `group` is
+/// its `tag`), and the tag is a real link: `TimerStart` and `TimerPause` on a
+/// tagged timer start or pause every timer with that tag. Timers also gained
+/// sections (`TimerSection*`, `TimerMove`, and a timer's `sectionId`).
+pub const PROTOCOL_VERSION: u32 = 4;
 /// The `--json` envelope's version. Adding a field keeps it; removing or
 /// renaming one bumps it. 3: a timer segment's `durationMs` and `recordedAt`
 /// became `startedAt` and `endedAt` (`durationMs` stays, derived from them).
-pub const SCHEMA_VERSION: u32 = 3;
+/// 4: a timer's `group` became `tag`.
+pub const SCHEMA_VERSION: u32 = 4;
 /// Why a command that changes nothing destructive cannot take `--dry-run`;
 /// the core and `rize` give the same words.
 pub const DRY_RUN_UNSUPPORTED: &str = "--dry-run only previews commands that delete, reset or rebuild; this one would run for real. Run it without --dry-run.";
@@ -89,9 +94,11 @@ pub enum Operation {
     TimerCreate {
         label: String,
     },
+    /// Starts the timer and, when it has a tag, every timer with that tag.
     TimerStart {
         timer: String,
     },
+    /// Pauses the timer and, when it has a tag, every timer with that tag.
     TimerPause {
         timer: String,
     },
@@ -105,19 +112,40 @@ pub enum Operation {
     TimerDelete {
         timer: String,
     },
-    /// Puts a timer in the group `group`, or takes it out of its group when
-    /// `group` is `None`.
-    TimerGroup {
+    /// Tags a timer with `tag`, which links it to every timer with that tag,
+    /// or removes its tag when `tag` is `None`.
+    TimerTag {
         timer: String,
-        group: Option<String>,
+        tag: Option<String>,
     },
-    /// Starts every paused timer in the group.
-    TimerGroupStart {
-        group: String,
+    /// Starts every paused timer with the tag.
+    TimerTagStart {
+        tag: String,
     },
-    /// Pauses every running timer in the group.
-    TimerGroupPause {
-        group: String,
+    /// Pauses every running timer with the tag.
+    TimerTagPause {
+        tag: String,
+    },
+    /// Every section with every timer: `{ sections, timers }`. A section only
+    /// arranges timers on the page; the section answers below are the same.
+    TimerSectionsList {},
+    /// Adds an empty section after the others.
+    TimerSectionCreate {
+        name: String,
+    },
+    TimerSectionRename {
+        section: String,
+        name: String,
+    },
+    /// Deletes a section; its timers stay, with their time, in no section.
+    TimerSectionDelete {
+        section: String,
+    },
+    /// Moves a timer to the end of `section`, or out of any section when
+    /// `section` is `None`.
+    TimerMove {
+        timer: String,
+        section: Option<String>,
     },
     /// One timer with its segments, each a start and an end.
     TimerSegments {

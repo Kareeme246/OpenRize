@@ -8,7 +8,12 @@ import type {
 } from "./accounts";
 import type { BreakEntry, BreakState } from "./breaks";
 import type { LoginItemState, Settings, StoragePaths } from "./settings";
-import type { SegmentEdit, Timer, TimerSavedState } from "./timers";
+import type {
+  SegmentEdit,
+  Timer,
+  TimerSavedState,
+  TimerSection,
+} from "./timers";
 import type {
   AccessibilityState,
   ActivitySnapshot,
@@ -58,6 +63,7 @@ export const ACTIVITY_TICK = "activity-tick";
 export const SETTINGS_CHANGED = "settings-changed";
 export const ENTRIES_CHANGED = "entries-changed";
 export const TIMERS_CHANGED = "timers-changed";
+export const TIMER_SECTIONS_CHANGED = "timer-sections-changed";
 /** Payload: `{ entryId }`. */
 export const SUGGESTION_READY = "suggestion-ready";
 /** Payload: `AiStatus`. */
@@ -767,19 +773,52 @@ export function renameTimer(id: string, label: string): Promise<Timer[]> {
   return invoke<Timer[]>("rename_timer", { id, label });
 }
 
-export function setTimerGroup(
+export function setTimerTag(id: string, tag: string | null): Promise<Timer[]> {
+  return invoke<Timer[]>("set_timer_tag", { id, tag });
+}
+
+export function startTimerTag(tag: string): Promise<Timer[]> {
+  return invoke<Timer[]>("start_timer_tag", { tag });
+}
+
+export function pauseTimerTag(tag: string): Promise<Timer[]> {
+  return invoke<Timer[]>("pause_timer_tag", { tag });
+}
+
+/** `index` is the place among the section's timers; left out, the end. */
+export function moveTimerToSection(
   id: string,
-  group: string | null,
+  sectionId: string | null,
+  index?: number,
 ): Promise<Timer[]> {
-  return invoke<Timer[]>("set_timer_group", { id, group });
+  return invoke<Timer[]>("move_timer_to_section", { id, sectionId, index });
 }
 
-export function startTimerGroup(group: string): Promise<Timer[]> {
-  return invoke<Timer[]>("start_timer_group", { group });
+export function listTimerSections(): Promise<TimerSection[]> {
+  return invoke<TimerSection[]>("list_timer_sections");
 }
 
-export function pauseTimerGroup(group: string): Promise<Timer[]> {
-  return invoke<Timer[]>("pause_timer_group", { group });
+/** Adds a section after the others, and moves `timerId` into it if given. */
+export function createTimerSection(
+  name: string,
+  timerId?: string,
+): Promise<TimerSection[]> {
+  return invoke<TimerSection[]>("create_timer_section", { name, timerId });
+}
+
+export function renameTimerSection(
+  id: string,
+  name: string,
+): Promise<TimerSection[]> {
+  return invoke<TimerSection[]>("rename_timer_section", { id, name });
+}
+
+export function deleteTimerSection(id: string): Promise<TimerSection[]> {
+  return invoke<TimerSection[]>("delete_timer_section", { id });
+}
+
+export function reorderTimerSections(ids: string[]): Promise<TimerSection[]> {
+  return invoke<TimerSection[]>("reorder_timer_sections", { ids });
 }
 
 export function addTimerSegment(
@@ -824,10 +863,6 @@ export function deleteTimer(id: string): Promise<Timer[]> {
 
 export function reorderTimers(ids: string[]): Promise<Timer[]> {
   return invoke<Timer[]>("reorder_timers", { ids });
-}
-
-export function moveTimer(id: string, delta: number): Promise<Timer[]> {
-  return invoke<Timer[]>("move_timer", { id, delta });
 }
 
 // --- Battery & Energy ---

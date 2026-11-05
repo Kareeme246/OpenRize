@@ -41,9 +41,25 @@ pub struct Timer {
     pub started_at: Option<u64>,
     pub created_at: u64,
     pub ordinal: i64,
-    /// The group this timer belongs to, or `None`. A group is the timers that
-    /// share a name (compared without regard to case), nothing more.
-    pub group: Option<String>,
+    /// The tag this timer carries, or `None`. Timers that share a tag
+    /// (compared without regard to case) are linked: starting or pausing one
+    /// starts or pauses them all.
+    pub tag: Option<String>,
+    /// The section this timer sits under, or `None` for the trackers above
+    /// every section. Sections only arrange the page; they never link timers.
+    pub section_id: Option<String>,
+}
+
+/// An organizational subheading on the Stopwatches page. It holds no time and
+/// links nothing: its timers are the ones whose `section_id` names it, read in
+/// their own `ordinal` order.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimerSection {
+    pub id: String,
+    pub name: String,
+    pub ordinal: i64,
+    pub created_at: u64,
 }
 
 /// A stretch of time on a timer, defined as a time entry is: a start and an
@@ -91,7 +107,7 @@ pub struct TimerSavedState {
 /// Selects a timer with its total computed from its segments.
 const TIMER_SELECT: &str = "SELECT id, label,
        COALESCE((SELECT SUM(ended_at - started_at) FROM timer_segments WHERE timer_id = timers.id), 0),
-       started_at, created_at, ordinal, group_name
+       started_at, created_at, ordinal, tag, section_id
      FROM timers";
 
 impl Timer {
@@ -176,7 +192,7 @@ impl TimerStore {
         if label.is_empty() {
             return Err("a tracker needs a name".to_string());
         }
-        let next = self.take_next_id()?;
+        let next = self.take_next_id("timer_next_id", "timers", 't')?;
         let id = format!("t{next}");
         let next_ordinal: i64 = self
             .conn
@@ -203,17 +219,10 @@ impl TimerStore {
         self.start_at(id, now)
     }
 
+    /// Starts the timer and every timer linked to it by its tag.
     pub fn start_at(&mut self, id: &str, now: u64) -> Result<Vec<Timer>, String> {
-        let timer = self.find(id)?;
-        if timer.started_at.is_none() {
-            self.conn
-                .execute(
-                    "UPDATE timers SET started_at = ?1 WHERE id = ?2",
-                    params![now as i64, id],
-                )
-                .map_err(|error| error.to_string())?;
-        }
-        self.snapshot()
+        let linked = self.linked(id)?;
+        self.start_all_at(&linked, now)
     }
 
     pub fn pause(&mut self, id: &str) -> Result<Vec<Timer>, String> {
@@ -221,20 +230,58 @@ impl TimerStore {
         self.pause_at(id, now)
     }
 
+    /// Pauses the timer and every timer linked to it by its tag.
     pub fn pause_at(&mut self, id: &str, now: u64) -> Result<Vec<Timer>, String> {
+        let linked = self.linked(id)?;
+        self.pause_all_at(&linked, now)
+    }
+
+    /// The ids `start` and `pause` act on for `id`: the timer itself and,
+    /// when it has a tag, every other timer with that tag.
+    pub fn linked_ids(&self, id: &str) -> Result<Vec<String>, String> {
+        Ok(self.linked(id)?.into_iter().map(|timer| timer.id).collect())
+    }
+
+    fn linked(&self, id: &str) -> Result<Vec<Timer>, String> {
         let timer = self.find(id)?;
-        if let Some((started_at, ended_at)) = timer.run_span_at(now) {
-            // One transaction, so a pause can never stop the clock without
-            // keeping the time it ran.
-            let tx = self.conn.transaction().map_err(|error| error.to_string())?;
+        match timer.tag.clone() {
+            Some(tag) => self.tagged(&tag),
+            None => Ok(vec![timer]),
+        }
+    }
+
+    /// Starts every paused timer in `timers` at the same instant, in one
+    /// transaction, so a linked set reads one clock; a timer already running
+    /// keeps its own start.
+    fn start_all_at(&mut self, timers: &[Timer], now: u64) -> Result<Vec<Timer>, String> {
+        let tx = self.conn.transaction().map_err(|error| error.to_string())?;
+        for timer in timers.iter().filter(|timer| !timer.is_running()) {
             tx.execute(
-                "UPDATE timers SET started_at = NULL WHERE id = ?1",
-                params![id],
+                "UPDATE timers SET started_at = ?1 WHERE id = ?2",
+                params![now as i64, timer.id],
             )
             .map_err(|error| error.to_string())?;
-            insert_segment(&tx, id, started_at, ended_at)?;
-            tx.commit().map_err(|error| error.to_string())?;
         }
+        tx.commit().map_err(|error| error.to_string())?;
+        self.snapshot()
+    }
+
+    /// Pauses every running timer in `timers`, each recording the segment it
+    /// ran. One transaction, so a pause can never stop a clock without
+    /// keeping the time it ran.
+    fn pause_all_at(&mut self, timers: &[Timer], now: u64) -> Result<Vec<Timer>, String> {
+        let tx = self.conn.transaction().map_err(|error| error.to_string())?;
+        for timer in timers {
+            if let Some((started_at, ended_at)) = timer.run_span_at(now) {
+                tx.execute(
+                    "UPDATE timers SET started_at = NULL WHERE id = ?1",
+                    params![timer.id],
+                )
+                .map_err(|error| error.to_string())?;
+                insert_segment(&tx, &timer.id, started_at, ended_at)?;
+            }
+        }
+        tx.commit().map_err(|error| error.to_string())?;
         self.snapshot()
     }
 
@@ -270,95 +317,69 @@ impl TimerStore {
         self.snapshot()
     }
 
-    /// Puts a timer in the group called `group`, or takes it out of any group
-    /// when `group` is `None` or blank. A name that matches an existing group
-    /// without regard to case joins that group and takes its spelling, so
-    /// "Launch" and "launch" never become two groups.
-    pub fn set_group(&mut self, id: &str, group: Option<&str>) -> Result<Vec<Timer>, String> {
+    /// Tags a timer with `tag`, or removes its tag when `tag` is `None` or
+    /// blank. A name that matches an existing tag without regard to case
+    /// takes that tag's spelling, so "Launch" and "launch" never become two
+    /// tags.
+    pub fn set_tag(&mut self, id: &str, tag: Option<&str>) -> Result<Vec<Timer>, String> {
         self.find(id)?;
-        let group = match group.map(str::trim).filter(|name| !name.is_empty()) {
+        let tag = match tag.map(str::trim).filter(|name| !name.is_empty()) {
             None => None,
-            Some(name) => Some(self.canonical_group(name)?),
+            Some(name) => Some(self.canonical_tag(name)?),
         };
         self.conn
-            .execute(
-                "UPDATE timers SET group_name = ?1 WHERE id = ?2",
-                params![group, id],
-            )
+            .execute("UPDATE timers SET tag = ?1 WHERE id = ?2", params![tag, id])
             .map_err(|error| error.to_string())?;
         self.snapshot()
     }
 
-    pub fn start_group(&mut self, group: &str) -> Result<Vec<Timer>, String> {
+    pub fn start_tag(&mut self, tag: &str) -> Result<Vec<Timer>, String> {
         let now = now_epoch_ms();
-        self.start_group_at(group, now)
+        self.start_tag_at(tag, now)
     }
 
-    /// Starts every paused timer in the group at the same instant, so the
-    /// set reads one clock; a timer already running keeps its own start.
-    pub fn start_group_at(&mut self, group: &str, now: u64) -> Result<Vec<Timer>, String> {
-        let members = self.members(group)?;
-        let tx = self.conn.transaction().map_err(|error| error.to_string())?;
-        for timer in members.iter().filter(|timer| !timer.is_running()) {
-            tx.execute(
-                "UPDATE timers SET started_at = ?1 WHERE id = ?2",
-                params![now as i64, timer.id],
-            )
-            .map_err(|error| error.to_string())?;
-        }
-        tx.commit().map_err(|error| error.to_string())?;
-        self.snapshot()
+    /// Starts every paused timer with the tag, as starting any one of them does.
+    pub fn start_tag_at(&mut self, tag: &str, now: u64) -> Result<Vec<Timer>, String> {
+        let tagged = self.tagged(tag)?;
+        self.start_all_at(&tagged, now)
     }
 
-    pub fn pause_group(&mut self, group: &str) -> Result<Vec<Timer>, String> {
+    pub fn pause_tag(&mut self, tag: &str) -> Result<Vec<Timer>, String> {
         let now = now_epoch_ms();
-        self.pause_group_at(group, now)
+        self.pause_tag_at(tag, now)
     }
 
-    /// Pauses every running timer in the group, each recording its segment as
-    /// `pause` does, all in one transaction.
-    pub fn pause_group_at(&mut self, group: &str, now: u64) -> Result<Vec<Timer>, String> {
-        let members = self.members(group)?;
-        let tx = self.conn.transaction().map_err(|error| error.to_string())?;
-        for timer in &members {
-            if let Some((started_at, ended_at)) = timer.run_span_at(now) {
-                tx.execute(
-                    "UPDATE timers SET started_at = NULL WHERE id = ?1",
-                    params![timer.id],
-                )
-                .map_err(|error| error.to_string())?;
-                insert_segment(&tx, &timer.id, started_at, ended_at)?;
-            }
-        }
-        tx.commit().map_err(|error| error.to_string())?;
-        self.snapshot()
+    /// Pauses every running timer with the tag, as pausing any one of them does.
+    pub fn pause_tag_at(&mut self, tag: &str, now: u64) -> Result<Vec<Timer>, String> {
+        let tagged = self.tagged(tag)?;
+        self.pause_all_at(&tagged, now)
     }
 
-    /// The timers in `group`, oldest ordinal first; an error if there are none.
-    fn members(&self, group: &str) -> Result<Vec<Timer>, String> {
-        let group = group.trim();
-        let members: Vec<Timer> = self
+    /// The timers with `tag`, oldest ordinal first; an error if there are none.
+    fn tagged(&self, tag: &str) -> Result<Vec<Timer>, String> {
+        let tag = tag.trim();
+        let tagged: Vec<Timer> = self
             .snapshot()?
             .into_iter()
             .filter(|timer| {
                 timer
-                    .group
+                    .tag
                     .as_deref()
-                    .is_some_and(|name| name.eq_ignore_ascii_case(group))
+                    .is_some_and(|name| name.eq_ignore_ascii_case(tag))
             })
             .collect();
-        if members.is_empty() {
-            return Err(unknown_group(group));
+        if tagged.is_empty() {
+            return Err(unknown_tag(tag));
         }
-        Ok(members)
+        Ok(tagged)
     }
 
-    /// The spelling an existing group already uses for `name`, else `name`.
-    fn canonical_group(&self, name: &str) -> Result<String, String> {
+    /// The spelling an existing tag already uses for `name`, else `name`.
+    fn canonical_tag(&self, name: &str) -> Result<String, String> {
         Ok(self
             .snapshot()?
             .into_iter()
-            .filter_map(|timer| timer.group)
+            .filter_map(|timer| timer.tag)
             .find(|existing| existing.eq_ignore_ascii_case(name))
             .unwrap_or_else(|| name.to_string()))
     }
@@ -377,25 +398,204 @@ impl TimerStore {
         self.snapshot()
     }
 
-    /// Moves a timer up (negative delta) or down (positive delta) in the list.
+    /// Moves a timer up (negative delta) or down (positive delta) among the
+    /// timers in its own section.
     pub fn move_timer(&mut self, id: &str, delta: i32) -> Result<Vec<Timer>, String> {
         let timers = self.snapshot()?;
-        let pos = timers
+        let section = timers
             .iter()
-            .position(|t| t.id == id)
+            .find(|t| t.id == id)
+            .ok_or_else(|| unknown(id))?
+            .section_id
+            .clone();
+        // Where each timer of the section sits in the whole list.
+        let peers: Vec<usize> = timers
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.section_id == section)
+            .map(|(index, _)| index)
+            .collect();
+        let pos = peers
+            .iter()
+            .position(|&index| timers[index].id == id)
             .ok_or_else(|| unknown(id))?;
         let target = if delta < 0 {
-            pos.saturating_sub((-delta) as usize)
+            pos.saturating_sub(delta.unsigned_abs() as usize)
         } else {
-            (pos + (delta as usize)).min(timers.len().saturating_sub(1))
+            (pos + (delta as usize)).min(peers.len().saturating_sub(1))
         };
         if target == pos {
             return Ok(timers);
         }
         let mut ids: Vec<String> = timers.into_iter().map(|t| t.id).collect();
-        let item = ids.remove(pos);
-        ids.insert(target, item);
+        let item = ids.remove(peers[pos]);
+        ids.insert(peers[target], item);
         self.reorder(&ids)
+    }
+
+    /// Puts a timer under `section` (`None` for above every section) at
+    /// `index` among that section's other timers, or after them when `index`
+    /// is `None` or past the end. One transaction sets the section and the
+    /// order together.
+    pub fn move_to_section(
+        &mut self,
+        id: &str,
+        section: Option<&str>,
+        index: Option<usize>,
+    ) -> Result<Vec<Timer>, String> {
+        self.find(id)?;
+        if let Some(section) = section {
+            self.find_section(section)?;
+        }
+        let mut ids: Vec<(String, Option<String>)> = self
+            .snapshot()?
+            .into_iter()
+            .filter(|timer| timer.id != id)
+            .map(|timer| (timer.id, timer.section_id))
+            .collect();
+        let members: Vec<usize> = ids
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, of))| of.as_deref() == section)
+            .map(|(position, _)| position)
+            .collect();
+        let at = match index.and_then(|index| members.get(index)) {
+            Some(&position) => position,
+            None => members.last().map_or(ids.len(), |&last| last + 1),
+        };
+        ids.insert(at, (id.to_string(), section.map(str::to_string)));
+
+        let tx = self.conn.transaction().map_err(|error| error.to_string())?;
+        tx.execute(
+            "UPDATE timers SET section_id = ?1 WHERE id = ?2",
+            params![section, id],
+        )
+        .map_err(|error| error.to_string())?;
+        for (ordinal, (timer, _)) in ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE timers SET ordinal = ?1 WHERE id = ?2",
+                params![ordinal as i64, timer],
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        tx.commit().map_err(|error| error.to_string())?;
+        self.snapshot()
+    }
+
+    // --- sections --------------------------------------------------------
+
+    /// Every section, in page order.
+    pub fn sections(&self) -> Result<Vec<TimerSection>, String> {
+        let mut statement = self
+            .conn
+            .prepare(
+                "SELECT id, name, ordinal, created_at FROM timer_sections
+                 ORDER BY ordinal ASC, created_at ASC, id ASC",
+            )
+            .map_err(|error| error.to_string())?;
+        let sections = statement
+            .query_map([], section_from_row)
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string());
+        sections
+    }
+
+    pub fn create_section(&mut self, name: &str) -> Result<TimerSection, String> {
+        let now = now_epoch_ms();
+        self.create_section_at(name, now)
+    }
+
+    /// Adds an empty section after the others.
+    pub fn create_section_at(&mut self, name: &str, now: u64) -> Result<TimerSection, String> {
+        let name = self.free_section_name(name, None)?;
+        let next = self.take_next_id("timer_section_next_id", "timer_sections", 's')?;
+        let id = format!("s{next}");
+        let ordinal: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(ordinal) + 1, 0) FROM timer_sections",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        self.conn
+            .execute(
+                "INSERT INTO timer_sections (id, name, ordinal, created_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![id, name, ordinal, now as i64],
+            )
+            .map_err(|error| error.to_string())?;
+        self.find_section(&id)
+    }
+
+    pub fn rename_section(&mut self, id: &str, name: &str) -> Result<Vec<TimerSection>, String> {
+        self.find_section(id)?;
+        let name = self.free_section_name(name, Some(id))?;
+        self.conn
+            .execute(
+                "UPDATE timer_sections SET name = ?1 WHERE id = ?2",
+                params![name, id],
+            )
+            .map_err(|error| error.to_string())?;
+        self.sections()
+    }
+
+    /// Deletes a section. Its timers stay, with their time, above every
+    /// section; nothing else changes.
+    pub fn delete_section(&mut self, id: &str) -> Result<Vec<TimerSection>, String> {
+        self.find_section(id)?;
+        let tx = self.conn.transaction().map_err(|error| error.to_string())?;
+        tx.execute(
+            "UPDATE timers SET section_id = NULL WHERE section_id = ?1",
+            params![id],
+        )
+        .map_err(|error| error.to_string())?;
+        tx.execute("DELETE FROM timer_sections WHERE id = ?1", params![id])
+            .map_err(|error| error.to_string())?;
+        tx.commit().map_err(|error| error.to_string())?;
+        self.sections()
+    }
+
+    /// Updates the order of sections to match the given list of IDs.
+    pub fn reorder_sections(&mut self, ids: &[String]) -> Result<Vec<TimerSection>, String> {
+        let tx = self.conn.transaction().map_err(|error| error.to_string())?;
+        for (index, id) in ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE timer_sections SET ordinal = ?1 WHERE id = ?2",
+                params![index as i64, id],
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        tx.commit().map_err(|error| error.to_string())?;
+        self.sections()
+    }
+
+    fn find_section(&self, id: &str) -> Result<TimerSection, String> {
+        self.conn
+            .query_row(
+                "SELECT id, name, ordinal, created_at FROM timer_sections WHERE id = ?1",
+                params![id],
+                section_from_row,
+            )
+            .map_err(|_| unknown_section(id))
+    }
+
+    /// `name` trimmed, or why it cannot name a section: it is blank, or
+    /// another section (any case) already has it. `own` is the section being
+    /// renamed, which may keep its name.
+    fn free_section_name(&self, name: &str, own: Option<&str>) -> Result<String, String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("a section needs a name".to_string());
+        }
+        let taken = self.sections()?.into_iter().any(|section| {
+            Some(section.id.as_str()) != own && section.name.eq_ignore_ascii_case(name)
+        });
+        if taken {
+            return Err(format!("there is already a section named {name}"));
+        }
+        Ok(name.to_string())
     }
 
     /// Adds a stretch of time to the total, from `started_at` to `ended_at`.
@@ -586,21 +786,19 @@ impl TimerStore {
             .map_err(|error| error.to_string())
     }
 
-    /// IDs keep the historical `t<n>` shape and never get reused after a
-    /// delete, so the counter lives in `settings` rather than being derived
-    /// from the current row set.
-    fn take_next_id(&self) -> Result<u64, String> {
-        let stored_next = self
-            .read_setting("timer_next_id")
-            .and_then(|value| value.parse().ok());
+    /// IDs keep the historical `t<n>` shape (`s<n>` for sections) and never
+    /// get reused after a delete, so the counter lives in `settings` under
+    /// `key` rather than being derived from the current rows of `table`.
+    fn take_next_id(&self, key: &str, table: &str, prefix: char) -> Result<u64, String> {
+        let stored_next = self.read_setting(key).and_then(|value| value.parse().ok());
         let next = match stored_next {
             Some(n) => n,
             None => {
                 let mut max_id = 0u64;
-                if let Ok(mut stmt) = self.conn.prepare("SELECT id FROM timers") {
+                if let Ok(mut stmt) = self.conn.prepare(&format!("SELECT id FROM {table}")) {
                     if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
                         for row in rows.flatten() {
-                            if let Some(suffix) = row.strip_prefix('t') {
+                            if let Some(suffix) = row.strip_prefix(prefix) {
                                 if let Ok(val) = suffix.parse::<u64>() {
                                     max_id = max_id.max(val);
                                 }
@@ -611,7 +809,7 @@ impl TimerStore {
                 max_id + 1
             }
         };
-        self.write_setting("timer_next_id", &(next + 1).to_string())?;
+        self.write_setting(key, &(next + 1).to_string())?;
         Ok(next)
     }
 }
@@ -625,7 +823,17 @@ fn timer_from_row(row: &Row<'_>) -> rusqlite::Result<Timer> {
         started_at: row.get::<_, Option<i64>>(3)?.map(|value| value as u64),
         created_at: row.get::<_, i64>(4)? as u64,
         ordinal: row.get::<_, i64>(5)?,
-        group: row.get(6)?,
+        tag: row.get(6)?,
+        section_id: row.get(7)?,
+    })
+}
+
+fn section_from_row(row: &Row<'_>) -> rusqlite::Result<TimerSection> {
+    Ok(TimerSection {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        ordinal: row.get(2)?,
+        created_at: row.get::<_, i64>(3)? as u64,
     })
 }
 
@@ -662,8 +870,12 @@ fn unknown_segment(segment_id: i64) -> String {
     format!("no time segment with id {segment_id}")
 }
 
-fn unknown_group(group: &str) -> String {
-    format!("no group named {group}")
+fn unknown_tag(tag: &str) -> String {
+    format!("no stopwatch is tagged {tag}")
+}
+
+fn unknown_section(id: &str) -> String {
+    format!("no section with id {id}")
 }
 
 fn unknown(id: &str) -> String {
@@ -737,53 +949,239 @@ mod tests {
     }
 
     #[test]
-    fn timers_sharing_a_group_name_form_one_group_whatever_the_case() {
-        let mut store = store("group-names");
+    fn timers_sharing_a_tag_name_carry_one_tag_whatever_the_case() {
+        let mut store = store("tag-names");
         let a = store.create_at("A", 1).unwrap()[0].id.clone();
         store.create_at("B", 2).unwrap();
         let b = store.snapshot().unwrap()[1].id.clone();
 
-        store.set_group(&a, Some("  Launch ")).unwrap();
-        let timers = store.set_group(&b, Some("launch")).unwrap();
-        assert_eq!(timers[0].group.as_deref(), Some("Launch"));
-        // Joins the existing group and takes its spelling.
-        assert_eq!(timers[1].group.as_deref(), Some("Launch"));
+        store.set_tag(&a, Some("  Launch ")).unwrap();
+        let timers = store.set_tag(&b, Some("launch")).unwrap();
+        assert_eq!(timers[0].tag.as_deref(), Some("Launch"));
+        // Takes the existing tag's spelling.
+        assert_eq!(timers[1].tag.as_deref(), Some("Launch"));
 
-        let timers = store.set_group(&a, Some("   ")).unwrap();
-        assert_eq!(timers[0].group, None);
-        assert!(store.set_group("t99", Some("x")).is_err());
+        let timers = store.set_tag(&a, Some("   ")).unwrap();
+        assert_eq!(timers[0].tag, None);
+        assert!(store.set_tag("t99", Some("x")).is_err());
     }
 
-    #[test]
-    fn a_group_starts_and_pauses_as_a_set_at_one_instant() {
-        let mut store = store("group-run");
+    fn three_timers(store: &mut TimerStore) -> Vec<String> {
         for label in ["A", "B", "C"] {
             store.create_at(label, 1).unwrap();
         }
-        let ids: Vec<String> = store
+        store
             .snapshot()
             .unwrap()
             .into_iter()
             .map(|t| t.id)
-            .collect();
-        store.set_group(&ids[0], Some("Launch")).unwrap();
-        store.set_group(&ids[1], Some("Launch")).unwrap();
-        // B is already running from its own start; C is outside the group.
-        store.start_at(&ids[1], 10_000).unwrap();
+            .collect()
+    }
 
-        let timers = store.start_group_at("launch", 20_000).unwrap();
+    #[test]
+    fn starting_or_pausing_one_tagged_timer_starts_or_pauses_every_timer_with_its_tag() {
+        let mut store = store("tag-link");
+        let ids = three_timers(&mut store);
+        store.set_tag(&ids[0], Some("Launch")).unwrap();
+        store.set_tag(&ids[1], Some("launch")).unwrap();
+
+        // One start instant for the set; C has no tag and stays put.
+        let timers = store.start_at(&ids[1], 20_000).unwrap();
+        assert_eq!(timers[0].started_at, Some(20_000));
+        assert_eq!(timers[1].started_at, Some(20_000));
+        assert_eq!(timers[2].started_at, None);
+        assert_eq!(store.linked_ids(&ids[0]).unwrap(), ids[..2]);
+        assert_eq!(store.linked_ids(&ids[2]).unwrap(), ids[2..]);
+
+        let timers = store.pause_at(&ids[0], 50_000).unwrap();
+        assert!(timers.iter().all(|timer| !timer.is_running()));
+        assert_eq!(timers[0].accumulated_ms, 30_000);
+        assert_eq!(timers[1].accumulated_ms, 30_000);
+
+        // An untagged timer is on its own.
+        let timers = store.start_at(&ids[2], 60_000).unwrap();
+        assert_eq!(timers[0].started_at, None);
+        assert_eq!(timers[2].started_at, Some(60_000));
+    }
+
+    #[test]
+    fn reset_delete_and_added_time_stay_with_one_tagged_timer() {
+        let mut store = store("tag-per-timer");
+        let ids = three_timers(&mut store);
+        for id in &ids {
+            store.set_tag(id, Some("Launch")).unwrap();
+        }
+        store.start_at(&ids[0], 10_000).unwrap();
+
+        let timers = store.reset(&ids[0]).unwrap();
+        assert_eq!(timers[0].started_at, None);
+        assert_eq!(timers[1].started_at, Some(10_000));
+
+        let timers = store.add_segment(&ids[1], 0, 5_000).unwrap();
+        assert_eq!(timers[1].segments.len(), 1);
+        assert!(timers[2].segments.is_empty());
+
+        let timers = store.delete(&ids[2]).unwrap();
+        assert_eq!(timers.len(), 2);
+        assert!(timers[1].is_running());
+    }
+
+    #[test]
+    fn a_tag_starts_and_pauses_as_a_set_at_one_instant() {
+        let mut store = store("tag-run");
+        let ids = three_timers(&mut store);
+        store.set_tag(&ids[0], Some("Launch")).unwrap();
+        // B is already running from its own start, before it joined the tag.
+        store.start_at(&ids[1], 10_000).unwrap();
+        store.set_tag(&ids[1], Some("Launch")).unwrap();
+
+        let timers = store.start_tag_at("launch", 20_000).unwrap();
         assert_eq!(timers[0].started_at, Some(20_000));
         assert_eq!(timers[1].started_at, Some(10_000));
         assert_eq!(timers[2].started_at, None);
 
-        let timers = store.pause_group_at("Launch", 50_000).unwrap();
+        let timers = store.pause_tag_at("Launch", 50_000).unwrap();
         assert!(timers.iter().all(|timer| !timer.is_running()));
         assert_eq!(timers[0].accumulated_ms, 30_000);
         assert_eq!(timers[1].accumulated_ms, 40_000);
         assert_eq!(timers[2].accumulated_ms, 0);
         assert_eq!(timers[1].segments[0].started_at, 10_000);
 
-        assert!(store.start_group_at("nobody", 1).is_err());
+        assert!(store.start_tag_at("nobody", 1).is_err());
+    }
+
+    fn order(store: &TimerStore) -> Vec<(String, Option<String>)> {
+        store
+            .snapshot()
+            .unwrap()
+            .into_iter()
+            .map(|t| (t.label, t.section_id))
+            .collect()
+    }
+
+    #[test]
+    fn sections_are_created_named_and_ordered_without_touching_timers() {
+        let mut store = store("sections");
+        let web = store.create_section_at("  Website ", 1).unwrap();
+        assert_eq!(
+            (web.id.as_str(), web.name.as_str(), web.ordinal),
+            ("s1", "Website", 0)
+        );
+        let calls = store.create_section_at("Calls", 2).unwrap();
+        assert_eq!(calls.ordinal, 1);
+
+        assert!(store.create_section_at("website", 3).is_err());
+        assert!(store.create_section_at("   ", 3).is_err());
+        assert!(store.rename_section(&calls.id, "WEBSITE").is_err());
+        // A section may keep its own name in another case.
+        let sections = store.rename_section(&web.id, "website").unwrap();
+        assert_eq!(sections[0].name, "website");
+
+        let sections = store
+            .reorder_sections(&[calls.id.clone(), web.id.clone()])
+            .unwrap();
+        let names: Vec<&str> = sections.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["Calls", "website"]);
+        assert!(store.rename_section("s9", "x").is_err());
+    }
+
+    #[test]
+    fn a_timer_moves_into_a_section_at_an_index_and_back_out() {
+        let mut store = store("section-moves");
+        let ids = three_timers(&mut store);
+        let web = store.create_section_at("Website", 1).unwrap().id;
+        let some =
+            |label: &str, section: Option<&str>| (label.to_string(), section.map(str::to_string));
+
+        store.move_to_section(&ids[2], Some(&web), None).unwrap();
+        // Into the section before C.
+        store.move_to_section(&ids[0], Some(&web), Some(0)).unwrap();
+        assert_eq!(
+            order(&store),
+            [
+                some("B", None),
+                some("A", Some(&web)),
+                some("C", Some(&web))
+            ]
+        );
+
+        // Moving within a section only swaps with its own timers.
+        store.move_timer(&ids[0], 1).unwrap();
+        assert_eq!(
+            order(&store),
+            [
+                some("B", None),
+                some("C", Some(&web)),
+                some("A", Some(&web))
+            ]
+        );
+        store.move_timer(&ids[2], -1).unwrap();
+        assert_eq!(order(&store)[1], some("C", Some(&web)));
+
+        store.move_to_section(&ids[2], None, Some(0)).unwrap();
+        assert_eq!(
+            order(&store),
+            [some("C", None), some("B", None), some("A", Some(&web))]
+        );
+        assert!(store.move_to_section(&ids[0], Some("s9"), None).is_err());
+        assert!(store.move_to_section("t99", None, None).is_err());
+    }
+
+    #[test]
+    fn deleting_a_section_keeps_its_timers_and_their_time() {
+        let mut store = store("section-delete");
+        let ids = three_timers(&mut store);
+        let web = store.create_section_at("Website", 1).unwrap().id;
+        store.add_segment(&ids[1], 0, 9_000).unwrap();
+        store.move_to_section(&ids[1], Some(&web), None).unwrap();
+
+        assert!(store.delete_section(&web).unwrap().is_empty());
+        let timers = store.snapshot().unwrap();
+        assert_eq!(timers.len(), 3);
+        assert!(timers.iter().all(|timer| timer.section_id.is_none()));
+        let kept = timers.iter().find(|timer| timer.id == ids[1]).unwrap();
+        assert_eq!(kept.accumulated_ms, 9_000);
+        assert!(store.delete_section(&web).is_err());
+        // Ids are never reused.
+        assert_eq!(store.create_section_at("Again", 2).unwrap().id, "s2");
+    }
+
+    #[test]
+    fn existing_groups_become_tags_and_sections_start_empty() {
+        let dir = temp_dir("groups-to-tags");
+        {
+            let mut conn = Connection::open(dir.join(DB_FILE)).unwrap();
+            crate::migrations::run_migrations(&mut conn).unwrap();
+            // The v14 shape: a `group_name` column and no sections.
+            conn.execute_batch(
+                "DROP TABLE timer_sections;
+                 ALTER TABLE timers DROP COLUMN section_id;
+                 ALTER TABLE timers RENAME COLUMN tag TO group_name;
+                 INSERT INTO timers (id, label, accumulated_ms, started_at, created_at, ordinal, group_name)
+                   VALUES ('t1', 'Email', 0, NULL, 1, 0, 'Admin'),
+                          ('t2', 'Standup', 0, NULL, 2, 1, 'Admin'),
+                          ('t3', 'Mockups', 0, NULL, 3, 2, NULL);
+                 PRAGMA user_version = 14;",
+            )
+            .unwrap();
+        }
+
+        let mut store = TimerStore::load(&dir).expect("timer store");
+        let timers = store.snapshot().unwrap();
+        let tags: Vec<Option<&str>> = timers.iter().map(|t| t.tag.as_deref()).collect();
+        assert_eq!(tags, [Some("Admin"), Some("Admin"), None]);
+        assert!(timers.iter().all(|t| t.section_id.is_none()));
+        assert!(store.sections().unwrap().is_empty());
+
+        // The old group is now a link.
+        let timers = store.start_at("t2", 5_000).unwrap();
+        assert_eq!(timers[0].started_at, Some(5_000));
+
+        let conn = Connection::open(dir.join(DB_FILE)).unwrap();
+        let version: i32 = conn
+            .query_row("PRAGMA user_version;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, crate::migrations::SCHEMA_VERSION);
     }
 
     #[test]

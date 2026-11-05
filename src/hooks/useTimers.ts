@@ -18,17 +18,18 @@ export interface TimersApi {
   /** Resets without a toast, once the time has been logged elsewhere. */
   clear: (id: string) => void;
   rename: (id: string, label: string) => void;
-  /** Puts a timer in a group, or takes it out when `group` is null. */
-  setGroup: (id: string, group: string | null) => void;
-  startGroup: (group: string) => void;
-  pauseGroup: (group: string) => void;
+  /** Tags (links) a timer, or removes its tag when `tag` is null. */
+  setTag: (id: string, tag: string | null) => void;
+  startTag: (tag: string) => void;
+  pauseTag: (tag: string) => void;
+  /** Puts a timer under a section (null: none) at `index` among its timers. */
+  moveToSection: (id: string, sectionId: string | null, index?: number) => void;
   addSegment: (id: string, startedAt: number, endedAt: number) => void;
   updateSegment: (id: string, segmentId: number, edit: SegmentEdit) => void;
   deleteSegment: (id: string, segmentId: number) => void;
   saveState: (id: string) => void;
   remove: (id: string) => void;
   reorder: (ids: string[]) => void;
-  moveTimer: (id: string, direction: "up" | "down") => void;
 }
 
 let cachedTimers: Timer[] | null = null;
@@ -130,23 +131,29 @@ export function useTimers(): TimersApi {
       confirm(api.renameTimer(id, label), `Renamed to "${label}"`),
     [confirm],
   );
-  const setGroup = useCallback(
-    (id: string, group: string | null) =>
+  const setTag = useCallback(
+    (id: string, tag: string | null) =>
       confirm(
-        api.setTimerGroup(id, group),
-        group === null
-          ? `Removed "${labelOf(id)}" from its group`
-          : `Added "${labelOf(id)}" to ${group.trim()}`,
+        api.setTimerTag(id, tag),
+        tag === null
+          ? `Unlinked "${labelOf(id)}"`
+          : `Linked "${labelOf(id)}" to ${tag.trim()}`,
       ),
     [confirm, labelOf],
   );
   // Like a single Start and Pause, the cards show the result.
-  const startGroup = useCallback(
-    (group: string) => void send(api.startTimerGroup(group)),
+  const startTag = useCallback(
+    (tag: string) => void send(api.startTimerTag(tag)),
     [send],
   );
-  const pauseGroup = useCallback(
-    (group: string) => void send(api.pauseTimerGroup(group)),
+  const pauseTag = useCallback(
+    (tag: string) => void send(api.pauseTimerTag(tag)),
+    [send],
+  );
+  // The card shows where it went; a toast would only repeat it.
+  const moveToSection = useCallback(
+    (id: string, sectionId: string | null, index?: number) =>
+      void send(api.moveTimerToSection(id, sectionId, index)),
     [send],
   );
   const addSegment = useCallback(
@@ -193,12 +200,7 @@ export function useTimers(): TimersApi {
     [confirm, labelOf],
   );
   const reorder = useCallback(
-    (ids: string[]) => send(api.reorderTimers(ids)),
-    [send],
-  );
-  const moveTimer = useCallback(
-    (id: string, direction: "up" | "down") =>
-      send(api.moveTimer(id, direction === "up" ? -1 : 1)),
+    (ids: string[]) => void send(api.reorderTimers(ids)),
     [send],
   );
 
@@ -213,15 +215,15 @@ export function useTimers(): TimersApi {
     reset,
     clear,
     rename,
-    setGroup,
-    startGroup,
-    pauseGroup,
+    setTag,
+    startTag,
+    pauseTag,
+    moveToSection,
     addSegment,
     updateSegment,
     deleteSegment,
     saveState,
     remove,
     reorder,
-    moveTimer,
   };
 }

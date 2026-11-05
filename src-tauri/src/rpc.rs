@@ -93,9 +93,10 @@ impl Live for App<'_> {
             | O::TimerReset { .. }
             | O::TimerRename { .. }
             | O::TimerDelete { .. }
-            | O::TimerGroup { .. }
-            | O::TimerGroupStart { .. }
-            | O::TimerGroupPause { .. }
+            | O::TimerTag { .. }
+            | O::TimerTagStart { .. }
+            | O::TimerTagPause { .. }
+            | O::TimerMove { .. }
             | O::TimerSegmentAdd { .. }
             | O::TimerSegmentEdit { .. } => {
                 let timers = state
@@ -104,6 +105,30 @@ impl Live for App<'_> {
                     .ok()
                     .and_then(|store| store.snapshot().ok());
                 if let Some(timers) = timers {
+                    if matches!(operation, O::TimerStart { .. } | O::TimerTagStart { .. }) {
+                        // Started by hand, as from a card: whatever runs now
+                        // (the timer and every one its tag links) is no
+                        // longer work an account switch left paused.
+                        let running: Vec<String> = timers
+                            .iter()
+                            .filter(|timer| timer.is_running())
+                            .map(|timer| timer.id.clone())
+                            .collect();
+                        crate::accounts::forget_paused_stopwatches(self.0, &running);
+                    }
+                    commands::refresh_tray(self.0, &timers);
+                }
+            }
+            O::TimerSectionCreate { .. }
+            | O::TimerSectionRename { .. }
+            | O::TimerSectionDelete { .. } => {
+                let changed = state
+                    .store
+                    .lock()
+                    .ok()
+                    .and_then(|store| Some((store.sections().ok()?, store.snapshot().ok()?)));
+                if let Some((sections, timers)) = changed {
+                    commands::sections_changed(self.0, &sections);
                     commands::refresh_tray(self.0, &timers);
                 }
             }

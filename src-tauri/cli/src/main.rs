@@ -171,9 +171,9 @@ enum TimersCommand {
     List,
     /// Create a timer
     New { label: String },
-    /// Start or resume a timer
+    /// Start or resume a timer, and every timer with its tag
     Start { timer: String },
-    /// Pause a running timer
+    /// Pause a running timer, and every timer with its tag
     Pause { timer: String },
     /// Set a timer back to zero (asks first)
     Reset { timer: String },
@@ -186,25 +186,47 @@ enum TimersCommand {
         #[command(subcommand)]
         command: SegmentsCommand,
     },
-    /// Timers that belong to one piece of work, run and reported as a set
-    Group {
+    /// Tags that link timers: starting or pausing one starts or pauses them all
+    Tag {
         #[command(subcommand)]
-        command: GroupCommand,
+        command: TagCommand,
+    },
+    /// Sections that arrange timers under subheadings, and nothing else
+    Section {
+        #[command(subcommand)]
+        command: SectionCommand,
     },
 }
 
 #[derive(Subcommand, Debug)]
-enum GroupCommand {
-    /// Every group with its timers, how many are running and the combined time
+enum TagCommand {
+    /// Every tag with its timers, how many are running and the combined time
     List,
-    /// Put a timer in a group (a name that matches an existing group joins it)
-    Add { timer: String, group: String },
-    /// Take a timer out of its group
+    /// Tag a timer, linking it to every timer with that tag (a name that matches an existing tag takes its spelling)
+    Add { timer: String, tag: String },
+    /// Remove a timer's tag, unlinking it
     Rm { timer: String },
-    /// Start every paused timer in a group
-    Start { group: String },
-    /// Pause every running timer in a group
-    Pause { group: String },
+    /// Start every paused timer with a tag
+    Start { tag: String },
+    /// Pause every running timer with a tag
+    Pause { tag: String },
+}
+
+#[derive(Subcommand, Debug)]
+enum SectionCommand {
+    /// Every section with the timers under it
+    List,
+    /// Add an empty section after the others
+    New { name: String },
+    /// Rename a section
+    Rename { section: String, name: String },
+    /// Delete a section; its timers stay, with their time, in no section
+    Rm { section: String },
+    /// Move a timer to the end of a section, or out of any section when none is named
+    Move {
+        timer: String,
+        section: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -815,21 +837,34 @@ fn run(args: &Args) -> Result<Outcome, Response> {
                     timer: timer.clone(),
                 })
             }
-            TimersCommand::Group { command } => match command {
-                GroupCommand::List => ask(Operation::TimersList {}),
-                GroupCommand::Add { timer, group } => ask(Operation::TimerGroup {
+            TimersCommand::Tag { command } => match command {
+                TagCommand::List => ask(Operation::TimersList {}),
+                TagCommand::Add { timer, tag } => ask(Operation::TimerTag {
                     timer: timer.clone(),
-                    group: Some(group.clone()),
+                    tag: Some(tag.clone()),
                 }),
-                GroupCommand::Rm { timer } => ask(Operation::TimerGroup {
+                TagCommand::Rm { timer } => ask(Operation::TimerTag {
                     timer: timer.clone(),
-                    group: None,
+                    tag: None,
                 }),
-                GroupCommand::Start { group } => ask(Operation::TimerGroupStart {
-                    group: group.clone(),
+                TagCommand::Start { tag } => ask(Operation::TimerTagStart { tag: tag.clone() }),
+                TagCommand::Pause { tag } => ask(Operation::TimerTagPause { tag: tag.clone() }),
+            },
+            TimersCommand::Section { command } => match command {
+                SectionCommand::List => ask(Operation::TimerSectionsList {}),
+                SectionCommand::New { name } => {
+                    ask(Operation::TimerSectionCreate { name: name.clone() })
+                }
+                SectionCommand::Rename { section, name } => ask(Operation::TimerSectionRename {
+                    section: section.clone(),
+                    name: name.clone(),
                 }),
-                GroupCommand::Pause { group } => ask(Operation::TimerGroupPause {
-                    group: group.clone(),
+                SectionCommand::Rm { section } => ask(Operation::TimerSectionDelete {
+                    section: section.clone(),
+                }),
+                SectionCommand::Move { timer, section } => ask(Operation::TimerMove {
+                    timer: timer.clone(),
+                    section: section.clone(),
                 }),
             },
             TimersCommand::Segments { command } => match command {

@@ -19,12 +19,13 @@ use crate::models::{
 use crate::projects::{HintPreview, ImportSummary, ProjectRule, ProjectStats, ProjectSuggestion};
 use crate::reports::{self, EntryFilter, ExportFormat, ExportResult, GroupBy, RollupCell};
 use crate::settings::Settings;
-use crate::timers::{now_epoch_ms, Timer, TimerSavedState};
+use crate::timers::{now_epoch_ms, Timer, TimerSavedState, TimerSection};
 use crate::tray;
 use crate::updater::{self, ReleaseNotes, UpdateStatus, UpdaterState};
 use crate::AppState;
 
 type Timers = Result<Vec<Timer>, String>;
+type Sections = Result<Vec<TimerSection>, String>;
 
 pub(crate) fn refresh_tray(app: &AppHandle, timers: &[Timer]) {
     if let Err(error) = tray::refresh(app, timers) {
@@ -54,12 +55,19 @@ pub fn create_timer(app: AppHandle, label: String) -> Timers {
 
 #[tauri::command]
 pub fn start_timer(app: AppHandle, id: String) -> Timers {
+    let linked = {
+        let state = app.state::<AppState>();
+        let store = state.store.lock().map_err(|error| error.to_string())?;
+        store.linked_ids(&id)?
+    };
     let timers = start_timer_by_id(&app, &id)?;
-    // Started by hand, so no longer work an account switch left paused.
-    crate::accounts::forget_paused_stopwatch(&app, &id);
+    // Started by hand, the timer and every one its tag links, so none of them
+    // is work an account switch left paused any more.
+    crate::accounts::forget_paused_stopwatches(&app, &linked);
     Ok(timers)
 }
 
+/// Starts the timer and every timer its tag links to it.
 pub fn start_timer_by_id(app: &AppHandle, id: &str) -> Timers {
     let timers = {
         let state = app.state::<AppState>();
@@ -75,6 +83,7 @@ pub fn pause_timer(app: AppHandle, id: String) -> Timers {
     pause_timer_by_id(&app, &id)
 }
 
+/// Pauses the timer and every timer its tag links to it.
 pub fn pause_timer_by_id(app: &AppHandle, id: &str) -> Timers {
     let timers = {
         let state = app.state::<AppState>();
@@ -108,49 +117,46 @@ pub fn rename_timer(app: AppHandle, id: String, label: String) -> Timers {
 }
 
 #[tauri::command]
-pub fn set_timer_group(app: AppHandle, id: String, group: Option<String>) -> Timers {
+pub fn set_timer_tag(app: AppHandle, id: String, tag: Option<String>) -> Timers {
     let timers = {
         let state = app.state::<AppState>();
         let mut store = state.store.lock().map_err(|error| error.to_string())?;
-        store.set_group(&id, group.as_deref())?
+        store.set_tag(&id, tag.as_deref())?
     };
     refresh_tray(&app, &timers);
     Ok(timers)
 }
 
 #[tauri::command]
-pub fn start_timer_group(app: AppHandle, group: String) -> Timers {
-    let (timers, started) = {
+pub fn start_timer_tag(app: AppHandle, tag: String) -> Timers {
+    let (timers, tagged) = {
         let state = app.state::<AppState>();
         let mut store = state.store.lock().map_err(|error| error.to_string())?;
-        let paused: Vec<String> = store
+        let tagged: Vec<String> = store
             .snapshot()?
             .into_iter()
             .filter(|timer| {
-                !timer.is_running()
-                    && timer
-                        .group
-                        .as_deref()
-                        .is_some_and(|name| name.eq_ignore_ascii_case(group.trim()))
+                timer
+                    .tag
+                    .as_deref()
+                    .is_some_and(|name| name.eq_ignore_ascii_case(tag.trim()))
             })
             .map(|timer| timer.id)
             .collect();
-        (store.start_group(&group)?, paused)
+        (store.start_tag(&tag)?, tagged)
     };
     // Started by hand, so no longer work an account switch left paused.
-    for id in &started {
-        crate::accounts::forget_paused_stopwatch(&app, id);
-    }
+    crate::accounts::forget_paused_stopwatches(&app, &tagged);
     refresh_tray(&app, &timers);
     Ok(timers)
 }
 
 #[tauri::command]
-pub fn pause_timer_group(app: AppHandle, group: String) -> Timers {
+pub fn pause_timer_tag(app: AppHandle, tag: String) -> Timers {
     let timers = {
         let state = app.state::<AppState>();
         let mut store = state.store.lock().map_err(|error| error.to_string())?;
-        store.pause_group(&group)?
+        store.pause_tag(&tag)?
     };
     refresh_tray(&app, &timers);
     Ok(timers)
@@ -240,6 +246,95 @@ pub fn move_timer(app: AppHandle, id: String, delta: i32) -> Timers {
     };
     refresh_tray(&app, &timers);
     Ok(timers)
+}
+
+/// Puts a timer under `section_id` (or in no section) at `index` among that
+/// section's timers, or after them when `index` is left out.
+#[tauri::command]
+pub fn move_timer_to_section(
+    app: AppHandle,
+    id: String,
+    section_id: Option<String>,
+    index: Option<usize>,
+) -> Timers {
+    let timers = {
+        let state = app.state::<AppState>();
+        let mut store = state.store.lock().map_err(|error| error.to_string())?;
+        store.move_to_section(&id, section_id.as_deref(), index)?
+    };
+    refresh_tray(&app, &timers);
+    Ok(timers)
+}
+
+// --- Stopwatch sections -------------------------------------------------
+
+/// Broadcasts the sections, as `refresh_tray` does the timers, so every
+/// window adopts a change made anywhere, `rize` included.
+pub(crate) fn sections_changed(app: &AppHandle, sections: &[TimerSection]) {
+    let _ = app.emit(crate::EVENT_TIMER_SECTIONS_CHANGED, sections);
+}
+
+#[tauri::command]
+pub fn list_timer_sections(app: AppHandle) -> Sections {
+    let state = app.state::<AppState>();
+    let store = state.store.lock().map_err(|error| error.to_string())?;
+    store.sections()
+}
+
+/// Adds a section after the others and, when `timer_id` is given, moves that
+/// timer into it.
+#[tauri::command]
+pub fn create_timer_section(app: AppHandle, name: String, timer_id: Option<String>) -> Sections {
+    let (sections, timers) = {
+        let state = app.state::<AppState>();
+        let mut store = state.store.lock().map_err(|error| error.to_string())?;
+        let section = store.create_section(&name)?;
+        let timers = match timer_id {
+            Some(id) => Some(store.move_to_section(&id, Some(&section.id), None)?),
+            None => None,
+        };
+        (store.sections()?, timers)
+    };
+    sections_changed(&app, &sections);
+    if let Some(timers) = timers {
+        refresh_tray(&app, &timers);
+    }
+    Ok(sections)
+}
+
+#[tauri::command]
+pub fn rename_timer_section(app: AppHandle, id: String, name: String) -> Sections {
+    let sections = {
+        let state = app.state::<AppState>();
+        let mut store = state.store.lock().map_err(|error| error.to_string())?;
+        store.rename_section(&id, &name)?
+    };
+    sections_changed(&app, &sections);
+    Ok(sections)
+}
+
+/// Deletes a section; its timers stay, with their time, in no section.
+#[tauri::command]
+pub fn delete_timer_section(app: AppHandle, id: String) -> Sections {
+    let (sections, timers) = {
+        let state = app.state::<AppState>();
+        let mut store = state.store.lock().map_err(|error| error.to_string())?;
+        (store.delete_section(&id)?, store.snapshot()?)
+    };
+    sections_changed(&app, &sections);
+    refresh_tray(&app, &timers);
+    Ok(sections)
+}
+
+#[tauri::command]
+pub fn reorder_timer_sections(app: AppHandle, ids: Vec<String>) -> Sections {
+    let sections = {
+        let state = app.state::<AppState>();
+        let mut store = state.store.lock().map_err(|error| error.to_string())?;
+        store.reorder_sections(&ids)?
+    };
+    sections_changed(&app, &sections);
+    Ok(sections)
 }
 
 // --- Activity capture ---------------------------------------------------

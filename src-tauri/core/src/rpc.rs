@@ -168,21 +168,55 @@ impl Context<'_> {
                 let id = self.timer(&timer)?;
                 to_value(lock(&self.state.store)?.delete(&id).map_err(fail)?)
             }
-            O::TimerGroup { timer, group } => {
+            O::TimerTag { timer, tag } => {
                 let id = self.timer(&timer)?;
                 to_value(
                     lock(&self.state.store)?
-                        .set_group(&id, group.as_deref())
+                        .set_tag(&id, tag.as_deref())
                         .map_err(fail)?,
                 )
             }
-            O::TimerGroupStart { group } => {
-                let group = self.group(&group)?;
-                to_value(lock(&self.state.store)?.start_group(&group).map_err(fail)?)
+            O::TimerTagStart { tag } => {
+                let tag = self.tag(&tag)?;
+                to_value(lock(&self.state.store)?.start_tag(&tag).map_err(fail)?)
             }
-            O::TimerGroupPause { group } => {
-                let group = self.group(&group)?;
-                to_value(lock(&self.state.store)?.pause_group(&group).map_err(fail)?)
+            O::TimerTagPause { tag } => {
+                let tag = self.tag(&tag)?;
+                to_value(lock(&self.state.store)?.pause_tag(&tag).map_err(fail)?)
+            }
+            O::TimerSectionsList {} => self.sections(),
+            O::TimerSectionCreate { name } => {
+                if name.trim().is_empty() {
+                    return Err(invalid("a section needs a name"));
+                }
+                lock(&self.state.store)?
+                    .create_section(&name)
+                    .map_err(invalid)?;
+                self.sections()
+            }
+            O::TimerSectionRename { section, name } => {
+                let id = self.section(&section)?;
+                lock(&self.state.store)?
+                    .rename_section(&id, &name)
+                    .map_err(invalid)?;
+                self.sections()
+            }
+            O::TimerSectionDelete { section } => {
+                let id = self.section(&section)?;
+                lock(&self.state.store)?.delete_section(&id).map_err(fail)?;
+                self.sections()
+            }
+            O::TimerMove { timer, section } => {
+                let id = self.timer(&timer)?;
+                let section = match section {
+                    Some(section) => Some(self.section(&section)?),
+                    None => None,
+                };
+                to_value(
+                    lock(&self.state.store)?
+                        .move_to_section(&id, section.as_deref(), None)
+                        .map_err(fail)?,
+                )
             }
             O::TimerSegments { timer } => {
                 let id = self.timer(&timer)?;
@@ -690,17 +724,32 @@ impl Context<'_> {
         pick(&timers, reference, "timer", |t| &t.id, |t| &t.label)
     }
 
-    /// The group a reference names, as its members spell it. Groups are
-    /// matched by name or a unique prefix, as timers are by label.
-    fn group(&self, reference: &str) -> Result<String, ApiError> {
+    /// The tag a reference names, as its timers spell it. Tags are matched
+    /// by name or a unique prefix, as timers are by label.
+    fn tag(&self, reference: &str) -> Result<String, ApiError> {
         let mut names: Vec<String> = self
             .timers()?
             .into_iter()
-            .filter_map(|timer| timer.group)
+            .filter_map(|timer| timer.tag)
             .collect();
         names.sort();
         names.dedup();
-        pick(&names, reference, "group", same, same)
+        pick(&names, reference, "tag", same, same)
+    }
+
+    /// The id of the section a reference names, by id, name or a unique prefix.
+    fn section(&self, reference: &str) -> Result<String, ApiError> {
+        let sections = lock(&self.state.store)?.sections().map_err(fail)?;
+        pick(&sections, reference, "section", |s| &s.id, |s| &s.name)
+    }
+
+    /// Every section with every timer, the answer to each section operation.
+    fn sections(&self) -> Outcome {
+        let store = lock(&self.state.store)?;
+        Ok(json!({
+            "sections": store.sections().map_err(fail)?,
+            "timers": store.snapshot().map_err(fail)?,
+        }))
     }
 
     fn category(&self, reference: &str) -> Result<String, ApiError> {

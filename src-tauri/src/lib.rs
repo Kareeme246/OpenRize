@@ -33,6 +33,10 @@ use settings::CloseBehavior;
 /// Rust already has — the tray can change state without the window asking.
 pub const EVENT_TIMERS_CHANGED: &str = "timers-changed";
 
+/// Emitted after every stopwatch section change, with every section, so a
+/// change from `rize` repaints the open Stopwatches page.
+pub const EVENT_TIMER_SECTIONS_CHANGED: &str = "timer-sections-changed";
+
 /// Emitted on every structural activity change (a segment opened or closed)
 /// and on focus-regained reconciliation. Carries the full `ActivitySnapshot`
 /// — see activity.rs's module doc for the push-model rationale.
@@ -228,9 +232,9 @@ pub fn run() {
             commands::pause_timer,
             commands::reset_timer,
             commands::rename_timer,
-            commands::set_timer_group,
-            commands::start_timer_group,
-            commands::pause_timer_group,
+            commands::set_timer_tag,
+            commands::start_timer_tag,
+            commands::pause_timer_tag,
             commands::add_timer_segment,
             commands::update_timer_segment,
             commands::delete_timer_segment,
@@ -239,6 +243,12 @@ pub fn run() {
             commands::delete_timer,
             commands::reorder_timers,
             commands::move_timer,
+            commands::move_timer_to_section,
+            commands::list_timer_sections,
+            commands::create_timer_section,
+            commands::rename_timer_section,
+            commands::delete_timer_section,
+            commands::reorder_timer_sections,
             commands::activity_snapshot,
             commands::set_capture_enabled,
             commands::set_idle_threshold,

@@ -1,0 +1,1516 @@
+{
+ "version": 1,
+ "note": "SYNTHETIC. Invented blocks that exercise the benchmark harness end to end. Not consented real data: do not use these scores to choose or rank models. The real golden set is collected separately (see docs/design/local-models.md).",
+ "workspaces": [
+  {
+   "name": "Software developer",
+   "suggest": "categoryProject",
+   "custom": "",
+   "categories": [
+    {
+     "id": "c-code",
+     "name": "Coding",
+     "description": "Writing and debugging code",
+     "hint": "Xcode, VS Code, terminal, GitHub"
+    },
+    {
+     "id": "c-review",
+     "name": "Code Review",
+     "description": "Reading and commenting on pull requests",
+     "hint": "pull request, review"
+    },
+    {
+     "id": "c-meet",
+     "name": "Meetings",
+     "description": "Calls and scheduled meetings",
+     "hint": "Zoom, Google Meet, standup"
+    },
+    {
+     "id": "c-comm",
+     "name": "Communication",
+     "description": "Chat and email",
+     "hint": "Slack, Mail"
+    },
+    {
+     "id": "c-docs",
+     "name": "Research & Docs",
+     "description": "Reading documentation and writing design docs",
+     "hint": "docs, RFC, Stack Overflow"
+    },
+    {
+     "id": "c-admin",
+     "name": "Admin",
+     "description": "Expenses, timesheets, HR tools",
+     "hint": "expenses, timesheet"
+    }
+   ],
+   "projects": [
+    {
+     "id": "p-atlas",
+     "name": "Atlas API",
+     "description": "Backend REST service",
+     "hint": "atlas, atlas-api"
+    },
+    {
+     "id": "p-mobile",
+     "name": "Mobile App",
+     "description": "iOS app",
+     "hint": "ios, swiftui, mobile"
+    },
+    {
+     "id": "p-tools",
+     "name": "Internal Tools",
+     "description": "Scripts and dashboards for the team",
+     "hint": "tools, dashboard"
+    }
+   ],
+   "history": [
+    {
+     "block": {
+      "start": "2026-03-02T09:30:00-05:00",
+      "segments": [
+       {
+        "app": "Visual Studio Code",
+        "title": "orders.rs - atlas-api",
+        "minutes": 28,
+        "bundleId": "com.microsoft.VSCode"
+       },
+       {
+        "app": "Terminal",
+        "title": "cargo test - atlas-api",
+        "minutes": 9,
+        "bundleId": "com.apple.Terminal"
+       },
+       {
+        "app": "Google Chrome",
+        "title": "Axum routing docs",
+        "minutes": 3,
+        "bundleId": "com.google.Chrome",
+        "url": "https://docs.rs/axum/latest/axum/",
+        "domain": "docs.rs"
+       }
+      ]
+     },
+     "category": "c-code",
+     "project": "p-atlas"
+    },
+    {
+     "block": {
+      "start": "2026-03-02T11:00:00-05:00",
+      "segments": [
+       {
+        "app": "Xcode",
+        "title": "ProfileView.swift - Mobile",
+        "minutes": 35,
+        "bundleId": "com.apple.dt.Xcode"
+       },
+       {
+        "app": "Simulator",
+        "title": "iPhone 16",
+        "minutes": 6,
+        "bundleId": "com.apple.iphonesimulator"
+       }
+      ]
+     },
+     "category": "c-code",
+     "project": "p-mobile"
+    },
+    {
+     "block": {
+      "start": "2026-03-02T13:00:00-05:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Add rate limiting by dbarnes - Pull Request #412 - acme/atlas-api",
+        "minutes": 22,
+        "bundleId": "com.google.Chrome",
+        "url": "https://github.com/acme/atlas-api/pull/412",
+        "domain": "github.com"
+       }
+      ]
+     },
+     "category": "c-review",
+     "project": "p-atlas"
+    },
+    {
+     "block": {
+      "start": "2026-03-02T14:00:00-05:00",
+      "segments": [
+       {
+        "app": "zoom.us",
+        "title": "Zoom Meeting",
+        "minutes": 30,
+        "bundleId": "us.zoom.xos"
+       }
+      ]
+     },
+     "category": "c-meet",
+     "project": null
+    },
+    {
+     "block": {
+      "start": "2026-03-02T15:00:00-05:00",
+      "segments": [
+       {
+        "app": "Slack",
+        "title": "Slack - acme - #eng",
+        "minutes": 12,
+        "bundleId": "com.tinyspeck.slackmacgap"
+       },
+       {
+        "app": "Mail",
+        "title": "Inbox",
+        "minutes": 8,
+        "bundleId": "com.apple.mail"
+       }
+      ]
+     },
+     "category": "c-comm",
+     "project": null
+    },
+    {
+     "block": {
+      "start": "2026-03-03T10:00:00-05:00",
+      "segments": [
+       {
+        "app": "Safari",
+        "title": "Core Data concurrency - Apple Developer Documentation",
+        "minutes": 14,
+        "bundleId": "com.apple.Safari",
+        "url": "https://developer.apple.com/documentation/coredata",
+        "domain": "developer.apple.com"
+       },
+       {
+        "app": "Safari",
+        "title": "swift - Core Data background context - Stack Overflow",
+        "minutes": 9,
+        "bundleId": "com.apple.Safari",
+        "url": "https://stackoverflow.com/questions/1",
+        "domain": "stackoverflow.com"
+       }
+      ]
+     },
+     "category": "c-docs",
+     "project": "p-mobile"
+    },
+    {
+     "block": {
+      "start": "2026-03-03T16:00:00-05:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Expenses - Concur",
+        "minutes": 10,
+        "bundleId": "com.google.Chrome",
+        "url": "https://concur.example.com/expenses",
+        "domain": "concur.example.com"
+       }
+      ]
+     },
+     "category": "c-admin",
+     "project": null
+    },
+    {
+     "block": {
+      "start": "2026-03-04T09:30:00-05:00",
+      "segments": [
+       {
+        "app": "Visual Studio Code",
+        "title": "dashboard.tsx - team-dashboard",
+        "minutes": 25,
+        "bundleId": "com.microsoft.VSCode"
+       },
+       {
+        "app": "Google Chrome",
+        "title": "localhost:5173",
+        "minutes": 5,
+        "bundleId": "com.google.Chrome",
+        "url": "http://localhost:5173/",
+        "domain": "localhost"
+       }
+      ]
+     },
+     "category": "c-code",
+     "project": "p-tools"
+    }
+   ],
+   "cases": [
+    {
+     "id": "dev-01",
+     "block": {
+      "start": "2026-03-09T09:35:00-05:00",
+      "segments": [
+       {
+        "app": "Visual Studio Code",
+        "title": "payments.rs - atlas-api",
+        "minutes": 31,
+        "bundleId": "com.microsoft.VSCode"
+       },
+       {
+        "app": "Terminal",
+        "title": "cargo test payments - atlas-api",
+        "minutes": 8,
+        "bundleId": "com.apple.Terminal"
+       },
+       {
+        "app": "Google Chrome",
+        "title": "axum extractors docs",
+        "minutes": 4,
+        "bundleId": "com.google.Chrome",
+        "url": "https://docs.rs/axum/latest/axum/extract/",
+        "domain": "docs.rs"
+       }
+      ]
+     },
+     "category": "c-code",
+     "project": "p-atlas",
+     "description": "Implementing payments handler in atlas-api"
+    },
+    {
+     "id": "dev-02",
+     "block": {
+      "start": "2026-03-09T10:30:00-05:00",
+      "segments": [
+       {
+        "app": "Xcode",
+        "title": "CheckoutViewModel.swift - Mobile",
+        "minutes": 40,
+        "bundleId": "com.apple.dt.Xcode"
+       },
+       {
+        "app": "Simulator",
+        "title": "iPhone 16 Pro",
+        "minutes": 7,
+        "bundleId": "com.apple.iphonesimulator"
+       }
+      ]
+     },
+     "category": "c-code",
+     "project": "p-mobile"
+    },
+    {
+     "id": "dev-03",
+     "block": {
+      "start": "2026-03-09T13:00:00-05:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Fix pagination off-by-one by mlee - Pull Request #431 - acme/atlas-api",
+        "minutes": 18,
+        "bundleId": "com.google.Chrome",
+        "url": "https://github.com/acme/atlas-api/pull/431/files",
+        "domain": "github.com"
+       },
+       {
+        "app": "Slack",
+        "title": "Slack - acme - #atlas",
+        "minutes": 3,
+        "bundleId": "com.tinyspeck.slackmacgap"
+       }
+      ]
+     },
+     "category": "c-review",
+     "project": "p-atlas"
+    },
+    {
+     "id": "dev-04",
+     "block": {
+      "start": "2026-03-09T14:00:00-05:00",
+      "segments": [
+       {
+        "app": "zoom.us",
+        "title": "Sprint planning",
+        "minutes": 45,
+        "bundleId": "us.zoom.xos"
+       },
+       {
+        "app": "Notion",
+        "title": "Sprint 14 board",
+        "minutes": 5,
+        "bundleId": "notion.id"
+       }
+      ]
+     },
+     "category": "c-meet",
+     "project": null
+    },
+    {
+     "id": "dev-05",
+     "block": {
+      "start": "2026-03-09T15:00:00-05:00",
+      "segments": [
+       {
+        "app": "Slack",
+        "title": "Slack - acme - #general",
+        "minutes": 9,
+        "bundleId": "com.tinyspeck.slackmacgap"
+       },
+       {
+        "app": "Slack",
+        "title": "Slack - acme - DM with Priya",
+        "minutes": 6,
+        "bundleId": "com.tinyspeck.slackmacgap"
+       },
+       {
+        "app": "Mail",
+        "title": "Inbox (14)",
+        "minutes": 5,
+        "bundleId": "com.apple.mail"
+       }
+      ]
+     },
+     "category": "c-comm",
+     "project": null
+    },
+    {
+     "id": "dev-06",
+     "block": {
+      "start": "2026-03-10T09:30:00-05:00",
+      "segments": [
+       {
+        "app": "Safari",
+        "title": "SwiftUI NavigationStack - Apple Developer Documentation",
+        "minutes": 12,
+        "bundleId": "com.apple.Safari",
+        "url": "https://developer.apple.com/documentation/swiftui/navigationstack",
+        "domain": "developer.apple.com"
+       },
+       {
+        "app": "Safari",
+        "title": "swiftui navigationstack deep link - Stack Overflow",
+        "minutes": 11,
+        "bundleId": "com.apple.Safari",
+        "url": "https://stackoverflow.com/questions/2",
+        "domain": "stackoverflow.com"
+       }
+      ]
+     },
+     "category": "c-docs",
+     "project": "p-mobile"
+    },
+    {
+     "id": "dev-07",
+     "block": {
+      "start": "2026-03-10T10:30:00-05:00",
+      "segments": [
+       {
+        "app": "Visual Studio Code",
+        "title": "sync.py - team-dashboard",
+        "minutes": 26,
+        "bundleId": "com.microsoft.VSCode"
+       },
+       {
+        "app": "Spotify",
+        "title": "Spotify Premium",
+        "minutes": 3,
+        "bundleId": "com.spotify.client"
+       },
+       {
+        "app": "Visual Studio Code",
+        "title": "sync.py - team-dashboard",
+        "minutes": 14,
+        "bundleId": "com.microsoft.VSCode"
+       },
+       {
+        "app": "Terminal",
+        "title": "python sync.py --dry-run",
+        "minutes": 4,
+        "bundleId": "com.apple.Terminal"
+       }
+      ]
+     },
+     "category": "c-code",
+     "project": "p-tools",
+     "description": "Coding sync script with music in the background"
+    },
+    {
+     "id": "dev-08",
+     "block": {
+      "start": "2026-03-10T13:00:00-05:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Timesheet - Workday",
+        "minutes": 12,
+        "bundleId": "com.google.Chrome",
+        "url": "https://wd5.example.com/timesheet",
+        "domain": "wd5.example.com"
+       },
+       {
+        "app": "Google Chrome",
+        "title": "Expense report #8812 - Concur",
+        "minutes": 9,
+        "bundleId": "com.google.Chrome",
+        "url": "https://concur.example.com/expenses/8812",
+        "domain": "concur.example.com"
+       }
+      ]
+     },
+     "category": "c-admin",
+     "project": null
+    },
+    {
+     "id": "dev-09",
+     "block": {
+      "start": "2026-03-10T14:00:00-05:00",
+      "segments": [
+       {
+        "app": "Slack",
+        "title": "Slack - acme - #atlas",
+        "minutes": 10,
+        "bundleId": "com.tinyspeck.slackmacgap"
+       },
+       {
+        "app": "Visual Studio Code",
+        "title": "routes.rs - atlas-api",
+        "minutes": 12,
+        "bundleId": "com.microsoft.VSCode"
+       },
+       {
+        "app": "Slack",
+        "title": "Slack - acme - #atlas",
+        "minutes": 5,
+        "bundleId": "com.tinyspeck.slackmacgap"
+       },
+       {
+        "app": "Visual Studio Code",
+        "title": "routes.rs - atlas-api",
+        "minutes": 9,
+        "bundleId": "com.microsoft.VSCode"
+       }
+      ]
+     },
+     "category": "c-code",
+     "project": "p-atlas"
+    },
+    {
+     "id": "dev-10",
+     "block": {
+      "start": "2026-03-11T09:30:00-05:00",
+      "segments": [
+       {
+        "app": "Terminal",
+        "title": "zsh - dotfiles",
+        "minutes": 14,
+        "bundleId": "com.apple.Terminal"
+       },
+       {
+        "app": "Visual Studio Code",
+        "title": "init.lua - dotfiles",
+        "minutes": 18,
+        "bundleId": "com.microsoft.VSCode"
+       }
+      ]
+     },
+     "category": "c-code",
+     "project": null
+    },
+    {
+     "id": "dev-11",
+     "block": {
+      "start": "2026-03-11T11:00:00-05:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Add retry with backoff by sokafor - Pull Request #440 - acme/ios-app",
+        "minutes": 24,
+        "bundleId": "com.google.Chrome",
+        "url": "https://github.com/acme/ios-app/pull/440",
+        "domain": "github.com"
+       }
+      ]
+     },
+     "category": "c-review",
+     "project": "p-mobile"
+    },
+    {
+     "id": "dev-12",
+     "block": {
+      "start": "2026-03-11T14:00:00-05:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "RFC: event sourcing for orders - Google Docs",
+        "minutes": 30,
+        "bundleId": "com.google.Chrome",
+        "url": "https://docs.google.com/document/d/abc",
+        "domain": "docs.google.com"
+       },
+       {
+        "app": "Google Chrome",
+        "title": "Event sourcing pattern - Microsoft Learn",
+        "minutes": 8,
+        "bundleId": "com.google.Chrome",
+        "url": "https://learn.microsoft.com/azure/architecture/patterns/event-sourcing",
+        "domain": "learn.microsoft.com"
+       }
+      ]
+     },
+     "category": "c-docs",
+     "project": "p-atlas"
+    },
+    {
+     "id": "dev-13",
+     "block": {
+      "start": "2026-03-11T16:00:00-05:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Meet - Quarterly all-hands",
+        "minutes": 50,
+        "bundleId": "com.google.Chrome",
+        "url": "https://meet.google.com/xyz-abcd-efg",
+        "domain": "meet.google.com"
+       }
+      ]
+     },
+     "category": "c-meet",
+     "project": null
+    },
+    {
+     "id": "dev-14",
+     "block": {
+      "start": "2026-03-12T10:00:00-05:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Grafana - Atlas API latency",
+        "minutes": 11,
+        "bundleId": "com.google.Chrome",
+        "url": "https://grafana.example.com/d/atlas",
+        "domain": "grafana.example.com"
+       },
+       {
+        "app": "Visual Studio Code",
+        "title": "alerts.yaml - team-dashboard",
+        "minutes": 16,
+        "bundleId": "com.microsoft.VSCode"
+       },
+       {
+        "app": "Terminal",
+        "title": "kubectl logs atlas-api",
+        "minutes": 5,
+        "bundleId": "com.apple.Terminal"
+       }
+      ]
+     },
+     "category": "c-code",
+     "project": "p-tools"
+    }
+   ]
+  },
+  {
+   "name": "Freelance designer",
+   "suggest": "categoryProject",
+   "custom": "",
+   "categories": [
+    {
+     "id": "d-design",
+     "name": "Design",
+     "description": "Hands-on design work in Figma, Illustrator, Photoshop",
+     "hint": "Figma, Sketch, Illustrator"
+    },
+    {
+     "id": "d-review",
+     "name": "Design Review",
+     "description": "Presenting and getting feedback on designs",
+     "hint": "critique, feedback, review call"
+    },
+    {
+     "id": "d-client",
+     "name": "Client Communication",
+     "description": "Email, calls and chat with clients",
+     "hint": "Mail, Zoom, Slack"
+    },
+    {
+     "id": "d-admin",
+     "name": "Admin & Finance",
+     "description": "Invoices, contracts, bookkeeping",
+     "hint": "invoice, contract, QuickBooks"
+    },
+    {
+     "id": "d-admin2",
+     "name": "Admin",
+     "description": "General admin, scheduling and errands",
+     "hint": "calendar, scheduling"
+    },
+    {
+     "id": "d-inspo",
+     "name": "Inspiration",
+     "description": "Browsing references and portfolios",
+     "hint": "Dribbble, Pinterest, Behance"
+    },
+    {
+     "id": "d-market",
+     "name": "Self Marketing",
+     "description": "Own portfolio and social media",
+     "hint": "portfolio, LinkedIn"
+    }
+   ],
+   "projects": [
+    {
+     "id": "p-nw",
+     "name": "Northwind Cafe",
+     "description": "Brand identity and menu design",
+     "hint": "northwind"
+    },
+    {
+     "id": "p-jun",
+     "name": "Juniper Health",
+     "description": "Patient portal UI redesign",
+     "hint": "juniper"
+    },
+    {
+     "id": "p-bl",
+     "name": "Brightline Studio",
+     "description": "Pitch deck and landing page",
+     "hint": "brightline"
+    }
+   ],
+   "history": [
+    {
+     "block": {
+      "start": "2026-02-23T10:00:00+00:00",
+      "segments": [
+       {
+        "app": "Figma",
+        "title": "Northwind - Menu v3",
+        "minutes": 42,
+        "bundleId": "com.figma.Desktop"
+       },
+       {
+        "app": "Adobe Illustrator",
+        "title": "northwind-logo.ai",
+        "minutes": 10,
+        "bundleId": "com.adobe.illustrator"
+       }
+      ]
+     },
+     "category": "d-design",
+     "project": "p-nw"
+    },
+    {
+     "block": {
+      "start": "2026-02-23T13:00:00+00:00",
+      "segments": [
+       {
+        "app": "Figma",
+        "title": "Juniper - Portal / Dashboard",
+        "minutes": 50,
+        "bundleId": "com.figma.Desktop"
+       }
+      ]
+     },
+     "category": "d-design",
+     "project": "p-jun"
+    },
+    {
+     "block": {
+      "start": "2026-02-23T15:00:00+00:00",
+      "segments": [
+       {
+        "app": "Mail",
+        "title": "Re: Juniper feedback round 2",
+        "minutes": 14,
+        "bundleId": "com.apple.mail"
+       },
+       {
+        "app": "Slack",
+        "title": "Slack - Juniper Health - #design",
+        "minutes": 6,
+        "bundleId": "com.tinyspeck.slackmacgap"
+       }
+      ]
+     },
+     "category": "d-client",
+     "project": "p-jun"
+    },
+    {
+     "block": {
+      "start": "2026-02-24T09:30:00+00:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Invoice INV-2026-014 - QuickBooks",
+        "minutes": 20,
+        "bundleId": "com.google.Chrome",
+        "url": "https://qbo.example.com/invoice/14",
+        "domain": "qbo.example.com"
+       }
+      ]
+     },
+     "category": "d-admin",
+     "project": null
+    },
+    {
+     "block": {
+      "start": "2026-02-24T11:00:00+00:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Dribbble - Discover the world's top designers",
+        "minutes": 12,
+        "bundleId": "com.google.Chrome",
+        "url": "https://dribbble.com/shots",
+        "domain": "dribbble.com"
+       },
+       {
+        "app": "Google Chrome",
+        "title": "Pinterest - cafe branding",
+        "minutes": 9,
+        "bundleId": "com.google.Chrome",
+        "url": "https://www.pinterest.com/search/pins/?q=cafe%20branding",
+        "domain": "pinterest.com"
+       }
+      ]
+     },
+     "category": "d-inspo",
+     "project": null
+    },
+    {
+     "block": {
+      "start": "2026-02-24T14:00:00+00:00",
+      "segments": [
+       {
+        "app": "zoom.us",
+        "title": "Brightline design critique",
+        "minutes": 35,
+        "bundleId": "us.zoom.xos"
+       }
+      ]
+     },
+     "category": "d-review",
+     "project": "p-bl"
+    }
+   ],
+   "cases": [
+    {
+     "id": "des-01",
+     "block": {
+      "start": "2026-03-03T10:00:00+00:00",
+      "segments": [
+       {
+        "app": "Figma",
+        "title": "Northwind - Packaging",
+        "minutes": 44,
+        "bundleId": "com.figma.Desktop"
+       },
+       {
+        "app": "Adobe Illustrator",
+        "title": "northwind-label.ai",
+        "minutes": 9,
+        "bundleId": "com.adobe.illustrator"
+       }
+      ]
+     },
+     "category": "d-design",
+     "project": "p-nw"
+    },
+    {
+     "id": "des-02",
+     "block": {
+      "start": "2026-03-03T13:00:00+00:00",
+      "segments": [
+       {
+        "app": "Figma",
+        "title": "Juniper - Portal / Appointments",
+        "minutes": 38,
+        "bundleId": "com.figma.Desktop"
+       },
+       {
+        "app": "Google Chrome",
+        "title": "WCAG 2.2 contrast checker",
+        "minutes": 6,
+        "bundleId": "com.google.Chrome",
+        "url": "https://webaim.org/resources/contrastchecker/",
+        "domain": "webaim.org"
+       }
+      ]
+     },
+     "category": "d-design",
+     "project": "p-jun"
+    },
+    {
+     "id": "des-03",
+     "block": {
+      "start": "2026-03-03T15:00:00+00:00",
+      "segments": [
+       {
+        "app": "Mail",
+        "title": "Re: Landing page copy",
+        "minutes": 16,
+        "bundleId": "com.apple.mail"
+       },
+       {
+        "app": "Mail",
+        "title": "Brightline - scope change",
+        "minutes": 9,
+        "bundleId": "com.apple.mail"
+       }
+      ]
+     },
+     "category": "d-client",
+     "project": "p-bl"
+    },
+    {
+     "id": "des-04",
+     "block": {
+      "start": "2026-03-04T09:30:00+00:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Invoice INV-2026-021 - QuickBooks",
+        "minutes": 14,
+        "bundleId": "com.google.Chrome",
+        "url": "https://qbo.example.com/invoice/21",
+        "domain": "qbo.example.com"
+       },
+       {
+        "app": "Pages",
+        "title": "Services Agreement - Juniper Health.pages",
+        "minutes": 12,
+        "bundleId": "com.apple.iWork.Pages"
+       }
+      ]
+     },
+     "category": "d-admin",
+     "project": "p-jun"
+    },
+    {
+     "id": "des-05",
+     "block": {
+      "start": "2026-03-04T11:00:00+00:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Behance - Brand identity",
+        "minutes": 15,
+        "bundleId": "com.google.Chrome",
+        "url": "https://www.behance.net/search/projects?search=brand",
+        "domain": "behance.net"
+       },
+       {
+        "app": "Google Chrome",
+        "title": "Awwwards - Site of the Day",
+        "minutes": 10,
+        "bundleId": "com.google.Chrome",
+        "url": "https://www.awwwards.com/",
+        "domain": "awwwards.com"
+       }
+      ]
+     },
+     "category": "d-inspo",
+     "project": null
+    },
+    {
+     "id": "des-06",
+     "block": {
+      "start": "2026-03-04T14:00:00+00:00",
+      "segments": [
+       {
+        "app": "zoom.us",
+        "title": "Northwind menu review",
+        "minutes": 40,
+        "bundleId": "us.zoom.xos"
+       },
+       {
+        "app": "Figma",
+        "title": "Northwind - Menu v3",
+        "minutes": 6,
+        "bundleId": "com.figma.Desktop"
+       }
+      ]
+     },
+     "category": "d-review",
+     "project": "p-nw"
+    },
+    {
+     "id": "des-07",
+     "block": {
+      "start": "2026-03-05T10:00:00+00:00",
+      "segments": [
+       {
+        "app": "Figma",
+        "title": "Brightline - Pitch deck",
+        "minutes": 22,
+        "bundleId": "com.figma.Desktop"
+       },
+       {
+        "app": "Slack",
+        "title": "Slack - Brightline - #pitch",
+        "minutes": 11,
+        "bundleId": "com.tinyspeck.slackmacgap"
+       },
+       {
+        "app": "Figma",
+        "title": "Brightline - Pitch deck",
+        "minutes": 14,
+        "bundleId": "com.figma.Desktop"
+       }
+      ]
+     },
+     "category": "d-design",
+     "project": "p-bl"
+    },
+    {
+     "id": "des-08",
+     "block": {
+      "start": "2026-03-05T13:00:00+00:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Google Calendar - Week of March 9",
+        "minutes": 8,
+        "bundleId": "com.google.Chrome",
+        "url": "https://calendar.google.com/",
+        "domain": "calendar.google.com"
+       },
+       {
+        "app": "Google Chrome",
+        "title": "Calendly - Event types",
+        "minutes": 6,
+        "bundleId": "com.google.Chrome",
+        "url": "https://calendly.com/event_types",
+        "domain": "calendly.com"
+       },
+       {
+        "app": "Mail",
+        "title": "Inbox",
+        "minutes": 5,
+        "bundleId": "com.apple.mail"
+       }
+      ]
+     },
+     "category": "d-admin2",
+     "project": null
+    },
+    {
+     "id": "des-09",
+     "block": {
+      "start": "2026-03-05T15:00:00+00:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Portfolio - Squarespace editor",
+        "minutes": 25,
+        "bundleId": "com.google.Chrome",
+        "url": "https://account.squarespace.com/",
+        "domain": "squarespace.com"
+       },
+       {
+        "app": "Google Chrome",
+        "title": "LinkedIn - Post draft",
+        "minutes": 8,
+        "bundleId": "com.google.Chrome",
+        "url": "https://www.linkedin.com/feed/",
+        "domain": "linkedin.com"
+       }
+      ]
+     },
+     "category": "d-market",
+     "project": null
+    },
+    {
+     "id": "des-10",
+     "block": {
+      "start": "2026-03-06T10:00:00+00:00",
+      "segments": [
+       {
+        "app": "Figma",
+        "title": "Untitled - Icon exploration",
+        "minutes": 30,
+        "bundleId": "com.figma.Desktop"
+       },
+       {
+        "app": "Safari",
+        "title": "Private Browsing",
+        "minutes": 6,
+        "bundleId": "com.apple.Safari",
+        "private": true
+       }
+      ]
+     },
+     "category": "d-design",
+     "project": null
+    },
+    {
+     "id": "des-11",
+     "block": {
+      "start": "2026-03-06T13:00:00+00:00",
+      "segments": [
+       {
+        "app": "zoom.us",
+        "title": "Juniper weekly sync",
+        "minutes": 28,
+        "bundleId": "us.zoom.xos"
+       },
+       {
+        "app": "Notion",
+        "title": "Juniper - meeting notes",
+        "minutes": 4,
+        "bundleId": "notion.id"
+       }
+      ]
+     },
+     "category": "d-client",
+     "project": "p-jun"
+    },
+    {
+     "id": "des-12",
+     "block": {
+      "start": "2026-03-06T15:00:00+00:00",
+      "segments": [
+       {
+        "app": "Numbers",
+        "title": "Q1 expenses.numbers",
+        "minutes": 18,
+        "bundleId": "com.apple.iWork.Numbers"
+       },
+       {
+        "app": "Google Chrome",
+        "title": "Tax estimate - TurboTax",
+        "minutes": 11,
+        "bundleId": "com.google.Chrome",
+        "url": "https://turbotax.example.com/",
+        "domain": "turbotax.example.com"
+       }
+      ]
+     },
+     "category": "d-admin",
+     "project": null
+    }
+   ]
+  },
+  {
+   "name": "PhD student",
+   "suggest": "category",
+   "custom": "I am a biology PhD student.",
+   "categories": [
+    {
+     "id": "s-write",
+     "name": "Writing",
+     "description": "Thesis, papers, and grant text",
+     "hint": "LaTeX, Overleaf, Word"
+    },
+    {
+     "id": "s-read",
+     "name": "Reading Papers",
+     "description": "Reading and annotating literature",
+     "hint": "arXiv, PDF, Zotero"
+    },
+    {
+     "id": "s-data",
+     "name": "Data Analysis",
+     "description": "Coding experiments and plots",
+     "hint": "Jupyter, Python, R"
+    },
+    {
+     "id": "s-teach",
+     "name": "Teaching",
+     "description": "Grading, teaching prep, office hours",
+     "hint": "Canvas, grading"
+    },
+    {
+     "id": "s-lab",
+     "name": "Lab Meetings",
+     "description": "Group meetings and advisor 1:1s",
+     "hint": "Zoom, group meeting"
+    },
+    {
+     "id": "s-admin",
+     "name": "Email & Admin",
+     "description": "Email and university admin",
+     "hint": "Gmail, registrar"
+    },
+    {
+     "id": "s-break",
+     "name": "Personal",
+     "description": "Non-work browsing and breaks",
+     "hint": "YouTube, Reddit"
+    }
+   ],
+   "projects": [],
+   "history": [
+    {
+     "block": {
+      "start": "2026-03-02T09:00:00-08:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Thesis - Overleaf",
+        "minutes": 55,
+        "bundleId": "com.google.Chrome",
+        "url": "https://www.overleaf.com/project/abc",
+        "domain": "overleaf.com"
+       }
+      ]
+     },
+     "category": "s-write",
+     "project": null
+    },
+    {
+     "block": {
+      "start": "2026-03-02T11:00:00-08:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "arXiv:2402.01234 Scaling laws for protein folding",
+        "minutes": 20,
+        "bundleId": "com.google.Chrome",
+        "url": "https://arxiv.org/abs/2402.01234",
+        "domain": "arxiv.org"
+       },
+       {
+        "app": "Zotero",
+        "title": "My Library",
+        "minutes": 12,
+        "bundleId": "org.zotero.zotero"
+       }
+      ]
+     },
+     "category": "s-read",
+     "project": null
+    },
+    {
+     "block": {
+      "start": "2026-03-02T14:00:00-08:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "analysis.ipynb - JupyterLab",
+        "minutes": 50,
+        "bundleId": "com.google.Chrome",
+        "url": "http://localhost:8888/lab/tree/analysis.ipynb",
+        "domain": "localhost"
+       }
+      ]
+     },
+     "category": "s-data",
+     "project": null
+    },
+    {
+     "block": {
+      "start": "2026-03-03T10:00:00-08:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Canvas - BIO 101 Gradebook",
+        "minutes": 40,
+        "bundleId": "com.google.Chrome",
+        "url": "https://canvas.example.edu/courses/101/gradebook",
+        "domain": "canvas.example.edu"
+       }
+      ]
+     },
+     "category": "s-teach",
+     "project": null
+    },
+    {
+     "block": {
+      "start": "2026-03-03T13:00:00-08:00",
+      "segments": [
+       {
+        "app": "zoom.us",
+        "title": "Lab group meeting",
+        "minutes": 60,
+        "bundleId": "us.zoom.xos"
+       }
+      ]
+     },
+     "category": "s-lab",
+     "project": null
+    },
+    {
+     "block": {
+      "start": "2026-03-03T16:00:00-08:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Gmail - Inbox",
+        "minutes": 20,
+        "bundleId": "com.google.Chrome",
+        "url": "https://mail.google.com/",
+        "domain": "mail.google.com"
+       }
+      ]
+     },
+     "category": "s-admin",
+     "project": null
+    },
+    {
+     "block": {
+      "start": "2026-03-04T12:30:00-08:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "YouTube - lofi hip hop radio",
+        "minutes": 25,
+        "bundleId": "com.google.Chrome",
+        "url": "https://www.youtube.com/watch?v=x",
+        "domain": "youtube.com"
+       },
+       {
+        "app": "Google Chrome",
+        "title": "Reddit - r/gradschool",
+        "minutes": 10,
+        "bundleId": "com.google.Chrome",
+        "url": "https://www.reddit.com/r/gradschool",
+        "domain": "reddit.com"
+       }
+      ]
+     },
+     "category": "s-break",
+     "project": null
+    }
+   ],
+   "cases": [
+    {
+     "id": "stu-01",
+     "block": {
+      "start": "2026-03-09T09:00:00-08:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Chapter 3 - Overleaf",
+        "minutes": 48,
+        "bundleId": "com.google.Chrome",
+        "url": "https://www.overleaf.com/project/abc",
+        "domain": "overleaf.com"
+       },
+       {
+        "app": "Zotero",
+        "title": "Insert citation",
+        "minutes": 4,
+        "bundleId": "org.zotero.zotero"
+       }
+      ]
+     },
+     "category": "s-write",
+     "project": null
+    },
+    {
+     "id": "stu-02",
+     "block": {
+      "start": "2026-03-09T11:00:00-08:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "arXiv:2403.05510 Diffusion models for molecules",
+        "minutes": 25,
+        "bundleId": "com.google.Chrome",
+        "url": "https://arxiv.org/abs/2403.05510",
+        "domain": "arxiv.org"
+       },
+       {
+        "app": "Preview",
+        "title": "2403.05510v2.pdf",
+        "minutes": 18,
+        "bundleId": "com.apple.Preview"
+       }
+      ]
+     },
+     "category": "s-read",
+     "project": null
+    },
+    {
+     "id": "stu-03",
+     "block": {
+      "start": "2026-03-09T14:00:00-08:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "figures.ipynb - JupyterLab",
+        "minutes": 35,
+        "bundleId": "com.google.Chrome",
+        "url": "http://localhost:8888/lab/tree/figures.ipynb",
+        "domain": "localhost"
+       },
+       {
+        "app": "Terminal",
+        "title": "python train.py --epochs 20",
+        "minutes": 12,
+        "bundleId": "com.apple.Terminal"
+       }
+      ]
+     },
+     "category": "s-data",
+     "project": null
+    },
+    {
+     "id": "stu-04",
+     "block": {
+      "start": "2026-03-10T10:00:00-08:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Canvas - BIO 101 Assignment 4 Submissions",
+        "minutes": 38,
+        "bundleId": "com.google.Chrome",
+        "url": "https://canvas.example.edu/courses/101/assignments/4",
+        "domain": "canvas.example.edu"
+       },
+       {
+        "app": "Slides",
+        "title": "Lecture 8.key",
+        "minutes": 12,
+        "bundleId": "com.apple.iWork.Keynote"
+       }
+      ]
+     },
+     "category": "s-teach",
+     "project": null
+    },
+    {
+     "id": "stu-05",
+     "block": {
+      "start": "2026-03-10T13:00:00-08:00",
+      "segments": [
+       {
+        "app": "zoom.us",
+        "title": "Advisor 1:1",
+        "minutes": 30,
+        "bundleId": "us.zoom.xos"
+       },
+       {
+        "app": "Notion",
+        "title": "Thesis TODOs",
+        "minutes": 5,
+        "bundleId": "notion.id"
+       }
+      ]
+     },
+     "category": "s-lab",
+     "project": null
+    },
+    {
+     "id": "stu-06",
+     "block": {
+      "start": "2026-03-10T15:00:00-08:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Gmail - Inbox",
+        "minutes": 12,
+        "bundleId": "com.google.Chrome",
+        "url": "https://mail.google.com/",
+        "domain": "mail.google.com"
+       },
+       {
+        "app": "Google Chrome",
+        "title": "Graduate Registrar - Degree audit",
+        "minutes": 9,
+        "bundleId": "com.google.Chrome",
+        "url": "https://registrar.example.edu/audit",
+        "domain": "registrar.example.edu"
+       }
+      ]
+     },
+     "category": "s-admin",
+     "project": null
+    },
+    {
+     "id": "stu-07",
+     "block": {
+      "start": "2026-03-11T10:00:00-08:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Statistical Rethinking 2023 - Lecture 5 - YouTube",
+        "minutes": 42,
+        "bundleId": "com.google.Chrome",
+        "url": "https://www.youtube.com/watch?v=abc",
+        "domain": "youtube.com"
+       },
+       {
+        "app": "Notion",
+        "title": "Course notes",
+        "minutes": 10,
+        "bundleId": "notion.id"
+       }
+      ]
+     },
+     "category": "s-read",
+     "project": null
+    },
+    {
+     "id": "stu-08",
+     "block": {
+      "start": "2026-03-11T14:00:00-08:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "Reddit - r/Python",
+        "minutes": 14,
+        "bundleId": "com.google.Chrome",
+        "url": "https://www.reddit.com/r/Python",
+        "domain": "reddit.com"
+       },
+       {
+        "app": "Google Chrome",
+        "title": "YouTube - Funny cat compilation",
+        "minutes": 17,
+        "bundleId": "com.google.Chrome",
+        "url": "https://www.youtube.com/watch?v=cats",
+        "domain": "youtube.com"
+       }
+      ]
+     },
+     "category": "s-break",
+     "project": null
+    },
+    {
+     "id": "stu-09",
+     "block": {
+      "start": "2026-03-11T16:00:00-08:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "results.R - RStudio",
+        "minutes": 20,
+        "bundleId": "com.google.Chrome",
+        "url": "http://localhost:8787/",
+        "domain": "localhost"
+       },
+       {
+        "app": "Google Chrome",
+        "title": "Thesis - Overleaf",
+        "minutes": 17,
+        "bundleId": "com.google.Chrome",
+        "url": "https://www.overleaf.com/project/abc",
+        "domain": "overleaf.com"
+       },
+       {
+        "app": "Google Chrome",
+        "title": "results.R - RStudio",
+        "minutes": 8,
+        "bundleId": "com.google.Chrome",
+        "url": "http://localhost:8787/",
+        "domain": "localhost"
+       }
+      ]
+     },
+     "category": "s-data",
+     "project": null
+    },
+    {
+     "id": "stu-10",
+     "block": {
+      "start": "2026-03-12T09:30:00-08:00",
+      "segments": [
+       {
+        "app": "Google Chrome",
+        "title": "NSF GRFP application - Google Docs",
+        "minutes": 44,
+        "bundleId": "com.google.Chrome",
+        "url": "https://docs.google.com/document/d/grfp",
+        "domain": "docs.google.com"
+       }
+      ]
+     },
+     "category": "s-write",
+     "project": null
+    }
+   ]
+  }
+ ]
+}

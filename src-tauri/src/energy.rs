@@ -101,6 +101,18 @@ pub fn read_process_rusage(pid: i32) -> Option<ProcessRusage> {
     native::read_proc_rusage(pid)
 }
 
+/// A process's resident size now in bytes, for the golden-set benchmark.
+#[cfg(test)]
+pub fn resident_bytes(pid: i32) -> Option<u64> {
+    native::resident_bytes(pid)
+}
+
+/// A process's peak memory in bytes, for the golden-set benchmark.
+#[cfg(test)]
+pub fn peak_memory_bytes(pid: i32) -> Option<u64> {
+    native::peak_memory_bytes(pid)
+}
+
 pub fn read_battery_info() -> BatteryInfo {
     native::read_battery_info()
 }

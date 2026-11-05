@@ -53,8 +53,18 @@ pub struct Sidecar {
 
 impl Sidecar {
     pub fn new() -> Self {
+        Self::with_path(locate())
+    }
+
+    /// A sidecar at an explicit binary, for the benchmark.
+    #[cfg_attr(not(test), allow(dead_code))] // only the golden-set benchmark uses it
+    pub fn at(path: PathBuf) -> Self {
+        Self::with_path(Some(path))
+    }
+
+    fn with_path(path: Option<PathBuf>) -> Self {
         Self {
-            path: locate(),
+            path,
             process: None,
             next_id: 1,
             last_used: Instant::now(),

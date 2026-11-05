@@ -12,6 +12,7 @@ mod dev_tools;
 mod energy;
 mod invoices;
 mod login_item;
+mod net;
 mod onboarding;
 mod panel;
 mod permissions;

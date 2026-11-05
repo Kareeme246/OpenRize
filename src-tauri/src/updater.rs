@@ -365,10 +365,7 @@ async fn release_notes_between(current: &str, latest: &str) -> Result<Vec<Releas
     let current = semver::Version::parse(current).map_err(|error| error.to_string())?;
     let latest = semver::Version::parse(latest).map_err(|error| error.to_string())?;
 
-    // reqwest is built without a bundled crypto provider, like the updater's.
-    if rustls::crypto::CryptoProvider::get_default().is_none() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    }
+    crate::net::ensure_crypto_provider();
     let client = reqwest::Client::builder()
         .user_agent(concat!("OpenRize/", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(20))

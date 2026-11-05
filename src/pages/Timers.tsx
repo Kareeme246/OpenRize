@@ -113,6 +113,7 @@ export function Timers({ api: propApi, revealTimer }: TimersProps = {}) {
       sections={sections.sections}
       onMoveToSection={(id, sectionId) => api.moveToSection(id, sectionId)}
       onCreateSection={sections.create}
+      reserveTagRow={tags.length > 0}
       onAddSegment={api.addSegment}
       onUpdateSegment={api.updateSegment}
       onDeleteSegment={api.deleteSegment}

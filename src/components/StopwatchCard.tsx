@@ -42,6 +42,11 @@ interface StopwatchCardProps {
   onMoveToSection: (id: string, sectionId: string | null) => void;
   /** Adds a section and moves this stopwatch into it. */
   onCreateSection: (name: string, id: string) => void;
+  /**
+   * Keeps the tag chip's row even without a tag, so rings and times line up
+   * across a row of cards when any card on the page is tagged.
+   */
+  reserveTagRow?: boolean;
   onAddSegment: (id: string, startedAt: number, endedAt: number) => void;
   onUpdateSegment: (id: string, segmentId: number, edit: SegmentEdit) => void;
   onDeleteSegment: (id: string, segmentId: number) => void;
@@ -74,6 +79,7 @@ export function StopwatchCard({
   sections,
   onMoveToSection,
   onCreateSection,
+  reserveTagRow = false,
   onAddSegment,
   onUpdateSegment,
   onDeleteSegment,
@@ -276,7 +282,7 @@ export function StopwatchCard({
         )}
       </div>
 
-      {timer.tag !== null && (
+      {timer.tag !== null ? (
         <TagChip
           tag={
             tags.find(
@@ -286,6 +292,8 @@ export function StopwatchCard({
           onStart={onStartTag}
           onPause={onPauseTag}
         />
+      ) : (
+        reserveTagRow && <div aria-hidden="true" className={TAG_ROW} />
       )}
 
       <HourRing
@@ -397,6 +405,9 @@ function LinkIcon({ className }: { className: string }) {
   );
 }
 
+/** The tag chip's row: one fixed height, whether it holds a chip or not. */
+const TAG_ROW = "-mt-1.5 h-5 shrink-0";
+
 interface TagChipProps {
   tag: TimerTag;
   onStart: (tag: string) => void;
@@ -412,7 +423,10 @@ function TagChip({ tag, onStart, onPause }: TagChipProps) {
   const running = tag.running > 0;
 
   return (
-    <div ref={ref} className="relative -mt-1.5 flex max-w-full justify-center">
+    <div
+      ref={ref}
+      className={`relative flex max-w-full justify-center ${TAG_ROW}`}
+    >
       <button
         type="button"
         data-timer-tag-badge={tag.name}
@@ -420,7 +434,7 @@ function TagChip({ tag, onStart, onPause }: TagChipProps) {
         aria-expanded={open}
         aria-label={`Linked by ${tag.name}`}
         onClick={() => setOpen(!open)}
-        className={`flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 font-medium text-[11px] text-accent transition-colors ${
+        className={`flex h-5 max-w-full items-center gap-1 rounded-full px-2 font-medium text-[11px] text-accent transition-colors ${
           open ? "bg-accent/20" : "bg-accent/10 hover:bg-accent/20"
         }`}
       >

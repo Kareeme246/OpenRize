@@ -1,21 +1,6 @@
-//! Timer store — the single source of truth for stopwatch state.
-//!
-//! Clock policy: every instant is a wall-clock epoch in milliseconds, stamped
-//! from `now_epoch_ms` and nothing else. The stopwatch card, `rize` and the
-//! tray all read the wall clock, and a run is `now - started_at`, so a start
-//! stamped from any other clock (a monotonic `Instant` stops ticking while a
-//! Mac sleeps) would make the card read the gap between the two clocks the
-//! moment Start was pressed.
-//!
-//! A timer's time is its segments, each a start and an end like a time entry,
-//! plus the run in progress. The run in progress is also a start and an end
-//! (`run_span`: started_at and now), and that one span is what the live
-//! reading, the pause and the save all use.
-//!
-//! Persistence policy: timers live in a `timers` table in
-//! the same SQLite file activity capture already uses (`activity.db`), each
-//! store through its own connection Timers still mutate at human
-//! rate, so there's no contention concern moving to row-level SQL statements.
+//! Timer store - the single source of truth for stopwatch state. Every instant is a wall-clock
+//! epoch ms from `now_epoch_ms` (a monotonic `Instant` stops ticking while a Mac sleeps). A timer's
+//! time is its segments plus the run in progress (`run_span`); timers live in `activity.db`.
 
 use std::fs;
 use std::path::Path;
@@ -37,7 +22,6 @@ pub struct Timer {
     /// Completed stretches of time, oldest first. Pausing records one, and
     /// they can be added, edited and deleted by hand.
     pub segments: Vec<TimerSegment>,
-    /// Epoch milliseconds at which the current run started, or `None` if paused.
     pub started_at: Option<u64>,
     pub created_at: u64,
     pub ordinal: i64,
@@ -50,9 +34,8 @@ pub struct Timer {
     pub section_id: Option<String>,
 }
 
-/// An organizational subheading on the Stopwatches page. It holds no time and
-/// links nothing: its timers are the ones whose `section_id` names it, read in
-/// their own `ordinal` order.
+/// A subheading on the Stopwatches page. It holds no time and links nothing: its timers are the
+/// ones whose `section_id` names it, in their own `ordinal` order.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TimerSection {
@@ -100,11 +83,9 @@ pub struct TimerSavedState {
     /// The timer's label when it was saved; later renames do not rewrite it.
     pub label: String,
     pub elapsed_ms: u64,
-    /// Epoch milliseconds at which the state was saved.
     pub saved_at: u64,
 }
 
-/// Selects a timer with its total computed from its segments.
 const TIMER_SELECT: &str = "SELECT id, label,
        COALESCE((SELECT SUM(ended_at - started_at) FROM timer_segments WHERE timer_id = timers.id), 0),
        started_at, created_at, ordinal, tag, section_id
@@ -115,14 +96,12 @@ impl Timer {
         self.started_at.is_some()
     }
 
-    /// The run in progress as a start and an end: when it started and `now`,
-    /// or `None` while paused. The one computation behind the live reading,
-    /// the pause and the save.
+    /// The run in progress as a start and an end (`started_at` and `now`), or `None` while paused;
+    /// behind the live reading, the pause and the save.
     pub fn run_span_at(&self, now: u64) -> Option<(u64, u64)> {
         self.started_at.map(|started| run_span(started, now))
     }
 
-    /// Total time at `now`: the segments plus the run in progress, if any.
     pub fn elapsed_at(&self, now: u64) -> u64 {
         self.accumulated_ms + self.run_span_at(now).map_or(0, |(start, end)| end - start)
     }
@@ -134,7 +113,6 @@ fn run_span(started_at: u64, now: u64) -> (u64, u64) {
     (started_at, now.max(started_at))
 }
 
-/// Wall-clock milliseconds since the Unix epoch.
 pub fn now_epoch_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -147,7 +125,6 @@ pub struct TimerStore {
 }
 
 impl TimerStore {
-    /// Opens the shared database and migrates timer state if needed.
     pub fn load(dir: &Path) -> Result<Self, String> {
         fs::create_dir_all(dir).map_err(|error| format!("could not create data dir: {error}"))?;
         let path = dir.join(DB_FILE);
@@ -178,7 +155,6 @@ impl TimerStore {
         Ok(timers)
     }
 
-    // --- mutations -------------------------------------------------------
     // The `_at` variants take an explicit `now` and are what the tests drive;
     // the public ones stamp the real clock.
 
@@ -219,7 +195,6 @@ impl TimerStore {
         self.start_at(id, now)
     }
 
-    /// Starts the timer and every timer linked to it by its tag.
     pub fn start_at(&mut self, id: &str, now: u64) -> Result<Vec<Timer>, String> {
         let linked = self.linked(id)?;
         self.start_all_at(&linked, now)
@@ -230,7 +205,6 @@ impl TimerStore {
         self.pause_at(id, now)
     }
 
-    /// Pauses the timer and every timer linked to it by its tag.
     pub fn pause_at(&mut self, id: &str, now: u64) -> Result<Vec<Timer>, String> {
         let linked = self.linked(id)?;
         self.pause_all_at(&linked, now)
@@ -250,9 +224,8 @@ impl TimerStore {
         }
     }
 
-    /// Starts every paused timer in `timers` at the same instant, in one
-    /// transaction, so a linked set reads one clock; a timer already running
-    /// keeps its own start.
+    /// Starts every paused timer in `timers` at the same instant in one transaction, so a linked
+    /// set reads one clock; a running timer keeps its own start.
     fn start_all_at(&mut self, timers: &[Timer], now: u64) -> Result<Vec<Timer>, String> {
         let tx = self.conn.transaction().map_err(|error| error.to_string())?;
         for timer in timers.iter().filter(|timer| !timer.is_running()) {
@@ -266,9 +239,8 @@ impl TimerStore {
         self.snapshot()
     }
 
-    /// Pauses every running timer in `timers`, each recording the segment it
-    /// ran. One transaction, so a pause can never stop a clock without
-    /// keeping the time it ran.
+    /// Pauses every running timer in `timers`, each recording the segment it ran, in one
+    /// transaction so a pause never stops a clock without keeping its time.
     fn pause_all_at(&mut self, timers: &[Timer], now: u64) -> Result<Vec<Timer>, String> {
         let tx = self.conn.transaction().map_err(|error| error.to_string())?;
         for timer in timers {
@@ -317,10 +289,8 @@ impl TimerStore {
         self.snapshot()
     }
 
-    /// Tags a timer with `tag`, or removes its tag when `tag` is `None` or
-    /// blank. A name that matches an existing tag without regard to case
-    /// takes that tag's spelling, so "Launch" and "launch" never become two
-    /// tags.
+    /// Removes the tag when `tag` is `None` or blank. A case-insensitive match takes the
+    /// existing tag's spelling, so "Launch" and "launch" never become two tags.
     pub fn set_tag(&mut self, id: &str, tag: Option<&str>) -> Result<Vec<Timer>, String> {
         self.find(id)?;
         let tag = match tag.map(str::trim).filter(|name| !name.is_empty()) {
@@ -338,7 +308,6 @@ impl TimerStore {
         self.start_tag_at(tag, now)
     }
 
-    /// Starts every paused timer with the tag, as starting any one of them does.
     pub fn start_tag_at(&mut self, tag: &str, now: u64) -> Result<Vec<Timer>, String> {
         let tagged = self.tagged(tag)?;
         self.start_all_at(&tagged, now)
@@ -349,7 +318,6 @@ impl TimerStore {
         self.pause_tag_at(tag, now)
     }
 
-    /// Pauses every running timer with the tag, as pausing any one of them does.
     pub fn pause_tag_at(&mut self, tag: &str, now: u64) -> Result<Vec<Timer>, String> {
         let tagged = self.tagged(tag)?;
         self.pause_all_at(&tagged, now)
@@ -384,7 +352,6 @@ impl TimerStore {
             .unwrap_or_else(|| name.to_string()))
     }
 
-    /// Updates the display order of timers to match the given list of IDs.
     pub fn reorder(&mut self, ids: &[String]) -> Result<Vec<Timer>, String> {
         let tx = self.conn.transaction().map_err(|error| error.to_string())?;
         for (index, id) in ids.iter().enumerate() {
@@ -408,7 +375,6 @@ impl TimerStore {
             .ok_or_else(|| unknown(id))?
             .section_id
             .clone();
-        // Where each timer of the section sits in the whole list.
         let peers: Vec<usize> = timers
             .iter()
             .enumerate()
@@ -433,10 +399,8 @@ impl TimerStore {
         self.reorder(&ids)
     }
 
-    /// Puts a timer under `section` (`None` for above every section) at
-    /// `index` among that section's other timers, or after them when `index`
-    /// is `None` or past the end. One transaction sets the section and the
-    /// order together.
+    /// Puts a timer under `section` (`None` for above every section) at `index` among that
+    /// section's other timers (last if `None` or past the end), in one transaction.
     pub fn move_to_section(
         &mut self,
         id: &str,
@@ -482,9 +446,6 @@ impl TimerStore {
         self.snapshot()
     }
 
-    // --- sections --------------------------------------------------------
-
-    /// Every section, in page order.
     pub fn sections(&self) -> Result<Vec<TimerSection>, String> {
         let mut statement = self
             .conn
@@ -506,7 +467,6 @@ impl TimerStore {
         self.create_section_at(name, now)
     }
 
-    /// Adds an empty section after the others.
     pub fn create_section_at(&mut self, name: &str, now: u64) -> Result<TimerSection, String> {
         let name = self.free_section_name(name, None)?;
         let next = self.take_next_id("timer_section_next_id", "timer_sections", 's')?;
@@ -557,7 +517,6 @@ impl TimerStore {
         self.sections()
     }
 
-    /// Updates the order of sections to match the given list of IDs.
     pub fn reorder_sections(&mut self, ids: &[String]) -> Result<Vec<TimerSection>, String> {
         let tx = self.conn.transaction().map_err(|error| error.to_string())?;
         for (index, id) in ids.iter().enumerate() {
@@ -598,7 +557,6 @@ impl TimerStore {
         Ok(name.to_string())
     }
 
-    /// Adds a stretch of time to the total, from `started_at` to `ended_at`.
     pub fn add_segment(
         &mut self,
         id: &str,
@@ -611,8 +569,8 @@ impl TimerStore {
         self.snapshot()
     }
 
-    /// Changes a segment's start and/or end; whichever is `None` stays as it
-    /// is, and the pair that results has to be a valid span.
+    /// Changes a segment's start and/or end (`None` stays); the resulting pair must be a valid
+    /// span.
     pub fn update_segment(
         &mut self,
         id: &str,
@@ -683,7 +641,6 @@ impl TimerStore {
         })
     }
 
-    /// A timer's saved states, newest first.
     pub fn saved_states(&self, id: &str) -> Result<Vec<TimerSavedState>, String> {
         self.find(id)?;
         let mut statement = self
@@ -902,13 +859,11 @@ mod tests {
         let mut store = store("reads-now-minus-start");
         let id = store.create_at("Stopwatch", 1_000).unwrap()[0].id.clone();
 
-        // Never run: zero, whatever the clock says.
         let fresh = store.snapshot().unwrap().remove(0);
         assert_eq!(fresh.elapsed_at(0), 0);
         assert_eq!(fresh.elapsed_at(1_000), 0);
         assert_eq!(fresh.elapsed_at(u64::MAX), 0);
 
-        // Running: exactly `now - started_at`, second by second.
         store.start_at(&id, 50_000).unwrap();
         let running = store.snapshot().unwrap().remove(0);
         for seconds in 0..4 {
@@ -917,10 +872,8 @@ mod tests {
                 seconds * 1_000
             );
         }
-        // A clock that stepped back never reads negative or wraps.
         assert_eq!(running.elapsed_at(49_000), 0);
 
-        // Pausing keeps what the display showed, to the millisecond.
         let shown = running.elapsed_at(53_250);
         store.pause_at(&id, 53_250).unwrap();
         let paused = store.snapshot().unwrap().remove(0);
@@ -931,12 +884,9 @@ mod tests {
 
     #[test]
     fn start_is_stamped_from_the_wall_clock_the_card_reads() {
-        // `Start` used to be stamped from a monotonic `Instant` anchored at
-        // launch, which stops ticking while a Mac sleeps: after a 7h16m45s
-        // sleep the card (wall clock) read 7:16:45 the moment a stopwatch
-        // started, then fell back to 0:00 on Pause. A fresh process cannot
-        // show that drift, so this pins the contract the fix restored: the
-        // public `start` stamps `now_epoch_ms`, the clock the card reads.
+        // `Start` was once stamped from a monotonic `Instant`, which stops while a Mac sleeps (the
+        // card read 7:16:45 right after Start). This pins the contract: the public `start` stamps
+        // `now_epoch_ms`.
         let mut store = store("start-uses-wall-clock");
         let id = store.create("Stopwatch").unwrap()[0].id.clone();
         let before = now_epoch_ms();
@@ -958,7 +908,6 @@ mod tests {
         store.set_tag(&a, Some("  Launch ")).unwrap();
         let timers = store.set_tag(&b, Some("launch")).unwrap();
         assert_eq!(timers[0].tag.as_deref(), Some("Launch"));
-        // Takes the existing tag's spelling.
         assert_eq!(timers[1].tag.as_deref(), Some("Launch"));
 
         let timers = store.set_tag(&a, Some("   ")).unwrap();
@@ -998,7 +947,6 @@ mod tests {
         assert_eq!(timers[0].accumulated_ms, 30_000);
         assert_eq!(timers[1].accumulated_ms, 30_000);
 
-        // An untagged timer is on its own.
         let timers = store.start_at(&ids[2], 60_000).unwrap();
         assert_eq!(timers[0].started_at, None);
         assert_eq!(timers[2].started_at, Some(60_000));
@@ -1094,7 +1042,6 @@ mod tests {
             |label: &str, section: Option<&str>| (label.to_string(), section.map(str::to_string));
 
         store.move_to_section(&ids[2], Some(&web), None).unwrap();
-        // Into the section before C.
         store.move_to_section(&ids[0], Some(&web), Some(0)).unwrap();
         assert_eq!(
             order(&store),
@@ -1105,7 +1052,6 @@ mod tests {
             ]
         );
 
-        // Moving within a section only swaps with its own timers.
         store.move_timer(&ids[0], 1).unwrap();
         assert_eq!(
             order(&store),
@@ -1142,7 +1088,6 @@ mod tests {
         let kept = timers.iter().find(|timer| timer.id == ids[1]).unwrap();
         assert_eq!(kept.accumulated_ms, 9_000);
         assert!(store.delete_section(&web).is_err());
-        // Ids are never reused.
         assert_eq!(store.create_section_at("Again", 2).unwrap().id, "s2");
     }
 
@@ -1173,7 +1118,6 @@ mod tests {
         assert!(timers.iter().all(|t| t.section_id.is_none()));
         assert!(store.sections().unwrap().is_empty());
 
-        // The old group is now a link.
         let timers = store.start_at("t2", 5_000).unwrap();
         assert_eq!(timers[0].started_at, Some(5_000));
 
@@ -1197,7 +1141,6 @@ mod tests {
         assert_eq!(paused.accumulated_ms, 3_500);
         assert!(!paused.is_running());
 
-        // Pausing again must not double-count.
         store.pause_at(&id, 9_000).unwrap();
         assert_eq!(store.snapshot().unwrap()[0].accumulated_ms, 3_500);
     }
@@ -1221,7 +1164,6 @@ mod tests {
 
         let first = timer.segments[0].id;
         let second = timer.segments[1].id;
-        // Change only the end, then only the start, then both.
         store
             .update_segment(&id, first, None, Some(11_000))
             .unwrap();
@@ -1307,12 +1249,10 @@ mod tests {
         let mut store = store("save-state");
         let id = store.create_at("Deep work", 0).unwrap()[0].id.clone();
 
-        // At rest, nothing tracked yet.
         let at_rest = store.save_state_at(&id, 500).unwrap();
         assert_eq!(at_rest.elapsed_ms, 0);
         assert_eq!(at_rest.label, "Deep work");
 
-        // Running: 37m52s since the last start.
         store.start_at(&id, 1_000).unwrap();
         let running = store.save_state_at(&id, 1_000 + 2_272_000).unwrap();
         assert_eq!(running.elapsed_ms, 2_272_000);
@@ -1322,7 +1262,6 @@ mod tests {
         assert_eq!(timer.started_at, Some(1_000));
         assert!(timer.segments.is_empty());
 
-        // Paused: the stored segments are the whole reading.
         store.pause_at(&id, 61_000).unwrap();
         let paused = store.save_state_at(&id, 90_000).unwrap();
         assert_eq!(paused.elapsed_ms, 60_000);
@@ -1483,7 +1422,6 @@ mod tests {
         let mut store = TimerStore::load(&dir).expect("timer store");
         let timers = store.snapshot().unwrap();
         assert_eq!(timers.len(), 3);
-        // Default order matches historical order: ORDER BY created_at ASC, id ASC
         assert_eq!(timers[0].label, "First");
         assert_eq!(timers[0].ordinal, 0);
         assert_eq!(timers[1].label, "Second");
@@ -1491,7 +1429,6 @@ mod tests {
         assert_eq!(timers[2].label, "Third");
         assert_eq!(timers[2].ordinal, 2);
 
-        // A new timer lands at the end
         let timers = store.create_at("Fourth", 4000).unwrap();
         assert_eq!(timers.len(), 4);
         assert_eq!(timers[3].label, "Fourth");
@@ -1513,7 +1450,6 @@ mod tests {
             let t = store.create_at("Gamma", 3000).unwrap();
             id_c = t[2].id.clone();
 
-            // Reorder to Gamma, Alpha, Beta
             let reordered = store
                 .reorder(&[id_c.clone(), id_a.clone(), id_b.clone()])
                 .unwrap();
@@ -1522,7 +1458,6 @@ mod tests {
             assert_eq!(reordered[2].label, "Beta");
         }
 
-        // Reload the store from disk
         let store = TimerStore::load(&dir).expect("timer store");
         let timers = store.snapshot().unwrap();
         assert_eq!(timers.len(), 3);
@@ -1544,21 +1479,17 @@ mod tests {
         let t = store.create_at("Three", 3000).unwrap();
         let id3 = t[2].id.clone();
 
-        // Moving the first item up is a no-op
         let res = store.move_timer(&id1, -1).unwrap();
         assert_eq!(res[0].id, id1);
 
-        // Moving the third item down is a no-op
         let res = store.move_timer(&id3, 1).unwrap();
         assert_eq!(res[2].id, id3);
 
-        // Move "Two" up
         let res = store.move_timer(&id2, -1).unwrap();
         assert_eq!(res[0].id, id2);
         assert_eq!(res[1].id, id1);
         assert_eq!(res[2].id, id3);
 
-        // Move "Two" down
         let res = store.move_timer(&id2, 1).unwrap();
         assert_eq!(res[0].id, id1);
         assert_eq!(res[1].id, id2);
@@ -1623,12 +1554,10 @@ mod tests {
             .unwrap();
         }
 
-        // Open with the updated TimerStore (which runs migration 11)
         let store = TimerStore::load(&dir).expect("timer store load");
         let timers = store.snapshot().expect("snapshot");
         assert_eq!(timers.len(), 3);
 
-        // Order is stable by created_at: t1 (0000), t3 (0010), t2 (0020)
         assert_eq!(timers[0].id, "t1");
         assert_eq!(timers[0].label, "Running Project");
         assert_eq!(timers[0].ordinal, 0);

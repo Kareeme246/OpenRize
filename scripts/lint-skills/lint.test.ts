@@ -187,7 +187,6 @@ function base(): Record<string, string> {
   };
 }
 
-/** Builds a fixture repo; a null override deletes that file. */
 function repo(overrides: Record<string, string | null> = {}): string {
   const root = mkdtempSync(join(tmpdir(), "lint-skills-"));
   made.push(root);
@@ -205,7 +204,6 @@ function only(findings: Finding[], rule: string): Finding[] {
   return findings.filter((f) => f.rule === rule);
 }
 
-/** Asserts the fixture produced exactly one finding of `rule`, at `file:line`. */
 function expectOne(
   overrides: Record<string, string | null>,
   rule: string,
@@ -244,8 +242,6 @@ test("catalogs parse from the real source formats", () => {
   );
   assert.equal(parseRoutes("export type Nope = {};"), null);
 });
-
-// ---------------------------------------------------------------- skill rules
 
 test("frontmatter: missing block, wrong name, long description", () => {
   expectOne({ [SKILL_FILE]: "# no block\n" }, "frontmatter", SKILL_FILE, 1);
@@ -369,8 +365,6 @@ test("the generic rules also cover other markdown under the skills", () => {
   const notes = ".agents/skills/demo/references/notes.md";
   expectOne({ [notes]: "# Notes\n\nFIXME later\n" }, "placeholder", notes, 3);
 });
-
-// ---------------------------------------------------------------- feature rules
 
 test("feature-frontmatter: order, domains and id", () => {
   const swapped = feature({ id: "calendar" }).replace(
@@ -571,8 +565,6 @@ test("rules are skipped when there is no feature map", () => {
   assert.deepEqual(lintRepo(repo(overrides)), []);
 });
 
-// ---------------------------------------------------------------- coverage
-
 test("coverage prints the template in index order", () => {
   const table = coverageTable(repo());
   assert.equal(
@@ -593,8 +585,6 @@ test("coverage prints the template in index order", () => {
     /\| Timers[\s\S]*\| Calendar/,
   );
 });
-
-// ---------------------------------------------------------------- the real repository
 
 test("the real repository lints clean", () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");

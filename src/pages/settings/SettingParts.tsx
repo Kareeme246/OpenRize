@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import { Picker } from "../../components/Picker";
 import { type Status, StatusBadge } from "../../components/StatusBadge";
 
-/** Title + description with an inline control on the right. */
 export function SettingRow({
   title,
   description,
@@ -27,7 +26,6 @@ export function SettingRow({
   );
 }
 
-/** Title + description with a full-width control underneath. */
 export function SettingBlock({
   title,
   description,
@@ -67,7 +65,6 @@ export function SettingGroup({
   );
 }
 
-/** A themed dropdown, styled to match the segmented controls beside it. */
 export function Select({
   label,
   value,

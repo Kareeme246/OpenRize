@@ -37,13 +37,8 @@ function Figure({
   );
 }
 
-/** Beyond this many entries the bar stops drawing one segment each. */
 const MAX_SEGMENTS = 40;
 
-/**
- * My Timesheet's day header from Rise: pending, approved, and total time in
- * one card, then a review progress bar with a segment per entry.
- */
 export function DaySummary({ summary }: { summary: SheetSummary }) {
   const reviewable = summary.review.entries + summary.approved.entries;
   const segments = Math.min(reviewable, MAX_SEGMENTS);

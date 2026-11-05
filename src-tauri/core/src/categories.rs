@@ -1,6 +1,4 @@
-//! The Categories page: per-category totals, which also tell its Delete
-//! whether a category has history to keep (see
-//! `ActivityStore::remove_category`).
+//! The Categories page: per-category totals, which also tell Delete whether a category has history.
 
 use rusqlite::{params, Connection};
 use serde::Serialize;

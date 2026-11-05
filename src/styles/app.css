@@ -1,20 +1,13 @@
 @import "tailwindcss";
 
-/* `sharper:` styles an element only in the Sharper shape (Settings > Appearance),
-   which the root's `data-shape` attribute carries. Rounded is the base. */
+/* `sharper:` styles an element only when the root's `data-shape` is sharper. */
 @custom-variant sharper (:where(:root[data-shape="sharper"]) &);
 
 /*
- * Semantic tokens. Components never name a raw colour: they use utilities
- * generated from these names (`text-fg-muted`, `border-line`, `bg-surface`, ...)
- * so light/dark is a variable swap, not a component rewrite.
- *
- * Dark is the default. `[data-theme="light"]` (set by applyAppearance in
- * src/lib/settings.ts) overrides the same names. Accent tokens are written at
- * runtime by that same function from the palette in src/lib/settings.ts.
+ * Semantic tokens: components use utilities from these, never raw colours.
+ * Dark is default; `[data-theme="light"]` overrides; accents set at runtime.
  */
 :root {
-  /* Normal is the existing 16px baseline. Rem utilities scale with the root. */
   --ui-scale: 1;
   font-size: calc(16px * var(--ui-scale));
 
@@ -22,7 +15,6 @@
   --bg-rail: #191c1b;
   --bg-bar: #161817;
   --bg-panel: #252827;
-  /* Settings cards are opaque and intentionally distinct from the canvas. */
   --bg-settings-card: #2c322f;
   --settings-card-border: rgba(255, 255, 255, 0.18);
   --bg-surface-1: rgba(255, 255, 255, 0.05);
@@ -42,31 +34,26 @@
   --line-soft: rgba(255, 255, 255, 0.04);
   --line-strong: rgba(255, 255, 255, 0.2);
 
-  /* Categorical colours that sit beside the accent without competing with it. */
   --break: #66b1df;
   --review: #e7b447;
   --danger: #e97e7b;
   --danger-soft: rgba(233, 126, 123, 0.12);
-  /* Fixed green for "good news" (e.g. an available update), independent of
-     the user's accent choice. */
+  /* Fixed green for "good news", independent of the accent. */
   --success: #5bcf8f;
   --success-soft: rgba(91, 207, 143, 0.15);
 
-  /* Accent defaults; overwritten inline from the chosen palette. */
   --accent: #5bcf8f;
   --accent-dim: #48ab74;
   --accent-soft: rgba(91, 207, 143, 0.15);
   --accent-rgb: 91, 207, 143;
   --accent-fg: #10261a;
 
-  /* Canvas gradient stops, also accent-aware. */
   --glow-1: rgba(var(--accent-rgb), 0.05);
   --glow-2: rgba(var(--accent-rgb), 0.02);
   --canvas-1: #191c1b;
   --canvas-2: #1d201f;
   --canvas-3: #222624;
 
-  /* Muted category palette tokens */
   --cat-1: #75a4e5;
   --cat-2: #56c2b1;
   --cat-3: #52b788;
@@ -79,12 +66,9 @@
   --cat-10: #9b87df;
   --cat-11: #e97e7b;
   --cat-12: #64748b;
-  /* Letters set on a category colour: dark ink on this theme's light colours,
-     white on the light theme's dark ones. */
+  /* Ink for letters on a category colour. */
   --cat-ink: #101312;
 
-  /* Decision tiers (Settings → AI effectiveness), fixed order rule →
-     personal → model. Validated with the dataviz palette checks. */
   --tier-rule: #5f8fd6;
   --tier-personal: #4ebfa8;
   --tier-model: #a07ad6;
@@ -102,9 +86,7 @@
   --ui-scale: 1.2;
 }
 
-/* Tailwind's arbitrary pixel typography does not follow the root rem size.
-   Keep its original pixel values at Normal and scale them with the same factor
-   as the rem-based type and icon utilities everywhere, including Pulse. */
+/* Arbitrary pixel type ignores the root rem size, so scale it by --ui-scale. */
 .text-\[9px\] { font-size: calc(9px * var(--ui-scale)); }
 .text-\[9\.5px\] { font-size: calc(9.5px * var(--ui-scale)); }
 .text-\[10px\] { font-size: calc(10px * var(--ui-scale)); }
@@ -124,7 +106,6 @@
 .text-\[26px\] { font-size: calc(26px * var(--ui-scale)); }
 .text-\[28px\] { font-size: calc(28px * var(--ui-scale)); }
 
-/* Pixel-sized glyphs are the only icons outside rem-based size utilities. */
 .size-\[7px\] { width: calc(7px * var(--ui-scale)); height: calc(7px * var(--ui-scale)); }
 .size-\[18px\] { width: calc(18px * var(--ui-scale)); height: calc(18px * var(--ui-scale)); }
 .w-\[4px\] { width: calc(4px * var(--ui-scale)); }
@@ -265,8 +246,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* The menu-bar panel's window is clear: the card draws its own rounded
-   corners, and macOS shades the window from the card's shape. */
+/* Clear window: the card draws its own rounded corners, and macOS shades
+   from its shape. */
 html.pulse-window,
 html.pulse-window body,
 html.reminder-window,
@@ -274,7 +255,6 @@ html.reminder-window body {
   background: transparent;
 }
 
-/* Calendar block states (see the design board, D1). */
 @keyframes entry-shimmer {
   from {
     background-position: 200% 0;
@@ -284,11 +264,9 @@ html.reminder-window body {
   }
 }
 
-/* Slim scrollbars across the app (reduced thickness by half). The
-   ::-webkit-scrollbar rules style Chromium (WebView2) and WebKit (macOS). Chromium
-   121+ also reads scrollbar-width/scrollbar-color, and once those are set it
-   ignores ::-webkit-scrollbar, so the standard properties are only used where
-   the webkit pseudo-elements are not supported (Firefox). */
+/* Slim scrollbars. ::-webkit-scrollbar styles Chromium and WebKit; Chromium
+   121+ ignores it once scrollbar-width/color are set, so those apply only
+   where unsupported (Firefox). */
 @supports not selector(::-webkit-scrollbar) {
   * {
     scrollbar-width: thin;
@@ -335,7 +313,6 @@ html.reminder-window body {
   animation: entry-shimmer 1.6s linear infinite;
 }
 
-/* The recording session's now line: a soft ring breathing off its dots. */
 @keyframes recording-pulse {
   0% {
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 55%, transparent);
@@ -357,7 +334,6 @@ html.reminder-window body {
   }
 }
 
-/* Settings → auto-accept threshold. The track fill is an inline gradient. */
 .threshold-range::-webkit-slider-thumb {
   appearance: none;
   width: 14px;
@@ -373,7 +349,6 @@ html.reminder-window body {
   outline-offset: 4px;
 }
 
-/* The settings surface opts out of the app-wide gradient and mono body type. */
 .settings-page {
   font-family: var(--font-sans);
 }
@@ -559,21 +534,9 @@ html.reminder-window body {
 }
 
 /*
- * Sharper shape. Rounded keeps the spaced, rounded cards; Sharper turns each
- * panel into an edge-to-edge band split by plain dividers, with no gap between
- * them. A page opts a panel in with one of these classes, and every rule below
- * is unlayered so it wins over the panel's own utilities.
- *
- *   shape-bleed        a panel that spans the page gutters (the px-5 of <main>)
- *   shape-bleed-table  the same, for a table or list whose rows pad themselves
- *                      (their header fills should reach the edges)
- *   shape-top          a band that opens the page, flush under the header line
- *   shape-strip        a grid of shape-cell panels fused into one divided band
- *   shape-cell         one cell of a strip
- *   shape-narrow-rows  a strip whose cells stack below 64rem (-xl: 80rem): divide them by row
- *   shape-stack        a column of panels: the gaps between them close up
- *   shape-group        a wrapper of bands that follows a band: they fuse across it
- *   shape-one-col      a grid of panels that stacks into one column of bands
+ * Sharper shape: panels become edge-to-edge bands split by plain dividers.
+ * Pages opt in via the shape-* classes below; unlayered rules win over the
+ * panel's own utilities.
  */
 :root {
   --gutter: 1.25rem;
@@ -590,7 +553,6 @@ html.reminder-window body {
   border-style: solid;
 }
 
-/* Fused bands share one divider rather than stacking two borders. */
 :root[data-shape="sharper"]
   :is(.shape-bleed, .shape-bleed-table, .shape-strip)
   + :is(.shape-bleed, .shape-bleed-table, .shape-strip) {
@@ -612,7 +574,6 @@ html.reminder-window body {
   border-top-width: 0;
 }
 
-/* A grid of panels that sharper stacks into one column of bands. */
 :root[data-shape="sharper"] .shape-one-col {
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
@@ -660,7 +621,6 @@ html.reminder-window body {
   }
 }
 
-/* A selected cell keeps its accent as a bar, since its ring is gone. */
 :root[data-shape="sharper"] .shape-cell[aria-pressed="true"] {
   box-shadow: inset 0 -2px 0 var(--accent);
 }

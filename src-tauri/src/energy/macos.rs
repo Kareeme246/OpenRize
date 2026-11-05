@@ -2,7 +2,6 @@
 
 use super::*;
 
-/// macOS reports per-process energy through `proc_pid_rusage`.
 pub const HAS_ENERGY_COUNTER: bool = true;
 
 #[repr(C)]

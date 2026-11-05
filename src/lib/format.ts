@@ -1,7 +1,5 @@
 /**
- * Display formats shared by every view. Durations are `5h 22m` (design board,
- * D shared conventions), table hours are `3.4h`, and clock times follow the
- * user's locale.
+ * Display formats shared by every view; clock times follow the user's locale.
  */
 
 const HOUR_MS = 3_600_000;
@@ -16,7 +14,6 @@ export function formatDuration(ms: number): string {
   return `${hours}h ${String(rest).padStart(2, "0")}m`;
 }
 
-/** `3.4h` for pivots and cells; an en dash for nothing. */
 export function formatHours(ms: number, empty = "–"): string {
   if (ms <= 0) return empty;
   const hours = ms / HOUR_MS;
@@ -25,7 +22,6 @@ export function formatHours(ms: number, empty = "–"): string {
   return `${hours >= 10 ? hours.toFixed(0) : hours.toFixed(1)}h`;
 }
 
-/** `9:38 AM` (or `09:38` in 24-hour locales). */
 export function formatTime(epochMs: number): string {
   return new Date(epochMs).toLocaleTimeString([], {
     hour: "numeric",
@@ -33,7 +29,6 @@ export function formatTime(epochMs: number): string {
   });
 }
 
-/** `$4,620` in the given ISO currency, USD when none is set. */
 export function formatMoney(amount: number, currency = "USD"): string {
   try {
     return new Intl.NumberFormat(undefined, {
@@ -63,7 +58,6 @@ export function formatRelative(epochMs: number, now: number): string {
   return formatShortDate(epochMs, now);
 }
 
-/** `Sep 21`, with the year only when it isn't this one. */
 export function formatShortDate(epochMs: number, now = Date.now()): string {
   const date = new Date(epochMs);
   const sameYear = date.getFullYear() === new Date(now).getFullYear();

@@ -23,9 +23,8 @@ import {
 const HOUR_MS = 3_600_000;
 
 /**
- * The positioned panel: break reminders, the elapsed-time capsule, the
- * welcome-back card, and stopwatch reminders. Rust decides when it is on
- * screen; this draws the state and reports its size so the window fits it.
+ * The positioned panel: break, capsule, welcome-back and stopwatch reminders.
+ * Rust decides when it shows; this reports its size so the window fits.
  */
 export default function Reminder() {
   return (
@@ -38,8 +37,8 @@ export default function Reminder() {
 function ReminderPanel() {
   const { state, now } = useBreaks();
   const { settings } = useSettings();
-  // A panel in a bottom corner opens its menus upwards, and is pinned to the
-  // window's bottom edge, which Rust keeps fixed as the window grows to fit.
+  // A bottom-corner panel opens its menus upwards and is pinned to the window's
+  // bottom edge, which Rust keeps fixed.
   const upward =
     settings.notificationPlacement === "bottomLeft" ||
     settings.notificationPlacement === "bottomRight";
@@ -48,8 +47,8 @@ function ReminderPanel() {
     id: string | null;
     value: boolean;
   }>({ id: null, value: false });
-  // Keyed by start time: a welcome card has no break id, and it keeps the
-  // choice made while its break ran.
+  // Keyed by start time: a welcome card has no break id and keeps the choice
+  // made while its break ran.
   const currentId = state.current ? String(state.current.startedAt) : null;
   const compact = collapsed.id === currentId && collapsed.value;
 
@@ -61,8 +60,7 @@ function ReminderPanel() {
   const card = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const reported = useRef("");
-  // Report the card and any overhanging menu's bounds after every state
-  // change: the window waits for a measurement before it shows.
+  // Report bounds after every state change: the window waits for a measurement.
   // biome-ignore lint/correctness/useExhaustiveDependencies: state, menu and compact are what change the layout
   useLayoutEffect(() => {
     const element = card.current;
@@ -347,7 +345,6 @@ function ReminderCard({
   );
 }
 
-/** Local midnight at the start of tomorrow. */
 function tomorrow(): number {
   const date = new Date();
   date.setHours(0, 0, 0, 0);
@@ -357,7 +354,7 @@ function tomorrow(): number {
 
 /**
  * A combo button: the main half snoozes for the default length, the chevron
- * offers 5 / 10 / 15 minutes on every reminder.
+ * offers 5 / 10 / 15 minutes.
  */
 function SnoozeButton({
   minutes,
@@ -444,7 +441,6 @@ function MenuItem({
   );
 }
 
-/** The reminder went unanswered: a small "Break due" tab in the corner. */
 function NudgeCapsule({ reminder }: { reminder: ReminderView }) {
   return (
     <button
@@ -462,7 +458,6 @@ function NudgeCapsule({ reminder }: { reminder: ReminderView }) {
   );
 }
 
-/** Click the live line to collapse or expand without changing the break. */
 function BreakCard({
   current,
   now,
@@ -541,7 +536,6 @@ function BreakCard({
   );
 }
 
-/** Collapses to the same corner pill as a running break, and back. */
 function WelcomeCard({
   current,
   expanded,

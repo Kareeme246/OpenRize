@@ -1,8 +1,5 @@
-//! Everything about OpenRize's data that needs no Tauri: the stores, their
-//! schema, entry queries and reports, settings, where the app keeps its
-//! files, and the protocol and local endpoint `rize` uses. The app links it
-//! for its windows and tracker; `rize` links it to read and edit the same data
-//! while the app is closed.
+//! OpenRize's data without Tauri: stores, schema, queries, reports, settings, paths and the `rize`
+//! protocol. The app and `rize` both link it; `rize` can edit the data while the app is closed.
 
 pub mod accounts;
 pub mod activity;
@@ -73,7 +70,6 @@ pub struct Clause {
     pub params: Vec<Value>,
 }
 
-/// `column IS NULL` for the `none` sentinel, else an equality.
 fn id_condition(column: &str, value: &Option<String>, sql: &mut Vec<String>, out: &mut Vec<Value>) {
     match value.as_deref() {
         None | Some("") => {}
@@ -85,9 +81,8 @@ fn id_condition(column: &str, value: &Option<String>, sql: &mut Vec<String>, out
     }
 }
 
-/// Search terms, each a substring. `%` is dropped because LIKE would treat
-/// it as a wildcard; `_` is kept, since matching any one character still
-/// matches the literal underscore the user meant.
+/// Search terms, each a substring. `%` is dropped (a LIKE wildcard); `_` is kept, as matching any
+/// one character still matches the literal underscore meant.
 fn search_terms(search: &str) -> Vec<String> {
     search
         .split_whitespace()

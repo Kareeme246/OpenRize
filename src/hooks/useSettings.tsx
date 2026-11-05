@@ -22,7 +22,6 @@ export interface SettingsApi {
   settings: Settings;
   storage: StoragePaths | null;
   error: string | null;
-  /** Merges a patch, persists it, and repaints immediately. */
   update: (patch: Partial<Settings>) => void;
 }
 
@@ -42,7 +41,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [storage, setStorage] = useState<StoragePaths | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Latest value for `update`, so the callback stays stable without stale
-  // reads - the same pattern useTimers uses for its send().
+  // reads.
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
 
@@ -60,8 +59,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       .catch((cause: unknown) => setError(describeError(cause)));
   }, []);
 
-  // Rust owns preferences; adopt whatever it broadcasts (e.g. after a future
-  // tray or CLI toggle).
+  // Rust owns preferences; adopt whatever it broadcasts.
   useTauriEvent<Settings>(api.SETTINGS_CHANGED, (payload) => {
     setSettings(payload);
     applyAppearance(payload);

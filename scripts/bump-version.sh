@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Bumps the version in package.json, src-tauri/tauri.conf.json, and
-# src-tauri/Cargo.toml together, so the three can never drift. See
-# RELEASING.md for the full release procedure.
+# Bumps the version in package.json, tauri.conf.json and Cargo.toml together. See RELEASING.md.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -18,8 +16,7 @@ fi
 
 set_json_version() {
   local file="$1"
-  # Only the top-level "version" field (the first match), so nested
-  # dependency version strings elsewhere in the file are left alone.
+  # Only the top-level "version" (first match); nested dependency versions are left alone.
   perl -0pi -e 's/("version":\s*")[^"]*(")/${1}'"$VERSION"'${2}/' "$file"
 }
 

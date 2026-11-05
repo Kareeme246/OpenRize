@@ -8,10 +8,8 @@ function overlap(entry: TimeEntry, start: number, end: number): number {
   );
 }
 
-/** What the Analyze > Timesheets matrix puts on its row axis. */
 export type SheetRows = "project" | "category";
 
-/** The filter value for "No client", "No project", and "Uncategorized". */
 export const NONE = "none";
 
 export function hasTimesheetFilters(filters: TimesheetFilters): boolean {
@@ -26,7 +24,6 @@ function matches(list: string[] | undefined, id: string | undefined): boolean {
   return !list?.length || list.includes(id ?? NONE);
 }
 
-/** Entries every active filter admits; a project's client comes from `clientOf`. */
 export function filterEntries(
   entries: TimeEntry[],
   filters: TimesheetFilters,
@@ -44,11 +41,9 @@ export function filterEntries(
   );
 }
 
-/** One cell: its time, and how much of it still waits on review. */
 export interface SheetCell {
   ms: number;
   reviewMs: number;
-  /** Entries overlapping the cell that wait on review. */
   review: number;
 }
 
@@ -57,9 +52,7 @@ export interface SheetRow {
   key: string;
   days: SheetCell[];
   total: SheetCell;
-  /** Entries in the row, oldest first. */
   entries: TimeEntry[];
-  /** The row broken down by the other dimension (its expanded view). */
   children: SheetRow[];
 }
 
@@ -99,7 +92,6 @@ function builder(key: string, width: number): Builder {
   };
 }
 
-/** Adds the entry's time to each day it overlaps. */
 function add(
   target: Builder,
   entry: TimeEntry,
@@ -135,13 +127,9 @@ function byTotal(a: Builder, b: Builder): number {
 }
 
 /**
- * The timesheet matrix: rows of projects or of categories, one cell per
- * bucket between `edges`, with row, group, and column totals. With
- * `clientOf`, project rows group under their client; without it every row
- * sits in one `all` group. Every entry lands in exactly one row, so the footer matches
- * the tracked time; entries on no project or category get a `NONE` row.
- * An entry spanning midnight counts in each day's review count but once in
- * a total's.
+ * Timesheet matrix: a row per project or category, a cell per bucket between
+ * `edges`. Every entry lands in exactly one row (`NONE` if unset); a midnight-
+ * spanning entry counts in each day's review count but once in a total.
  */
 export function buildSheet(
   entries: TimeEntry[],

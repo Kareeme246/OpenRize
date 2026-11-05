@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Single entry point for lint/format/typecheck/clippy. Agents and humans
-# should run this (not ad hoc biome/cargo invocations) before calling a task
-# done. Pass --fix to apply safe auto-fixes instead of just checking.
+# Single entry point for lint/format/typecheck/clippy; run it, not ad hoc biome/cargo. --fix applies
+# safe auto-fixes.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 

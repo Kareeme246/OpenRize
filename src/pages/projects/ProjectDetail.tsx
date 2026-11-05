@@ -63,7 +63,6 @@ interface ProjectDetailProps {
   catalog: Catalog;
   onBack: () => void;
   onEdit: () => void;
-  /** Start an invoice filled with this project's ready-to-bill time. */
   onInvoice: () => void;
   onChanged: () => void;
 }
@@ -77,11 +76,6 @@ interface DetailData {
   rules: ProjectRule[];
 }
 
-/**
- * One project: totals, time by category and by week, recent entries (which
- * open the review panel), the apps and rules that feed it, and the
- * Complete / Archive / Delete actions.
- */
 /** What a status change did, for its toast. */
 const STATUS_DONE: Record<string, string> = {
   completed: "marked complete",

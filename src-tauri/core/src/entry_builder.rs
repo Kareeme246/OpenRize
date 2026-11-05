@@ -4,10 +4,10 @@ use serde::{Deserialize, Serialize};
 
 /// Inactivity longer than this ends a session; anything up to it is a short
 /// break inside it.
-pub const SHORT_BREAK_THRESHOLD_MS: u64 = 5 * 60 * 1000; // 5 min
+pub const SHORT_BREAK_THRESHOLD_MS: u64 = 5 * 60 * 1000;
 /// A finished session shorter than this is not worth tracking on its own (a
 /// nudged mouse, a glance at a notification).
-pub const MIN_SESSION_MS: u64 = 5 * 60 * 1000; // 5 min
+pub const MIN_SESSION_MS: u64 = 5 * 60 * 1000;
 
 #[derive(Debug, Clone)]
 pub struct EntrySettings {
@@ -60,35 +60,9 @@ pub struct BuiltTimeEntry {
     pub segment_ids: Vec<i64>,
 }
 
-/// Pure entry builder: folds raw activity segments into sessions, one
-/// reviewable time entry per session.
-///
-/// Rules:
-/// 1. A session is one continuous stretch of activity, whatever apps it
-///    moves through. Only inactivity splits it: a gap longer than
-///    `short_break_threshold_ms` (5 min) between one activity segment and
-///    the next, whether the gap is an idle or manual break or time nothing
-///    was captured, ends the session. Break segments carry no work, so the
-///    gap is measured between activity segments, and the session spans the
-///    whole wall-clock range, short gaps included.
-/// 2. The last session stays `building` while it is live (a segment is still
-///    open, or the last one ended no more than the threshold ago). Everything
-///    before it has closed and is `pending`, which is when it gets
-///    categorized: once per session.
-/// 3. A closed session shorter than `min_duration_ms` (5 min) is dropped
-///    rather than becoming an entry of its own. Zero-length segments (an open
-///    segment the app could not close before it quit) carry no time and are
-///    ignored.
-/// 4. Frozen entries are preserved and never altered or re-segmented, and
-///    their segments stay out of the build. Callers freeze every entry that
-///    has closed (so its suggestion and any edits stay attached to a stable
-///    id), plus ones the user deleted, whose unclaimed time must stay
-///    unassigned rather than be rebuilt into a new entry. A deleted entry
-///    never takes a segment that another entry owns: only the user's own
-///    deletions leave these tombstones, and they must not eat live time.
-/// 5. Ids are stable across rebuilds: an entry keeps the id its segments were
-///    linked to, so re-running the builder updates the open entry in place
-///    instead of minting a duplicate.
+/// Folds activity segments into sessions, a reviewable entry each. Only a gap over the short-break
+/// threshold splits; the live last session is `building`, closed ones `pending`, ones under the
+/// minimum are dropped. Frozen entries (kept or user-deleted) are never rebuilt: ids stay stable.
 pub fn build_entries(
     segments: &[SegmentInput],
     frozen_entries: &[BuiltTimeEntry],
@@ -159,16 +133,14 @@ pub fn build_entries(
     results
 }
 
-/// Whether a kept entry holds any of the time from `from` to `to`. A session
-/// never runs through one: the entry owns those minutes, so the session ends
-/// before it and the next begins after it.
+/// Whether a kept entry holds any of the time from `from` to `to`; a session never runs through
+/// one.
 fn holds_time_between(frozen_entries: &[BuiltTimeEntry], from: u64, to: u64) -> bool {
     frozen_entries
         .iter()
         .any(|fe| fe.deleted_at.is_none() && fe.started_at < to && fe.ended_at > from)
 }
 
-/// Adds a finished session as a pending entry, unless it is too short to be work.
 fn push_closed(
     results: &mut Vec<BuiltTimeEntry>,
     session: &[&SegmentInput],
@@ -187,10 +159,9 @@ fn push_closed(
     }
 }
 
-/// Whether a segment is already accounted for by a frozen entry: linked to
-/// it, or inside its span. Inside a deleted entry's span only unlinked
-/// segments count (its time must stay unassigned, but a segment some other
-/// entry owns is that entry's); inside a kept one, unlinked ones too.
+/// Whether a frozen entry already accounts for a segment: linked to it, or inside its span. Inside
+/// a deleted entry's span only unlinked segments count (a segment another entry owns is that
+/// entry's).
 fn belongs_to_frozen(
     seg: &SegmentInput,
     frozen_ids: &HashSet<&str>,
@@ -256,7 +227,6 @@ fn create_entry_from_segments(
     }
 }
 
-/// The name an ongoing session carries until it closes.
 pub const UNTITLED_SESSION: &str = "Untitled session";
 
 /// The template description a closed session gets: its dominant app and that
@@ -281,9 +251,8 @@ fn generate_description(segments: &[&SegmentInput]) -> String {
         // What a private window showed is not written into the entry, which
         // outlives the segment's detail.
         let clean_title = if seg.private { "" } else { seg.title.trim() };
-        // A title equal to the app name is uninformative in a description
-        // like "Slack: Slack", so it's dropped; titles are capped at 3 per
-        // app to keep the generated description short.
+        // A title equal to the app name is dropped as uninformative; titles are capped at 3 per
+        // app.
         if !clean_title.is_empty() && clean_title != seg.app {
             let list = titles_by_app.entry(seg.app.clone()).or_default();
             if !list.contains(&clean_title.to_string()) && list.len() < 3 {
@@ -364,7 +333,6 @@ mod tests {
             [(0, 6 * MIN), (6 * MIN, 8 * MIN), (8 * MIN, 14 * MIN)]
         );
 
-        // Without it, the same gap is one session.
         let built = build_entries(&segments, &[], &EntrySettings::default(), 30 * MIN);
         assert_eq!(built.len(), 1);
     }
@@ -379,7 +347,6 @@ mod tests {
         assert_eq!(built[0].id, "manual");
     }
 
-    /// An hour of work hopping between apps every 20 seconds.
     fn busy_hour() -> Vec<SegmentInput> {
         let apps = ["Code", "Terminal", "Safari", "Slack"];
         (0..180)
@@ -516,7 +483,6 @@ mod tests {
     fn a_session_under_five_minutes_is_not_an_entry() {
         let segs = vec![
             make_seg(1, "Code", "main.rs", "activity", 0, 10 * MIN),
-            // A nudged mouse between two idle stretches.
             make_seg(
                 2,
                 "Finder",
@@ -525,9 +491,7 @@ mod tests {
                 20 * MIN,
                 20 * MIN + 20_000,
             ),
-            // A few minutes of real use, still under the floor.
             make_seg(3, "Slack", "chat", "activity", 30 * MIN, 34 * MIN),
-            // Exactly the floor is kept.
             make_seg(4, "Code", "main.rs", "activity", 45 * MIN, 50 * MIN),
         ];
         let entries = build_entries(&segs, &[], &EntrySettings::default(), 60 * MIN);

@@ -15,18 +15,13 @@ import {
 } from "./manifest.ts";
 import type { ObjectStore } from "./store.ts";
 
-/** A refusal the operator can act on; the CLI prints it without a stack trace. */
 export class PublishError extends Error {}
 
 export interface PublishOptions {
   version: string;
-  /** Directory of installers named like the GitHub release assets. */
   dir: string;
-  /** Upload and verify the version but leave `current.json` alone. */
   noCurrent?: boolean;
-  /** Delete the previous release's objects once the new one is current. */
   purge?: boolean;
-  /** Make an already published version current; uploads nothing. */
   promote?: boolean;
   log?: (line: string) => void;
   warn?: (line: string) => void;
@@ -34,14 +29,12 @@ export interface PublishOptions {
 }
 
 export interface PublishResult {
-  /** Previous-release objects --purge declined or failed to delete. */
   purgeRefused: string[];
 }
 
 const MIN_INSTALLER_BYTES = 1_000_000;
 const IMMUTABLE = "public, max-age=31536000, immutable";
 
-/** The installer file names GitHub release assets carry, per target. */
 export function releaseAssetNames(
   version: string,
 ): Record<OpenRizeTarget, string> {
@@ -56,7 +49,6 @@ const sha256 = (bytes: Uint8Array) =>
 const compare = (a: string, b: string) =>
   a.localeCompare(b, undefined, { numeric: true });
 
-/** Installer sanity checks that catch a wrong or truncated file before it goes public. */
 function checkInstaller(
   target: OpenRizeTarget,
   path: string,
@@ -81,8 +73,8 @@ function checkInstaller(
 }
 
 /**
- * Publish a release. Order matters: installers are uploaded and read back first, then the version
- * manifest, and `current.json` last, so a visitor never sees a build that is not there.
+ * Order matters: installers first, then the manifest, `current.json` last, so
+ * no visitor sees a missing build.
  */
 export async function publishRelease(
   store: ObjectStore,
@@ -137,7 +129,6 @@ export async function publishRelease(
     );
   }
 
-  // 1. Locate and validate the installers.
   const names = releaseAssetNames(version);
   const builds: ReleaseManifest["builds"] = {};
   const files: Partial<Record<OpenRizeTarget, Uint8Array>> = {};
@@ -162,7 +153,6 @@ export async function publishRelease(
     );
   }
 
-  // 2. Upload each installer and read it back before anything advertises it.
   for (const target of OPENRIZE_TARGETS) {
     const build = builds[target];
     if (!build) continue;
@@ -181,7 +171,6 @@ export async function publishRelease(
     );
   }
 
-  // 3. Version manifest, then 4. current pointer.
   const manifest = parseManifest({
     schema: 1,
     version,

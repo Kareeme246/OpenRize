@@ -30,7 +30,6 @@ fn explicitly_started_break_survives_paused_capture_and_background_awake_signals
         store.tick(background_sample(), now - 2_000, now).unwrap();
         let live = store.live_state(now);
         assert_eq!(live.segment_info().unwrap().id, id);
-        // No display-awake assertion can masquerade as fresh user input.
         assert_eq!(live.last_idle_ms, now - 2_000);
     }
     assert!(!store.capture_enabled);

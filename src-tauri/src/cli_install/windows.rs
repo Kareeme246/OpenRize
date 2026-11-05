@@ -5,10 +5,8 @@
 use std::path::Path;
 
 pub fn install_bundled_cli() {
-    // Development and drive builds must never write the developer's real PATH,
-    // or every `pnpm dev:drive:win` session would add its build folder. Debug
-    // builds are skipped outright; a release build run from a Cargo `target`
-    // folder is not an installed app and is skipped too.
+    // Dev and drive builds must never write the developer's real PATH: skip
+    // debug builds and release builds run from a Cargo `target` folder.
     if cfg!(debug_assertions) {
         return;
     }
@@ -37,7 +35,6 @@ pub fn install_bundled_cli() {
     }
 }
 
-/// False for a build run from a Cargo `target` folder.
 fn is_installed(exe: &Path) -> bool {
     !exe.components()
         .any(|part| part.as_os_str().eq_ignore_ascii_case("target"))

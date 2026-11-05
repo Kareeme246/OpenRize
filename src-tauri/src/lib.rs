@@ -29,53 +29,36 @@ use tauri::{Manager, RunEvent, WindowEvent};
 
 use settings::CloseBehavior;
 
-/// Emitted after every timer mutation so the frontend can adopt the snapshot
-/// Rust already has — the tray can change state without the window asking.
+/// The tray can change timer state without the window asking.
 pub const EVENT_TIMERS_CHANGED: &str = "timers-changed";
 
-/// Emitted after every stopwatch section change, with every section, so a
-/// change from `rize` repaints the open Stopwatches page.
+/// Carries every section.
 pub const EVENT_TIMER_SECTIONS_CHANGED: &str = "timer-sections-changed";
 
-/// Emitted on every structural activity change (a segment opened or closed)
-/// and on focus-regained reconciliation. Carries the full `ActivitySnapshot`
-/// — see activity.rs's module doc for the push-model rationale.
+/// Carries the full `ActivitySnapshot`.
 pub const EVENT_ACTIVITY_CHANGED: &str = "activity-changed";
 
-/// Emitted at 1Hz while OpenRize is focused, or every 30s while it isn't and
-/// nothing structural has changed. Carries the lighter `ActivityTick`.
+/// 1Hz while focused, else every 30s; carries `ActivityTick`.
 pub const EVENT_ACTIVITY_TICK: &str = "activity-tick";
 
-/// Emitted whenever preferences change, so any open view (and the tray) can
-/// re-read them without polling.
 pub const EVENT_SETTINGS_CHANGED: &str = "settings-changed";
 
-/// Emitted whenever time entries are modified or rebuilt.
 pub const EVENT_ENTRIES_CHANGED: &str = "entries-changed";
 
-/// Emitted after the accounts list changes without a restart (a rename or a
-/// delete), so every open view re-reads it.
 pub const EVENT_ACCOUNTS_CHANGED: &str = "accounts-changed";
 
-/// Emitted when what the app knows about its Accessibility access changes.
 /// Carries a `permissions::AccessibilityState`.
 pub const EVENT_PERMISSIONS_CHANGED: &str = "permissions-changed";
 
-/// Emitted when whether the first-run permissions screen should show changes
-/// without a restart (a developer re-run or reset, see dev_tools.rs). No payload.
 pub const EVENT_ONBOARDING_CHANGED: &str = "onboarding-changed";
 
-/// Sent to the main window when the break reminder asks for its settings.
 pub const EVENT_OPEN_BREAK_SETTINGS: &str = "open-break-settings";
 
-/// Sent to the main window when the Pulse panel's review button asks it to
-/// open today's review queue.
 pub const EVENT_OPEN_REVIEW: &str = "open-review";
 
 pub use openrize_core::state::AppState;
 
-/// Launched by `rize app start`: run in the menu bar with no window until
-/// one is asked for.
+/// Run in the menu bar with no window until one is asked for.
 const BACKGROUND_ARG: &str = "--background";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -106,17 +89,14 @@ pub fn run() {
                 caption::prepare(&main);
             }
             login_item::refresh();
-            // Everything stays on this machine: Local AppData on Windows. Older
-            // builds used Roaming (`app_data_dir`), so existing data is moved
-            // across first, before any store or lock. On macOS and Linux both
-            // are the same folder and this changes nothing.
+            // Local AppData on Windows; older builds used Roaming, so existing data is
+            // moved across first, before any store or lock.
             let root = openrize_core::data_location::adopt(
                 &app.path().app_data_dir()?,
                 &app.path().app_local_data_dir()?,
             );
             std::fs::create_dir_all(&root)?;
-            // Before any store opens: repairs the account list, finishes a
-            // requested move of existing data, and says which folder to open.
+            // Before any store opens: repairs the account list and finishes a requested move.
             let launch = openrize_core::accounts::launch(&root);
             let dir = launch.resolved.dir.clone();
             let handoff = launch.handoff.clone();
@@ -155,8 +135,7 @@ pub fn run() {
             capture::register_sleep_listeners(app.handle().clone());
             spawn_retention_sweeper(app.handle().clone());
             updater::spawn_scheduler(app.handle().clone());
-            // One sweep on startup, so a long-dormant install is cleaned before
-            // the first hour-long wait elapses.
+            // One sweep on startup so a dormant install is cleaned before the first wait.
             if let Err(error) = commands::sweep_retention(app.handle()) {
                 eprintln!("retention sweep failed: {error}");
             }
@@ -186,7 +165,6 @@ pub fn run() {
                 api.prevent_close();
                 let _ = window.hide();
             }
-            // The glyph colour follows the theme on Windows.
             WindowEvent::ThemeChanged(_) => tray::restyle(window.app_handle()),
             // Closing is a preference: either end the app, or hide to the menu
             // bar so a background tracker keeps running. With the tray off a
@@ -201,10 +179,8 @@ pub fn run() {
                     app.exit(0);
                 }
             }
-            // Drives the activity push cadence (1Hz while any OpenRize window
-            // is focused / 30s otherwise — see activity.rs). Recomputed from
-            // every window, so the order of one window's blur and the next
-            // one's focus does not matter.
+            // 1Hz while any OpenRize window is focused, else 30s. Recomputed from every
+            // window so blur/focus ordering across windows does not matter.
             WindowEvent::Focused(is_focused) => {
                 let app = window.app_handle();
                 if !*is_focused && window.label() == pulse::LABEL {
@@ -286,7 +262,6 @@ pub fn run() {
             commands::create_client,
             commands::update_client,
             commands::delete_client,
-            // Local invoice lifecycle.
             commands::list_invoices,
             commands::get_invoice,
             commands::list_billable_entries,
@@ -376,19 +351,16 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building OpenRize")
         .run(|app, event| match event {
-            // macOS: clicking the dock icon with no visible window reopens it.
             #[cfg(target_os = "macos")]
             RunEvent::Reopen { .. } => tray::show_main_window(app),
-            // Flush open state at the real quit time.
             RunEvent::Exit => flush_on_exit(app),
             _ => {}
         });
 }
 
-/// Ends an open break and closes the open activity segment at the real quit
-/// time. Left open, the next launch can only close it at its own start,
-/// losing its time. Shared with the Windows updater, which exits the process
-/// without a `RunEvent::Exit`.
+/// Ends an open break and closes the activity segment at the real quit time, or
+/// the next launch can only close it at its own start. Shared with the Windows
+/// updater, which exits without a `RunEvent::Exit`.
 pub(crate) fn flush_on_exit(app: &tauri::AppHandle) {
     breaks::on_exit(app);
     if let Ok(mut store) = app.state::<AppState>().activity.lock() {
@@ -396,8 +368,6 @@ pub(crate) fn flush_on_exit(app: &tauri::AppHandle) {
     }
 }
 
-/// Deletes activity history past the retention window once an hour. Startup
-/// does the first pass; this keeps a process open.
 fn spawn_retention_sweeper(app: tauri::AppHandle) {
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_secs(3600));

@@ -1,24 +1,11 @@
 #!/usr/bin/env bash
-# Installs the built NSIS installer on this Windows machine, as a user would,
-# and checks what its hooks promise: the app and rize land in the install
-# folder, rize is on the user PATH (once, even after an in-app style update)
-# and the uninstaller takes the PATH entry and the login item away again.
-#
-# The Release workflow's windows job runs this after `pnpm tauri build
-# --bundles nsis`, on a disposable runner whose registry is ours to use. It is
-# a script rather than inline YAML so the same gate can be run on its own.
-#
-# Every program it starts is bounded: a hang must name the program that hung
-# and fail in seconds, never sit in the job timeout with no output. The
-# arguments each program gets are written into a generated PowerShell file
-# rather than passed as arguments or environment values, because Git Bash
-# rewrites anything that looks like a POSIX path - it turns the installer's
-# silent switch `/S` into `S:/`, which starts a wizard nobody can click.
+# Installs the NSIS installer as a user would; checks app and rize land in the install folder, rize
+# is on PATH once, and uninstall cleans up. Every program is bounded so a hang names the culprit.
+# Arguments go in a generated PowerShell file: Git Bash mangles POSIX-looking ones (`/S`).
 set -euo pipefail
 
 VERSION="${VERSION:?VERSION (the version being built) must be set}"
 
-# Long enough for a slow runner, short enough that a hang is obvious.
 RUN_LIMIT=120
 INSTALL_LIMIT=240
 
@@ -31,11 +18,9 @@ fail() {
   echo "::error title=Windows installer smoke test::$*"
   exit 1
 }
-# A progress marker before each action, so the log says where a hang happened.
 step() {
   printf -- '--- [%s] %s\n' "$(date -u +%H:%M:%SZ)" "$*"
 }
-# A PowerShell single-quoted string literal.
 ps_string() {
   printf "'%s'" "${1//\'/\'\'}"
 }
@@ -46,11 +31,8 @@ MSYS_NT* | MINGW*) ;;
 esac
 
 # run_bounded <windows exe> <arguments> <label> [limit]
-#
-# Starts the program, waits at most LIMIT seconds for it, and leaves its stdout
-# in RESPONSE_OUT and its status in RESPONSE_STATUS. On a timeout it prints
-# every process in the started program's tree - so the log names the culprit
-# instead of going quiet - kills that tree, and returns 124.
+# Leaves stdout in RESPONSE_OUT, status in RESPONSE_STATUS. On timeout prints the process tree,
+# kills it, returns 124.
 run_bounded() {
   local exe=$1 args=${2-} label=$3 limit=${4-$RUN_LIMIT}
   local script="$TMP_POSIX/run$RUNS.ps1"
@@ -117,7 +99,6 @@ user_path() {
   MSYS_NO_PATHCONV=1 powershell.exe -NoProfile -NonInteractive -Command \
     "[Environment]::GetEnvironmentVariable('Path', 'User')" | tr -d '\r'
 }
-# How many PATH entries are the folder, ignoring case and a trailing backslash.
 path_entries() {
   user_path | tr ';' '\n' | sed 's/[\]$//' | grep -Fxic "$1" || true
 }
@@ -148,7 +129,6 @@ step "checking the user PATH"
 [[ $(path_entries "$dir_win") == 1 ]] ||
   fail "$dir_win is not on the user PATH exactly once after install"
 
-# An in-app update runs the installer again over the install, with /UPDATE.
 run_bounded "$installer" "/S /UPDATE" "silent update" "$INSTALL_LIMIT" ||
   fail "silent update exited with $RESPONSE_STATUS"
 [[ -f "$dir/rize.exe" ]] || fail "rize.exe is missing after the update"

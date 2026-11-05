@@ -1,17 +1,7 @@
 #!/usr/bin/env bash
-# Shoots the OpenRize window in dark and light for offlinestudios.net, from the seeded day in
-# seed.json. macOS only (it drives the window with System Events and screencapture) and it
-# needs ImageMagick (`magick`) and `sqlite3`.
-#
-#   docs/website-screenshots/capture.sh [checkout] [out-dir]
-#
-# checkout  the OpenRize checkout to run, at the commit the seed was designed for (see README.md).
-#           Defaults to the repo this script lives in.
-# out-dir   where openrize-dark.png and openrize-light.png go. Defaults to ./website-screenshots-out.
-#
-# Nothing here touches your real OpenRize: the app runs under its own identifier (its own
-# database) and its own XDG_CONFIG_HOME (its own settings.json, which is where theme lives).
-# The checkout's index.html is patched to freeze the clock and restored on exit.
+# Dark and light shots for offlinestudios.net from seed.json's day. macOS; needs magick and sqlite3.
+# Usage: capture.sh [checkout] [out-dir] (checkout: commit the seed fits, default this repo).
+# Own identifier and XDG_CONFIG_HOME; index.html is patched to freeze the clock, restored on exit.
 set -euo pipefail
 set -m
 
@@ -92,7 +82,6 @@ if [[ ! -f "$DATA_DIR/activity.db" ]]; then
 fi
 node "$HERE/seed.mjs" "$DATA_DIR/activity.db"
 
-# 2. One shot per theme.
 for THEME in dark light; do
   launch "$THEME"
   sleep 8 # let the webview paint and the Calendar load

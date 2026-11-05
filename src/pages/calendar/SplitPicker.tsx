@@ -11,14 +11,11 @@ import {
 const MINUTE = 60_000;
 
 interface SplitPickerProps {
-  /** The entry block's box, as `place` gave it. */
   top: number;
   height: number;
   narrow?: boolean;
   startedAt: number;
-  /** The entry's end; for the live entry, now. */
   endsAt: number;
-  /** Where the cut starts out (the smart split point). */
   initialAt: number;
   timeline: Timeline;
   dayStart: number;
@@ -27,10 +24,8 @@ interface SplitPickerProps {
 }
 
 /**
- * Split mode on the selected entry: a cut line that follows the pointer over
- * the block, snapped to the minute, and a click (or Enter) that takes it to
- * the split dialog. ↑/↓ nudge it a minute (⇧ for five); Esc, handled by the
- * review sheet, leaves split mode.
+ * Split mode: a cut line following the pointer, snapped to the minute; click or
+ * Enter takes it on.
  */
 export function SplitPicker({
   top,
@@ -64,7 +59,6 @@ export function SplitPicker({
         top,
     ),
   );
-  /** Moves the cut under the pointer; returns where it landed. */
   const follow = (clientY: number): number => {
     const box = ref.current?.getBoundingClientRect();
     if (!box) return at;

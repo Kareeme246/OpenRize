@@ -1,14 +1,12 @@
 import { hasPrimaryModifier } from "./platform.ts";
 
 /**
- * The entry review panel's window-level keys. Merging deliberately has none:
- * it joins an entry to a neighbour on one side, which a bare key cannot say.
- * The panel itself owns 1-3, C, P and E.
+ * The entry review panel's window-level keys. Merging has none: it joins a
+ * neighbour on one side, which a bare key cannot say.
  */
 
 export type EntryShortcut = "accept" | "reject" | "split" | "close";
 
-/** The parts of a `KeyboardEvent` a shortcut reads. */
 export interface ShortcutKey {
   key: string;
   metaKey: boolean;
@@ -16,7 +14,6 @@ export interface ShortcutKey {
   altKey: boolean;
 }
 
-/** What a key press asks the open entry to do, if anything. */
 export function entryShortcut(event: ShortcutKey): EntryShortcut | undefined {
   const command = hasPrimaryModifier(event);
   if (event.key === "Escape") return "close";

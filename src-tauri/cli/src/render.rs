@@ -10,7 +10,6 @@ use crate::{
     TrackCommand,
 };
 
-/// Keys that carry window titles or URLs, left out unless `--full`.
 const PRIVATE_KEYS: [&str; 3] = ["title", "titles", "url"];
 
 /// The muted categorical palette in `src/lib/palette.ts`; a new project or
@@ -30,7 +29,6 @@ pub fn color_for(name: &str) -> String {
     PALETTE[hash as usize % PALETTE.len()].to_string()
 }
 
-/// Removes window titles and URLs.
 pub fn redact(value: &mut Value) {
     match value {
         Value::Object(fields) => {
@@ -509,7 +507,6 @@ fn timers(data: &Value) {
     }
 }
 
-/// Each tag with how many of its timers are running and their combined time.
 fn tags(data: &Value) {
     let mut totals: Vec<(String, usize, usize, u64)> = Vec::new();
     for timer in data.as_array().into_iter().flatten() {
@@ -545,7 +542,6 @@ fn tags(data: &Value) {
     table(&["TAG", "TIMERS", "RUNNING", "TOTAL"], rows);
 }
 
-/// Each section, in page order, with the timers under it.
 fn sections(data: &Value) {
     let timers = data["timers"].as_array().map(Vec::as_slice).unwrap_or(&[]);
     let rows: Vec<Vec<String>> = data["sections"]

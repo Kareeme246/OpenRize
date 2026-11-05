@@ -19,11 +19,8 @@ import type { PermissionInfo } from "../lib/types";
 const AUTOMATION_ID = "automation";
 
 /**
- * The first screen a Mac user sees: the permissions OpenRize can use, each
- * explained once. Accessibility is recommended and Automation optional, and
- * neither gates Continue, so skipping is the normal path. When a grant needs
- * the app restarted, the same button becomes Restart. See `onboardingStep` for
- * when it comes up and `useOnboarding` for the state behind it.
+ * First-run permissions screen: neither permission gates Continue; a grant
+ * needing a restart turns it into Restart.
  */
 export function Onboarding({
   step,

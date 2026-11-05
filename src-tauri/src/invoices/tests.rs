@@ -127,17 +127,15 @@ fn lists_only_approved_billable_uninvoiced_time_for_the_client() {
     let found = billable_entries(&conn, "c", 0, 10 * HOUR as u64, None).unwrap();
     let ids: Vec<_> = found.iter().map(|e| e.entry_id.as_str()).collect();
     assert_eq!(ids, ["e1", "e2"]);
-    assert_eq!(found[0].rate_cents, Some(10_000)); // client fallback
-    assert_eq!(found[1].rate_cents, Some(15_000)); // project rate
+    assert_eq!(found[0].rate_cents, Some(10_000));
+    assert_eq!(found[1].rate_cents, Some(15_000));
     assert_eq!(found[1].quantity_hundredths, 150);
     assert_eq!(found[1].amount_cents, Some(22_500));
     assert!(billable_entries(&conn, "c", 5, 5, None).is_err());
 }
 
-/// Why invoices need no opt-in against double billing: billable time is
-/// approved time, approved time is never taken by another entry, and a new
-/// entry can only gain minutes by taking them from pending ones. So however
-/// the entries were written, no two billable entries share a minute.
+/// Billable time is approved time, which no other entry can take, and a new entry
+/// only gains minutes from pending ones: no two billable entries share a minute.
 #[test]
 fn billable_time_written_through_the_store_never_overlaps() {
     use openrize_core::activity::{ActivityStore, APPROVED_OVERLAP};
@@ -155,7 +153,6 @@ fn billable_time_written_through_the_store_never_overlaps() {
         review,
     };
 
-    // e1 (0-60) and e2 (120-210) are approved. Nothing can overlap them.
     for (from, to) in [(30, 90), (0, 60), (100, 130), (150, 160), (0, 300)] {
         assert_eq!(
             store
@@ -171,8 +168,6 @@ fn billable_time_written_through_the_store_never_overlaps() {
         );
     }
 
-    // Pending time between them gives way to whatever claims it, whether
-    // that is added or edited, and the claimer is what gets billed.
     let pending = store.create_manual_entry(manual(60, 120, true), 1).unwrap();
     store
         .create_manual_entry(manual(80, 100, false), 1)
@@ -188,7 +183,6 @@ fn billable_time_written_through_the_store_never_overlaps() {
             1,
         )
         .unwrap();
-    // Approved entries cannot be edited into each other either.
     store
         .approve_time_entries(std::slice::from_ref(&wide.id), "user", 1)
         .unwrap();
@@ -251,7 +245,6 @@ fn hybrid_draft_totals_reserve_time_and_release_it_on_edit_and_delete() {
         5,
     )
     .unwrap();
-    // 2,000.00 retainer + 1h x 100 + 1.5h x 150 = 2,325.00
     assert_eq!(saved.summary.total_cents, 232_500);
     assert_eq!(saved.summary.due_date.as_deref(), Some("2026-10-29"));
     assert_eq!(saved.lines.len(), 3);
@@ -261,16 +254,13 @@ fn hybrid_draft_totals_reserve_time_and_release_it_on_edit_and_delete() {
         Some(saved.summary.id.as_str())
     );
 
-    // Another draft cannot take reserved time.
     assert!(save_draft(&mut conn, &draft(None, vec![time("e1")]), 6).is_err());
-    // Nor can a tracked entry appear twice.
     assert!(quote(
         &conn,
         &draft(Some(&saved.summary.id), vec![time("e1"), time("e1")])
     )
     .is_err());
 
-    // Dropping a line releases exactly that entry.
     let edited = save_draft(
         &mut conn,
         &draft(Some(&saved.summary.id), vec![retainer(200_000), time("e2")]),
@@ -281,7 +271,6 @@ fn hybrid_draft_totals_reserve_time_and_release_it_on_edit_and_delete() {
     assert_eq!(linked(&conn, "e1"), None);
     assert!(linked(&conn, "e2").is_some());
 
-    // Reserved time is locked against edits.
     assert!(conn
         .execute("UPDATE time_entries SET ended_at = 10 WHERE id = 'e2'", [])
         .is_err());
@@ -301,7 +290,6 @@ fn a_time_line_keeps_its_entry_but_takes_an_edited_rate_and_description() {
     assert_eq!(saved.lines[0].rate_cents, 12_345);
     assert_eq!(saved.lines[0].description, "Interface design");
     assert_eq!(saved.lines[0].amount_cents, 12_345);
-    // The snapshot survives a later rate change.
     conn.execute("UPDATE clients SET default_rate = 999 WHERE id = 'c'", [])
         .unwrap();
     assert_eq!(
@@ -333,7 +321,6 @@ fn validation_rejects_bad_drafts() {
     assert!(bad(&|d| d.from_name = "x".repeat(121)));
     assert!(bad(&|d| d.from_address = "x\n".repeat(9)));
     assert!(bad(&|d| d.from_email = Some("x".repeat(121))));
-    // Time from another client's project, unapproved or unbillable time.
     entry(
         &conn,
         "elsewhere",
@@ -347,12 +334,10 @@ fn validation_rejects_bad_drafts() {
     assert!(bad(&|d| d.lines = vec![time("elsewhere")]));
     assert!(bad(&|d| d.lines = vec![time("pending")]));
     assert!(bad(&|d| d.lines = vec![time("missing")]));
-    // A missing rate is a clear error, not a $0 line.
     conn.execute("UPDATE clients SET default_rate = NULL WHERE id = 'c'", [])
         .unwrap();
     let error = quote(&conn, &draft(None, vec![time("e1")])).unwrap_err();
     assert!(error.contains("hourly rate"), "{error}");
-    // Editing a finalized invoice is refused.
     conn.execute("UPDATE clients SET default_rate = 100 WHERE id = 'c'", [])
         .unwrap();
     let saved = save_draft(&mut conn, &draft(None, vec![retainer(1000)]), 1).unwrap();
@@ -400,7 +385,6 @@ fn finalize_numbers_invoices_by_year_and_archives_the_pdf() {
         Some("INV-2027-0001")
     );
 
-    // Finalized invoices are frozen: no delete, no re-finalize, PDF bytes unchanged.
     assert!(delete_draft(&mut conn, &first.summary.id).is_err());
     assert!(finalize(&mut conn, &first.summary.id, 15).is_err());
     assert_eq!(stored_pdf(&conn, &first.summary.id).unwrap(), bytes);
@@ -426,7 +410,6 @@ fn finalize_failure_consumes_no_number_and_leaves_the_draft_intact() {
     )
     .unwrap();
     assert!(finalize(&mut conn, &zero.summary.id, 4).is_err());
-    // A number sitting in the way is skipped, never reused.
     conn.execute(
         "UPDATE invoices SET number = 'INV-2026-0001' WHERE id = ?1",
         [&zero.summary.id],
@@ -448,19 +431,18 @@ fn paid_and_void_transitions_release_time_only_on_void() {
     let mut conn = db();
     let saved = save_draft(&mut conn, &draft(None, vec![time("e1")]), 1).unwrap();
     let id = saved.summary.id.clone();
-    assert!(set_paid(&conn, &id, true, 2).is_err()); // still a draft
+    assert!(set_paid(&conn, &id, true, 2).is_err());
     assert!(void(&mut conn, &id, 2).is_err());
     finalize(&mut conn, &id, 3).unwrap();
     set_paid(&conn, &id, true, 4).unwrap();
     assert_eq!(get(&conn, &id).unwrap().summary.paid_at, Some(4));
-    assert!(void(&mut conn, &id, 5).is_err()); // unpay first
+    assert!(void(&mut conn, &id, 5).is_err());
     set_paid(&conn, &id, false, 5).unwrap();
     assert!(linked(&conn, "e1").is_some());
     void(&mut conn, &id, 6).unwrap();
     assert_eq!(get(&conn, &id).unwrap().summary.status, "void");
     assert_eq!(linked(&conn, "e1"), None);
     assert!(stored_pdf(&conn, &id).is_ok());
-    // The freed entry can be invoiced again, and the void number is not reused.
     let again = save_draft(&mut conn, &draft(None, vec![time("e1")]), 7).unwrap();
     assert_eq!(
         finalize(&mut conn, &again.summary.id, 8)
@@ -476,13 +458,11 @@ fn paid_and_void_transitions_release_time_only_on_void() {
 fn delete_void_removes_voided_invoice_and_enforces_restrictions() {
     let mut conn = db();
 
-    // 1. Nonexistent invoice fails
     assert_eq!(
         delete_void(&mut conn, "does-not-exist").unwrap_err(),
         "Invoice not found"
     );
 
-    // 2. Draft invoice cannot be deleted via delete_void
     let draft_inv = save_draft(&mut conn, &draft(None, vec![time("e1")]), 1).unwrap();
     let draft_id = draft_inv.summary.id.clone();
     assert_eq!(
@@ -490,35 +470,29 @@ fn delete_void_removes_voided_invoice_and_enforces_restrictions() {
         "Only void invoices can be deleted"
     );
 
-    // 3. Open (finalized active) invoice cannot be deleted via delete_void
     finalize(&mut conn, &draft_id, 2).unwrap();
     assert_eq!(
         delete_void(&mut conn, &draft_id).unwrap_err(),
         "Only void invoices can be deleted"
     );
 
-    // 4. Paid invoice cannot be deleted via delete_void
     set_paid(&conn, &draft_id, true, 3).unwrap();
     assert_eq!(
         delete_void(&mut conn, &draft_id).unwrap_err(),
         "Only void invoices can be deleted"
     );
 
-    // 5. Unpay and void the invoice
     set_paid(&conn, &draft_id, false, 4).unwrap();
     void(&mut conn, &draft_id, 5).unwrap();
     assert_eq!(get(&conn, &draft_id).unwrap().summary.status, "void");
 
-    // delete_draft refuses to delete voided invoices
     assert_eq!(
         delete_draft(&mut conn, &draft_id).unwrap_err(),
         "Only draft invoices can be deleted"
     );
 
-    // 6. Successfully delete the voided invoice
     delete_void(&mut conn, &draft_id).unwrap();
 
-    // Invoice is now gone
     assert!(get(&conn, &draft_id).is_err());
     assert!(stored_pdf(&conn, &draft_id).is_err());
     let line_count: i64 = conn
@@ -530,10 +504,8 @@ fn delete_void_removes_voided_invoice_and_enforces_restrictions() {
         .unwrap();
     assert_eq!(line_count, 0);
 
-    // Time entry e1 is detached and still exists
     assert_eq!(linked(&conn, "e1"), None);
 
-    // Calling delete_void again on the deleted invoice fails
     assert_eq!(
         delete_void(&mut conn, &draft_id).unwrap_err(),
         "Invoice not found"
@@ -563,7 +535,6 @@ fn the_from_block_belongs_to_each_invoice_not_to_the_shared_settings() {
     let mut conn = db();
     set_profile(&mut conn, "Settings Name", "Settings Street");
 
-    // An invoice prints its own From, not the settings'.
     let mut custom = draft(None, vec![retainer(1000)]);
     custom.from_name = "Custom Studio".into();
     custom.from_address = "9 Elm St.\nSalem, OR".into();
@@ -579,7 +550,6 @@ fn the_from_block_belongs_to_each_invoice_not_to_the_shared_settings() {
     );
     assert!(render_draft(&conn, &custom).unwrap().starts_with(b"%PDF-"));
 
-    // Saving stores it; a later change to the settings leaves it alone.
     let saved = save_draft(&mut conn, &custom, 1).unwrap();
     set_profile(&mut conn, "Changed Name", "Changed Street");
     let reloaded = get(&conn, &saved.summary.id).unwrap();
@@ -588,14 +558,12 @@ fn the_from_block_belongs_to_each_invoice_not_to_the_shared_settings() {
     assert_eq!(reloaded.from_email.as_deref(), Some("hi@offline.test"));
     assert_eq!(reloaded.from_phone.as_deref(), Some("555-0100"));
 
-    // Editing the draft's From updates it.
     let mut edited = custom.clone();
     edited.id = Some(saved.summary.id.clone());
     edited.from_name = "Edited Studio".into();
     let resaved = save_draft(&mut conn, &edited, 2).unwrap();
     assert_eq!(resaved.from_name, "Edited Studio");
 
-    // Finalizing snapshots it, and it survives further settings changes.
     let done = finalize(&mut conn, &saved.summary.id, 3).unwrap();
     assert_eq!(done.from_name, "Edited Studio");
     let snapshot: String = conn
@@ -611,7 +579,6 @@ fn the_from_block_belongs_to_each_invoice_not_to_the_shared_settings() {
     assert_eq!(frozen.from_name, "Edited Studio");
     assert_eq!(frozen.from_address, "9 Elm St.\nSalem, OR");
 
-    // A draft with nothing in From still previews, with placeholders.
     let mut blank = draft(None, vec![retainer(1000)]);
     blank.from_name = String::new();
     blank.from_address = String::new();
@@ -721,8 +688,7 @@ fn page_count(pdf: &[u8]) -> usize {
         .count()
 }
 
-/// Renders the risky specimens. Set `OPENRIZE_INVOICE_SAMPLES` to a directory to
-/// keep the PDFs for visual inspection.
+/// Renders the risky specimens; set `OPENRIZE_INVOICE_SAMPLES` to keep the PDFs.
 #[test]
 fn renders_short_long_unicode_and_draft_specimens() {
     let short = pdf::render(&paper_fixture(

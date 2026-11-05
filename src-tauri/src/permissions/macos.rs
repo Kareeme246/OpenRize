@@ -14,10 +14,9 @@ fn check_accessibility() -> bool {
     unsafe { AXIsProcessTrusted() }
 }
 
-/// Asks the Accessibility service which app has focus. This is the question
-/// capture depends on, put to the system-wide element, which needs no
-/// particular app to be running or cooperative. A process that is not really
-/// trusted gets `kAXErrorAPIDisabled` here whatever the trust flag says.
+/// Asks the Accessibility service which app has focus, via the system-wide element, which needs no
+/// app to cooperate. A process not really trusted gets `kAXErrorAPIDisabled` whatever the flag
+/// says.
 fn probe() -> Probe {
     // SAFETY: the element is created here and released when the wrapper
     // drops; a successful copy hands back a +1 value that is released too.
@@ -38,8 +37,7 @@ fn probe() -> Probe {
     }
 }
 
-/// Asks macOS to show its Accessibility prompt, which also lists OpenRize in
-/// System Settings so there is something to switch on.
+/// Asks macOS to show its Accessibility prompt, which also lists OpenRize in System Settings.
 pub fn request_accessibility() {
     use core_foundation::boolean::CFBoolean;
     use core_foundation::dictionary::CFDictionary;

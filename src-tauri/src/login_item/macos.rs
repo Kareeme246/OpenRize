@@ -11,7 +11,6 @@ use super::LoginItemState;
 #[link(name = "ServiceManagement", kind = "framework")]
 extern "C" {}
 
-/// `SMAppService.mainAppService`, or `None` before macOS 13.
 fn main_app_service() -> Option<Retained<AnyObject>> {
     let class = AnyClass::get(c"SMAppService")?;
     // SAFETY: `mainAppService` is a class property returning the shared
@@ -19,9 +18,7 @@ fn main_app_service() -> Option<Retained<AnyObject>> {
     unsafe { msg_send![class, mainAppService] }
 }
 
-/// Maps `SMAppServiceStatus`. `NotFound` (3) means macOS has no record of
-/// the service, which for the main app just means it was never
-/// registered, so it reads as off.
+/// Maps `SMAppServiceStatus`; `NotFound` (3) means never registered, so it reads as off.
 fn from_status(status: isize) -> LoginItemState {
     match status {
         1 => LoginItemState::Enabled,
@@ -30,7 +27,6 @@ fn from_status(status: isize) -> LoginItemState {
     }
 }
 
-/// Nothing to migrate: only the Windows registration has an older format.
 pub fn refresh() {}
 
 pub fn state() -> LoginItemState {

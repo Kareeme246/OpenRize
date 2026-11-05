@@ -1,9 +1,6 @@
 /**
- * Relaunches the app, after an optional step that must not stand in its way.
- * The relaunch screen and the first-run Restart button both go through this,
- * with `api.relaunchApp` as `relaunch`, so there is one way the app restarts
- * for a permission. A `prepare` that fails is reported and the relaunch goes
- * ahead: the restart is what the user needs.
+ * Relaunches the app after an optional `prepare`; a failing `prepare` is
+ * reported and the relaunch still goes ahead.
  */
 export async function relaunchAfter(
   prepare: (() => Promise<void>) | undefined,

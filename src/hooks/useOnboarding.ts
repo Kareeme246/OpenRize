@@ -6,13 +6,11 @@ import type { AccessibilityState } from "../lib/types";
 import { useTauriEvent } from "./useTauriEvent";
 
 /**
- * Which step of the first-run permissions screen is up, and how to leave it.
- * Kept above the screen so the relaunch screen can ask whether this one has
- * taken the relaunch over (see `relaunchModalOpen`).
+ * Which first-run step is up; kept above the screen so the relaunch screen can
+ * ask whether it took the relaunch over.
  */
 export function useOnboarding(accessibility: AccessibilityState | null): {
   step: OnboardingStep;
-  /** Marks it done and closes it. */
   finish: () => void;
 } {
   const [needed, setNeeded] = useState<boolean | null>(null);

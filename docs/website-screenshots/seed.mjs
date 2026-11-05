@@ -1,12 +1,7 @@
 #!/usr/bin/env node
-// Loads seed.json into an OpenRize activity database, so the app shows the same
-// fictional day every time. Run it with the app closed, after the app has created
-// the database once (it owns the migrations):
-//
-//   node docs/website-screenshots/seed.mjs "<app data dir>/activity.db"
-//
-// Re-running replaces the seeded rows (ids start with "seed-") and leaves everything
-// else alone. Needs the `sqlite3` command line tool (preinstalled on macOS).
+// Loads seed.json into an activity database: the same fictional day every time.
+// App closed, db already created: node seed.mjs "<data dir>/activity.db"
+// Re-running replaces rows with ids starting "seed-". Needs the sqlite3 CLI.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -66,9 +61,8 @@ const projectId = (name) => {
 };
 
 /**
- * Lays an entry's activity out as consecutive segments of at most five minutes,
- * always continuing with the app that has the most time left, so the activity
- * strip reads like real app switching. The minutes must add up to the entry.
+ * Segments of at most five minutes, always continuing with the app with the
+ * most time left; minutes sum to the entry.
  */
 function segmentsFor(entry) {
   const start = at(entry.start);

@@ -156,7 +156,6 @@ export function Picker<T extends string | number>({
     };
   }, [isOpen]);
 
-  // Avoid clipping the menu below the viewport.
   const openMenu = useCallback(() => {
     if (disabled) return;
     if (triggerRef.current) {
@@ -197,7 +196,6 @@ export function Picker<T extends string | number>({
     [onChange],
   );
 
-  // Keyboard navigation can move the highlight outside the list's viewport.
   useEffect(() => {
     if (!isOpen || highlightedIndex < 0 || !listboxRef.current) return;
     const element = listboxRef.current.querySelector(

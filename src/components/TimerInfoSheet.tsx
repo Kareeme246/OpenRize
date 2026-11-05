@@ -22,7 +22,6 @@ import { Sheet } from "./Sheet";
 
 interface TimerInfoSheetProps {
   timer: Timer;
-  /** The running stretch so far, shown read-only until it is paused. */
   runningMs: number;
   total: number;
   onRename: (label: string) => void;
@@ -34,7 +33,6 @@ interface TimerInfoSheetProps {
 
 const BACKWARDS = "A segment cannot end before it starts.";
 
-/** A new segment starts as the last hour, ending now. */
 function lastHour(): [string, string] {
   const end = Date.now();
   return [localDateTimeString(end - 3_600_000), localDateTimeString(end)];
@@ -48,7 +46,6 @@ interface SpanFieldsProps {
   onEnd: (value: string) => void;
 }
 
-/** A segment's start and end, as a time entry's are. */
 function SpanFields({ start, end, label, onStart, onEnd }: SpanFieldsProps) {
   return (
     <div className="flex items-center gap-1.5 text-fg-faint">
@@ -163,7 +160,6 @@ function SegmentRow({
   );
 }
 
-/** `Oct 19, 4:58 PM`: a date with its time. */
 function stamp(epochMs: number): string {
   return `${formatShortDate(epochMs)}, ${formatTime(epochMs)}`;
 }
@@ -177,11 +173,6 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-/**
- * Everything about one stopwatch, and where it is edited: its name, what it
- * reads and since when, the segments its total is made of (pausing records
- * one; they can be added, changed or removed), and its saved states.
- */
 export function TimerInfoSheet({
   timer,
   runningMs,
@@ -218,7 +209,6 @@ export function TimerInfoSheet({
     };
   }, [timer.id]);
 
-  // A blank name reverts, the same as renaming on the card.
   const commitName = (): void => {
     const next = name.trim();
     if (next.length > 0 && next !== timer.label) onRename(next);

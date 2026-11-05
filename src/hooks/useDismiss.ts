@@ -1,8 +1,8 @@
 import { type RefObject, useEffect } from "react";
 
 /**
- * Closes a popover on a press outside `ref` or on Escape, for as long as it
- * is `open`. The latest `onClose` is always called, so it need not be stable.
+ * Closes a popover on an outside press or Escape while `open`; always calls the
+ * latest `onClose`.
  */
 export function useDismiss(
   open: boolean,

@@ -1,9 +1,3 @@
-//! SQLite access for the AI pipeline: the job queue, suggestions and their
-//! outcomes, the kNN store, rules, and trained model artifacts.
-//!
-//! Every function takes a plain `&Connection`, so the worker can read on its
-//! own connection while writes go through the `ActivityStore` writer.
-
 use std::collections::HashMap;
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -23,20 +17,14 @@ pub const JOB_CLASSIFY: &str = "classify";
 pub const JOB_EMBED: &str = "embed";
 pub const MAX_ATTEMPTS: u32 = 3;
 const RETRY_BASE_MS: u64 = 30_000;
-/// Consistent corrections for one app or domain before a rule is offered.
 pub const RULE_SUGGESTION_MIN: u32 = 3;
-/// `model_artifacts.kind` of the isotonic calibration curve.
 pub const KIND_CALIBRATION: &str = "calibration";
-/// Calibration fits on at most this many recent verdicts, so it follows
-/// drift in the models and in the user's habits.
 const CALIBRATION_WINDOW: u32 = 2_000;
 /// An auto-approved suggestion nobody corrected within this long counts as
 /// accepted. Without it, calibration would only ever hear about the
 /// auto-approvals that were wrong.
 pub const AUTO_TRUSTED_AFTER_MS: u64 = 24 * 60 * 60 * 1000;
-/// Retired versions kept per kind, for the model history.
 const ARTIFACT_HISTORY: u32 = 20;
-/// Key in the activity `settings` table: when "Reset learned data" last ran.
 const LEARNING_RESET_KEY: &str = "ai_learning_reset_at";
 
 type Result<T> = std::result::Result<T, String>;
@@ -44,8 +32,6 @@ type Result<T> = std::result::Result<T, String>;
 fn new_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
-
-// --- Job queue -----------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Job {
@@ -55,8 +41,7 @@ pub struct Job {
     pub attempts: u32,
 }
 
-/// Queues (or re-queues) a job. A classify job also moves a pending entry to
-/// `processing`, which the Calendar renders as "Categorizing…".
+/// Queues (or re-queues) a job. A classify job also moves a pending entry to `processing`.
 pub fn enqueue(conn: &Connection, entry_id: &str, kind: &str, now: u64) -> Result<()> {
     conn.execute(
         "INSERT INTO classify_jobs (id, entry_id, kind, state, attempts, next_at, created_at, updated_at)
@@ -78,8 +63,6 @@ pub fn enqueue(conn: &Connection, entry_id: &str, kind: &str, now: u64) -> Resul
     Ok(())
 }
 
-/// Queues unclassified closed auto entries and blank manual sessions after they end.
-/// Returns how many were queued.
 pub fn enqueue_unclassified(conn: &Connection, start: u64, end: u64, now: u64) -> Result<usize> {
     let ids: Vec<String> = {
         let mut stmt = conn
@@ -107,7 +90,6 @@ pub fn enqueue_unclassified(conn: &Connection, start: u64, end: u64, now: u64) -
     Ok(ids.len())
 }
 
-/// Queue a live session at 30 minutes, then each 15-minute milestone.
 /// Only freshly rebuilt open entries qualify; old/closed sessions never poll.
 pub fn enqueue_live_due(conn: &Connection, now: u64) -> Result<usize> {
     const MINUTE: u64 = 60_000;
@@ -172,9 +154,6 @@ pub fn set_job_state(conn: &Connection, job_id: &str, state: &str, now: u64) -> 
     .map_err(err)
 }
 
-/// Records a failed attempt: retries with exponential backoff, or gives up
-/// after `MAX_ATTEMPTS`, leaving the entry pending with no suggestion.
-/// Returns whether it gave up.
 pub fn fail_job(conn: &Connection, job: &Job, error: &str, now: u64) -> Result<bool> {
     let attempts = job.attempts + 1;
     let gave_up = attempts >= MAX_ATTEMPTS;
@@ -203,7 +182,6 @@ pub fn fail_job(conn: &Connection, job: &Job, error: &str, now: u64) -> Result<b
     Ok(gave_up)
 }
 
-/// A crash mid-job leaves it `running`; put it back in the queue.
 pub fn requeue_interrupted(conn: &Connection) -> Result<()> {
     conn.execute(
         "UPDATE classify_jobs SET state = 'queued' WHERE state = 'running';",
@@ -239,8 +217,6 @@ pub fn job_for(conn: &Connection, entry_id: &str) -> Result<Option<ClassifyJob>>
     .map_err(err)
 }
 
-/// Re-queues pending entries whose suggestion came from the fallback engine,
-/// once the Foundation Model becomes available ("backfilled later").
 pub fn requeue_fallback(conn: &Connection, since: u64, now: u64) -> Result<usize> {
     let ids: Vec<String> = {
         let mut stmt = conn
@@ -265,10 +241,6 @@ pub fn requeue_fallback(conn: &Connection, since: u64, now: u64) -> Result<usize
     Ok(ids.len())
 }
 
-// --- Suggestions ------------------------------------------------------------
-
-/// "78% of this block was in Xcode · 11 of your 12 most similar entries
-/// were Coding · the on-device model agrees".
 pub fn why_text(signals: &[Signal]) -> String {
     let joined = signals
         .iter()
@@ -335,7 +307,6 @@ struct StoredSignals {
     items: Vec<Signal>,
 }
 
-/// The latest suggestion per field, category first.
 pub fn latest_suggestions(conn: &Connection, entry_id: &str) -> Result<Vec<FieldSuggestion>> {
     let mut stmt = conn
         .prepare(
@@ -382,7 +353,6 @@ pub fn latest_suggestions(conn: &Connection, entry_id: &str) -> Result<Vec<Field
     Ok(list)
 }
 
-/// Job state and headline confidences for every entry in a range.
 pub fn summaries(conn: &Connection, start: u64, end: u64) -> Result<HashMap<String, EntryAi>> {
     let mut out: HashMap<String, EntryAi> = HashMap::new();
     let mut stmt = conn
@@ -422,8 +392,7 @@ pub fn summaries(conn: &Connection, start: u64, end: u64) -> Result<HashMap<Stri
 }
 
 /// On approval, each undecided suggestion is `accepted` when the entry kept
-/// its value and `changed` when the user picked something else. These
-/// outcomes feed the cold-start cap, rule suggestions, and calibration.
+/// its value and `changed` otherwise.
 pub fn record_approval(
     conn: &Connection,
     entry_id: &str,
@@ -454,8 +423,6 @@ pub fn record_approval(
     Ok(())
 }
 
-/// Marks the undecided suggestions rejected and returns them, so the caller
-/// can clear the values they pre-filled.
 pub fn record_rejection(
     conn: &Connection,
     entry_id: &str,
@@ -476,10 +443,8 @@ pub fn record_rejection(
     Ok(rejected)
 }
 
-/// A later edit to an approved entry is a correction too: a suggestion that
-/// was accepted or auto-approved becomes `changed` when the user moves the
-/// entry to another value, so calibration, the metrics, and rule
-/// suggestions all hear about it.
+/// A later edit that moves an approved entry to another value also turns an accepted or
+/// auto-approved suggestion into `changed`.
 pub fn record_edit(
     conn: &Connection,
     entry_id: &str,
@@ -507,9 +472,6 @@ pub fn record_edit(
     Ok(())
 }
 
-// --- Calibration -------------------------------------------------------------
-
-/// When learning last started from scratch (0 = never reset).
 pub fn learning_since(conn: &Connection) -> Result<u64> {
     conn.query_row(
         "SELECT value FROM settings WHERE key = ?1;",
@@ -530,8 +492,6 @@ const VERDICTS: &str = "FROM suggestions s JOIN time_entries e ON e.id = s.entry
        AND (s.outcome IN ('accepted', 'changed', 'rejected')
             OR (s.outcome = 'auto' AND s.updated_at <= ?2))";
 
-/// Verdicts calibration can learn from so far (drives the cold-start cap
-/// and the "12/50 reviewed" readout).
 pub fn outcome_count(conn: &Connection, now: u64) -> Result<u32> {
     let since = learning_since(conn)?;
     conn.query_row(
@@ -546,7 +506,6 @@ pub fn outcome_count(conn: &Connection, now: u64) -> Result<u32> {
     .map_err(err)
 }
 
-/// `(raw score, accepted)` for the most recent verdicts.
 pub fn calibration_samples(conn: &Connection, now: u64) -> Result<Vec<(f64, bool)>> {
     let since = learning_since(conn)?;
     let mut stmt = conn
@@ -581,7 +540,6 @@ pub fn active_calibration(conn: &Connection) -> Result<Option<Calibrator>> {
     Ok(json.and_then(|json| serde_json::from_str(&json).ok()))
 }
 
-/// Versions a freshly fitted curve and makes it the active one.
 pub fn insert_calibration(conn: &Connection, calibrator: &Calibrator, now: u64) -> Result<()> {
     let json = serde_json::to_string(calibrator).map_err(|e| e.to_string())?;
     conn.execute(
@@ -610,10 +568,8 @@ pub fn labeled_count(conn: &Connection) -> Result<u32> {
     .map_err(err)
 }
 
-/// "Reset learned data": forgets the personal models, the calibration
-/// curve, the kNN store (and with it the few-shot pool), and the verdict
-/// history calibration counts. Entries, categories, projects, and rules are
-/// the user's data and stay. Returns the model files to delete.
+/// "Reset learned data": forgets personal models, calibration, the kNN store and verdict history.
+/// Returns the model files to delete.
 pub fn reset_learned(conn: &Connection, now: u64) -> Result<Vec<String>> {
     let paths: Vec<String> = {
         let mut stmt = conn
@@ -638,8 +594,6 @@ pub fn reset_learned(conn: &Connection, now: u64) -> Result<Vec<String>> {
     tx.commit().map_err(err)?;
     Ok(paths)
 }
-
-// --- kNN store ------------------------------------------------------------
 
 pub fn upsert_embedding(
     conn: &Connection,
@@ -668,7 +622,6 @@ pub fn upsert_embedding(
     .map_err(err)
 }
 
-/// A stored vector, when it was computed from exactly this text.
 pub fn embedding_for(
     conn: &Connection,
     entry_id: &str,
@@ -684,7 +637,6 @@ pub fn embedding_for(
     .map_err(err)
 }
 
-/// Approved entries with vectors since `since`: the kNN pool.
 pub fn labeled_pool(conn: &Connection, since: u64, exclude: &str) -> Result<Vec<Labeled>> {
     let mut stmt = conn
         .prepare(
@@ -709,10 +661,7 @@ pub fn labeled_pool(conn: &Connection, since: u64, exclude: &str) -> Result<Vec<
     rows.collect::<rusqlite::Result<_>>().map_err(err)
 }
 
-// --- Rules ----------------------------------------------------------------
-
-/// A rule's category, or NULL when the category is archived or deleted: the
-/// AI only suggests live categories.
+/// A rule's category is NULL when archived or deleted: the AI only suggests live categories.
 const LIVE_CATEGORY: &str = "CASE WHEN category_id IN (
     SELECT id FROM categories WHERE deleted_at IS NULL AND archived = 0
   ) THEN category_id END";
@@ -720,9 +669,8 @@ const LIVE_DEFAULT_CATEGORY: &str = "CASE WHEN default_category_id IN (
     SELECT id FROM categories WHERE deleted_at IS NULL AND archived = 0
   ) THEN default_category_id END";
 
-/// Enabled rules plus the Apps page defaults, which act as app/domain rules.
-/// A rule's category is dropped when that category is archived or deleted,
-/// so it stops deciding categories but can still assign its project.
+/// Enabled rules plus Apps page defaults (app/domain rules). A rule whose category is gone can
+/// still assign its project.
 pub fn load_rules(conn: &Connection) -> Result<Vec<Rule>> {
     let mut rules: Vec<Rule> = {
         let mut stmt = conn
@@ -809,10 +757,8 @@ pub fn create_rule(
     Ok(id)
 }
 
-/// Offers "Always categorize figma.com as Design?" once the user has made
-/// `RULE_SUGGESTION_MIN` consistent corrections for the entry's dominant app
-/// or domain (counting a correction pending on this entry), and no rule or
-/// dismissal exists for it yet.
+/// Offers "Always categorize figma.com as Design?" after `RULE_SUGGESTION_MIN` consistent
+/// corrections for the entry's dominant app or domain, when no rule or dismissal exists.
 pub fn rule_suggestion(
     conn: &Connection,
     entry_id: &str,
@@ -894,8 +840,6 @@ pub fn rule_suggestion(
     Ok(None)
 }
 
-// --- Personal model artifacts ------------------------------------------------
-
 #[derive(Debug, Clone)]
 pub struct Artifact {
     pub id: String,
@@ -953,9 +897,6 @@ pub fn insert_artifact(
     prune_artifacts(conn, kind)
 }
 
-/// Drops all but the newest `ARTIFACT_HISTORY` inactive versions of a kind.
-/// Their model files are already gone: the worker deletes a model's
-/// directory as soon as it stops being active.
 fn prune_artifacts(conn: &Connection, kind: &str) -> Result<()> {
     conn.execute(
         "DELETE FROM model_artifacts WHERE kind = ?1 AND active = 0 AND id NOT IN (
@@ -968,7 +909,6 @@ fn prune_artifacts(conn: &Connection, kind: &str) -> Result<()> {
     .map_err(err)
 }
 
-/// A trained version as Settings shows it.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArtifactVersion {
@@ -980,7 +920,6 @@ pub struct ArtifactVersion {
     pub active: bool,
 }
 
-/// Newest first.
 pub fn artifact_history(conn: &Connection, kind: &str, limit: u32) -> Result<Vec<ArtifactVersion>> {
     let mut stmt = conn
         .prepare(
@@ -1002,7 +941,6 @@ pub fn artifact_history(conn: &Connection, kind: &str, limit: u32) -> Result<Vec
     rows.collect::<rusqlite::Result<_>>().map_err(err)
 }
 
-/// (entry id, content text, label) for every approved entry with a vector.
 /// Project rows use `none` for "No project".
 pub fn training_rows(conn: &Connection, field: Field) -> Result<Vec<(String, String, String)>> {
     let column = match field {
@@ -1022,7 +960,6 @@ pub fn training_rows(conn: &Connection, field: Field) -> Result<Vec<(String, Str
     rows.collect::<rusqlite::Result<_>>().map_err(err)
 }
 
-/// When a model of this kind was last trained or fitted, kept or not.
 pub fn last_trained_at(conn: &Connection, kind: &str) -> Result<Option<u64>> {
     conn.query_row(
         "SELECT MAX(trained_at) FROM model_artifacts WHERE kind = ?1;",
@@ -1033,7 +970,6 @@ pub fn last_trained_at(conn: &Connection, kind: &str) -> Result<Option<u64>> {
     .map_err(err)
 }
 
-/// Verdicts recorded after `after` (calibration refit trigger).
 pub fn verdicts_since(conn: &Connection, after: u64, now: u64) -> Result<u32> {
     let since = learning_since(conn)?;
     conn.query_row(
@@ -1049,7 +985,6 @@ pub fn verdicts_since(conn: &Connection, after: u64, now: u64) -> Result<u32> {
     .map_err(err)
 }
 
-/// Labeled entries approved since `since` (retraining trigger).
 pub fn labeled_since(conn: &Connection, since: u64) -> Result<u32> {
     conn.query_row(
         "SELECT COUNT(*) FROM time_entries e JOIN entry_embeddings v ON v.entry_id = e.id
@@ -1062,7 +997,6 @@ pub fn labeled_since(conn: &Connection, since: u64) -> Result<u32> {
     .map_err(err)
 }
 
-/// Maps personal-model labels back to field values (`none` = no project).
 pub fn label_from_model(label: &str) -> Label {
     (label != "none").then(|| label.to_string())
 }

@@ -1,18 +1,6 @@
-//! The reminder panel: a small, borderless window at the chosen position in
-//! the active display's work area. It carries break and stopwatch reminders,
-//! the countdown capsule and the welcome-back card.
-//!
-//! Like the Pulse panel it is created on first need, hidden (not destroyed)
-//! between uses, and sized by its page: the page measures its card and calls
-//! `resize_reminder_panel`, and the window is re-anchored on
-//! every resize. When it becomes visible it waits for the page's next
-//! measurement, so it never shows at a stale size.
-//!
-//! It never takes focus. On macOS the window is converted into a
-//! non-activating `NSPanel`, so clicking a button acts without activating
-//! OpenRize (which would raise the main window over the user's work).
-//! On Windows the builder's two flags do the same job (see `create`).
-//! Pulse opening over it needs no coordination.
+//! The reminder panel: a borderless window anchored in the active display's work area,
+//! created on first need, hidden between uses and sized by its page. It never takes
+//! focus: a non-activating `NSPanel` on macOS, builder flags on Windows (see `create`).
 
 use std::sync::Mutex;
 
@@ -24,9 +12,7 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder}
 
 pub const LABEL: &str = "reminder";
 
-/// Space between a screen's usable edge and a notification panel.
 const EDGE: f64 = 12.0;
-/// A placeholder until the page reports its real size.
 const INITIAL_SIZE: (f64, f64) = (360.0, 120.0);
 
 #[derive(Default)]
@@ -34,18 +20,13 @@ pub struct SurfaceState(Mutex<Placement>);
 
 #[derive(Default)]
 struct Placement {
-    /// Logical size the page last reported.
     size: Option<(f64, f64)>,
-    /// Whether the engine wants the panel on screen.
     wanted: bool,
-    /// Visible next time the page reports a size.
     show_when_sized: bool,
 }
 
-/// Shows or hides the panel to match the engine's phase.
-///
-/// No window call is made while the placement lock is held: showing or hiding
-/// a window can deliver events synchronously.
+/// No window call is made while the placement lock is held: showing or hiding a window
+/// can deliver events synchronously.
 pub fn sync(app: &AppHandle, visible: bool) {
     let existing = app.get_webview_window(LABEL);
     let show_when_sized = remember(app, |placement| {
@@ -75,12 +56,9 @@ pub fn sync(app: &AppHandle, visible: bool) {
             eprintln!("could not open the reminder panel: {error}");
         }
     } else if show_when_sized {
-        // The page re-measures on every state change and shows the panel.
     }
 }
 
-/// The page measured its card: size the window to it, keep it anchored, and
-/// show it if it was waiting.
 pub fn resize(app: &AppHandle, width: f64, height: f64) {
     let Some(window) = app.get_webview_window(LABEL) else {
         return;
@@ -100,14 +78,12 @@ pub fn resize(app: &AppHandle, width: f64, height: f64) {
     place(app, &window, size);
     if show {
         let _ = window.show();
-        // The window server only learns a window's "does not activate the
-        // app" tag once the window exists on screen, so state it again now.
-        // On Windows this re-asserts the topmost flag the show may have lost.
+        // The window server learns the "does not activate the app" tag only once the window
+        // is on screen, so state it again now. On Windows this re-asserts topmost.
         crate::panel::prevent_activation(&window);
     }
 }
 
-/// Puts the window at the chosen anchor on the display the user is working on.
 fn place(app: &AppHandle, window: &WebviewWindow, (width, height): (f64, f64)) {
     let cursor = app.cursor_position().ok();
     let monitor = cursor
@@ -132,7 +108,6 @@ fn place(app: &AppHandle, window: &WebviewWindow, (width, height): (f64, f64)) {
     placement::set_bounds(window, scale, (x.round(), y.round()), (width, height));
 }
 
-/// Re-anchor an already visible notification immediately after a preference change.
 pub fn reposition(app: &AppHandle) {
     let size = remember(app, |placement| placement.size).flatten();
     if let (Some(window), Some(size)) = (app.get_webview_window(LABEL), size) {
@@ -162,7 +137,6 @@ fn notification_origin(
     }
 }
 
-/// Runs `update` under the placement lock; `None` if the lock is poisoned.
 fn remember<T>(app: &AppHandle, update: impl FnOnce(&mut Placement) -> T) -> Option<T> {
     let state = app.state::<SurfaceState>();
     let mut placement = state.0.lock().ok()?;
@@ -170,12 +144,10 @@ fn remember<T>(app: &AppHandle, update: impl FnOnce(&mut Placement) -> T) -> Opt
 }
 
 fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
-    // Same bundle as the main window; the page picks its root by window label.
     let window = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("index.html".into()))
         .title("OpenRize reminder")
         .inner_size(INITIAL_SIZE.0, INITIAL_SIZE.1)
         .decorations(false)
-        // The page draws the rounded card and its shadow; the window is clear.
         .transparent(true)
         .shadow(false)
         .resizable(false)
@@ -184,15 +156,13 @@ fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .always_on_top(true)
         .skip_taskbar(true)
         .visible(false)
-        // On Windows these two keep it from ever taking focus: tao gives a
-        // non-focusable window WS_EX_NOACTIVATE (clicks act without
-        // activating it) and shows an unfocused one with SW_SHOWNOACTIVATE,
-        // on every show, not just the first.
+        // Windows: tao gives a non-focusable window WS_EX_NOACTIVATE and shows an unfocused
+        // one with SW_SHOWNOACTIVATE on every show, so it never takes focus.
         .focused(false)
         .focusable(false)
         .accept_first_mouse(true)
-        // Best effort: keeps the panel out of screen shares and recordings.
-        // Dev builds stay capturable so `pnpm dev:drive` can screenshot it.
+        // Best effort: keeps the panel out of screen shares. Dev builds stay capturable
+        // so `pnpm dev:drive` can screenshot it.
         .content_protected(!cfg!(debug_assertions))
         .build()?;
     crate::panel::make_panel(&window, crate::panel::Kind::Reminder);

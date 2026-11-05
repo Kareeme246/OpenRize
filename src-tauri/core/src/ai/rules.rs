@@ -1,12 +1,6 @@
-//! Tier 0: deterministic rules. A hit sets the field at confidence 1.0.
-//!
-//! Rules come from the `rules` table (manual, or accepted rule suggestions)
-//! and from the Apps page, where an app's or site's default category or
-//! project behaves as an `app`/`domain` rule. Each segment takes the most
-//! specific matching rule (path/url prefix beats title, title beats domain,
-//! domain beats app; then priority). A rule decides the entry only when the
-//! time it covers is at least `HIT_COVERAGE` of the entry's active time, so
-//! five minutes of Figma inside a coding block doesn't make it Design.
+//! Tier 0 rules (a hit is confidence 1.0). Each segment takes the most specific match (path/url
+//! prefix > title > domain > app, then priority); a rule decides the entry only when it covers
+//! at least `HIT_COVERAGE` of its active time.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -21,14 +15,11 @@ pub const HIT_COVERAGE: f64 = 0.6;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rule {
     pub id: String,
-    /// app | domain | title_contains | title_regex | url_prefix | path_prefix
     pub match_kind: String,
     pub pattern: String,
     pub category_id: Option<String>,
     pub project_id: Option<String>,
     pub priority: i64,
-    /// manual | suggested | hint (from a project's AI hints) | app (an
-    /// Apps-page default)
     pub origin: String,
 }
 
@@ -49,7 +40,6 @@ impl Rule {
         }
     }
 
-    /// Short description for the "Why" line, e.g. `domain figma.com`.
     pub fn describe(&self) -> String {
         let kind = match self.match_kind.as_str() {
             "title_contains" | "title_regex" => "title",
@@ -111,8 +101,6 @@ pub struct RuleHit {
     pub coverage: f64,
 }
 
-/// The rule outcome for one field, or `None` when no value covers enough of
-/// the entry.
 pub fn evaluate(rules: &[Rule], segments: &[ActivitySegment], field: Field) -> Option<RuleHit> {
     let candidates: Vec<&Rule> = rules.iter().filter(|r| r.value(field).is_some()).collect();
     if candidates.is_empty() {
@@ -120,7 +108,6 @@ pub fn evaluate(rules: &[Rule], segments: &[ActivitySegment], field: Field) -> O
     }
 
     let mut active_ms = 0u64;
-    // value -> (covered ms, the rule that covered the most of it)
     let mut covered: HashMap<String, (u64, HashMap<String, u64>)> = HashMap::new();
     for segment in segments.iter().filter(|s| s.kind != KIND_BREAK) {
         let ms = segment
@@ -162,9 +149,7 @@ fn strip_scheme(url: &str) -> &str {
     rest.strip_prefix("www.").unwrap_or(rest)
 }
 
-/// The user's home folder, which `~` in a path rule means. Windows has no
-/// `HOME` outside shells like Git Bash, so it asks for the profile folder
-/// (`%USERPROFILE%`) instead.
+/// The user's home folder, which `~` in a path rule means (`%USERPROFILE%` on Windows).
 fn home_dir() -> Option<String> {
     if cfg!(windows) {
         static PROFILE: LazyLock<Option<String>> =
@@ -185,10 +170,7 @@ fn expand_home(path: &str, home: Option<&str>) -> String {
     }
 }
 
-/// Whether a segment's file URL starts with the rule's folder, or its window
-/// title (a terminal's working directory, an editor's path) names it. Windows
-/// paths are case-insensitive and may be written with either separator, so
-/// there both sides are compared lowercased with `/` throughout.
+/// Windows paths are compared lowercased with `/` separators.
 fn path_prefix_matches(
     segment: &ActivitySegment,
     pattern: &str,
@@ -215,7 +197,6 @@ fn path_prefix_matches(
     });
     url_path.is_some_and(|url| url.starts_with(&path))
         || title.contains(&path)
-        // Terminals show the working directory as `~/Code/...`.
         || title.contains(&pattern)
 }
 
@@ -333,8 +314,6 @@ mod tests {
             "C:/users/kareem/code/proj",
         ] {
             for matching in [&terminal, &prompt, &lower, &file] {
-                // A prompt that abbreviates the profile as `~` only names the
-                // folder to a rule written with `~`.
                 if pattern.starts_with("C:") && std::ptr::eq(matching, &prompt) {
                     continue;
                 }

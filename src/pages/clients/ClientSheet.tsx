@@ -7,7 +7,6 @@ import { describeError } from "../../lib/api";
 import type { Client } from "../../lib/types";
 
 interface ClientSheetProps {
-  /** Editing this client; absent creates one. */
   client?: Client;
   onClose: () => void;
   onSaved: (client: Client) => void;
@@ -16,10 +15,6 @@ interface ClientSheetProps {
 /** ISO 4217 codes are three letters; an empty one means USD everywhere. */
 const CURRENCY = /^[A-Za-z]{3}$/;
 
-/**
- * New or edit client: name, billing email and address, the default rate and
- * currency its projects fall back to, and a note.
- */
 export function ClientSheet({ client, onClose, onSaved }: ClientSheetProps) {
   const showToast = useToast();
   const [name, setName] = useState(client?.name ?? "");

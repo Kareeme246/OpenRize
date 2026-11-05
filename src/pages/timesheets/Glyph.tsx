@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 
-/** A 24px stroke glyph at the chip's size. */
 export function Glyph({ children }: { children: ReactNode }) {
   return (
     <svg

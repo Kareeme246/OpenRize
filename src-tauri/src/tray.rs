@@ -1,6 +1,5 @@
-//! The menu-bar (macOS) or notification-area (Windows) icon. Icon only, no text (decision T1): the glyph shape
-//! carries idle vs active. Left click opens the Pulse panel (pulse.rs); right
-//! click opens the native menu with the running timers, Open, and Quit.
+//! Menu-bar (macOS) or notification-area (Windows) icon, icon only (decision T1).
+//! Left click opens the Pulse panel; right click opens the native menu.
 
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuBuilder, MenuEvent, MenuItemBuilder};
@@ -17,24 +16,9 @@ const QUIT: &str = "quit";
 const PAUSE_PREFIX: &str = "pause:";
 const MAX_LABEL_CHARS: usize = 32;
 
-/// Template images: black with alpha. macOS uses the alpha as a mask and tints
-/// the glyph for the current menu bar, which is why no brand colour can appear
-/// here. Both are cut from the Chrono Bloom master, `app-icon.png` — run from
-/// the repo root, replacing the final path with `tray-idle.png` for the second
-/// file and adding `-fill black -draw "circle 512,512 512,362"` after `-level`
-/// to paint out the centre bead:
-///
-/// ```text
-/// magick app-icon.png -fx "g-max(r,b)" -alpha off -level "15%,40%" \
-///   -gravity center -crop 680x680+0+0 +repage -resize 42x42 \
-///   -colorspace sRGB -alpha set -channel A -fx "u.r" +channel \
-///   -channel RGB -evaluate set 0 +channel \
-///   -background none -gravity center -extent 44x44 \
-///   png32:src-tauri/icons/tray-active.png
-/// ```
-///
-/// 44px is deliberate: macOS draws the tray glyph at 18pt, so a 44px bitmap
-/// stays crisp on retina where the old 22px one was blurry.
+/// Template images: black with alpha, so macOS tints the glyph and no brand colour
+/// can appear. Cut from `app-icon.png` with ImageMagick at 44px (18pt on retina);
+/// tray-idle.png additionally paints out the centre bead.
 fn glyph(active: bool) -> Image<'static> {
     let template = if active {
         tauri::include_image!("icons/tray-active.png")
@@ -62,9 +46,7 @@ pub fn init(app: &AppHandle, timers: &[Timer]) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Adds or removes the menu-bar icon to match the preference. Idempotent: a
-/// redundant call is a no-op, so the settings command does not have to track
-/// whether the tray is already mounted.
+/// Idempotent: a redundant call is a no-op.
 pub fn set_enabled(app: &AppHandle, enabled: bool, timers: &[Timer]) -> tauri::Result<()> {
     let mounted = app.tray_by_id(TRAY_ID).is_some();
     match (enabled, mounted) {
@@ -80,8 +62,7 @@ pub fn set_enabled(app: &AppHandle, enabled: bool, timers: &[Timer]) -> tauri::R
 }
 
 /// Repaints the tray from a snapshot, then tells the frontend what changed.
-/// Called on every mutation, never on a timer: nothing here is clock-driven.
-/// The menu is built when it opens, so it needs no refresh.
+/// Called on every mutation, never on a timer; the menu is built when it opens.
 pub fn refresh(app: &AppHandle, timers: &[Timer]) -> tauri::Result<()> {
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         // Sets icon and template flag together; doing it in two calls flickers.
@@ -95,11 +76,9 @@ pub fn refresh(app: &AppHandle, timers: &[Timer]) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Repaints just the glyph, for when the colour it should have changed without
-/// any timer changing (a Windows light/dark switch). Windows reports the
-/// app's theme, so a change to the taskbar's colour alone (Settings >
-/// Personalization > Colours, "Choose your default Windows mode") may not
-/// reach here and shows up at the next icon change instead.
+/// Repaints just the glyph when its colour should change without any timer
+/// changing (Windows light/dark). A taskbar-only colour change may not reach
+/// here and shows up at the next icon change.
 pub fn restyle(app: &AppHandle) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
@@ -110,7 +89,6 @@ pub fn restyle(app: &AppHandle) {
     }
 }
 
-/// The stored timers as they are now; empty if the store is unavailable.
 fn current_timers(app: &AppHandle) -> Vec<Timer> {
     app.state::<AppState>()
         .store
@@ -182,11 +160,9 @@ fn disabled(app: &AppHandle, id: &str, text: &str) -> tauri::Result<tauri::menu:
     MenuItemBuilder::with_id(id, text).enabled(false).build(app)
 }
 
-/// The panel opens as the left button goes down, like a native menu-bar item,
-/// not after it comes back up. The right button opens the menu on
-/// `platform::MENU_BUTTON_STATE`: down on macOS, up on Windows, where the
-/// shell's own icons open theirs on release. A double click (Windows only) is
-/// the shell convention for "open the app".
+/// The panel opens on left button down, like a native menu-bar item. The menu
+/// opens on `platform::MENU_BUTTON_STATE` (down on macOS, up on Windows). A
+/// double click (Windows only) opens the app.
 fn on_tray_icon_event(tray: &TrayIcon, event: TrayIconEvent) {
     let app = tray.app_handle();
     match event {
@@ -213,10 +189,9 @@ fn on_tray_icon_event(tray: &TrayIcon, event: TrayIconEvent) {
     }
 }
 
-/// Opens the native menu, attached to the icon only while it is open. With a
-/// menu attached, macOS opens it on every click, left included, which would
-/// leave no click for the panel (`show_menu_on_left_click(false)` does not
-/// stop it). Built fresh from the timers, so it is never stale.
+/// Opens the native menu, attached only while open: attached, macOS opens it on
+/// every click, left included, leaving none for the panel. Built fresh from the
+/// timers, so never stale.
 fn show_menu(tray: &TrayIcon) {
     let app = tray.app_handle();
     crate::pulse::hide(app);

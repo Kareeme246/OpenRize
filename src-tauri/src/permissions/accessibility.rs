@@ -1,19 +1,6 @@
-//! What the running process knows about its own Accessibility access, and
-//! when it has to restart to get it.
-//!
-//! macOS answers "is this app trusted" from a flag that can read true while the
-//! Accessibility calls in the same process still fail: a grant made after the
-//! process started, or an entry that was removed and re-added in System
-//! Settings, are the known ways. The trust flag alone therefore decides
-//! nothing here. Each poll pairs it with a real probe call, and
-//! [`Tracker`] turns that stream of readings into one state. Only a grant seen
-//! happen in this run, followed by a probe that keeps failing, asks for a
-//! relaunch; a process that starts with the flag set and a failing probe says
-//! "allowed but not working" and never asks, which is what keeps a relaunch
-//! from looping.
-//!
-//! The OS calls live in `macos.rs`; everything decided here is plain data in,
-//! plain data out, so it is tested without a Mac.
+//! The trust flag can read true while calls still fail, so each poll pairs it with a real probe
+//! and [`Tracker`] folds readings into one state. Only a grant seen this run, then a failing
+//! probe, asks for a relaunch.
 
 // The readings are only produced on macOS; other platforms compile the types.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -24,19 +11,15 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
-/// How often the trust flag and probe are read.
 pub const POLL: Duration = Duration::from_secs(2);
 
-/// Consecutive failing readings, with the flag set, before the failure is
-/// believed. At the poll interval this is a few seconds, long enough for a
-/// grant that macOS is still applying to take effect and for one busy moment
-/// in the system's Accessibility service to pass.
+/// Consecutive failing readings, with the flag set, before the failure is believed: a few
+/// seconds, enough for a grant macOS is still applying or a busy moment in the service.
 pub const SETTLE_READINGS: u32 = 3;
 
 /// `kAXErrorNoValue`: the service answered, there was just nothing focused.
 const AX_ERROR_NO_VALUE: i32 = -25212;
 
-/// What one call to the Accessibility service came back with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Probe {
     Works,
@@ -54,25 +37,18 @@ impl Probe {
     }
 }
 
-/// One poll.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reading {
-    /// The trust flag is off.
     Untrusted,
-    /// The flag is on; the probe says whether it is true in this process.
     Trusted(Probe),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AccessibilityState {
-    /// This platform asks for no Accessibility access.
     NotApplicable,
-    /// Not allowed in System Settings.
     NotGranted,
-    /// Allowed, and a probe has failed but not for long enough to believe.
     Checking,
-    /// Allowed and the probe works: titles are being read.
     Working,
     /// Allowed, but the probe keeps failing, in a process that started that
     /// way. Relaunching has not been tried, so it does not help to ask again.
@@ -104,7 +80,6 @@ impl Tracker {
         self.state
     }
 
-    /// Folds in one reading. Returns the new state when it changed.
     pub fn observe(&mut self, reading: Reading) -> Option<AccessibilityState> {
         let next = match reading {
             Reading::Untrusted => {
@@ -157,7 +132,6 @@ impl Observed {
         }
     }
 
-    /// The simulated state if one is set, otherwise what the tracker says.
     pub fn state(&self) -> AccessibilityState {
         self.accessibility.unwrap_or_else(|| self.tracker.state())
     }
@@ -172,7 +146,6 @@ impl Observed {
         (after != before).then_some(after)
     }
 
-    /// Sets or clears the simulated state. Clearing shows the tracker's state.
     pub fn simulate(&mut self, state: Option<AccessibilityState>) -> Option<AccessibilityState> {
         let before = self.state();
         self.accessibility = state;
@@ -193,8 +166,6 @@ impl Observed {
     }
 }
 
-/// The observed state as app state, with the event and window behaviour that
-/// goes with a change.
 pub struct Monitor {
     observed: Mutex<Observed>,
 }
@@ -241,8 +212,7 @@ impl Monitor {
         announce(app, state);
     }
 
-    /// Shows a simulated state in place of the real one (dev builds only).
-    /// `None` ends the simulation and shows the real state again.
+    /// Shows a simulated state (dev builds only); `None` shows the real one again.
     pub fn simulate(&self, app: &AppHandle, state: Option<AccessibilityState>) {
         let Some(state) = self
             .observed
@@ -267,8 +237,6 @@ impl Monitor {
     }
 }
 
-/// Tells open views about a state change, and brings the main window forward
-/// when a relaunch is needed.
 fn announce(app: &AppHandle, state: AccessibilityState) {
     let _ = app.emit(crate::EVENT_PERMISSIONS_CHANGED, state);
     if state == AccessibilityState::RelaunchRequired {
@@ -278,9 +246,8 @@ fn announce(app: &AppHandle, state: AccessibilityState) {
     }
 }
 
-/// Reads once now, so the state is known before the window asks, then keeps
-/// reading for as long as the app runs. A revoke and a later re-grant are
-/// both worth seeing.
+/// Reads once now so the state is known before the window asks, then keeps reading;
+/// a revoke and a later re-grant are both worth seeing.
 pub fn spawn_monitor(app: AppHandle) {
     let Some(first) = super::platform::accessibility_reading() else {
         return;
@@ -301,7 +268,6 @@ mod tests {
     const BROKEN: Reading = Reading::Trusted(Probe::Fails(-25211));
     const FINE: Reading = Reading::Trusted(Probe::Works);
 
-    /// The state after each reading, so a test reads as the story it tells.
     fn run(readings: &[Reading]) -> Vec<AccessibilityState> {
         let mut tracker = Tracker::new();
         readings

@@ -1,27 +1,14 @@
-//! Tier 1 kNN over the NLEmbedding vectors of approved entries.
-//!
-//! The store updates the moment an entry is approved (its vector is already
-//! in `entry_embeddings` from classification), so a correction helps the
-//! very next similar block.
-
-/// Neighbors consulted per decision. The "Why" line reads "11 of your 12
-/// most similar entries were Coding".
 pub const K: usize = 12;
-/// Below this cosine similarity a past entry isn't meaningfully similar.
 pub const MIN_SIMILARITY: f32 = 0.35;
-/// Only approved entries this recent vote (the "suggestion lookback").
 pub const LOOKBACK_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 
-/// An approved entry in the kNN store.
 #[derive(Debug, Clone)]
 pub struct Labeled {
     pub vector: Vec<f32>,
     pub category_id: Option<String>,
     pub project_id: Option<String>,
-    /// The content rendering the vector was computed from, reused as a
-    /// few-shot example for the Foundation Model.
+    /// Content the vector was computed from, reused as a few-shot example.
     pub features: String,
-    /// The user corrected (changed or rejected) the AI's suggestion on it.
     pub corrected: bool,
 }
 
@@ -59,7 +46,6 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
     dot / (norm_a.sqrt() * norm_b.sqrt())
 }
 
-/// Little-endian f32s, 2 KB for a 512-d vector.
 pub fn encode(vector: &[f32]) -> Vec<u8> {
     vector
         .iter()

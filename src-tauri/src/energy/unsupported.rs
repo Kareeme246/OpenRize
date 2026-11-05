@@ -2,7 +2,6 @@
 
 use super::*;
 
-/// No telemetry here, so the sampler stays off.
 pub const HAS_ENERGY_COUNTER: bool = false;
 
 pub fn read_proc_rusage(_pid: i32) -> Option<ProcessRusage> {

@@ -1,34 +1,6 @@
-//! Who an app is on Windows. macOS gives every app, each installed web app
-//! (PWA) included, its own bundle id; here the lowercased executable name is
-//! the identity (`slack.exe`, `winword.exe`), which merges unrelated apps
-//! wherever one executable hosts many:
-//!
-//! - a browser hosting installed web apps: a Chrome or Edge PWA runs inside
-//!   `chrome.exe` / `msedge.exe`;
-//! - a generic host: `javaw.exe`, `python.exe`, `node.exe`, `dotnet.exe`,
-//!   `mmc.exe` (every `.msc` is a different tool), `rundll32.exe`,
-//!   `wwahost.exe` (packaged JavaScript apps), `electron.exe`, ...
-//!
-//! Only those get a qualifier, written `<executable>/<qualifier>`
-//! (`msedge.exe/msedge._crx_abc`, `mmc.exe/compmgmt`). Every other app keeps
-//! the bare executable name, so history, rules and exclusions keyed on it
-//! keep matching. The qualifier is, in order of trust:
-//!
-//! 1. the window's explicit AppUserModelID (what the taskbar groups by, and
-//!    what Chromium sets per window for a PWA), read from the window's property
-//!    store; for a browser only an app window's counts, since a plain browser
-//!    window carries the browser's or its profile's id;
-//! 2. for a packaged (MSIX/UWP) process, its package application id;
-//! 3. for a host that runs a script, jar, snap-in or dll, that file's name
-//!    without folders, extension or version, taken from the process command
-//!    line. The line itself is never stored: it can carry tokens.
-//!
-//! The app is named by the window's relaunch name, else the shell's Apps
-//! folder entry for the id, else the file the host runs, else the host.
-//!
-//! The sampler asks once a second, so answers are cached per process and
-//! window: ordinary apps cost nothing, hosts and browsers one lookup per cache
-//! lifetime.
+//! Who an app is on Windows: the lowercased executable name, as `<executable>/<qualifier>` only
+//! where one executable hosts many apps (PWAs, `javaw.exe`, `mmc.exe`). Qualifier, in trust order:
+//! window AppUserModelID, package application id, the file a host runs (never the command line).
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -52,18 +24,14 @@ use windows::Win32::UI::Shell::{
 
 use super::{wide, BROWSERS};
 
-/// An app as the sampler records it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Identity {
-    /// The stable identifier: the executable name, qualified where that
-    /// alone would merge different apps.
+    /// The executable name, qualified where it alone would merge different apps.
     pub id: String,
-    /// What the user would call the app.
     pub name: String,
 }
 
-/// Executables that run other programs and so say nothing about which one.
-/// Lowercase.
+/// Lowercase executables that run other programs and so say nothing about which one.
 const HOSTS: [&str; 12] = [
     "dotnet.exe",
     "electron.exe",
@@ -79,26 +47,20 @@ const HOSTS: [&str; 12] = [
     "wwahost.exe",
 ];
 
-/// How long an answer that found nothing to tell the app apart is kept: a
-/// window sets its AppUserModelID shortly after it is created, so it is asked
-/// again soon.
+/// How long an answer with no qualifier is kept: a window sets its AppUserModelID shortly after
+/// creation.
 const UNQUALIFIED_TTL: Duration = Duration::from_secs(3);
-/// How long a qualified answer is kept.
 const QUALIFIED_TTL: Duration = Duration::from_secs(60);
-/// Most answers kept; past this the cache starts over.
 const CACHE_LIMIT: usize = 128;
 
 type Key = (u32, isize);
 
 thread_local! {
     static IDENTITIES: RefCell<HashMap<Key, (Instant, Identity)>> = RefCell::new(HashMap::new());
-    /// Names the Apps folder gave an application id (or none).
     static SHELL_NAMES: RefCell<HashMap<String, Option<String>>> = RefCell::new(HashMap::new());
     static COM_READY: Cell<bool> = const { Cell::new(false) };
 }
 
-/// Names the app behind `window`, whose process `pid` runs `executable`
-/// (lowercase) and is called `app` by its version resource.
 pub(super) fn identify(window: HWND, pid: u32, executable: &str, app: &str) -> Identity {
     let browser = BROWSERS.contains(&executable);
     if !browser && !is_host(executable) {
@@ -132,8 +94,7 @@ pub(super) fn identify(window: HWND, pid: u32, executable: &str, app: &str) -> I
     identity
 }
 
-/// Whether the window is a web app's window inside a browser, not a window of
-/// the browser itself: such a window has no address bar to read.
+/// A web app's window inside a browser, not the browser's own: it has no address bar to read.
 pub(super) fn is_web_app(executable: &str, identity: &Identity) -> bool {
     BROWSERS.contains(&executable) && identity.id != executable
 }
@@ -188,24 +149,17 @@ fn resolve(window: HWND, pid: u32, executable: &str, app: &str, browser: bool) -
     }
 }
 
-// ---- Pure rules --------------------------------------------------------
-
-/// The id of the installed web app a Chromium window shows, if it is one.
-/// Chromium gives an app window an AppUserModelID built on the app's internal
-/// name, `_crx_<app id>`, and a relaunch command that carries
-/// `--app-id=<app id>`; the browser's own windows have neither (their id is the
-/// install's or profile's, and their relaunch command is the bare browser).
-/// Either names the app, the same way for every profile and signal, so the id
-/// does not flip with which one was readable.
+/// The id of the installed web app a Chromium window shows: an AppUserModelID `_crx_<app id>` or a
+/// relaunch command with `--app-id=<app id>`; the browser's own windows have neither. Either names
+/// the app, so the id does not flip with which signal was readable.
 fn web_app_id(app_user_model_id: Option<&str>, relaunch_command: Option<&str>) -> Option<String> {
     app_user_model_id
         .and_then(|id| id_after(id, "_crx_"))
         .or_else(|| relaunch_command.and_then(|command| id_after(command, "--app-id=")))
 }
 
-/// Whether an AppUserModelID is a framework's or host's default, shared by
-/// every app built on it, and so says nothing about which one this is:
-/// Electron's `electron.app.Electron`, or the host's own name (`Python`).
+/// Whether an AppUserModelID is a framework's or host's default (Electron's, or `Python`), shared
+/// by every app on it.
 fn is_generic_app_id(executable: &str, app_id: &str) -> bool {
     let id = app_id.trim().to_ascii_lowercase();
     let stem = executable.strip_suffix(".exe").unwrap_or(executable);
@@ -224,9 +178,8 @@ fn id_after(text: &str, marker: &str) -> Option<String> {
     (16..=64).contains(&id.len()).then_some(id)
 }
 
-/// `<executable>/<qualifier>`, the qualifier folded to a form safe to store,
-/// compare and show anywhere: lowercase, nothing but letters, digits and
-/// `._-!+@~()`, no longer than `QUALIFIER_LIMIT` characters.
+/// `<executable>/<qualifier>` with the qualifier folded to lowercase letters, digits and
+/// `._-!+@~()`, at most `QUALIFIER_LIMIT` long.
 fn qualified(executable: &str, qualifier: &str) -> String {
     let key: String = qualifier
         .trim()
@@ -295,9 +248,8 @@ fn split_command_line(line: &str) -> Vec<String> {
     args
 }
 
-/// The one file name (or class, or module) a host's command line runs, the
-/// first argument being the host itself. Only that name is returned; the rest
-/// of the line, which may carry paths and secrets, is dropped here.
+/// The one file name (or class, or module) a host's command line runs; the rest of the line may
+/// carry secrets and is dropped.
 fn script_name(executable: &str, args: &[String]) -> Option<String> {
     let args = args.get(1..)?;
     match executable {
@@ -374,7 +326,6 @@ fn java_name(args: &[String]) -> Option<String> {
                 args.next();
             }
             option if option.starts_with('-') || option.starts_with('@') => {}
-            // The main class, e.g. `com.example.Main`.
             class => return clean_name(class),
         }
     }
@@ -460,7 +411,6 @@ fn is_version(text: &str) -> bool {
         && number.chars().all(|c| c.is_ascii_digit() || c == '.')
 }
 
-/// What the user would call a host running `file`.
 fn shown_name(executable: &str, file: &str, host: &str) -> String {
     if executable == "mmc.exe" {
         if let Some(known) = snap_in_name(file) {
@@ -470,7 +420,6 @@ fn shown_name(executable: &str, file: &str, host: &str) -> String {
     format!("{file} ({host})")
 }
 
-/// Console snap-ins that ship with Windows, by file name.
 fn snap_in_name(file: &str) -> Option<&'static str> {
     Some(match file.to_ascii_lowercase().as_str() {
         "compmgmt" => "Computer Management",
@@ -486,8 +435,6 @@ fn snap_in_name(file: &str) -> Option<&'static str> {
         _ => return None,
     })
 }
-
-// ---- Win32 -------------------------------------------------------------
 
 /// The property store calls and the Apps folder need COM on the calling thread.
 fn ensure_com() {
@@ -520,9 +467,8 @@ fn string_property(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<String> 
     (!text.is_empty()).then(|| text.to_string())
 }
 
-/// The window's own name for its app: set by the app for the taskbar's
-/// jump list, and by Chromium for every web app window. Either text or a
-/// `@file,-id` resource reference.
+/// The window's own name for its app (jump list, or Chromium's for web apps): text or a `@file,-id`
+/// reference.
 fn relaunch_name(store: Option<&IPropertyStore>) -> Option<String> {
     let text = string_property(store?, &PKEY_AppUserModel_RelaunchDisplayNameResource)?;
     if !text.starts_with('@') {
@@ -537,7 +483,6 @@ fn relaunch_name(store: Option<&IPropertyStore>) -> Option<String> {
     (!name.trim().is_empty()).then(|| name.trim().to_string())
 }
 
-/// The name the shell lists an application id under, as in the Start menu.
 fn shell_name(app_id: &str) -> Option<String> {
     if let Some(known) = SHELL_NAMES.with(|names| names.borrow().get(app_id).cloned()) {
         return known;
@@ -589,7 +534,6 @@ fn package_app_id(pid: u32) -> Option<String> {
     }
 }
 
-/// Longest command line read: Windows allows 32,767 characters.
 const COMMAND_LINE_LIMIT: usize = 64 * 1024;
 
 /// A process's command line. The kernel copies it out (ProcessCommandLine
@@ -600,9 +544,8 @@ fn command_line(pid: u32) -> Option<String> {
         NtQueryInformationProcess, ProcessCommandLineInformation,
     };
 
-    // SAFETY: the handle is closed before returning. The buffer is 8-byte
-    // aligned, as long as the length passed, and on success holds a
-    // UNICODE_STRING followed by its text, which `Buffer` points into; the
+    // SAFETY: the handle is closed before returning. The buffer is 8-byte aligned, as long as the
+    // length passed, and on success holds a UNICODE_STRING whose `Buffer` points into it; the
     // pointer is checked to lie inside the buffer before it is read.
     unsafe {
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
@@ -815,7 +758,6 @@ mod tests {
         let from_aumid = format!("Chrome._crx_{ID}");
         let from_command =
             format!(r#""C:/Chrome/chrome.exe" --profile-directory=Default --app-id={ID}"#);
-        // Either signal gives the same id, whatever the profile.
         assert_eq!(web_app_id(Some(&from_aumid), None).as_deref(), Some(ID));
         assert_eq!(
             web_app_id(
@@ -830,7 +772,6 @@ mod tests {
             web_app_id(Some(&from_aumid), Some(&from_command)).as_deref(),
             Some(ID)
         );
-        // The browser's own windows, and Edge's `--app=URL` window.
         assert_eq!(
             web_app_id(Some("Chrome"), Some(r#""C:/Chrome/chrome.exe""#)),
             None
@@ -906,7 +847,6 @@ mod tests {
         assert_eq!(plain.name, "Google Chrome");
         let host = resolve(packaged, 0, "wwahost.exe", "Windows Web App Host", false);
         assert_eq!(host.id, "wwahost.exe/contoso.app_8wekyb3d8bbwe!main");
-        // The cache returns the same answer, and a different window another.
         assert_eq!(identify(app, 0, "chrome.exe", "Google Chrome"), web_app);
         assert_ne!(identify(browser, 0, "chrome.exe", "Google Chrome"), web_app);
 
@@ -925,7 +865,6 @@ mod tests {
         assert!(!is_generic_app_id("pythonw.exe", "Contoso.Tool"));
     }
 
-    /// An electron dev app with the default id is told apart by its entry.
     #[test]
     fn a_default_window_id_yields_to_the_command_line() {
         // The host branch of `resolve` filters the window id like this before
@@ -944,7 +883,6 @@ mod tests {
 
     #[test]
     fn ordinary_apps_keep_their_executable_as_the_id() {
-        // No lookups happen for these, so no window is needed.
         let identity = identify(HWND::default(), 0, "slack.exe", "Slack");
         assert_eq!(identity.id, "slack.exe");
         assert_eq!(identity.name, "Slack");

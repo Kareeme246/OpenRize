@@ -1,7 +1,6 @@
-//! One owner per minute: every write that gives an entry minutes takes them
-//! from whoever held them, approved time is never taken, and one Undo gives
-//! it all back. The `rize` CLI reaches the same store methods (see
-//! `cli/tests/offline.rs` for it end to end).
+//! One owner per minute: writes that give an entry minutes take them from whoever held them,
+//! approved time is never taken, and one Undo gives it all back.
+
 use std::collections::BTreeMap;
 
 use super::*;
@@ -37,7 +36,6 @@ fn new_entry(from: u64, to: u64, review: bool) -> NewTimeEntry {
     }
 }
 
-/// A hand-made entry from `from` to `to` minutes: pending, or approved.
 fn add(store: &mut ActivityStore, from: u64, to: u64, approved: bool) -> String {
     store
         .create_manual_entry(new_entry(from, to, !approved), NOW)
@@ -67,7 +65,6 @@ fn entries(store: &ActivityStore) -> Vec<TimeEntry> {
     store.list_time_entries(0, u64::MAX / 2).unwrap()
 }
 
-/// Live entries as (id, start, end) in minutes, in start order.
 fn spans(store: &ActivityStore) -> Vec<(String, u64, u64)> {
     entries(store)
         .into_iter()
@@ -79,16 +76,14 @@ fn minutes(store: &ActivityStore) -> Vec<(u64, u64)> {
     spans(store).into_iter().map(|(_, s, e)| (s, e)).collect()
 }
 
-/// The integrity check behind "totals stay plain sums": on every day, the time
-/// the entries cover (their union) is exactly the sum of their lengths, so no
-/// minute is counted, or billed, twice.
+/// Integrity check: each day's union of entry time equals the sum of their lengths (nothing
+/// double-counted).
 fn assert_union_equals_sum(store: &ActivityStore) {
     if let Some(problem) = days_that_overlap(store) {
         panic!("{problem}");
     }
 }
 
-/// The first day whose entries cover less than their lengths add up to.
 fn days_that_overlap(store: &ActivityStore) -> Option<String> {
     let mut days: BTreeMap<u64, Vec<(u64, u64)>> = BTreeMap::new();
     let mut statement = store
@@ -143,11 +138,8 @@ fn days_that_overlap(store: &ActivityStore) -> Option<String> {
     None
 }
 
-/// Who owns a stretch of activity: (entry, app and title, start, end).
 type Ownership = (Option<String>, String, u64, u64);
 
-/// Everything an Undo must give back: each entry but for `updated_at`, and
-/// who owns which stretch of activity (cut pieces of one segment count as one).
 fn state(store: &ActivityStore) -> (Vec<TimeEntry>, Vec<Ownership>) {
     let mut list = entries(store);
     for entry in &mut list {
@@ -181,7 +173,6 @@ fn state(store: &ActivityStore) -> (Vec<TimeEntry>, Vec<Ownership>) {
     (list, owned)
 }
 
-/// All the activity ever captured, in milliseconds.
 fn recorded(store: &ActivityStore) -> i64 {
     store
         .conn
@@ -205,8 +196,6 @@ fn sample(title: &str) -> Option<WindowSample> {
     })
 }
 
-/// Works from `from` to `to` (minutes), switching window every two minutes and
-/// rebuilding every minute like the AI worker.
 fn work(store: &mut ActivityStore, from: u64, to: u64) {
     let mut now = from * MIN;
     while now <= to * MIN {
@@ -306,7 +295,6 @@ fn an_added_entry_is_refused_over_an_approved_one_and_nothing_changes() {
         assert_eq!(state(&store), before);
         assert_eq!(store.undo_stack.len(), history);
     }
-    // The pending entry in reach of the refused claim was not trimmed either.
     assert_eq!(store.time_entry(&pending).unwrap().ended_at, 50 * MIN);
 }
 
@@ -330,7 +318,6 @@ fn an_edit_that_would_overlap_an_approved_entry_is_refused() {
         APPROVED_OVERLAP
     );
     assert_eq!(state(&store), before);
-    // Up to the approved entry's edge is fine.
     edit_times(&mut store, &pending, None, Some(60), NOW).unwrap();
     assert_union_equals_sum(&store);
 }
@@ -374,7 +361,6 @@ fn an_overlap_that_was_already_there_is_left_alone() {
     let mut store = store();
     let first = add(&mut store, 0, 60, false);
     let second = add(&mut store, 100, 160, false);
-    // How the record got here: before this change, edits could overlap.
     store
         .conn
         .execute(
@@ -385,7 +371,6 @@ fn an_overlap_that_was_already_there_is_left_alone() {
     let before = minutes(&store);
     assert_eq!(before, vec![(0, 60), (50, 160)]);
 
-    // Changing the description, or the end the overlap is not at, claims nothing.
     store
         .update_time_entry(
             &first,
@@ -426,8 +411,6 @@ fn one_undo_restores_the_state_before_a_claim_exactly_and_redo_repeats_it() {
     let before = state(&store);
     assert!(before.1.iter().any(|(owner, ..)| owner.is_some()));
 
-    // Takes the end of the captured session, all of one entry, and the start
-    // of another; the middle of the captured session is split around.
     let added = add(&mut store, 30, 150, false);
     assert_ne!(state(&store), before);
     assert_union_equals_sum(&store);
@@ -471,7 +454,6 @@ fn a_claim_leaves_the_activity_it_covered_to_the_claiming_entry() {
     let tail = entries(&store).pop().unwrap();
     let tail = store.get_entry_detail(&tail.id).unwrap();
     assert!(tail.segments.iter().all(|s| s.started_at >= 50 * MIN));
-    // Nothing is deleted: the activity is all still there.
     assert_eq!(recorded(&store), recorded_before);
     assert_union_equals_sum(&store);
 }
@@ -496,7 +478,6 @@ fn dragging_over_the_middle_of_the_live_session_closes_it_and_capture_resumes_af
     assert_eq!(list[2].status, "building");
     assert_eq!(list[2].started_at / MIN, 50);
 
-    // Capture keeps going into the part after the new entry.
     work(&mut store, 70 + 1, 75);
     let list = entries(&store);
     assert_eq!(list.len(), 3, "{list:?}");
@@ -505,7 +486,6 @@ fn dragging_over_the_middle_of_the_live_session_closes_it_and_capture_resumes_af
     assert!(list[2].ended_at >= 75 * MIN);
     assert_union_equals_sum(&store);
 
-    // Undo rejoins everything recorded since, like undoing a live split.
     assert_eq!(store.undo(75 * MIN).unwrap(), Some("Add"));
     work(&mut store, 76, 77);
     let list = entries(&store);
@@ -574,7 +554,6 @@ fn merging_is_refused_when_an_approved_entry_sits_in_the_gap() {
     assert_eq!(state(&store), before);
 }
 
-/// An entry the way the record may already hold one: no claim, no checks.
 fn insert_raw(store: &ActivityStore, id: &str, from: u64, to: u64) {
     store
         .conn
@@ -602,8 +581,6 @@ fn a_claim_that_is_refused_midway_changes_nothing() {
     add(&mut store, 0, 50, false);
     add(&mut store, 55, 80, true);
     let before = state(&store);
-    // The first range would trim the pending entry; the second hits approved
-    // time. Neither is applied.
     assert!(store
         .create_manual_entry(new_entry(40, 60, false), NOW)
         .is_err());
@@ -623,8 +600,7 @@ fn gained_minutes_are_what_the_new_span_adds_to_the_old_ones() {
     assert_eq!(gained(&[(40, 50)], 0, 10), vec![(0, 10)]);
 }
 
-/// A long run of random writes, undos and redos: after every step the day's
-/// entries cover exactly as much time as their lengths add up to.
+/// Random writes, undos and redos: after every step entry coverage equals the sum of lengths.
 #[test]
 fn the_per_day_union_equals_the_per_day_sum_after_any_run_of_writes() {
     let (mut applied, mut refused) = (0, 0);
@@ -696,9 +672,6 @@ fn the_per_day_union_equals_the_per_day_sum_after_any_run_of_writes() {
     );
 }
 
-/// Seeds for the random runs: `default` of them, or as many as
-/// `OVERLAP_FUZZ_SEEDS` says for a long local sweep.
-/// The entries as (status initial, start, end) in minutes, for failure messages.
 fn describe(store: &ActivityStore) -> String {
     let list: Vec<String> = entries(store)
         .iter()
@@ -714,7 +687,6 @@ fn describe(store: &ActivityStore) -> String {
     list.join(" ")
 }
 
-/// Who owns the recent activity, for failure messages.
 fn describe_segments(store: &ActivityStore, since: u64) -> String {
     let mut statement = store
         .conn
@@ -749,11 +721,7 @@ fn fuzz_seeds(default: usize) -> impl Iterator<Item = u64> {
     (1..=count as u64).map(|i| i.wrapping_mul(0x9E37_79B9_7F4A_7C15))
 }
 
-/// The same with capture running: the clock moves, the live session grows,
-/// hand-made entries are added, edited and merged over past, live and future
-/// minutes, and changes are undone and redone while the live session records
-/// into the time they free. After every step the entries cover exactly as much
-/// time as their lengths add up to, and at most one is live.
+/// The same with capture running: the live session grows and records into time that undo frees.
 #[test]
 fn the_union_equals_the_sum_while_capture_keeps_recording() {
     for start in fuzz_seeds(12) {
@@ -775,7 +743,6 @@ fn the_union_equals_the_sum_while_capture_keeps_recording() {
                 (!list.is_empty()).then(|| list[(n % list.len() as u64) as usize].id.clone())
             };
             // Refusals (over approved time, a change that no longer applies)
-            // are part of the run.
             let _ = match random(9) {
                 0..=2 => {
                     let to_clock = clock + 1 + random(8);
@@ -873,7 +840,6 @@ fn an_entry_dragged_out_past_now_fences_the_live_session_until_it_ends() {
     assert_eq!(list[1].id, future);
     assert_union_equals_sum(&store);
 
-    // Capture resumes where it ends.
     work(&mut store, 121, 145);
     let list = entries(&store);
     assert_eq!(list.len(), 3, "{list:?}");
@@ -895,7 +861,6 @@ fn undoing_a_merge_that_closed_the_live_entry_does_not_stretch_it_over_the_other
     insert_raw(&store, "next", 10, 12);
     let before = minutes(&store);
 
-    // The other half is hand-made, so the merge closes the live entry.
     store.merge_time_entries("live", "next", 12 * MIN).unwrap();
     assert_eq!(minutes(&store), vec![(0, 12)]);
     assert_eq!(store.undo(12 * MIN).unwrap(), Some("Merge"));

@@ -12,14 +12,9 @@ import { Field, Sheet } from "./Sheet";
 
 const NAME_HINT = `Just a name to tell accounts apart. There is no password: anyone using ${THIS_COMPUTER} can switch to any account.`;
 
-/**
- * Adds an account and opens it (the app restarts). From No account with data
- * of its own, also asks whether that data moves into the new account.
- */
 export function AddAccountSheet({ onClose }: { onClose: () => void }) {
   const { accounts, create } = useAccounts();
   const [name, setName] = useState("");
-  // Undefined until No account's data has been counted.
   const [existing, setExisting] = useState<DataSummary | null | undefined>();
   const [move, setMove] = useState(true);
   const [failure, setFailure] = useState<string | null>(null);

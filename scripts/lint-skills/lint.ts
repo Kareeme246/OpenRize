@@ -1,19 +1,13 @@
 /**
- * Structural lint for the repo skills and the drive-app feature map.
- *
- * Pure functions only: nothing here exits, prints, touches the network or reads anything outside the
- * root it is given. `cli.ts` is the command line; `lint.test.ts` exercises every rule on fixture trees.
- *
- * Catalogs (driver verbs, rize commands, pnpm scripts) are parsed from the real sources on every run so
- * the docs can never drift from the tools they describe.
+ * Structural lint for the repo skills and the drive-app feature map. Pure
+ * functions only: no exit, print or I/O outside the given root. Catalogs are
+ * parsed from the real sources on every run so docs cannot drift.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, posix } from "node:path";
 
 export interface Finding {
-  /** Repo-relative path, forward slashes. */
   file: string;
-  /** 1-based. */
   line: number;
   rule: string;
   message: string;
@@ -73,7 +67,6 @@ const IDENT_RE = /^[a-z][a-z0-9-]*$/;
 const KEBAB_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 const REPO_PATH_RE =
   /^(\.agents|\.github|scripts|src|src-tauri|docs|tests)\/[A-Za-z0-9_./-]+$/;
-/** Build output: present only after a build, and named per OS (`openrize.exe`). */
 const BUILD_OUTPUT_RE = /^src-tauri\/target(\/|$)/;
 const PNPM_BUILTINS = new Set(["install", "exec", "run", "dlx"]);
 const RIZE_GLOBAL_FLAGS = new Set([
@@ -83,8 +76,6 @@ const RIZE_GLOBAL_FLAGS = new Set([
   "-y",
   "--dry-run",
 ]);
-
-// ---------------------------------------------------------------- filesystem helpers
 
 function readText(root: string, rel: string): string | null {
   try {
@@ -120,19 +111,15 @@ function markdownFiles(root: string, rel: string): string[] {
   return out;
 }
 
-/** Skill directory names that hold a SKILL.md, sorted. */
 export function listSkills(root: string): string[] {
   return listDir(root, SKILLS_DIR).filter((dir) =>
     existsSync(join(root, SKILLS_DIR, dir, "SKILL.md")),
   );
 }
 
-// ---------------------------------------------------------------- markdown scanning
-
 export interface MdLine {
   n: number;
   text: string;
-  /** `fence` is a line inside a fenced block, `marker` an opening or closing fence line. */
   kind: "text" | "fence" | "marker";
 }
 
@@ -211,14 +198,9 @@ export function codeSpans(line: string): CodeSpan[] {
   return spans;
 }
 
-// ---------------------------------------------------------------- command catalog
-
 export interface Catalog {
-  /** Verbs in `scripts/app-drive.sh` usage(). */
   shVerbs: Set<string>;
-  /** Verbs in `scripts/app-drive-windows.mjs` USAGE. */
   winVerbs: Set<string>;
-  /** Shipped rize top-level commands and their subcommands. */
   rize: Map<string, Set<string>>;
   /** Non-shipped rize commands: "group" or "group sub" mapped to the Status cell. */
   rizePlanned: Map<string, string>;
@@ -313,14 +295,11 @@ export function loadCatalog(root: string): Catalog {
   };
 }
 
-// ---------------------------------------------------------------- shell-ish tokenizer
-
 export interface Token {
   text: string;
   kind: "word" | "quoted" | "op";
 }
 
-/** Splits one line of shell (or one inline code span) into words, quoted words and operators. */
 export function tokenize(source: string): Token[] {
   const tokens: Token[] = [];
   let current = "";
@@ -386,7 +365,6 @@ function atCommandPosition(tokens: Token[], i: number): boolean {
   );
 }
 
-/** Up to two command words after `rize`, skipping its global flags; stops at the first non-word. */
 function readRizeWords(tokens: Token[], from: number): string[] {
   const words: string[] = [];
   let i = from;
@@ -416,7 +394,6 @@ function plannedNote(catalog: Catalog, key: string): string | null {
     : null;
 }
 
-/** Why `rize <words>` is not a Shipped command, or null when it is. */
 export function rizeProblem(words: string[], catalog: Catalog): string | null {
   if (words.length === 0) return null;
   const [group, sub] = words;
@@ -447,7 +424,6 @@ function driverKind(word: string): "sh" | "win" | null {
   return null;
 }
 
-/** Every command-reference problem in one tokenized line or span. */
 export function commandProblems(tokens: Token[], catalog: Catalog): string[] {
   const out: string[] = [];
   for (let i = 0; i < tokens.length; i++) {
@@ -499,8 +475,6 @@ export function commandProblems(tokens: Token[], catalog: Catalog): string[] {
   return out;
 }
 
-// ---------------------------------------------------------------- generic markdown rules
-
 function finding(
   file: string,
   line: number,
@@ -510,7 +484,6 @@ function finding(
   return { file, line, rule, message };
 }
 
-/** `link`: relative markdown links must resolve. */
 export function ruleLink(root: string, file: string, text: string): Finding[] {
   const out: Finding[] = [];
   for (const line of scanLines(text)) {
@@ -548,7 +521,6 @@ export function ruleLink(root: string, file: string, text: string): Finding[] {
   return out;
 }
 
-/** `path`: an inline-code span that is a repo path must exist. */
 export function rulePath(root: string, file: string, text: string): Finding[] {
   const out: Finding[] = [];
   for (const line of scanLines(text)) {
@@ -573,7 +545,6 @@ export function rulePath(root: string, file: string, text: string): Finding[] {
   return out;
 }
 
-/** `placeholder`: no unfinished-work markers. */
 export function rulePlaceholder(file: string, text: string): Finding[] {
   const out: Finding[] = [];
   text.split("\n").forEach((line, index) => {
@@ -595,7 +566,6 @@ export function rulePlaceholder(file: string, text: string): Finding[] {
   return out;
 }
 
-/** `command`: driver, rize and pnpm references in code must exist in the real catalogs. */
 export function ruleCommand(
   catalog: Catalog,
   file: string,
@@ -616,8 +586,6 @@ export function ruleCommand(
   }
   return out;
 }
-
-// ---------------------------------------------------------------- skill frontmatter
 
 interface RawField {
   key: string;
@@ -658,7 +626,6 @@ function readSkillFields(lines: string[], close: number): RawField[] {
   return fields;
 }
 
-/** `frontmatter`: SKILL.md header. */
 export function ruleSkillFrontmatter(
   file: string,
   dir: string,
@@ -736,8 +703,6 @@ export function ruleSkillFrontmatter(
   return out;
 }
 
-// ---------------------------------------------------------------- feature map
-
 export type Surface = (typeof SURFACES)[number];
 export type Reach = (typeof REACH)[number];
 
@@ -753,9 +718,7 @@ export interface Feature {
   reachWindows: string;
   reachRize: string;
   verified: string;
-  /** Repo-relative path of the feature file. */
   file: string;
-  /** Line of each frontmatter key. */
   lines: Record<string, number>;
   /** Whether each `rize` item was double-quoted. */
   rizeQuoted: boolean[];
@@ -825,7 +788,6 @@ const EMPTY_FEATURE = (id: string, file: string): Feature => ({
   rizeQuoted: [],
 });
 
-/** `feature-frontmatter`: parses the flat subset and returns the feature with whatever was valid. */
 export function ruleFeatureFrontmatter(
   file: string,
   stem: string,
@@ -1001,7 +963,6 @@ export function ruleFeatureFrontmatter(
   return { findings, feature, bodyStart: block.close + 1 };
 }
 
-/** `feature-body`: one H1 equal to the title, then the six H2 sections in order, each non-empty. */
 export function ruleFeatureBody(
   file: string,
   title: string,
@@ -1073,7 +1034,6 @@ export function ruleFeatureBody(
   return out;
 }
 
-/** `feature-code`: every listed path exists. */
 export function ruleFeatureCode(root: string, feature: Feature): Finding[] {
   const out: Finding[] = [];
   for (const path of feature.code) {
@@ -1094,7 +1054,6 @@ export function ruleFeatureCode(root: string, feature: Feature): Finding[] {
   return out;
 }
 
-/** The `name: "<x>"` entries of `export type Route =`, or null when the anchor is missing. */
 export function parseRoutes(
   typesText: string,
 ): { name: string; line: number }[] | null {
@@ -1130,7 +1089,6 @@ export function parseRoutes(
   return routes;
 }
 
-/** `feature-route`: routes are real, and every route has exactly one owner. */
 export function ruleFeatureRoute(root: string, features: Feature[]): Finding[] {
   const typesText = readText(root, TYPES_TS);
   const routes = typesText === null ? null : parseRoutes(typesText);
@@ -1190,7 +1148,6 @@ export function ruleFeatureRoute(root: string, features: Feature[]): Finding[] {
   return out;
 }
 
-/** `feature-coverage`: every page and window entry point is covered by some feature's `code`. */
 export function ruleFeatureCoverage(
   root: string,
   features: Feature[],
@@ -1225,7 +1182,6 @@ export function ruleFeatureCoverage(
   return out;
 }
 
-/** `feature-rize`: every `rize` item is a Shipped command, written as command words only. */
 export function ruleFeatureRize(catalog: Catalog, feature: Feature): Finding[] {
   const out: Finding[] = [];
   const line = feature.lines.rize ?? 1;
@@ -1265,7 +1221,6 @@ interface IndexRow {
   target: string;
 }
 
-/** `feature-index`: README.md lists every feature file exactly once and nothing else. */
 export function ruleFeatureIndex(
   root: string,
   stems: string[],
@@ -1371,8 +1326,6 @@ export function ruleFeatureIndex(
   }
   return out;
 }
-
-// ---------------------------------------------------------------- loading and orchestration
 
 interface FeatureFile {
   stem: string;
@@ -1486,7 +1439,6 @@ export function isMapFinding(f: Finding): boolean {
   return f.rule.startsWith("feature-") || f.file.startsWith(`${FEATURES_DIR}/`);
 }
 
-/** The per-feature coverage table template for a maintenance pass, in index order. */
 export function coverageTable(root: string): string {
   const rows = loadFeatures(root).map(
     (f) =>

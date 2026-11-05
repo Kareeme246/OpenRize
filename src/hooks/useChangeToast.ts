@@ -3,7 +3,6 @@ import { plural } from "../lib/format";
 import type { UpdateTimeEntry } from "../lib/types";
 import { useToast } from "./useToast";
 
-/** "Category updated", "3 entries marked billable": what an entry edit did. */
 export function describeUpdate(patch: UpdateTimeEntry, count = 1): string {
   const what = count === 1 ? "" : ` on ${plural(count, "entry", "entries")}`;
   if (patch.billable !== undefined) {
@@ -26,8 +25,8 @@ export function describeUpdate(patch: UpdateTimeEntry, count = 1): string {
 }
 
 /**
- * Runs a change and, once it has gone through, confirms it with a toast.
- * Errors reach the caller untouched, for its inline error, and raise none.
+ * Runs a change and toasts once it succeeds; errors reach the caller untouched
+ * and raise no toast.
  */
 export function useChangeToast(): <T>(
   change: () => Promise<T>,

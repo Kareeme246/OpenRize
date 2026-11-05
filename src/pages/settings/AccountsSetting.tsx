@@ -19,7 +19,6 @@ import { SettingGroup } from "./SettingParts";
 const ROW_BUTTON =
   "rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] text-fg-muted hover:bg-surface-strong disabled:cursor-not-allowed disabled:opacity-40";
 
-/** Settings > Data & storage > Accounts: the list, with rename and delete. */
 export function AccountsSetting() {
   const { accounts, current, readOnly } = useAccounts();
   const [adding, setAdding] = useState(false);

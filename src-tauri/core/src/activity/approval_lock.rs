@@ -20,8 +20,6 @@ fn store() -> ActivityStore {
     store
 }
 
-/// A hand-made entry from `from` to `to` minutes. Labeled entries are
-/// approved on creation; `review` leaves them pending.
 fn entry(store: &mut ActivityStore, from: u64, to: u64, review: bool) -> String {
     store
         .create_manual_entry(
@@ -97,7 +95,6 @@ fn approved_entries_cannot_be_split_merged_deleted_or_rejected() {
     assert_locked(store.split_time_entry(&first, 10 * MIN, NOW));
     assert_locked(store.merge_time_entries(&first, &second, NOW));
     assert_locked(store.merge_time_entries(&second, &first, NOW));
-    // Either side being approved is enough.
     assert_locked(store.merge_time_entries(&pending, &second, NOW));
     assert_locked(store.merge_time_entries(&second, &pending, NOW));
     assert_locked(store.delete_time_entry(&first, NOW));
@@ -305,7 +302,6 @@ fn manual_creation_refuses_every_overlap_with_approved_time_atomically() {
             );
         }
     }
-    // Sharing an edge does not overlap.
     entry(&mut store, 0, 10, false);
     entry(&mut store, 30, 40, false);
 }
@@ -340,7 +336,6 @@ fn redoing_manual_creation_checks_new_approved_time_and_keeps_the_history() {
     assert_eq!(status(&store, &id), "pending");
 }
 
-/// What the AI worker or another client does behind the history's back.
 fn approve_behind_its_back(store: &ActivityStore, id: &str) {
     store
         .conn
@@ -372,7 +367,6 @@ fn undoing_an_accept_is_an_unapprove_and_stays_allowed() {
     assert_eq!(status(&store, &id), "pending");
     assert_eq!(store.redo(NOW).unwrap(), Some("Accept"));
     assert_eq!(status(&store, &id), "approved");
-    // Unapprove and its undo (back to approved) work too.
     store
         .unapprove_time_entries(std::slice::from_ref(&id), NOW)
         .unwrap();
@@ -382,7 +376,6 @@ fn undoing_an_accept_is_an_unapprove_and_stays_allowed() {
 
 #[test]
 fn undo_and_redo_refuse_to_change_an_approved_entry_and_stay_on_the_stack() {
-    // Edit
     let mut store = store();
     let id = entry(&mut store, 0, 30, true);
     store
@@ -401,7 +394,6 @@ fn undo_and_redo_refuse_to_change_an_approved_entry_and_stay_on_the_stack() {
     unapprove_behind_its_back(&store, &id);
     assert_eq!(store.redo(NOW).unwrap(), Some("Edit"));
 
-    // Split: undo and redo
     let mut store = self::store();
     let id = entry(&mut store, 0, 60, true);
     let (_, second) = store.split_time_entry(&id, 20 * MIN, NOW).unwrap();
@@ -415,7 +407,6 @@ fn undo_and_redo_refuse_to_change_an_approved_entry_and_stay_on_the_stack() {
     unapprove_behind_its_back(&store, &id);
     assert_eq!(store.redo(NOW).unwrap(), Some("Split"));
 
-    // Merge: undo and redo
     let mut store = self::store();
     let a = entry(&mut store, 0, 30, true);
     let b = entry(&mut store, 30, 60, true);
@@ -429,7 +420,6 @@ fn undo_and_redo_refuse_to_change_an_approved_entry_and_stay_on_the_stack() {
     unapprove_behind_its_back(&store, &b);
     assert_eq!(store.redo(NOW).unwrap(), Some("Merge"));
 
-    // Delete: undo and redo
     let mut store = self::store();
     let id = entry(&mut store, 0, 30, true);
     store.delete_time_entry(&id, NOW).unwrap();

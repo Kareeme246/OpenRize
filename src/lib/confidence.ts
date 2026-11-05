@@ -1,7 +1,7 @@
 /**
- * Confidence bands, shown everywhere with both a label and a meter, never
- * colour alone. Thresholds mirror src-tauri/src/ai/mod.rs: at or above
- * `PREFILL` the AI pre-selects a value; below it the entry "Needs you".
+ * Confidence bands, shown with a label and a meter, never colour alone.
+ * Thresholds mirror src-tauri/src/ai/mod.rs: at or above `PREFILL` the AI
+ * pre-selects.
  */
 
 export type Band = "high" | "medium" | "low";
@@ -22,7 +22,6 @@ export const BAND_LABEL: Record<Band, string> = {
   low: "Needs you",
 };
 
-/** Text colour per band: accent, neutral, and muted. */
 export const BAND_TONE: Record<Band, string> = {
   high: "text-accent",
   medium: "text-fg-muted",
@@ -40,8 +39,8 @@ export function percent(confidence: number): string {
 }
 
 /**
- * The confidence a Calendar block shows: the weaker of its fields, since an
- * entry only auto-approves when both clear the threshold.
+ * The weaker of an entry's field confidences, since it auto-approves only when
+ * both clear the threshold.
  */
 export function entryConfidence(
   category?: number,

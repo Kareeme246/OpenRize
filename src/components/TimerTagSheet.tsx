@@ -4,15 +4,12 @@ import { Field, Sheet } from "./Sheet";
 
 interface TimerTagSheetProps {
   label: string;
-  /** The timer's tag now, if any. */
   current: string | null;
-  /** Every tag in use, offered as one-click choices. */
   tags: string[];
   onSave: (tag: string | null) => void;
   onClose: () => void;
 }
 
-/** Links a stopwatch to others by giving it their tag, or unlinks it. */
 export function TimerTagSheet({
   label,
   current,

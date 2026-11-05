@@ -1,7 +1,6 @@
-//! Serves `rize` while the app runs. The answers come from
-//! `openrize_core::rpc`, the same code `rize` runs itself when the app is
-//! closed; the app adds what only it can do (`Live`) and emits the events a
-//! window command would, so open windows and the tray update at once.
+//! Serves `rize` while the app runs, answering from `openrize_core::rpc`. The
+//! app adds what only it can do (`Live`) and emits the events a window command
+//! would, so open windows and the tray update at once.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -15,11 +14,8 @@ use tauri::{AppHandle, Manager};
 use crate::settings::Settings;
 use crate::{activity, commands, AppState};
 
-/// Keeps the stores' lock (`openrize_core::state::lock_stores`) for the app's
-/// lifetime.
 pub struct StoresLock(#[allow(dead_code)] pub std::fs::File);
 
-/// Serves `rize` on this data directory's endpoint until the app exits.
 pub fn serve(app: AppHandle, data_dir: PathBuf) {
     let service = match Endpoint::new(&data_dir).and_then(|endpoint| endpoint.listen()) {
         Ok(service) => service,
@@ -48,7 +44,6 @@ pub fn serve(app: AppHandle, data_dir: PathBuf) {
     });
 }
 
-/// The running app, as `openrize_core::rpc` sees it.
 struct App<'a>(&'a AppHandle);
 
 impl Live for App<'_> {
@@ -106,9 +101,8 @@ impl Live for App<'_> {
                     .and_then(|store| store.snapshot().ok());
                 if let Some(timers) = timers {
                     if matches!(operation, O::TimerStart { .. } | O::TimerTagStart { .. }) {
-                        // Started by hand, as from a card: whatever runs now
-                        // (the timer and every one its tag links) is no
-                        // longer work an account switch left paused.
+                        // Started by hand: whatever runs now (the timer and its
+                        // tag's links) is no longer work an account switch paused.
                         let running: Vec<String> = timers
                             .iter()
                             .filter(|timer| timer.is_running())

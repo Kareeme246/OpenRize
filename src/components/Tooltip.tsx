@@ -14,27 +14,15 @@ import {
 import { createPortal } from "react-dom";
 
 /**
- * The app's hover tooltip, in place of the native `title` bubble: themed,
- * keyboard-reachable, and kept inside the window.
- *
- * It opens after a short hover delay (or at once while keyboard focus lands on
- * the trigger), and closes on pointer leave, blur, press, scroll, resize, or
- * Escape. Escape is swallowed while a tooltip is open, so it dismisses the
- * tooltip before anything else listening for it.
- *
- * The bubble lives in a portal and on the top layer (`popover="manual"`), so
- * overflow clipping and an open modal `<dialog>` never hide it. Inside a
- * dialog it is portalled into that dialog, so the dialog's inertness does not
- * apply to it either.
+ * Hover tooltip replacing the native `title` bubble. Escape is swallowed while
+ * one is open. Rendered in a top-layer portal (inside the open dialog, if any)
+ * so clipping and modal inertness never hide it.
  */
 
 export type TooltipPlacement = "top" | "bottom" | "left" | "right";
 
-/** How long the pointer must rest on a trigger before the bubble appears. */
 const SHOW_DELAY_MS = 450;
-/** Moving between triggers within this window skips the delay. */
 const WARM_WINDOW_MS = 300;
-/** Space between the trigger and the bubble, and from the window's edge. */
 const GAP = 6;
 const EDGE_MARGIN = 8;
 
@@ -45,7 +33,6 @@ const OPPOSITE: Record<TooltipPlacement, TooltipPlacement> = {
   right: "left",
 };
 
-/** Only one tooltip shows at a time; opening one closes the previous. */
 let closeActive: (() => void) | null = null;
 let lastClosedAt = 0;
 
@@ -78,11 +65,6 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(value, Math.max(min, max)));
 }
 
-/**
- * The preferred side when it fits, else its opposite, else whichever side
- * does; centred on the trigger and clamped into the window along the other
- * axis.
- */
 export function placeTooltip(
   anchor: DOMRect,
   width: number,
@@ -143,15 +125,10 @@ interface TriggerProps {
 }
 
 interface TooltipProps {
-  /** What the bubble says. Nothing renders, and no handlers attach, when empty. */
   content: ReactNode;
   placement?: TooltipPlacement;
-  /**
-   * Wrap the trigger in a `<span>` with these classes instead of attaching to
-   * the child itself. Use it for a disabled control (the browser sends it no
-   * pointer events, so the child is made click-through here) or a child that
-   * cannot take event props.
-   */
+  /** Wraps the trigger in a `<span>` with these classes: for a disabled
+   * control (no pointer events) or a child that cannot take event props. */
   wrapperClassName?: string;
   children: ReactElement<TriggerProps>;
 }
@@ -238,7 +215,6 @@ export function Tooltip({
     };
     // Capture, so Escape reaches us before a dialog or panel handler does.
     document.addEventListener("keydown", onKeyDown, true);
-    // Scrolling anywhere moves the trigger out from under the bubble.
     window.addEventListener("scroll", close, { capture: true, passive: true });
     window.addEventListener("resize", close);
     window.addEventListener("blur", close);
@@ -259,7 +235,6 @@ export function Tooltip({
   const handlers = {
     onPointerEnter: (event: PointerEvent<Element>) => {
       own.onPointerEnter?.(event);
-      // Touch has no hover; a tap should just act.
       if (event.pointerType === "touch") return;
       show(event.currentTarget, false);
     },
@@ -289,7 +264,6 @@ export function Tooltip({
     },
   };
 
-  // A string that repeats the trigger's accessible name adds nothing to read.
   const repeatsName =
     typeof content === "string" && children.props["aria-label"] === content;
   const describedBy = open && !repeatsName ? id : undefined;

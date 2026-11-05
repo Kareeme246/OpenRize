@@ -7,7 +7,6 @@ pub fn check_permissions(_accessibility: AccessibilityState) -> Vec<PermissionIn
 
 pub fn request_accessibility() {}
 
-/// Nothing here needs Accessibility, so there is nothing to watch.
 pub fn accessibility_reading() -> Option<Reading> {
     None
 }

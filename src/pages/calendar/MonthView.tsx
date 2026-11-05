@@ -10,11 +10,9 @@ import { formatDuration, formatHours } from "../../lib/format";
 import type { Category, RollupCell } from "../../lib/types";
 
 interface MonthViewProps {
-  /** The Monday the grid starts on. */
   gridStart: Date;
   weeks: number;
   month: number;
-  /** A category rollup with one bucket per grid day. */
   cells: RollupCell[];
   categoryById: Map<string, Category>;
   onOpenDay: (date: string) => void;
@@ -26,7 +24,6 @@ export interface DayTotal {
   slices: Slice[];
 }
 
-/** Folds a per-day category rollup into one total per grid day. */
 export function dayTotals(
   cells: RollupCell[],
   categoryById: Map<string, Category>,
@@ -62,9 +59,8 @@ export function dayTotals(
 }
 
 /**
- * Each day cell shows its total, a stacked category bar, and "N to review".
- * Titles are left to the Day view, which a click opens: Rize's truncated
- * entry titles were unreadable at this size.
+ * Titles are left to the Day view: truncated entry titles were unreadable at
+ * this size.
  */
 export function MonthView({
   gridStart,

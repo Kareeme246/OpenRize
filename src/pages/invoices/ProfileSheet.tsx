@@ -16,9 +16,8 @@ interface ProfileSheetProps {
 }
 
 /**
- * The business every invoice is "From": name, address, contact details,
- * payment instructions, logo and numbering. Stored locally; finalized invoices
- * keep their own copy, so editing this never rewrites an issued document.
+ * Finalized invoices keep their own copy of this business, so editing never
+ * rewrites an issued document.
  */
 export function ProfileSheet({ onClose, onSaved }: ProfileSheetProps) {
   const showToast = useToast();

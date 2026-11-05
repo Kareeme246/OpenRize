@@ -1,11 +1,6 @@
-//! The Projects page (P3): AI hints as T0 rules with a match preview,
-//! per-project totals, project discovery from captured activity, and CSV
-//! import.
-//!
-//! A project's `ai_hints` is free text: keywords, folders, repos, domains.
-//! Each hint becomes one `origin = 'hint'` rule for the project, which is how
-//! most project assignments resolve before the model is asked (design board
-//! C§3b). Saving the hints replaces that project's hint rules.
+//! The Projects page: AI hints as rules with a match preview, per-project totals, discovery from
+//! captured activity, and CSV import. A project's `ai_hints` free text becomes one `origin =
+//! 'hint'` rule per hint, replaced on save, so most assignments resolve before the model is asked.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
@@ -27,18 +22,14 @@ const DISCOVERY_MIN_MS: u64 = 30 * 60 * 1000;
 const DISCOVERY_LIMIT: usize = 5;
 const DISMISSED_KEY: &str = "project_suggestions_dismissed";
 
-/// The muted palette (design board, theme T), for projects created without a
-/// colour picker: imports and discovery.
+/// The muted palette, for projects created without a colour picker: imports and discovery.
 pub const PALETTE: [&str; 10] = [
     "#75a4e5", "#56c2b1", "#52b788", "#df84b5", "#e4817d", "#9aa6b4", "#bfa181", "#707bf0",
     "#66b1df", "#9b87df",
 ];
 
-// --- Hints ------------------------------------------------------------------
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hint {
-    /// The text the user wrote.
     pub text: String,
     /// The rule it becomes, or `None` when it is too short to match on.
     pub rule: Option<(&'static str, String)>,
@@ -144,7 +135,6 @@ pub fn sync_hint_rules(
 #[serde(rename_all = "camelCase")]
 pub struct HintMatch {
     pub hint: String,
-    /// The rule kind the hint becomes; `None` when it is too short to use.
     pub match_kind: Option<String>,
     pub pattern: Option<String>,
     pub matched_ms: u64,
@@ -180,7 +170,6 @@ fn segment_ms(segment: &ActivitySegment) -> u64 {
         .saturating_sub(segment.started_at)
 }
 
-/// How much captured time since `since_ms` each hint would have matched.
 pub fn preview_hints(conn: &Connection, hints: &str, since_ms: u64) -> Result<HintPreview, String> {
     let parsed = parse_hints(hints);
     let rules: Vec<Option<Rule>> = parsed
@@ -232,8 +221,6 @@ pub fn preview_hints(conn: &Connection, hints: &str, since_ms: u64) -> Result<Hi
     })
 }
 
-// --- Stats and links ----------------------------------------------------------
-
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectStats {
@@ -252,8 +239,7 @@ pub struct ProjectStats {
     pub last_activity: Option<u64>,
 }
 
-/// Totals for every project with at least one entry. Budgets are derived in
-/// the view from these and the project's rate.
+/// Totals for every project with at least one entry.
 pub fn project_stats(
     conn: &Connection,
     range_start: u64,
@@ -337,28 +323,23 @@ pub fn project_rules(conn: &Connection, project_id: &str) -> Result<Vec<ProjectR
     rows.collect::<rusqlite::Result<_>>().map_err(err)
 }
 
-// --- Discovery ------------------------------------------------------------------
-
 /// "Create project pantry-tracker? (6h 10m, matched by ~/Code/pantry-tracker,
 /// github.com/…/pantry-tracker)".
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectSuggestion {
-    /// Lowercased name, the identity a dismissal remembers.
     pub key: String,
     pub name: String,
     pub ms: u64,
-    /// The strongest matches, ready to become the project's AI hints.
     pub evidence: Vec<String>,
 }
 
 /// Folders people keep repositories in.
 const CODE_ROOTS: &str = "Code|code|Projects|projects|src|dev|Developer|developer|repos|git|workspace|Workspace|Sites|work";
 
-/// A repository path in a window title: under the home folder (`~`, a macOS or
-/// Linux home, a Windows profile, or WSL's view of one) or straight under a
-/// drive (`D:\Code\app`), in either separator, with `Documents`, `Desktop` or
-/// OneDrive allowed between. Windows paths are case-insensitive, so this is too.
+/// A repository path in a window title: under the home folder (`~`, a macOS/Linux home, a Windows
+/// profile, WSL's view of one) or straight under a drive (`D:\Code\app`), in either separator, with
+/// `Documents`, `Desktop` or OneDrive between. Windows paths are case-insensitive, so this is too.
 static TITLE_PATH: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(
         r"(?i)(?:(?P<home>~|/Users/[^/\s]+|/home/[^/\s]+|/mnt/[a-z]/Users/[^/\s]+|[a-z]:[\\/]Users[\\/][^\\/\s]+)|(?P<drive>[a-z]:))(?P<mid>[\\/](?:Documents|Desktop|OneDrive[^\\/\s]*))?[\\/](?P<root>{CODE_ROOTS})[\\/](?P<name>[a-z0-9][a-z0-9._-]*)"
@@ -420,7 +401,6 @@ const GENERIC_TITLES: [&str; 8] = [
     "search",
 ];
 
-/// `(name, evidence)` pairs one segment points at.
 fn candidates(segment: &ActivitySegment) -> Vec<(String, String)> {
     let mut out = Vec::new();
 
@@ -496,7 +476,6 @@ fn dismissed(conn: &Connection) -> Result<HashSet<String>, String> {
         .collect())
 }
 
-/// Remembers a dismissed suggestion so it never comes back.
 pub fn dismiss_suggestion(conn: &Connection, key: &str) -> Result<(), String> {
     let mut keys: Vec<String> = dismissed(conn)?.into_iter().collect();
     let key = key.to_lowercase();
@@ -521,11 +500,7 @@ struct Cluster {
     evidence: HashMap<String, u64>,
 }
 
-/// Proposes projects from recurring repo, folder, and forge names in the
-/// capture since `since_ms`, skipping names that already are a project (or a
-/// project's hint) and ones the user dismissed. Runs over local data only.
-/// How discovery compares names: "Acme Web", "acme-web", and "acme_web" are
-/// one project.
+/// How discovery compares names: "Acme Web", "acme-web" and "acme_web" are one project.
 fn name_key(name: &str) -> String {
     name.chars()
         .filter(|c| c.is_alphanumeric())
@@ -533,6 +508,8 @@ fn name_key(name: &str) -> String {
         .collect()
 }
 
+/// Proposes projects from recurring repo, folder and forge names in the capture since `since_ms`,
+/// skipping existing projects, their hints and dismissed names. Runs over local data only.
 pub fn discover(conn: &Connection, since_ms: u64) -> Result<Vec<ProjectSuggestion>, String> {
     let mut known: HashSet<String> = HashSet::new();
     {
@@ -619,8 +596,6 @@ pub fn discover(conn: &Connection, since_ms: u64) -> Result<Vec<ProjectSuggestio
     Ok(out)
 }
 
-// --- CSV import -------------------------------------------------------------------
-
 /// Minimal RFC 4180: quoted fields, doubled quotes, CRLF or LF line ends.
 pub fn parse_csv(text: &str) -> Vec<Vec<String>> {
     let mut rows = Vec::new();
@@ -679,7 +654,6 @@ fn parse_budget(text: &str) -> Option<(&'static str, f64)> {
     Some((if is_amount { "amount" } else { "hours" }, value))
 }
 
-/// `YYYY-MM-DD` as local midnight.
 fn parse_due(text: &str) -> Option<u64> {
     use chrono::{NaiveDate, TimeZone};
     let date = NaiveDate::parse_from_str(text.trim(), "%Y-%m-%d").ok()?;
@@ -697,9 +671,8 @@ pub struct ImportSummary {
     pub skipped: Vec<String>,
 }
 
-/// Imports `name, client, budget, due date` rows (header required, columns in
-/// any order). Clients are matched by name or created; existing project names
-/// are skipped rather than duplicated.
+/// Imports `name, client, budget, due date` rows (header required, any column order). Clients are
+/// matched by name or created; existing project names are skipped.
 pub fn import_csv(
     store: &mut ActivityStore,
     text: &str,
@@ -989,7 +962,6 @@ mod tests {
             20,
         );
         segment(conn, "Zed", "main.rs — pantry-tracker", None, 60 * MIN, 10);
-        // Too little time to suggest.
         segment(conn, "WezTerm", "~/Code/scratch", None, 70 * MIN, 5);
         // A forge page, not a repository.
         segment(
@@ -1015,7 +987,6 @@ mod tests {
             ]
         );
 
-        // Accepting it (a project with those hints) or dismissing it ends it.
         dismiss_suggestion(conn, "Pantry-Tracker").unwrap();
         assert!(discover(conn, 0).unwrap().is_empty());
         conn.execute("DELETE FROM settings WHERE key = ?1;", [DISMISSED_KEY])
@@ -1086,7 +1057,6 @@ mod tests {
             names("wsl.exe", "kareem@pc: /mnt/c/Users/kareem/Projects/api"),
             vec![pair("api", "~/Projects/api")]
         );
-        // Under Documents, and off the profile entirely.
         assert_eq!(
             names("cmd.exe", r"C:\Users\kareem\Documents\Code\proj"),
             vec![pair("proj", "~/Documents/Code/proj")]
@@ -1095,7 +1065,6 @@ mod tests {
             names("cmd.exe", r"D:\dev\ledger"),
             vec![pair("ledger", "D:/dev/ledger")]
         );
-        // Not a code folder.
         assert!(names("cmd.exe", r"C:\Users\kareem\Downloads\setup").is_empty());
 
         assert_eq!(
@@ -1335,7 +1304,6 @@ mod tests {
             2,
         );
         assert!(moved.is_err());
-        // Other edits still go through.
         store
             .update_project(
                 &project.id,

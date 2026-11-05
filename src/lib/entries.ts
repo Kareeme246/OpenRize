@@ -1,6 +1,6 @@
 /**
- * How an entry reads in every view: one state machine for the Calendar's
- * blocks, My Timesheet's tabs, and Time Entries' rows (design board, D1).
+ * How an entry reads in every view: one state machine for Calendar blocks, My
+ * Timesheet tabs, and Time Entries rows.
  */
 
 import { entryConfidence, PREFILL } from "./confidence";
@@ -29,7 +29,6 @@ export function blockState(entry: TimeEntry): BlockState {
   return "pending";
 }
 
-/** The weaker field's confidence: an entry clears review only on both. */
 export function confidenceOf(entry: TimeEntry): number | undefined {
   return entryConfidence(
     entry.ai?.categoryConfidence,
@@ -42,14 +41,13 @@ export const LOCKED_HINT =
   "Approved entries are locked. Unapprove to change them.";
 
 /**
- * Approved entries are frozen: the core refuses every change but unapprove,
- * so views disable their controls instead of offering a doomed action.
+ * Approved entries are frozen: the core refuses all but unapprove, so views
+ * disable their controls.
  */
 export function isLocked(entry: TimeEntry): boolean {
   return entry.status === "approved";
 }
 
-/** Invoiced time can be neither unapproved nor deleted. */
 export const INVOICED_HINT = "Invoiced entries can't be unapproved or deleted.";
 
 export function isInvoiced(entry: TimeEntry): boolean {
@@ -62,7 +60,6 @@ const REVIEWABLE: ReadonlySet<BlockState> = new Set([
   "failed",
 ]);
 
-/** Waiting on the user (review mode's queue, the "To review" tab). */
 export function isReviewable(entry: TimeEntry): boolean {
   return REVIEWABLE.has(blockState(entry));
 }
@@ -80,8 +77,8 @@ export function entryEnd(entry: TimeEntry, now: number = Date.now()): number {
 }
 
 /**
- * The session recording right now, if any: the building entry that has
- * started. The Calendar pins its now line to this entry's live edge.
+ * The session recording right now, if any; the Calendar pins its now line to
+ * its live edge.
  */
 export function recordingEntry(
   entries: TimeEntry[],
@@ -103,7 +100,6 @@ export function totalDuration(
   return entries.reduce((sum, entry) => sum + durationOf(entry, now), 0);
 }
 
-/** Whether time in this category counts toward work hours. */
 export function countsAsWork(
   categoryId: string | null | undefined,
   categoryById: Map<string, Category>,
@@ -139,8 +135,8 @@ export function isTyping(target: EventTarget | null): boolean {
 }
 
 /**
- * Splits at the app switch nearest the middle, else at the midpoint; for the
- * live entry, the middle of what it has recorded until now.
+ * Splits at the app switch nearest the middle, else the midpoint; for the live
+ * entry, the middle of what it has recorded.
  */
 export function splitPoint(
   entry: TimeEntry,

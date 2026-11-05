@@ -1,30 +1,6 @@
-//! In-app updates.
-//!
-//! `tauri-plugin-updater` reads `latest.json` from the newest GitHub Release
-//! (written by `.github/workflows/release.yml`), verifies the downloaded
-//! platform payload against the minisign public key in `tauri.conf.json`,
-//! and installs it. This module owns *when* that happens and
-//! what the UI sees:
-//!
-//! - **Schedule.** A check 10s after launch, then hourly, plus one whenever a
-//!   window regains focus if the last check is at least 5 minutes old.
-//! - **Status.** One [`UpdateStatus`] snapshot, returned by `update_status`
-//!   and pushed on every change as [`EVENT_UPDATE_STATUS`].
-//! - **Changelog.** `latest.json` only carries the newest release's notes, so
-//!   the notes of every release between the installed and the offered version
-//!   come from the GitHub Releases API, falling back to `latest.json`'s notes.
-//!   With no update waiting, Settings asks for the installed and older
-//!   releases' notes from the same API, only when its changelog is opened.
-//! - **Install.** Only on request. The restart goes through
-//!   [`AppHandle::request_restart`], so `RunEvent::Exit` still closes the open
-//!   activity segment and the relaunched app starts a fresh one. Windows quits
-//!   through the plugin before installation; its before-exit hook closes the
-//!   segment, and the installer relaunches the app.
-//!
-//! Debug builds never check: installing would overwrite `target/debug`. Set
-//! `OPENRIZE_SIMULATE_UPDATE=1` there to exercise the UI with a fake update.
-//! Platforms the release feed never carries do not check. A release that omits
-//! this build's platform is a normal no-update result.
+//! Checks run at launch+10s, hourly, and on focus after 5+ min. Install restarts via
+//! [`AppHandle::request_restart`] so `RunEvent::Exit` closes the activity segment (Windows:
+//! its before-exit hook). Debug builds never check; `OPENRIZE_SIMULATE_UPDATE=1` fakes one.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -33,14 +9,12 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
-/// Emitted with the full [`UpdateStatus`] whenever it changes.
 pub const EVENT_UPDATE_STATUS: &str = "update-status";
 
 const REPOSITORY: &str = "Kareeme246/OpenRize";
 const FIRST_CHECK_DELAY: Duration = Duration::from_secs(10);
 const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const FOCUS_CHECK_MIN_GAP: Duration = Duration::from_secs(5 * 60);
-/// Download progress is pushed at most this often.
 const PROGRESS_EMIT_GAP: Duration = Duration::from_millis(150);
 
 #[derive(Debug, Clone, Serialize)]
@@ -48,8 +22,6 @@ const PROGRESS_EMIT_GAP: Duration = Duration::from_millis(150);
 pub struct UpdateStatus {
     pub current_version: String,
     pub phase: UpdatePhase,
-    /// A newer version that can be installed, if the last successful check
-    /// found one.
     pub available: Option<AvailableUpdate>,
     /// Why the last manual check or install failed. Automatic checks only log,
     /// so an offline laptop doesn't show a stale error.
@@ -69,7 +41,6 @@ pub enum UpdatePhase {
 #[serde(rename_all = "camelCase")]
 pub struct AvailableUpdate {
     pub version: String,
-    /// Every release newer than the installed version, newest first.
     pub releases: Vec<ReleaseNotes>,
 }
 
@@ -77,14 +48,12 @@ pub struct AvailableUpdate {
 #[serde(rename_all = "camelCase")]
 pub struct ReleaseNotes {
     pub version: String,
-    /// RFC 3339 publish time, when known.
     pub published_at: Option<String>,
     pub notes: String,
 }
 
 pub struct UpdaterState {
     status: Mutex<UpdateStatus>,
-    /// The plugin's handle for `available`, kept to install it later.
     pending: Mutex<Option<Update>>,
     /// When the last check started. Starts at launch, so the focus a fresh
     /// launch gets doesn't jump ahead of the delayed first check.
@@ -113,7 +82,6 @@ impl UpdaterState {
     }
 }
 
-/// Why this build never checks for updates, if it doesn't.
 fn no_updates_reason() -> Option<&'static str> {
     if cfg!(debug_assertions) {
         Some("Development builds don't check for updates.")
@@ -127,7 +95,6 @@ fn no_updates_reason() -> Option<&'static str> {
     }
 }
 
-/// Starts the launch + hourly schedule.
 pub fn spawn_scheduler(app: AppHandle) {
     if no_updates_reason().is_some() {
         if cfg!(debug_assertions) && std::env::var_os("OPENRIZE_SIMULATE_UPDATE").is_some() {
@@ -144,7 +111,6 @@ pub fn spawn_scheduler(app: AppHandle) {
     });
 }
 
-/// Called when an OpenRize window regains focus.
 pub fn on_focus(app: &AppHandle) {
     if no_updates_reason().is_some() {
         return;
@@ -215,8 +181,7 @@ pub async fn check(app: &AppHandle, manual: bool) {
     emit(app, &status);
 }
 
-/// Downloads and installs the pending update, then restarts into it. Only
-/// returns on failure; the error is also left in the status.
+/// Only returns on failure; the error is also left in the status.
 pub async fn install(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<UpdaterState>();
     let update = state
@@ -269,7 +234,6 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
     }
 }
 
-/// Moves from `Idle` into `phase`; false when something else is running.
 fn begin(app: &AppHandle, phase: UpdatePhase) -> bool {
     let state = app.state::<UpdaterState>();
     let Ok(mut status) = state.status.lock() else {
@@ -362,7 +326,6 @@ struct GithubRelease {
     prerelease: bool,
 }
 
-/// Notes of every published release in `(current, latest]`, newest first.
 async fn release_notes_between(current: &str, latest: &str) -> Result<Vec<ReleaseNotes>, String> {
     let current = semver::Version::parse(current).map_err(|error| error.to_string())?;
     let latest = semver::Version::parse(latest).map_err(|error| error.to_string())?;
@@ -374,9 +337,7 @@ async fn release_notes_between(current: &str, latest: &str) -> Result<Vec<Releas
         .collect())
 }
 
-/// Notes of the newest `limit` published releases up to and including
-/// `current`, newest first: the changelog Settings shows when no update is
-/// waiting.
+/// Notes of the newest `limit` releases up to `current`, for the no-update changelog.
 pub async fn recent_release_notes(
     current: &str,
     limit: usize,
@@ -391,7 +352,6 @@ pub async fn recent_release_notes(
         .collect())
 }
 
-/// Every published, non-prerelease GitHub release, newest first.
 async fn published_releases() -> Result<Vec<(semver::Version, ReleaseNotes)>, String> {
     // reqwest is built without a bundled crypto provider, like the updater's.
     if rustls::crypto::CryptoProvider::get_default().is_none() {
@@ -432,7 +392,6 @@ async fn published_releases() -> Result<Vec<(semver::Version, ReleaseNotes)>, St
     Ok(notes)
 }
 
-/// Debug builds only: pretend an update is available so the UI can be seen.
 fn simulate(app: &AppHandle) {
     let state = app.state::<UpdaterState>();
     let Ok(mut status) = state.status.lock() else {

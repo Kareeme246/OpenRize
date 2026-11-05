@@ -1,13 +1,6 @@
-//! Process energy impact and battery monitoring.
-//!
-//! Samples process CPU time and energy counters (via macOS `proc_pid_rusage`
-//! and IOKit power sources) on a 15-second cadence and records telemetry into
-//! `energy_samples` in SQLite.
-//!
-//! Tracks OpenRize's main process and any child sidecar process (`openrize-ml`),
-//! correlating energy spikes with AI classification and model retraining.
-//! Surfaces relative energy impact (low / medium / high) and cumulative
-//! battery usage for Settings and benchmarking.
+//! Process energy impact and battery monitoring: samples process CPU time and energy counters
+//! (macOS `proc_pid_rusage`, IOKit power sources) every 15s into `energy_samples`, for the main
+//! process and the `openrize-ml` sidecar, and surfaces relative impact and battery usage.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,7 +23,6 @@ const NOMINAL_BATTERY_JOULES: f64 = 70.0 * 3600.0;
 /// Standard 1 mWh = 3.6 Joules.
 const JOULES_PER_MWH: f64 = 3.6;
 
-/// Power thresholds in Watts for energy impact levels.
 pub const THRESHOLD_LOW_WATTS: f64 = 0.5;
 pub const THRESHOLD_MEDIUM_WATTS: f64 = 2.0;
 
@@ -90,8 +82,6 @@ pub fn impact_level_for_power(power_watts: f64) -> &'static str {
     }
 }
 
-// --- Native telemetry, one file per platform --------------------------------
-
 #[cfg_attr(target_os = "macos", path = "energy/macos.rs")]
 #[cfg_attr(windows, path = "energy/windows.rs")]
 #[cfg_attr(not(any(target_os = "macos", windows)), path = "energy/unsupported.rs")]
@@ -105,7 +95,6 @@ pub fn read_battery_info() -> BatteryInfo {
     native::read_battery_info()
 }
 
-/// Whether the platform's battery saver (Low Power Mode, Battery Saver) is on.
 pub fn low_power_mode() -> bool {
     native::low_power_mode()
 }
@@ -114,8 +103,6 @@ pub fn low_power_mode() -> bool {
 /// would only write CPU-time guesses, so it is not started (see
 /// `HAS_ENERGY_MONITOR` in src/lib/platform.ts for the matching UI gate).
 pub const HAS_ENERGY_COUNTER: bool = native::HAS_ENERGY_COUNTER;
-
-// --- Background energy sampler -----------------------------------------------
 
 pub fn spawn_sampler(app: AppHandle, db_path: PathBuf) {
     if !HAS_ENERGY_COUNTER {
@@ -242,8 +229,6 @@ fn read_total_energy_nj(app: &AppHandle, main_pid: i32) -> u64 {
 
     main_rusage.billed_energy_nj + sidecar_rusage.billed_energy_nj
 }
-
-// --- Query and summary helpers -----------------------------------------------
 
 pub fn get_summary(
     conn: &Connection,

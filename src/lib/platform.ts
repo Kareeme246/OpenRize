@@ -1,9 +1,6 @@
 /**
- * Platform conventions the UI follows: which modifier shortcuts use, how
- * they are written, and what the OS calls its own places.
- *
- * Every platform-dependent value is a `Record<Platform, T>`, so supporting a
- * new platform is a type error at each one until it is spelled out.
+ * Platform conventions the UI follows; each is a `Record<Platform, T>`, so a
+ * new platform is a type error until spelled out.
  */
 
 export type Platform = "macos" | "windows" | "linux";
@@ -27,7 +24,6 @@ export const OS_NAME = byPlatform({
   linux: "Linux",
 });
 
-/** Where the app's icon lives, as the OS names it. */
 export const TRAY_PLACE = byPlatform({
   macos: "menu bar",
   windows: "system tray",
@@ -52,7 +48,6 @@ export const THIS_COMPUTER = byPlatform({
   linux: "this computer",
 });
 
-/** The OS's bin for deleted files, which removals move things into. */
 export const TRASH = byPlatform({
   macos: "Trash",
   windows: "Recycle Bin",
@@ -60,11 +55,8 @@ export const TRASH = byPlatform({
 });
 
 /**
- * Whether the OS draws its own window caption (title and window buttons)
- * above the webview. macOS overlays its title bar on the webview instead
- * (`titleBarStyle: "Overlay"` in tauri.conf.json) and Windows has its caption
- * removed (src-tauri/src/caption.rs), so the app's own bar is the title bar on
- * both.
+ * Whether the OS draws its own caption above the webview; macOS overlays its
+ * title bar and Windows has it removed (src-tauri/src/caption.rs).
  */
 export const HAS_NATIVE_CAPTION = byPlatform({
   macos: false,
@@ -73,9 +65,8 @@ export const HAS_NATIVE_CAPTION = byPlatform({
 });
 
 /**
- * Whether the app draws the minimize, maximize and close buttons itself, at
- * the right end of its top bar. macOS draws its traffic lights over the
- * webview, so only a platform whose caption was removed needs them.
+ * Whether the app draws minimize/maximize/close itself; macOS draws traffic
+ * lights over the webview.
  */
 export const DRAWS_CAPTION_BUTTONS = byPlatform({
   macos: false,
@@ -84,9 +75,8 @@ export const DRAWS_CAPTION_BUTTONS = byPlatform({
 });
 
 /**
- * Whether a right click on the top bar opens the system window menu (Restore,
- * Move, Size, Minimize, Maximize, Close), as it does on a native caption. Only
- * where the app's bar replaces a caption the OS removed.
+ * Whether right-clicking the top bar opens the system window menu, where the
+ * app's bar replaces a removed caption.
  */
 export const BAR_OPENS_WINDOW_MENU = byPlatform({
   macos: false,
@@ -95,10 +85,8 @@ export const BAR_OPENS_WINDOW_MENU = byPlatform({
 });
 
 /**
- * Whether the window's own theme is kept in step with the app's. Besides a
- * caption it decides the scheme of what the OS draws for the window (native
- * menus, the webview's context menu), so Windows keeps it even without a
- * caption. macOS has none of that to follow.
+ * Whether the window's own theme follows the app's. It sets the scheme of
+ * OS-drawn menus, so Windows keeps it even without a caption.
  */
 export const SYNCS_WINDOW_THEME = byPlatform({
   macos: false,
@@ -107,8 +95,7 @@ export const SYNCS_WINDOW_THEME = byPlatform({
 });
 
 /**
- * Left padding of the app's top bar. On macOS it clears the traffic lights,
- * which the overlaid title bar draws over the webview's left edge.
+ * Left padding of the top bar; on macOS it clears the overlaid traffic lights.
  */
 export const TOP_BAR_PADDING_LEFT = byPlatform({
   macos: "pl-[84px]",
@@ -117,8 +104,8 @@ export const TOP_BAR_PADDING_LEFT = byPlatform({
 });
 
 /**
- * Right padding of the app's top bar. Windows' caption buttons run to the
- * window's edge, so the bar leaves no gap there.
+ * Right padding of the top bar; Windows' caption buttons run to the window
+ * edge.
  */
 export const TOP_BAR_PADDING_RIGHT = byPlatform({
   macos: "pr-3",
@@ -126,17 +113,13 @@ export const TOP_BAR_PADDING_RIGHT = byPlatform({
   linux: "pr-3",
 });
 
-/**
- * Permissions the OS asks the user for (Accessibility, Automation), with the
- * first-run screen that offers them. Only macOS has any.
- */
 export const HAS_PERMISSIONS = byPlatform({
   macos: true,
   windows: false,
   linux: false,
 });
 
-/** The Battery & Energy monitor. Windows has no per-process energy counter. */
+/** Windows has no per-process energy counter. */
 export const HAS_ENERGY_MONITOR = byPlatform({
   macos: true,
   windows: false,
@@ -144,9 +127,8 @@ export const HAS_ENERGY_MONITOR = byPlatform({
 });
 
 /**
- * Whether this platform's build is expected to ship the on-device ML sidecar.
- * Only the first guess, before the AI status has loaded: after that the
- * status's `sidecar` says what is actually there.
+ * Whether the build is expected to ship the ML sidecar; only a first guess
+ * until the AI status loads.
  */
 export const EXPECTS_ON_DEVICE_ML = byPlatform({
   macos: true,
@@ -154,28 +136,24 @@ export const EXPECTS_ON_DEVICE_ML = byPlatform({
   linux: false,
 });
 
-/** Apple Intelligence, the on-device model that the AI engine can use. */
 export const HAS_APPLE_INTELLIGENCE = byPlatform({
   macos: true,
   windows: false,
   linux: false,
 });
 
-/** Why the on-device model is unavailable on an OS that cannot run it at all. */
 export const UNSUPPORTED_OS_MODEL_REASON = byPlatform({
   macos: "The on-device model needs macOS 26 or later",
   windows: "The on-device model isn't available on this platform",
   linux: "The on-device model isn't available on this platform",
 });
 
-/** The OS setting that throttles background work to save battery. */
 export const POWER_SAVING_MODE = byPlatform({
   macos: "Low Power Mode",
   windows: "Battery Saver",
   linux: "power saver",
 });
 
-/** Why launch at login is unavailable, for the OSes that do not offer it yet. */
 export const LOGIN_ITEM_UNAVAILABLE = byPlatform({
   macos: "Needs macOS 13 or later",
   windows: "Not available on Windows yet",
@@ -183,15 +161,14 @@ export const LOGIN_ITEM_UNAVAILABLE = byPlatform({
 });
 
 /**
- * The modifier keys a shortcut reads. Structural, so a `KeyboardEvent` and a
- * plain object both fit, and this module needs no DOM types to be imported.
+ * Structural, so a `KeyboardEvent` and a plain object both fit without DOM
+ * types.
  */
 export interface PrimaryModifierKeys {
   metaKey: boolean;
   ctrlKey: boolean;
 }
 
-/** The modifier app shortcuts use (and not the other one). */
 export function hasPrimaryModifier(event: PrimaryModifierKeys): boolean {
   return byPlatform({
     macos: event.metaKey && !event.ctrlKey,
@@ -201,8 +178,8 @@ export function hasPrimaryModifier(event: PrimaryModifierKeys): boolean {
 }
 
 /**
- * The letter that redoes with the primary modifier alone (no Shift). Windows
- * editors redo with Ctrl+Y; macOS redoes with Shift+Z only.
+ * Redo letter with the primary modifier alone: Ctrl+Y on Windows, Shift+Z only
+ * on macOS.
  */
 export const REDO_KEY = byPlatform<string | undefined>({
   macos: undefined,
@@ -210,13 +187,8 @@ export const REDO_KEY = byPlatform<string | undefined>({
   linux: "y",
 });
 
-/** Keys macOS writes as symbols. Other platforms spell them out. */
 const MAC_KEY_SYMBOLS: Record<string, string> = { Enter: "↵", Backspace: "⌫" };
 
-/**
- * A shortcut as the platform writes it: "⌘⇧↵" on macOS, "Ctrl+Shift+Enter"
- * elsewhere.
- */
 export function shortcutLabel(
   key: string,
   { shift = false }: { shift?: boolean } = {},

@@ -29,9 +29,7 @@ import type {
 import { Picker } from "./Picker";
 import { Tooltip } from "./Tooltip";
 
-/** One pickable value for a field, ranked: suggestion, alternatives, rest. */
 interface PickOption {
-  /** `null` is "No project". */
   valueId: string | null;
   name: string;
   color: string;
@@ -40,20 +38,16 @@ interface PickOption {
 
 interface FieldModel {
   field: SuggestionField;
-  /** The latest suggestion, unless the user rejected it. */
   suggestion?: FieldSuggestion;
   rejected: boolean;
   value: string | null;
   options: PickOption[];
 }
 
-/** Number keys 1-3 pick from the active field's top three options; the rest sit in a dropdown. */
 const KEYED_OPTIONS = 3;
-/** Options shown as full rows (with their confidence) before the chips. */
 const ROW_OPTIONS = 4;
 /**
- * Hides an action button's inline shortcut where the action row is too narrow
- * for it beside the other buttons ("Ctrl+Backspace" is wider than "⌘⌫"); the
+ * Hides an action button's inline shortcut when the row is too narrow; the
  * tooltip still carries it.
  */
 const INLINE_SHORTCUT: Record<Platform, string> = {
@@ -76,7 +70,6 @@ const EVENT_LABELS: Record<string, string> = {
   auto_approved: "Auto-approved",
 };
 
-/** "Undid split": undo and redo name the change they reversed. */
 function eventLabel(event: EntryEvent): string {
   if (event.kind === "undone" || event.kind === "redone") {
     let action = "change";
@@ -109,23 +102,19 @@ export interface EntryReviewPanelProps {
   detail: EntryDetail;
   categories: Category[];
   projects: Project[];
-  /** Settings → AI: suggest projects too, not just categories. */
   suggestProjects: boolean;
-  /** "3 of 7" while stepping through pending entries in review mode. */
   reviewPosition?: { index: number; total: number };
   onClose: () => void;
   onAccept: () => void;
   onReject: () => void;
   onUnapprove: () => void;
   onSplit: () => void;
-  /** Merges with the earlier / later neighbour; there is none when absent. */
   onMergePrev?: () => void;
   onMergeNext?: () => void;
-  /** Why merging up or down is off: no neighbour on that side, or it is approved. */
   mergeBlocked?: { prev?: string; next?: string };
   /**
-   * Untracked time between the open entry and each merge neighbour, when the
-   * two do not touch: merging claims it as tracked time, so the buttons say so.
+   * Untracked time between the open entry and each non-touching merge
+   * neighbour; merging claims it.
    */
   mergeGap?: { prev?: number; next?: number };
   onDelete: () => void;
@@ -265,7 +254,6 @@ export function EntryReviewPanel({
     });
   }, [detail, entry, categories, projects, suggestProjects]);
 
-  // Keep both pickers collapsed until the user opens one.
   const [activeField, setActiveField] = useState<SuggestionField | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-aim only when a different entry opens, not on every edit.
   useEffect(() => {
@@ -281,13 +269,10 @@ export function EntryReviewPanel({
     job?.state === "running";
   const approved = entry.status === "approved";
   const invoiced = entry.invoiceId !== undefined && entry.invoiceId !== null;
-  // Approved entries are frozen; unapprove one to edit it again.
   const locked = approved;
   const lockedHint = locked ? LOCKED_HINT : undefined;
   const mergePrevBlocked = lockedHint ?? mergeBlocked?.prev;
   const mergeNextBlocked = lockedHint ?? mergeBlocked?.next;
-  // A merge absorbs the gap to its neighbour into the entry's time, so every
-  // merge that is actually on offer says how much untracked time it claims.
   const mergePrevGap = mergeGap?.prev ?? 0;
   const mergeNextGap = mergeGap?.next ?? 0;
   const claimedGaps = [
@@ -337,7 +322,6 @@ export function EntryReviewPanel({
     return projects.find((p) => p.id === valueId)?.name ?? "Unknown";
   };
 
-  /** Saves new bounds; an end at or before the start is refused. */
   // The live entry's stored end trails the clock until the next rebuild.
   const endedAt = entryEnd(entry, now);
   const commitTimes = (startedAt: number, endedAt: number): boolean => {
@@ -346,7 +330,6 @@ export function EntryReviewPanel({
     return true;
   };
 
-  // Grow the editor with its text so a long title never scrolls in a box.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure when the text changes or the editor opens.
   useLayoutEffect(() => {
     const field = descriptionRef.current;
@@ -361,7 +344,6 @@ export function EntryReviewPanel({
     setEditing(true);
   };
 
-  /** A draft is kept: leaving the field by any route saves it. */
   const saveDescription = (): void => {
     if (editFinished.current) return;
     editFinished.current = true;
@@ -813,17 +795,12 @@ export function EntryReviewPanel({
   );
 }
 
-/** `HH:MM` in local time, the value format of `<input type="time">`. */
 function toTimeValue(epochMs: number): string {
   const date = new Date(epochMs);
   const pad = (n: number): string => String(n).padStart(2, "0");
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-/**
- * An inline start/end time editor. Keeps the boundary's calendar day and
- * commits on Enter or blur; Esc reverts.
- */
 function TimeField({
   epochMs,
   label,
@@ -833,7 +810,6 @@ function TimeField({
   epochMs: number;
   label: string;
   disabled: boolean;
-  /** Returns false to refuse the value and revert the field. */
   onCommit: (epochMs: number) => boolean;
 }) {
   const [value, setValue] = useState(() => toTimeValue(epochMs));

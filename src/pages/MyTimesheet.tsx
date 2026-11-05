@@ -88,7 +88,6 @@ const DEFAULT_COLUMNS: Columns = {
   billable: true,
 };
 
-/** Column visibility is a per-viewer convenience, so it lives in localStorage. */
 function readColumns(): Columns {
   try {
     const raw = window.localStorage.getItem(COLUMNS_KEY);
@@ -111,7 +110,6 @@ interface Group {
   label: string;
   color: string;
   entries: TimeEntry[];
-  /** Sorts last: "No project", "Needs you", "Unknown app". */
   trailing: boolean;
 }
 
@@ -200,7 +198,6 @@ function groupEntries(
   });
 }
 
-/** Keeps the list-only fields a single-entry command doesn't return. */
 function adopt(list: TimeEntry[], updated: TimeEntry[]): TimeEntry[] {
   const byId = new Map(updated.map((entry) => [entry.id, entry]));
   return list.map((entry) => {
@@ -294,8 +291,6 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
   ).length;
   const totalMs = totalDuration(inRange);
   const approvedMs = totalDuration(approved);
-  // Same measure as the Calendar summary: work time (breaks excluded)
-  // against the expected hours.
   const workMs = workDuration(inRange, categoryById);
   const targetMs = targetMsFor(
     settings,
@@ -323,7 +318,6 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
     () => groupEntries(rows, groupBy, categoryById, projectById),
     [rows, groupBy, categoryById, projectById],
   );
-  /** Approve all: everything reviewable that has a category to approve. */
   const approvable = useMemo(
     () => toReview.filter((entry) => entry.categoryId),
     [toReview],
@@ -374,7 +368,6 @@ export function MyTimesheet({ route, navigate, replace }: MyTimesheetProps) {
     if (approvable.length > 0) setConfirmApprove(approvable);
   }, [approvable]);
 
-  // ⌘⇧↵ approves everything confirmable, after asking.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (isTyping(event.target)) return;
@@ -1042,7 +1035,6 @@ function Confidence({ value }: { value?: number }) {
   );
 }
 
-/** A chip-styled select: the value's colour dot, name, and confidence. */
 function ChipSelect({
   label,
   value,

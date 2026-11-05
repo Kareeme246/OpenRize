@@ -1,7 +1,6 @@
-//! rize end to end with the app closed and not even installed: it reads and
-//! edits the data the app left, and never makes that data itself. The
-//! running app answers with the same code (`openrize_core::rpc`); only the
-//! transport differs.
+//! rize end to end with the app closed and not installed: it reads and edits the data the app
+//! left and never creates it. The running app answers with the same code
+//! (`openrize_core::rpc`); only the transport differs.
 
 use std::fs;
 use std::path::PathBuf;
@@ -26,7 +25,6 @@ impl Store {
         ));
         fs::create_dir_all(root.join("data")).unwrap();
         fs::create_dir_all(root.join("config")).unwrap();
-        // What the app's first launch leaves behind.
         ActivityStore::load(&root.join("data")).unwrap();
         Self { root }
     }
@@ -36,14 +34,12 @@ impl Store {
             .arg("--data-dir")
             .arg(self.root.join("data"))
             .args(args)
-            // No app anywhere rize could find one.
             .env("RIZE_APP", self.root.join("missing-openrize"))
             .env("XDG_CONFIG_HOME", self.root.join("config"))
             .output()
             .unwrap()
     }
 
-    /// Runs with `--json` and returns `data`, asserting success.
     fn ok(&self, args: &[&str]) -> Value {
         let mut all = vec!["--json"];
         all.extend_from_slice(args);
@@ -60,7 +56,6 @@ impl Store {
         envelope["data"].clone()
     }
 
-    /// Runs with `--json` and returns the error code and exit code.
     fn err(&self, args: &[&str]) -> (String, i32) {
         let mut all = vec!["--json"];
         all.extend_from_slice(args);
@@ -140,7 +135,6 @@ fn edits_and_reports_with_the_app_closed() {
         openrize_core::activity::APPROVED_OVERLAP
     );
 
-    // A hand-made entry is approved, and approved entries are frozen.
     let edit = [
         "entries",
         "edit",
@@ -181,12 +175,10 @@ fn edits_and_reports_with_the_app_closed() {
         .unwrap()
         .contains("Homepage copy"));
 
-    // Deleting asks; a script must say --yes.
     assert_eq!(
         store.err(&["entries", "rm", short]),
         ("INVALID_ARGUMENT".into(), 2)
     );
-    // ...and approved entries cannot be deleted until unapproved.
     assert_eq!(
         store.err(&["entries", "rm", short, "--yes"]),
         ("FAILED".into(), 1)
@@ -199,7 +191,6 @@ fn edits_and_reports_with_the_app_closed() {
     );
 }
 
-/// Every entry on the day as (short id, start, end, status), from `rize`.
 fn day(store: &Store) -> Vec<(String, String, String, String)> {
     let list = store.ok(&["entries", "list", "--from", "2026-09-01", "--limit", "50"]);
     let mut rows: Vec<_> = list["entries"]
@@ -228,8 +219,7 @@ fn day(store: &Store) -> Vec<(String, String, String, String)> {
     rows
 }
 
-/// One owner per minute from the command line: the same claim the app makes,
-/// since both reach the one store.
+/// One owner per minute from the command line: the same claim the app makes.
 #[test]
 fn entries_claim_their_minutes_and_never_take_approved_ones() {
     let store = Store::new();
@@ -253,7 +243,6 @@ fn entries_claim_their_minutes_and_never_take_approved_ones() {
     let first = short(&add("2026-09-01T09:00", "2026-09-01T10:00", "First"));
     store.ok(&["entries", "unapprove", &first]);
 
-    // Adding over a pending entry trims it; the new one keeps the minutes.
     let second = short(&add("2026-09-01T09:30", "2026-09-01T10:30", "Second"));
     let rows = day(&store);
     assert_eq!(
@@ -263,7 +252,6 @@ fn entries_claim_their_minutes_and_never_take_approved_ones() {
         vec![("09:00", "09:30"), ("09:30", "10:30")]
     );
 
-    // ...and over an approved one is refused, atomically.
     let before = day(&store);
     let refused = store.rize(&[
         "--json",
@@ -284,7 +272,6 @@ fn entries_claim_their_minutes_and_never_take_approved_ones() {
     );
     assert_eq!(day(&store), before);
 
-    // Editing an end takes the gained minutes from the pending neighbour...
     store.ok(&["entries", "unapprove", &second]);
     store.ok(&["entries", "edit", &first, "--to", "2026-09-01T10:15"]);
     let rows = day(&store);
@@ -295,7 +282,6 @@ fn entries_claim_their_minutes_and_never_take_approved_ones() {
         vec![("09:00", "10:15"), ("10:15", "10:30")]
     );
 
-    // ...but never from an approved one, and nothing changes when refused.
     store.ok(&["entries", "approve", &second]);
     let before = day(&store);
     let edit = store.rize(&[
@@ -314,7 +300,6 @@ fn entries_claim_their_minutes_and_never_take_approved_ones() {
     );
     assert_eq!(day(&store), before);
 
-    // Several entries cannot be given the same times in one go.
     assert_eq!(
         store.err(&[
             "entries",
@@ -327,7 +312,6 @@ fn entries_claim_their_minutes_and_never_take_approved_ones() {
         ("FAILED".into(), 1)
     );
 
-    // Totals are plain sums, and they are true: no minute is counted twice.
     let report = store.ok(&["report", "--from", "2026-09-01", "--by", "status"]);
     let total: i64 = report["cells"]
         .as_array()
@@ -376,7 +360,6 @@ fn timer_segments_are_a_start_and_an_end() {
     let store = Store::new();
     store.ok(&["timers", "new", "Deep work"]);
 
-    // A fresh timer reads zero; started, it reads from its start instant.
     let fresh = store.ok(&["timers", "list"]);
     assert_eq!(fresh[0]["accumulatedMs"], 0);
     assert!(fresh[0]["startedAt"].is_null());
@@ -388,7 +371,6 @@ fn timer_segments_are_a_start_and_an_end() {
         first["endedAt"].as_u64().unwrap() - first["startedAt"].as_u64().unwrap()
     );
 
-    // Add by start and end, then by start and a length.
     store.ok(&[
         "timers",
         "segments",
@@ -409,8 +391,6 @@ fn timer_segments_are_a_start_and_an_end() {
         "--for",
         "45m",
     ]);
-    // Segments run in start order: the two September ones come before the
-    // pause that was recorded just now.
     let segments = timers[0]["segments"].as_array().unwrap();
     let lengths: Vec<u64> = segments
         .iter()
@@ -418,7 +398,6 @@ fn timer_segments_are_a_start_and_an_end() {
         .collect();
     assert_eq!(lengths[..2], [5_400_000, 2_700_000]);
 
-    // Edit the end of the first manual segment, then only its start.
     let id = segments[0]["id"].to_string();
     let edited = store.ok(&[
         "timers",
@@ -441,7 +420,6 @@ fn timer_segments_are_a_start_and_an_end() {
     ]);
     assert_eq!(edited[0]["segments"][0]["durationMs"], 4_500_000);
 
-    // The listing carries every segment, and the total is their sum.
     let listed = store.ok(&["timers", "segments", "list", "deep"]);
     let sum: u64 = listed["segments"]
         .as_array()
@@ -451,7 +429,6 @@ fn timer_segments_are_a_start_and_an_end() {
         .sum();
     assert_eq!(listed["accumulatedMs"].as_u64().unwrap(), sum);
 
-    // A segment cannot end before it starts, and may be zero length.
     assert_eq!(
         store.err(&[
             "timers",
@@ -498,7 +475,6 @@ fn timer_segments_are_a_start_and_an_end() {
     let listed = store.ok(&["timers", "segments", "list", "deep"]);
     assert_eq!(listed["segments"].as_array().unwrap().len(), 4);
 
-    // --to and --for are two ways to say the same thing, not both.
     assert_eq!(
         store
             .rize(&[

@@ -42,9 +42,8 @@ const MAX_TIMERS = 3;
 const MAX_LEGEND = 4;
 
 /**
- * The menu-bar Pulse panel (design board option A): is capture on, and how
- * is today going. Live state only - anything historical, list-shaped, or
- * editable stays in the main window, and the review count is a door to it.
+ * The menu-bar Pulse panel: live state only; anything historical, list-shaped
+ * or editable stays in the main window.
  */
 export default function Pulse() {
   return (
@@ -135,10 +134,9 @@ function PulsePanel() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  // The window is sized to the card, so it grows and shrinks with content.
-  // The first open waits for this first report, so hold it until the data
-  // is in: the panel must not appear short and then grow. A failed read
-  // counts as loaded, or an error would keep the panel from ever opening.
+  // The window is sized to the card, and the first open waits for the first
+  // report, so hold it until data is in. A failed read counts as loaded, or an
+  // error would block opening.
   const card = useRef<HTMLDivElement>(null);
   const ready =
     (live !== null || error !== null) && entriesLoaded && !timers.loading;
@@ -233,11 +231,9 @@ interface StatusView {
   dot: string;
   text: string;
   detail?: string;
-  /** What the button does: pause capture, or resume it. */
   action?: "pause" | "resume";
 }
 
-/** The sidebar's live capture strip, plus one line of context under it. */
 function CaptureStatus({
   live,
   recording,
@@ -367,7 +363,6 @@ const RING_STROKE = 6;
 const RING_RADIUS = (RING - RING_STROKE) / 2;
 const RING_LENGTH = 2 * Math.PI * RING_RADIUS;
 
-/** Work hours against the day's target, and where the time went. */
 function TodaySummary({
   entries,
   categoryById,
@@ -490,7 +485,6 @@ function TodaySummary({
   );
 }
 
-/** The next break, a door to taking one now, and the pause-reminders switch. */
 function BreakRow({ state, now }: { state: BreakState; now: number }) {
   const current = state.current;
   const onBreak = current !== null && current.endedAt === null;
@@ -558,7 +552,6 @@ function BreakRow({ state, now }: { state: BreakState; now: number }) {
   );
 }
 
-/** Manual timers, running first; one click pauses or resumes each. */
 function TimerRows({
   timers,
   now,

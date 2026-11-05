@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 
 /**
- * The current time for live displays (now lines, a recording entry's end),
- * updated every 15 s and only while the app is visible.
+ * The current time for live displays, updated every 15 s and only while the app
+ * is visible.
  */
 export function useMinuteClock(): number {
   const [now, setNow] = useState(Date.now);

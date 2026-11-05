@@ -7,35 +7,28 @@ export function assignableClients(clients: Client[], keep?: string): Client[] {
   return clients.filter((client) => !client.archivedAt || client.id === keep);
 }
 
-/** A client's name as pickers list it. */
 export function clientLabel(client: Client): string {
   return client.archivedAt ? `${client.name} (archived)` : client.name;
 }
 
-/** A project's hourly rate, falling back to its client's default. */
 function projectRate(project: Project, client: Client): number | undefined {
   return project.hourlyRate ?? client.defaultRate ?? undefined;
 }
 
-/** One client's projects, time, ready-to-bill time, and invoices. */
 export interface ClientRollup {
   client: Client;
   projects: Project[];
   activeProjects: number;
   totalMs: number;
-  /** Time in the page's selected range. */
   rangeMs: number;
   unbilledMs: number;
   unbilledEntries: number;
   /** What the ready-to-bill time comes to at each project's rate, in the client's currency; projects with no rate are left out. */
   unbilledAmount: number;
-  /** Some ready-to-bill time has no rate to price it. */
   unpriced: boolean;
   lastActivity?: number;
   invoiceCount: number;
-  /** Issued (open or paid) invoices, in USD cents. */
   invoicedCents: number;
-  /** Issued but not yet paid, in USD cents. */
   outstandingCents: number;
 }
 

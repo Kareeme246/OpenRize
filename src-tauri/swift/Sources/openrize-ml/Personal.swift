@@ -3,10 +3,9 @@ import CreateML
 import Foundation
 import NaturalLanguage
 
-/// T1 personal classifier: a Create ML `MLTextClassifier` trained on the
-/// user's own approved entries. Training takes milliseconds for hundreds of
-/// rows, so it runs inline; Rust decides when to retrain and whether the new
-/// model is good enough to replace the old one.
+/// T1 personal classifier: a Create ML `MLTextClassifier` trained on the user's own approved
+/// entries. Training takes milliseconds for hundreds of rows, so it runs inline; Rust decides when
+/// to retrain and whether to replace the old model.
 struct PersonalModels {
     private var cache: [String: NLModel] = [:]
 

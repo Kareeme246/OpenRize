@@ -1,11 +1,6 @@
-//! Real invoices: editable drafts built from approved billable time, fixed
-//! retainer fees and manual items, finalized into numbered, immutable PDFs.
-//!
-//! Lifecycle: `draft` (editable, time reserved, no number) -> `open` (finalized:
-//! numbered, PDF archived, frozen) -> `paid`; an open invoice can instead be
-//! `void`ed, which releases its time but keeps its number and PDF. Rust owns all
-//! arithmetic (integer USD cents, see `money`) and the paper (`pdf`); the
-//! frontend only ever sends line choices and displays what comes back.
+//! Real invoices: editable drafts from approved billable time, retainer fees and manual
+//! items, finalized into numbered, immutable PDFs. Lifecycle: `draft` -> `open` -> `paid`;
+//! an open invoice can be `void`ed, releasing its time but keeping its number and PDF.
 
 mod money;
 mod pdf;
@@ -89,7 +84,6 @@ pub struct Invoice {
 #[serde(rename_all = "camelCase")]
 pub struct LineInput {
     pub kind: String,
-    /// Required for `time` lines; the entry supplies project, hours and date.
     pub entry_id: Option<String>,
     pub description: String,
     /// Hundredths; ignored for `time` lines (derived from the entry).
@@ -119,7 +113,6 @@ pub struct DraftInput {
     pub lines: Vec<LineInput>,
 }
 
-/// One approved, billable, not-yet-invoiced entry, with the rate it would bill at.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BillableEntry {
@@ -132,7 +125,6 @@ pub struct BillableEntry {
     pub quantity_hundredths: i64,
     pub rate_cents: Option<i64>,
     pub amount_cents: Option<i64>,
-    /// Already on the draft being edited.
     pub on_this_invoice: bool,
 }
 
@@ -222,9 +214,8 @@ pub fn get(conn: &Connection, id: &str) -> Result<Invoice, String> {
     Ok(invoice)
 }
 
-/// Approved, billable, uninvoiced time for a client in `[start_ms, end_ms)`,
-/// with the rate each entry would bill at. Entries already on `invoice_id`
-/// (the draft being edited) are included and flagged.
+/// Approved, billable, uninvoiced time for a client in `[start_ms, end_ms)`, plus entries
+/// already on `invoice_id` (the draft being edited), flagged.
 pub fn billable_entries(
     conn: &Connection,
     client_id: &str,
@@ -292,16 +283,14 @@ pub fn billable_entries(
     Ok(entries)
 }
 
-/// A REAL dollar rate (from the projects/clients tables) as whole cents.
 fn rate_to_cents(rate: f64) -> Option<i64> {
     let cents = (rate * 100.0).round();
     (cents.is_finite() && (0.0..=money::MAX_RATE_CENTS as f64).contains(&cents))
         .then_some(cents as i64)
 }
 
-/// A draft fully resolved against the database: validated, with every derived
-/// value (hours, project names, rates, amounts, due date, total) computed.
-/// Shared by preview, save and (via the stored rows) finalize.
+/// A draft resolved against the database with every derived value computed, shared by
+/// preview, save and (via the stored rows) finalize.
 fn resolve(conn: &Connection, input: &DraftInput) -> Result<Invoice, String> {
     let client_exists: bool = conn
         .query_row(
@@ -519,13 +508,11 @@ fn resolve_time_line(
     })
 }
 
-/// The draft as it would print, resolved but not stored.
 pub fn quote(conn: &Connection, input: &DraftInput) -> Result<Invoice, String> {
     resolve(conn, input)
 }
 
-/// Creates or updates a draft, reserving exactly its time entries (entries
-/// dropped from the draft are released) in one transaction.
+/// Creates or updates a draft, reserving exactly its entries in one transaction.
 pub fn save_draft(conn: &mut Connection, input: &DraftInput, now: u64) -> Result<Invoice, String> {
     let tx = conn.transaction().map_err(err)?;
     if let Some(id) = &input.id {
@@ -632,9 +619,8 @@ pub fn save_draft(conn: &mut Connection, input: &DraftInput, now: u64) -> Result
     get(conn, &id)
 }
 
-/// The invoice as it prints. Its From block is the invoice's own; only the
-/// logo comes from the shared profile. A draft with no From yet prints
-/// placeholders so the preview still renders.
+/// The invoice as it prints. Only the logo comes from the shared profile; a draft with no
+/// From yet prints placeholders.
 fn paper(
     invoice: &Invoice,
     logo: Option<Vec<u8>>,
@@ -721,14 +707,13 @@ fn paper(
     })
 }
 
-/// The DRAFT-watermarked PDF for an unsaved or saved draft.
 pub fn render_draft(conn: &Connection, input: &DraftInput) -> Result<Vec<u8>, String> {
     let invoice = resolve(conn, input)?;
     pdf::render(&paper(&invoice, profile::logo_bytes(conn)?, None)?)
 }
 
-/// Freezes a draft: allocates the next number for its issue year, renders the
-/// official PDF and stores number, snapshot and bytes, all or nothing.
+/// Freezes a draft: allocates the next number for its issue year, renders the official PDF
+/// and stores number, snapshot and bytes, all or nothing.
 pub fn finalize(conn: &mut Connection, id: &str, now: u64) -> Result<Invoice, String> {
     let tx = conn.transaction().map_err(err)?;
     let invoice = get(&tx, id)?;
@@ -802,7 +787,6 @@ fn allocate_number(tx: &Transaction<'_>, year: i32) -> Result<String, String> {
     Ok(number)
 }
 
-/// The archived PDF of a finalized invoice.
 pub fn stored_pdf(conn: &Connection, id: &str) -> Result<Vec<u8>, String> {
     conn.query_row("SELECT pdf FROM invoices WHERE id = ?1", [id], |row| {
         row.get::<_, Option<Vec<u8>>>(0)
@@ -831,7 +815,6 @@ pub fn file_name(number: Option<&str>, client_name: &str) -> String {
     }
 }
 
-/// `open` <-> `paid`.
 pub fn set_paid(conn: &Connection, id: &str, paid: bool, now: u64) -> Result<(), String> {
     let (from, to) = if paid {
         ("open", "paid")
@@ -901,7 +884,6 @@ pub fn delete_draft(conn: &mut Connection, id: &str) -> Result<(), String> {
     tx.commit().map_err(err)
 }
 
-/// Deletes a voided invoice permanently.
 pub fn delete_void(conn: &mut Connection, id: &str) -> Result<(), String> {
     let tx = conn.transaction().map_err(err)?;
     let status: Option<String> = tx

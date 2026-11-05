@@ -12,7 +12,6 @@ import { Field, Sheet } from "./Sheet";
 interface AddTimeSheetProps {
   date: Date;
   initialStartMs?: number;
-  /** Defaults to an hour after the start. */
   initialEndMs?: number;
   initialDescription?: string;
   categories: Category[];
@@ -21,7 +20,6 @@ interface AddTimeSheetProps {
   onCreated: () => void;
 }
 
-/** `HH:MM` on a local date, as epoch ms. */
 function at(day: string, time: string): number {
   const [hours, minutes] = time.split(":").map(Number);
   const date = parseLocalDate(day);
@@ -29,10 +27,6 @@ function at(day: string, time: string): number {
   return date.getTime();
 }
 
-/**
- * The manual entry sheet: start, end, category, and description (plus an
- * optional project and billable). A hand-made entry is approved as made.
- */
 export function AddTimeSheet({
   date,
   initialStartMs,

@@ -6,7 +6,7 @@ export interface PutOptions {
   cacheControl: string;
 }
 
-/** The three bucket operations the publisher needs. `get` is null only when the object is definitely absent. */
+/** `get` is null only when the object is definitely absent. */
 export interface ObjectStore {
   get(key: string): Promise<Uint8Array | null>;
   put(key: string, body: Uint8Array, options: PutOptions): Promise<void>;
@@ -16,7 +16,10 @@ export interface ObjectStore {
 /** Cloudflare rejects a single REST upload above this size (the limit wrangler enforces too). */
 export const MAX_UPLOAD_BYTES = 300 * 1024 * 1024;
 
-/** R2's "The specified key does not exist" error code; any other 404 (such as a missing bucket) is a real failure. */
+/**
+ * R2's "key does not exist" code; any other 404 (such as a missing bucket) is a
+ * real failure.
+ */
 const NO_SUCH_KEY = 10007;
 
 interface CloudflareStoreConfig {
@@ -38,8 +41,8 @@ async function failure(
 }
 
 /**
- * The bucket through Cloudflare's REST API, authenticated with an account API token that has
- * Workers R2 Storage Edit. These are the same object endpoints `wrangler r2 object` calls; no S3 keys.
+ * Cloudflare's REST API with an account token (Workers R2 Storage Edit): the
+ * endpoints `wrangler r2 object` uses, no S3 keys.
  */
 export function cloudflareStore(config: CloudflareStoreConfig): ObjectStore {
   const send = config.fetch ?? fetch;
@@ -92,7 +95,6 @@ export function cloudflareStore(config: CloudflareStoreConfig): ObjectStore {
   };
 }
 
-/** A plain directory standing in for the bucket, for `--local` rehearsals. Content types are not kept. */
 export function directoryStore(root: string): ObjectStore {
   const base = resolve(root);
   const pathFor = (key: string) => {

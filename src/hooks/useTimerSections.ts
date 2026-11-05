@@ -8,7 +8,6 @@ import { useToast } from "./useToast";
 export interface TimerSectionsApi {
   sections: TimerSection[];
   error: string | null;
-  /** Adds a section after the others, moving `timerId` into it if given. */
   create: (name: string, timerId?: string) => void;
   rename: (id: string, name: string) => void;
   /** Deletes a section; Rust keeps its stopwatches, in no section. */
@@ -19,9 +18,8 @@ export interface TimerSectionsApi {
 let cachedSections: TimerSection[] | null = null;
 
 /**
- * The Stopwatches page's sections. Rust owns them as it owns the timers:
- * every command answers with the full list, and a change made elsewhere
- * (`rize`) arrives as an event, so state is replaced, never patched.
+ * The Stopwatches page's sections; Rust owns them like timers, so state is
+ * replaced from each command's full list, never patched.
  */
 export function useTimerSections(): TimerSectionsApi {
   const [sections, setSectionsState] = useState<TimerSection[]>(

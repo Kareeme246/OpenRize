@@ -1,9 +1,6 @@
-//! Turning a Tauri window into a floating panel. The Pulse and reminder
-//! panels both go through here; each platform decides what that takes.
-//!
-//! - macOS: the window becomes an `NSPanel` (see `panel/macos.rs`).
-//! - Windows: the builder's flags do the work, and only the reminder needs a
-//!   touch after each show (see `panel/windows.rs`).
+//! Turning a Tauri window into a floating panel for Pulse and the reminder. macOS makes it an
+//! `NSPanel` (`panel/macos.rs`); on Windows the builder's flags do the work and only the reminder
+//! needs a touch after each show.
 
 use tauri::WebviewWindow;
 
@@ -21,8 +18,6 @@ pub enum Kind {
 #[cfg_attr(not(any(target_os = "macos", windows)), path = "panel/unsupported.rs")]
 mod platform;
 
-/// Converts `window` into a panel of the given kind. Call once, right after
-/// the window is built.
 pub fn make_panel(window: &WebviewWindow, kind: Kind) {
     platform::make_panel(window, kind);
 }

@@ -5,10 +5,8 @@ import { describeError } from "../lib/api";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 /**
- * Shown once when the account OpenRize remembers has lost its data folder: it
- * opened with no account instead of an empty stand-in. Cancel keeps the
- * account listed (Settings still says its data is missing); the other button
- * forgets it. Nothing else is changed either way.
+ * Shown once when the remembered account lost its data folder. Cancel keeps it
+ * listed; the other button forgets it.
  */
 export function MissingAccountDialog() {
   const { missing, reload } = useAccounts();

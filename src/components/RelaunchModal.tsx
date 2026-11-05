@@ -3,13 +3,9 @@ import { useRelaunch } from "../hooks/useRelaunch";
 import { TRAY_PLACE } from "../lib/platform";
 
 /**
- * Held over the whole window from the moment Accessibility is allowed in a
- * running OpenRize that still cannot use it, until the app restarts. macOS
- * only gives such a process the access on its next launch, so there is nothing
- * to dismiss and nothing to postpone: no close button, no "later". If the
- * access is withdrawn or starts working on its own, the backend says so and the
- * screen goes away by itself. While the first-run permissions screen is up it
- * asks for the restart itself, so `open` is false then (`relaunchModalOpen`).
+ * Held over the window until restart: macOS only gives the process
+ * Accessibility on its next launch, so there is no close or "later". `open` is
+ * false while the first-run screen asks itself.
  */
 export function RelaunchModal({ open }: { open: boolean }) {
   if (!open) return null;

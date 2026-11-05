@@ -5,8 +5,8 @@ interface ConfirmDialogProps {
   body: string;
   confirmLabel: string;
   /**
-   * `destructive` (the default) makes Cancel the primary button;
-   * `affirmative` (e.g. "Approve 4 entries?") makes the confirm button it.
+   * `destructive` (default) makes Cancel primary; `affirmative` makes Confirm
+   * primary.
    */
   tone?: "destructive" | "affirmative";
   onConfirm: () => void;
@@ -14,10 +14,8 @@ interface ConfirmDialogProps {
 }
 
 /**
- * A real <dialog> opened with showModal(), so the browser hands us the top
- * layer, the focus trap and Escape-to-cancel for free. Three details matter:
- *
-
+ * A real <dialog> via showModal(): top layer, focus trap and Escape-to-cancel
+ * for free.
  */
 export function ConfirmDialog({
   title,

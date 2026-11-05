@@ -1,7 +1,6 @@
 /**
- * Mirror of the break types in src-tauri/src/breaks. Rust owns the state
- * machine; these are only the shapes that arrive over IPC and the small
- * formatting helpers the views share.
+ * Mirror of the break types in src-tauri/src/breaks; Rust owns the state
+ * machine.
  */
 
 export type BreakSource = "interval" | "scheduled" | "manual" | "idle";
@@ -13,12 +12,9 @@ export interface ReminderView {
   label: string;
   plannedMs: number;
   dueAt: number;
-  /** Time worked when an interval reminder came due. */
   workedMs: number;
   snoozes: number;
-  /** The snooze button's default length. */
   snoozeMinutes: number;
-  /** Only present when the user wrote one. */
   message: string | null;
   canSnooze: boolean;
 }
@@ -29,7 +25,6 @@ export interface BreakView {
   label: string;
   plannedMs: number;
   startedAt: number;
-  /** Set once the break is over (the welcome-back card). */
   endedAt: number | null;
   pausedTimers: string[];
   resumedTimers: string[];
@@ -71,7 +66,6 @@ export const IDLE_BREAK_STATE: BreakState = {
 
 export type BreakStatus = "taken" | "skipped" | "missed";
 
-/** A row of the `breaks` table. */
 export interface BreakEntry {
   id: string;
   source: BreakSource;
@@ -124,10 +118,8 @@ export function formatUntil(ms: number): string {
 }
 
 /**
- * A break the user took on purpose: Take a break now, or Start break on an
- * interval or scheduled reminder. Rest credited from idle time (source
- * `idle`, or a scheduled break credited while away, which never came due)
- * still resets the work clock but is not one.
+ * A break taken on purpose (Take a break now, or Start break on a reminder).
+ * Rest credited from idle time resets the work clock but is not one.
  */
 export function isOfficialBreak(entry: BreakEntry): boolean {
   switch (entry.source) {
@@ -142,8 +134,8 @@ export function isOfficialBreak(entry: BreakEntry): boolean {
 }
 
 /**
- * Official breaks that were actually taken, as they draw on the Calendar.
- * Inactivity (sleep, overnight, a backfilled meeting) draws nothing.
+ * Official breaks actually taken, as drawn on the Calendar; inactivity draws
+ * nothing.
  */
 export function takenBreaks(entries: BreakEntry[]): BreakEntry[] {
   return entries.filter(
@@ -154,7 +146,6 @@ export function takenBreaks(entries: BreakEntry[]): BreakEntry[] {
   );
 }
 
-/** When a taken break ended; a running one ends now. */
 export function breakEnd(entry: BreakEntry, now: number): number {
   return entry.endedAt ?? Math.max(entry.startedAt ?? now, now);
 }

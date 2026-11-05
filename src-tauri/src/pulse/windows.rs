@@ -8,10 +8,9 @@ use super::{anchor, placement, WIDTH};
 /// Windows 11 flyouts leave.
 const FLYOUT_MARGIN: f64 = 12.0;
 
-/// Puts the panel in the work-area corner beside the taskbar, on the monitor
-/// that holds the icon. Where the icon is only picks the corner: an icon in
-/// the overflow flyout sits mid-screen, and the panel should still hug the
-/// taskbar once that flyout closes.
+/// Puts the panel in the work-area corner beside the taskbar, on the icon's
+/// monitor. The icon only picks the corner: one in the overflow flyout sits
+/// mid-screen, but the panel should still hug the taskbar.
 pub fn place(app: &AppHandle, window: &WebviewWindow, icon: Rect, height: f64) {
     let anchor = anchor(app, icon);
     let centre = (anchor.x, (anchor.top + anchor.bottom) / 2.0);

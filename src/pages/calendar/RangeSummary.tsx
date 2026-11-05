@@ -5,7 +5,6 @@ import { formatDuration, plural } from "../../lib/format";
 
 interface RangeSummaryProps {
   title: string;
-  /** Time in categories that count as work (and uncategorized time). */
   workMs: number;
   targetMs: number;
   targetLabel: string;
@@ -15,13 +14,8 @@ interface RangeSummaryProps {
   topApps?: { app: string; ms: number }[];
 }
 
-/** Apps listed on their own; the rest fold into one "Other" row. */
 const TOP_APPS = 4;
 
-/**
- * The Calendar's right panel when no entry is open: work hours against the
- * target, time by category, and (for a day) top apps.
- */
 export function RangeSummary({
   title,
   workMs,

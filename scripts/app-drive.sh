@@ -1,15 +1,7 @@
 #!/usr/bin/env bash
-# Launch an isolated OpenRize instance, click through its real webview UI, read
-# the result back, and tear the instance down. macOS only.
-#
-# This is the interactive sibling of dev-screenshot.sh: same isolation recipe
-# (own free port, own Tauri `identifier`, own config dir, own process group) but
-# the instance stays up between commands so an agent can actually drive it.
-#
-# Every session is namespaced by the checkout it was started from, so two agents
-# in two worktrees never see or kill each other's sessions.
-#
-# See .agents/skills/drive-app/SKILL.md for the workflow.
+# Launch an isolated OpenRize instance, drive its real webview UI, read the result back, and tear it
+# down. macOS only. Interactive sibling of dev-screenshot.sh; sessions are namespaced by checkout so
+# worktrees never touch each other's. Workflow: .agents/skills/drive-app/SKILL.md
 set -euo pipefail
 set -m
 
@@ -20,8 +12,7 @@ WORKSPACE_KEY="$(printf '%s' "$REPO_ROOT" | shasum 2>/dev/null | cut -c1-10 || t
 SESSION_ROOT="${TMPDIR:-/tmp}/openrize-app-drive/$WORKSPACE_KEY"
 AX_DRIVE_JS="$REPO_ROOT/scripts/ax-drive.js"
 
-# How long to wait for the app binary to appear. A warm target/ dir gets there in
-# seconds; a cold `cargo build` of the whole dependency tree can take minutes.
+# A cold `cargo build` of the dependency tree can take minutes.
 STARTUP_TIMEOUT="${OPENRIZE_DRIVE_TIMEOUT:-300}"
 
 usage() {
@@ -83,15 +74,12 @@ die() {
   exit 1
 }
 
-# A usage error (unknown command, missing arguments) exits 2 so callers can tell
-# it from a runtime failure.
+# A usage error exits 2 so callers can tell it from a runtime failure.
 die_usage() {
   echo "app-drive: $*" >&2
   exit 2
 }
 
-# Quote a value as a JSON string: escapes backslash, double quote, newline, tab
-# and carriage return, and drops any other control character.
 json_string() {
   local s="$1"
   s=${s//\\/\\\\}
@@ -103,11 +91,8 @@ json_string() {
   printf '"%s"' "$s"
 }
 
-# ---------------------------------------------------------------- session state
-
 session_dir() { echo "$SESSION_ROOT/$1"; }
 
-# Every session directory, live or stale (a stale one is left by a dead process).
 all_sessions() {
   [[ -d "$SESSION_ROOT" ]] || return 0
   local dir
@@ -127,8 +112,8 @@ live_sessions() {
   done < <(all_sessions)
 }
 
-# With a second argument, a session directory without a meta file still loads
-# (with empty fields), so stop --all can clear it.
+# With a second argument, a session directory without a meta file still loads (empty fields) so stop
+# --all can clear it.
 load_session() {
   local id="$1" lenient="${2:-}" dir
   dir="$(session_dir "$id")"
@@ -143,9 +128,8 @@ load_session() {
   SESSION_DIR="$dir"
 }
 
-# The app binary is the only process in the session's process group matching the
-# dev binary path, which makes the session -> pid mapping exact even when other
-# agents are running their own instances concurrently.
+# The app binary is the only process in the session's process group matching the dev binary path,
+# so the session -> pid mapping is exact even with other agents' instances running.
 session_pid() {
   local dir pgid pid
   dir="$(session_dir "$1")"
@@ -175,7 +159,6 @@ resolve_session() {
   esac
 }
 
-# Resolve the session and its pid, and export what ax-drive.js reads.
 attach() {
   local id
   id="$(resolve_session)" || exit 1
@@ -197,8 +180,6 @@ ax() {
   return "$rc"
 }
 
-# ---------------------------------------------------------------------- doctor
-
 CHECK_IDS=()
 CHECK_STATUS=()
 CHECK_DETAIL=()
@@ -212,8 +193,7 @@ add_check() {
   CHECK_FIX+=("${4:-}")
 }
 
-# Run a JXA probe that prints true or false. Prints the probe's output (or its
-# error text) and returns 1 when osascript itself failed.
+# Prints the probe's output (or error text); returns 1 when osascript itself failed.
 osa_probe() {
   local out
   if out="$(osascript -l JavaScript -e "$1" 2>&1)"; then
@@ -332,8 +312,6 @@ cmd_doctor() {
   [[ $failures -eq 0 ]]
 }
 
-# --------------------------------------------------------------------- commands
-
 cmd_start() {
   mkdir -p "$SESSION_ROOT"
 
@@ -354,19 +332,15 @@ cmd_start() {
   rm -rf "$dir"
   mkdir -p "$dir/config" "$dir/shots"
 
-  # Two separate isolation mechanisms, both required:
-  #   identifier      -> Tauri's app_data_dir, which holds activity.db and timers
-  #   XDG_CONFIG_HOME -> settings.rs::config_dir(), which is NOT identifier-scoped
-  #                      and would otherwise be the real ~/.config/openrize
+  # Both required for isolation: identifier scopes Tauri's app_data_dir; XDG_CONFIG_HOME scopes
+  # settings.rs::config_dir(), which is not identifier-scoped.
   local overrides
   overrides=$(printf '{"identifier":"%s","build":{"beforeDevCommand":"vite --port %s --strictPort","devUrl":"http://localhost:%s"}}' \
     "$identifier" "$port" "$port")
 
   echo "==> starting isolated instance $id on port $port" >&2
-  # Not through pnpm: pnpm 12 re-execs itself in a new process group, which
-  # would put the app and Vite outside $pgid, so start could never find the
-  # app and stop could never kill them. node_modules/.bin on PATH is all
-  # `pnpm tauri` and `pnpm exec vite` add.
+  # Not through pnpm: pnpm 12 re-execs in a new process group, putting the app and Vite outside
+  # $pgid so start could not find them and stop could not kill them.
   PATH="$REPO_ROOT/node_modules/.bin:$PATH" XDG_CONFIG_HOME="$dir/config" \
     nohup bash scripts/tauri.sh dev --no-watch -c "$overrides" >"$dir/dev.log" 2>&1 &
   local pgid=$!
@@ -393,8 +367,7 @@ META
   [[ -n "$pid" ]] || die "app binary never started within ${STARTUP_TIMEOUT}s (log: $dir/dev.log)"
 
   APP_PID="$pid"
-  # The process existing is not the same as the webview being laid out; wait for
-  # the window, then for the web content itself to publish its tree. A missing
+  # A live process is not a laid-out webview: wait for the window, then its web content. A missing
   # Accessibility grant would otherwise look like a window that never appears.
   local ready="" tree_out
   for _ in $(seq 1 40); do
@@ -462,12 +435,11 @@ cmd_click() {
 cmd_fill() {
   [[ $# -ge 2 ]] || die_usage "fill needs a field name and text, e.g. scripts/app-drive.sh fill \"Search\" \"hello\""
   attach
-  # AXPress focuses the field exactly as a user's click would. Writing AXValue
-  # directly is not an option: WebKit accepts the write, silently drops it, and
-  # React would never see an onChange even if it landed.
+  # AXPress focuses the field like a click. Writing AXValue directly is silently dropped by WebKit,
+  # and React would never see an onChange.
   OPT_ROLE="${OPT_ROLE:-AXTextField}" ax click "$1" >/dev/null
-  # Keystrokes are global, so raising the window and typing have to happen inside
-  # one System Events block; anything in between can hand focus to another app.
+  # Keystrokes are global: raise and type inside one System Events block or focus can move to
+  # another app.
   osascript -e "tell application \"System Events\"
 set frontmost of (first process whose unix id is $APP_PID) to true
 delay 0.5
@@ -544,9 +516,8 @@ cmd_shot() {
     die_usage "--out must end in .png, e.g. scripts/app-drive.sh shot --out /tmp/proof/settings.png"
   fi
   attach
-  # Capture by CGWindowID rather than by screen rectangle: this window is grabbed
-  # correctly even when another agent's instance sits on top of it, and nothing
-  # has to be raised or moved, so a concurrent session's focus is left alone.
+  # Capture by CGWindowID, not screen rectangle: works with another agent's window on top and
+  # needs no raising or moving.
   local window_id
   window_id="$(ax windowid)" || die "could not resolve the window id for session $SESSION_ID"
   if [[ -z "$out" ]]; then
@@ -577,8 +548,7 @@ cmd_rize() {
   exit "$rc"
 }
 
-# Check what stop is about to delete for the loaded session. Prints the reason
-# and returns 1 when the meta file looks corrupted.
+# Returns 1 when the meta file looks corrupted.
 session_guard() {
   local support="$HOME/Library/Application Support" name
   if [[ -n "$APP_DATA" ]]; then
@@ -615,8 +585,7 @@ cmd_stop() {
     ids=("$only")
   fi
 
-  # Refuse before touching anything, so a corrupted session never leaves a
-  # half-stopped batch behind. A dry run reports the refusal instead.
+  # Refuse before touching anything so a corrupted session never leaves a half-stopped batch.
   local reason
   if [[ -z "$dry" ]]; then
     for id in "${ids[@]}"; do
@@ -690,12 +659,9 @@ cmd_stop() {
   fi
 }
 
-# Quote a value for embedding in AppleScript source.
 osa_string() {
   printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
 }
-
-# ------------------------------------------------------------------ entry point
 
 [[ $# -ge 1 ]] || {
   usage

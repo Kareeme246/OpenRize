@@ -1,7 +1,5 @@
-//! The local endpoint the running app serves and `rize` connects to: a
-//! Unix-domain socket in a private directory, or a Windows named pipe.
-//! `interprocess` provides the transport; each platform file adds the access
-//! checks its transport needs and exposes the same items.
+//! The local endpoint the running app serves and `rize` connects to: a Unix socket in a private
+//! directory, or a Windows named pipe. Each platform file exposes the same items.
 #[cfg_attr(unix, path = "ipc/unix.rs")]
 #[cfg_attr(windows, path = "ipc/windows.rs")]
 mod platform;
@@ -32,7 +30,6 @@ impl Endpoint {
         })
     }
 
-    /// Connects to the app, or fails when nothing is serving.
     pub fn connect(&self) -> Result<Stream, String> {
         self.address.connect()
     }
@@ -43,13 +40,11 @@ impl Endpoint {
         self.address.listen()
     }
 
-    /// One request and its response over a fresh connection.
     pub fn call(&self, request: &Request) -> Result<Response, String> {
         exchange(self.connect()?, request)
     }
 }
 
-/// Sends one request on a connected stream and reads the answer.
 pub fn exchange(mut stream: Stream, request: &Request) -> Result<Response, String> {
     bound(&stream).map_err(|e| e.to_string())?;
     // A server that turns the connection away answers and hangs up, which can
@@ -66,7 +61,6 @@ pub fn exchange(mut stream: Stream, request: &Request) -> Result<Response, Strin
     }
 }
 
-/// Reads one request from a client and writes back what `handle` answers.
 pub fn respond(mut stream: Stream, handle: impl FnOnce(Request) -> Response) {
     // A client that disconnects mid-setup must not stop the server.
     if bound(&stream).is_err() {
@@ -107,14 +101,9 @@ fn canonical(data_dir: &Path) -> PathBuf {
     }
 }
 
-/// Windows paths are case-insensitive and accept either separator, so the key
-/// is taken from the spelling the file system itself reports: its casing, no
-/// trailing separator, no `.` or `..`, no 8.3 short names. A path that does not
-/// exist yet keeps its own spelling below the nearest folder that does. The
-/// folder the app opens (`%LOCALAPPDATA%\<identifier>`) is already written that way,
-/// so it hashes exactly as it did before this normalisation and an older `rize`
-/// still finds a newer app; only variant spellings, which never matched the
-/// app's pipe, now do.
+/// Windows paths are case-insensitive, so the key uses the spelling the file system reports
+/// (casing, no trailing separator, `.`/`..` or 8.3 names); a missing tail keeps its own spelling.
+/// Folders already in that form hash as before, so an older `rize` still finds a newer app.
 fn on_disk_form(absolute: &Path) -> PathBuf {
     let mut tail = Vec::new();
     let mut base = absolute;
@@ -184,7 +173,6 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("Rize-Ipc-Key-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("Data")).unwrap();
         let reference = canonical(&dir.join("Data"));
-        // Already in the file system's own form, it is its own key.
         assert_eq!(canonical(&reference), reference);
         assert_eq!(strip_verbatim(&reference), reference);
 

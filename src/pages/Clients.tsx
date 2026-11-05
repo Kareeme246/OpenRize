@@ -42,18 +42,11 @@ interface ClientsProps {
   replace: (route: Route) => void;
 }
 
-/** Editing state for the sheet: a client, or a new one. */
 type Editing = { client: Client } | "new" | null;
 
 const TEMPLATE =
   "minmax(0,1.5fr) 80px 110px 90px minmax(100px,1fr) minmax(100px,1fr) 100px 16px";
 
-/**
- * Clients, the Projects page's counterpart: a scannable list with each
- * client's projects, time, ready-to-bill time, and invoiced total, and a
- * detail view per client. Assignment stays project-to-client: a client's page
- * writes `Project.clientId`.
- */
 export function Clients({ route, navigate, replace }: ClientsProps) {
   const catalog = useCatalog();
   const tab: ClientsTab = route.tab ?? "active";
@@ -137,7 +130,6 @@ export function Clients({ route, navigate, replace }: ClientsProps) {
       );
   }, [catalog.clients, rollups, tab, search]);
 
-  // The summary above the list covers the clients in the current tab.
   const summary = useMemo(() => {
     const totals = { rangeMs: 0, unbilledMs: 0, outstandingCents: 0 };
     for (const client of catalog.clients) {

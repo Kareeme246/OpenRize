@@ -1,7 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useDismiss } from "../pages/timesheets/useDismiss";
 
-/** One row of a `KebabMenu`. */
 export type MenuEntry =
   | "divider"
   | {
@@ -9,26 +8,19 @@ export type MenuEntry =
       onSelect: () => void;
       danger?: boolean;
       disabled?: boolean;
-      /** Shown on hover while disabled. */
       hint?: string;
-      /** Marks the current choice in a list of choices. */
       checked?: boolean;
     }
-  /** Opens its entries in place of the menu, with a way back. */
   | { text: string; entries: MenuEntry[] };
 
 interface KebabMenuProps {
-  /** The button's accessible name, such as "Options for Email". */
   label: string;
   entries: MenuEntry[];
-  /** Positions the menu's anchor; it must establish a containing block. */
   className: string;
 }
 
-/** A three-dot button and its menu, as a stopwatch card and a section use. */
 export function KebabMenu({ label, entries, className }: KebabMenuProps) {
   const [open, setOpen] = useState(false);
-  /** The entry whose list is showing in place of the menu, if any. */
   const [view, setView] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const close = useCallback(() => {
@@ -72,7 +64,6 @@ export function KebabMenu({ label, entries, className }: KebabMenuProps) {
     const opensView = "entries" in entry;
     const danger = !opensView && entry.danger === true;
     const disabled = !opensView && entry.disabled === true;
-    // A choice in a list of choices is a radio item that says if it is on.
     const role =
       !opensView && "checked" in entry
         ? ({

@@ -1,12 +1,10 @@
 export interface SegmentedOption<T extends string | number> {
   value: T;
   label: string;
-  /** Optional colour chip, used by the accent picker. */
   swatch?: string;
 }
 
 interface SegmentedControlProps<T extends string | number> {
-  /** Shared radio group name; must be unique on the page. */
   name: string;
   value: T;
   options: SegmentedOption<T>[];
@@ -17,13 +15,8 @@ interface SegmentedControlProps<T extends string | number> {
 }
 
 /**
- * A horizontal radio group styled as one pill: segments separated by a
- * hairline, the checked segment washed in the accent colour so the highlight
- * "moves" between options. Sits right-justified inside a SettingRow.
- *
- * Built on real `<input type="radio">`, which gives arrow-key navigation and
- * screen-reader semantics for free - the input is visually hidden and the label
- * is the skin.
+ * A radio group styled as one pill, on real `<input type="radio">` for arrow
+ * keys and screen readers.
  */
 export function SegmentedControl<T extends string | number>({
   name,
@@ -82,7 +75,6 @@ interface ToggleProps {
   disabled?: boolean;
 }
 
-/** A switch: one boolean that applies the moment it is flipped. */
 export function Toggle({
   checked,
   onChange,

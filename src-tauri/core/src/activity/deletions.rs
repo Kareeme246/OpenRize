@@ -40,20 +40,15 @@ pub(super) struct Deletion {
     segments: Vec<ActivitySegment>,
 }
 
-/// What a deletion would change, as `rize --dry-run` reports it. Built from
-/// the same `Deletion` the real command applies and records for undo.
+/// What a deletion would change, as `rize --dry-run` reports it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeletionPreview {
-    /// Entries that would be deleted.
     pub deleted_entries: Vec<String>,
-    /// Entries that keep existing but lose a category or project link.
     pub unlinked_entries: Vec<String>,
     pub projects: Vec<String>,
     pub categories: Vec<CategoryPreview>,
-    /// Rules that would be deleted with their category or project.
     pub rules: usize,
-    /// Apps that would lose a default category or project.
     pub apps: usize,
 }
 
@@ -61,7 +56,6 @@ pub struct DeletionPreview {
 #[serde(rename_all = "camelCase")]
 pub struct CategoryPreview {
     pub id: String,
-    /// Whether the category was already archived before the deletion.
     pub was_archived: bool,
 }
 
@@ -162,7 +156,6 @@ impl Deletion {
                 deletion.projects.push(id.clone());
             }
         }
-        // A catalog can be shared: unlink other entries, do not delete their time.
         let mut affected = BTreeMap::new();
         for (column, values) in [
             ("id", ids.to_vec()),
@@ -316,7 +309,6 @@ impl Deletion {
                     return Err(conflict.to_string());
                 }
                 for mut segment in current {
-                    // Initial deletion closes a live segment in its snapshot.
                     segment.ended_at.get_or_insert(self.at as u64);
                     if !expected.iter().any(|expected| **expected == segment) {
                         return Err(conflict.to_string());
@@ -418,7 +410,6 @@ impl Deletion {
 }
 
 /// Captures what a deletion touches and applies it inside `tx`, refusing
-/// exactly as the real command does. The caller decides whether to commit.
 fn stage(
     tx: &Transaction,
     ids: &[String],
@@ -451,10 +442,8 @@ impl ActivityStore {
         Ok(())
     }
 
-    /// What `delete_undoable` would change, run through the same staging and
-    /// then rolled back: nothing is written, and no undo step, live segment
-    /// or journal entry is touched. An `Err` is the message the real
-    /// deletion would fail with.
+    /// Runs the real staging then rolls back: nothing is written. An `Err` is the real deletion's
+    /// failure message.
     pub fn preview_deletion(
         &mut self,
         ids: &[String],

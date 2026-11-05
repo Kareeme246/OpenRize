@@ -1,24 +1,6 @@
-//! The session's undo history. Every user change to time entries is one
-//! `Command`, applied inside a savepoint so it lands whole or not at all, and
-//! undone or redone the same way:
-//!
-//! - `Edit`: field changes (accept, unapprove, reject, category, project,
-//!   billable, description, times) and new entries, captured generically as
-//!   each entry's row before and after. Undo writes back only the columns the
-//!   change touched, after checking nothing else changed them since. A change
-//!   that claims minutes from other entries (see `claim.rs`) records those
-//!   entries, and the segments that changed hands, in the same `Edit`, so one
-//!   Undo gives every minute back.
-//! - `Split` and `Merge`: structural changes. Their inverse depends on time,
-//!   not on a snapshot: a live half keeps recording after a split, so on undo
-//!   every segment it gathered in the meantime goes home with it.
-//! - `Deletion`: entries and catalog items together (see `deletions.rs`).
-//!
-//! Structural removals never soft-delete. `deleted_at` means the user deleted
-//! that time, and the entry builder keeps a deleted entry's span empty, so a
-//! split half or merged-away entry marked deleted would blank tracked time.
-//! An entry a command removes is stashed instead (its row and every row that
-//! hangs off it) and put back verbatim on redo.
+//! The session's undo history. Each user change to time entries is one `Command` in a savepoint:
+//! `Edit` (before/after rows), `Split`/`Merge` (inverse depends on time), `Deletion`. Structural
+//! removals never soft-delete (it would blank tracked time): the entry is stashed for redo.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -30,11 +12,8 @@ use crate::models::TimeEntry;
 
 const CONFLICT: &str = "These entries have changed since; undo/redo cannot safely overwrite them.";
 
-/// How many commands the undo stack keeps.
 const DEPTH: usize = 100;
 
-/// The `time_entries` columns undo tracks, in `EntryRow` order. `updated_at`
-/// is only ever bumped.
 const COLUMNS: [&str; 14] = [
     "id",
     "started_at",
@@ -58,7 +37,6 @@ const STATUS: usize = 7;
 const INVOICE: usize = 11;
 const DELETED: usize = 13;
 
-/// One `time_entries` row, as `COLUMNS`.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct EntryRow(Vec<Value>);
 
@@ -82,8 +60,6 @@ impl EntryRow {
             .map_err(|e| e.to_string())
     }
 
-    /// The row, when it exists, is not deleted and is not invoiced: the only
-    /// rows a command may change.
     fn editable(conn: &Connection, id: &str) -> Result<Self, String> {
         Self::read(conn, id)?
             .filter(|row| row.0[DELETED] == Value::Null && row.0[INVOICE] == Value::Null)
@@ -113,7 +89,6 @@ impl EntryRow {
     }
 }
 
-/// The tables whose rows belong to one entry, keyed by `entry_id`.
 const DEPENDENTS: [&str; 4] = [
     "suggestions",
     "classify_jobs",
@@ -121,14 +96,11 @@ const DEPENDENTS: [&str; 4] = [
     "entry_events",
 ];
 
-/// A removed entry: its `time_entries` row and every dependent row, as they
-/// were, ready to go back.
 #[derive(Clone)]
 pub(super) struct Stash {
     tables: Vec<Rows>,
 }
 
-/// Rows of one table, every column.
 #[derive(Clone)]
 struct Rows {
     table: &'static str,
@@ -137,8 +109,7 @@ struct Rows {
 }
 
 impl Stash {
-    /// Removes an entry and its dependent rows, returning them. Its segments
-    /// are the caller's: relink them first.
+    /// Removes an entry and its dependent rows, returning them; relink its segments first.
     pub(super) fn take(conn: &Connection, id: &str) -> Result<Self, String> {
         let mut tables = Vec::new();
         for (table, key) in std::iter::once(("time_entries", "id"))
@@ -176,7 +147,6 @@ impl Stash {
     }
 }
 
-/// Every column of every `table` row whose `key` is `id`.
 fn select_all(
     conn: &Connection,
     table: &str,
@@ -216,7 +186,6 @@ fn insert(conn: &Connection, table: &str, columns: &[String], row: &[Value]) -> 
     .map_err(|e| e.to_string())
 }
 
-/// One undoable user action.
 pub(super) enum Command {
     Deletion(Deletion),
     Edit(Edit),
@@ -225,7 +194,6 @@ pub(super) enum Command {
 }
 
 impl Command {
-    /// What the undo toast calls it.
     fn label(&self) -> &'static str {
         match self {
             Self::Deletion(_) => "Delete",
@@ -236,15 +204,11 @@ impl Command {
     }
 }
 
-/// Field changes and new entries, as before/after rows.
 #[derive(Clone)]
 pub(super) struct Edit {
     label: &'static str,
     entries: Vec<Change>,
-    /// Segments that moved between entries along the way.
     handovers: Vec<Handover>,
-    /// Suggestion outcomes the change recorded (accepted, rejected,
-    /// changed): (suggestion id, before, after).
     outcomes: Vec<(String, Option<String>, Option<String>)>,
     /// What the last undo or redo of this change took from other entries to
     /// give its own minutes back: a freed stretch may have been filled since
@@ -255,15 +219,11 @@ pub(super) struct Edit {
 #[derive(Clone)]
 struct Change {
     id: String,
-    /// `None`: the change created this entry.
     before: Option<EntryRow>,
-    /// `None`: the change removed this entry.
     after: Option<EntryRow>,
-    /// A created or removed entry while it is absent.
     stash: Option<Stash>,
 }
 
-/// A segment that changed owner: another entry, or none.
 #[derive(Clone)]
 struct Handover {
     segment: i64,
@@ -271,16 +231,10 @@ struct Handover {
     after: Option<String>,
 }
 
-/// What a change touched, collected while it runs and turned into an `Edit`
-/// once it has finished.
 #[derive(Default)]
 pub(super) struct Journal {
-    /// Every entry the change touched, as it was before; `None` if it did not
-    /// exist.
     entries: BTreeMap<String, Option<EntryRow>>,
-    /// The entries the change removed.
     removed: BTreeMap<String, Stash>,
-    /// Who owned each segment before the change moved it.
     segments: BTreeMap<i64, Option<String>>,
 }
 
@@ -337,11 +291,8 @@ impl Journal {
     }
 }
 
-/// `id` has just become live again. If another live session has been
-/// recording since, they are one session when nothing sits between them: the
-/// newer one is folded into `id` (its activity moves over and it goes, as a
-/// rebuild would have done). Otherwise `id` is closed. Returns whether `id`
-/// is still live.
+/// `id` has just become live again: a newer live session with nothing between them is folded
+/// into it, otherwise `id` is closed. Returns whether `id` is still live.
 fn settle_live(conn: &Connection, id: &str, now: u64) -> Result<bool, String> {
     let newer: Option<(String, i64, i64)> = conn
         .query_row(
@@ -485,7 +436,6 @@ impl Edit {
             if to.building() && !from.building() && !settle_live(conn, &change.id, now)? {
                 let mut row = to.clone();
                 row.0[STATUS] = Value::Text("pending".to_string());
-                // The change now reads as what it did, so the way back is exact.
                 if undo {
                     change.before = Some(row);
                 } else {
@@ -510,7 +460,6 @@ impl Edit {
         Ok(())
     }
 
-    /// The entry's row before and after this step.
     fn direction(change: &Change, undo: bool) -> (Option<&EntryRow>, Option<&EntryRow>) {
         if undo {
             (change.after.as_ref(), change.before.as_ref())
@@ -520,7 +469,6 @@ impl Edit {
     }
 }
 
-/// The current outcome of every suggestion on these entries.
 fn outcomes(
     conn: &Connection,
     ids: &BTreeSet<String>,
@@ -541,18 +489,14 @@ fn outcomes(
     Ok(map)
 }
 
-/// A split: `original` keeps the time before `at`, `second` takes the rest.
 pub(super) struct Split {
     original: String,
     second: String,
     at: u64,
     before: EntryRow,
-    /// The second half while the split is undone.
     stash: Option<Stash>,
 }
 
-/// What a merge hands back: the merged entry, the secondary's stash, the
-/// secondary's and the primary's segments, and what it took from others.
 type MergeOutcome = (TimeEntry, Stash, Vec<i64>, Vec<i64>, Option<Edit>);
 
 /// A merge: `primary` absorbed `secondary`. The secondary's segments are
@@ -561,20 +505,13 @@ type MergeOutcome = (TimeEntry, Stash, Vec<i64>, Vec<i64>, Option<Edit>);
 pub(super) struct Merge {
     primary: String,
     secondary: String,
-    /// The secondary's segments when it was absorbed.
     segments: Vec<i64>,
-    /// The primary's own segments when the merge happened.
     kept: Vec<i64>,
-    /// Whether the secondary was the live entry, whose later segments return
-    /// to it on undo.
     secondary_live: bool,
-    /// When the merge happened; segments recorded after it belong to the live half.
     merged_at: u64,
     before: EntryRow,
     after: EntryRow,
-    /// The secondary while the merge stands.
     stash: Option<Stash>,
-    /// What the merge took from other entries: the gap it spans.
     claimed: Option<Edit>,
 }
 
@@ -587,8 +524,7 @@ impl ActivityStore {
         }
     }
 
-    /// Runs `op` in a savepoint: on error every write it made is rolled back,
-    /// and so is the capture state it may have moved (`current`).
+    /// Runs `op` in a savepoint: on error every write and the capture state (`current`) roll back.
     pub(super) fn atomically<T>(
         &mut self,
         op: impl FnOnce(&mut Self) -> Result<T, String>,
@@ -616,9 +552,8 @@ impl ActivityStore {
         }
     }
 
-    /// Runs a change to these entries as one undoable `Edit` called `label`.
-    /// `ids` must name every entry `op` touches itself; entries it takes
-    /// minutes from (`claim`) are recorded as it goes.
+    /// Runs a change as one undoable `Edit` called `label`. `ids` must name every entry `op`
+    /// touches itself; entries it claims minutes from are recorded as it goes.
     pub(super) fn edit<T>(
         &mut self,
         label: &'static str,
@@ -651,8 +586,6 @@ impl ActivityStore {
         Ok(value)
     }
 
-    /// Remembers an entry as it is now, for the `Edit` being journaled. Call
-    /// it before the first change to the entry.
     pub(super) fn note_entry(&mut self, id: &str) -> Result<(), String> {
         if self
             .journal
@@ -668,7 +601,6 @@ impl ActivityStore {
         Ok(())
     }
 
-    /// Remembers who owns a segment now, before the journaled change moves it.
     pub(super) fn note_segment(&mut self, segment: i64, owner: Option<&str>) {
         if let Some(journal) = self.journal.as_mut() {
             journal
@@ -678,7 +610,6 @@ impl ActivityStore {
         }
     }
 
-    /// Remembers every segment an entry owns now.
     pub(super) fn note_segments_of(&mut self, entry_id: &str) -> Result<(), String> {
         if self.journal.is_none() {
             return Ok(());
@@ -699,8 +630,6 @@ impl ActivityStore {
         Ok(())
     }
 
-    /// Removes an entry for good and keeps it for the journal, so the change
-    /// that removed it can bring it back. Its segments are left unowned.
     pub(super) fn remove_entry(&mut self, id: &str) -> Result<(), String> {
         self.note_entry(id)?;
         self.note_segments_of(id)?;
@@ -711,8 +640,7 @@ impl ActivityStore {
         Ok(())
     }
 
-    /// Undoes the last change; returns what it was, or `None` when there is
-    /// nothing to undo. A change that conflicts with later edits stays put.
+    /// Undoes the last change; one that conflicts with later edits stays put.
     pub fn undo(&mut self, now: u64) -> Result<Option<&'static str>, String> {
         self.step(true, now)
     }
@@ -812,7 +740,6 @@ impl ActivityStore {
             }
         };
         if !matches!(command, Command::Edit(_)) {
-            // (Edits settle theirs while recording them, above.)
             let winners = match command {
                 Command::Split(split) => vec![split.original.clone(), split.second.clone()],
                 Command::Merge(merge) => vec![merge.primary.clone(), merge.secondary.clone()],
@@ -831,8 +758,6 @@ impl ActivityStore {
         Ok(())
     }
 
-    /// After a step, claims the minutes it gave entries back from anyone who
-    /// holds them now, so undo and redo keep one owner per minute too.
     fn reclaim(
         &mut self,
         edit: &Edit,
@@ -879,7 +804,6 @@ impl ActivityStore {
         journal.into_edit(edit.label, &self.conn, Vec::new())
     }
 
-    /// Every pair of entries that share time.
     fn overlapping_pairs(&self) -> Result<BTreeSet<(String, String)>, String> {
         let mut statement = self
             .conn
@@ -897,11 +821,9 @@ impl ActivityStore {
         Ok(pairs)
     }
 
-    /// The last word of undo and redo: whatever it did, no two entries share
-    /// time that did not share it before. Where the step brought back an
-    /// entry (`winners`) over time another holds, the restored entry keeps it
-    /// and the other gives it up (or the step is refused when that is
-    /// approved). Time two other entries share is the newer entry's to give.
+    /// The last word of undo and redo: no two entries share time they did not share before.
+    /// A restored entry (`winners`) keeps contested time and the other gives it up (or the step is
+    /// refused when approved).
     fn settle_overlaps(
         &mut self,
         before: &BTreeSet<(String, String)>,
@@ -912,7 +834,6 @@ impl ActivityStore {
             let (Ok(first), Ok(second)) = (self.time_entry(a), self.time_entry(b)) else {
                 continue;
             };
-            // Settled by an earlier claim in this loop.
             if first.deleted_at.is_some()
                 || second.deleted_at.is_some()
                 || first.started_at >= second.ended_at
@@ -938,11 +859,6 @@ impl ActivityStore {
         Ok(())
     }
 
-    // --- Split ---------------------------------------------------------------
-
-    /// Splits an entry at `at`: the entry keeps the time before it, a new
-    /// entry the time after. Splitting the live entry closes its first half
-    /// and keeps recording into the second.
     pub fn split_time_entry(
         &mut self,
         id: &str,
@@ -962,8 +878,6 @@ impl ActivityStore {
         Ok(halves)
     }
 
-    /// The split itself, shared by the first run and redo (which puts the
-    /// stashed second half back instead of minting a new one).
     fn split_at(
         &mut self,
         id: &str,
@@ -994,7 +908,6 @@ impl ActivityStore {
         }
 
         if live {
-            // Activity captured since the last rebuild is this session's too.
             self.conn
                 .execute(
                     "UPDATE segments SET entry_id = ?1
@@ -1003,8 +916,6 @@ impl ActivityStore {
                 )
                 .map_err(|e| e.to_string())?;
         }
-        // Each half owns exactly its own activity: the segment running across
-        // the cut is cut too, and a live one keeps recording into the second.
         self.cut_segments(id, at, Some(second))?;
         self.conn
             .execute(
@@ -1035,7 +946,6 @@ impl ActivityStore {
                 params![at as i64, end as i64, now as i64, second],
             )
             .map_err(|e| e.to_string())?;
-        // The first half of a live session is a finished session now.
         self.conn
             .execute(
                 "UPDATE time_entries SET ended_at = ?1, updated_at = ?2,
@@ -1052,7 +962,6 @@ impl ActivityStore {
         Ok((self.time_entry(id)?, self.time_entry(second)?))
     }
 
-    /// Gives `to` its own copy of the suggestions `from` has.
     pub(super) fn copy_suggestions(&self, from: &str, to: &str) -> Result<(), String> {
         let (columns, rows) = select_all(&self.conn, "suggestions", "entry_id", from)?;
         for mut row in rows {
@@ -1107,8 +1016,6 @@ impl ActivityStore {
         Ok(())
     }
 
-    // --- Merge ---------------------------------------------------------------
-
     /// Merges `secondary_id` into the adjacent `primary_id`, which keeps its
     /// id and fields. Merging into the live session keeps it recording when
     /// both are captured sessions; otherwise the live one closes now.
@@ -1138,7 +1045,6 @@ impl ActivityStore {
         Ok(merged)
     }
 
-    /// The merge, journaling the minutes it takes from other entries.
     fn merge_claiming(
         &mut self,
         primary_id: &str,
@@ -1360,11 +1266,8 @@ impl ActivityStore {
         Ok(())
     }
 
-    // --- Shared --------------------------------------------------------------
-
-    /// Cuts every segment of `entry_id` that runs across `at` in two, giving
-    /// the later piece to `owner` (or to no entry). When the piece is the one
-    /// capture is still writing, capture carries on in the piece.
+    /// Cuts every segment of `entry_id` running across `at`, giving the later piece to `owner` (or
+    /// no entry).
     pub(super) fn cut_segments(
         &mut self,
         entry_id: &str,
@@ -1391,8 +1294,6 @@ impl ActivityStore {
         Ok(())
     }
 
-    /// Cuts one segment of `entry_id` (or of no entry) at `at`; see
-    /// `cut_segments`. Returns the later piece.
     pub(super) fn cut_segment(
         &mut self,
         id: i64,

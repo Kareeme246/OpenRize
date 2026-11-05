@@ -5,7 +5,6 @@ import { type BlockState, blockState, confidenceOf } from "../../lib/entries";
 import { formatDuration, formatTime } from "../../lib/format";
 import type { Category, Project, TimeEntry } from "../../lib/types";
 
-/** How much of a block's content fits its height. */
 type Density = "full" | "compact" | "line" | "sliver";
 
 const DENSITY_CLASSES: Record<Density, string> = {
@@ -23,8 +22,8 @@ const NARROW_DENSITY_CLASSES: Record<Density, string> = {
 };
 
 /**
- * Rendered line heights in px (font size x the inherited 1.5), pinned on the
- * text with `leading-[...]` below so the room maths here matches the layout.
+ * Rendered line heights in px, pinned with `leading-[...]` below so the room
+ * maths matches layout.
  */
 const LINE = {
   title: 18,
@@ -35,10 +34,8 @@ const LINE = {
   narrowTitle: 13.125,
   narrowSub: 12.5,
 };
-/** A chip is one text line plus its py-0.5. */
 const CHIP_HEIGHT = LINE.chipText + 4;
 
-/** Vertical padding plus border a density spends inside the block's height. */
 const CHROME: Record<Density, number> = {
   full: 22,
   compact: 10,
@@ -52,35 +49,26 @@ const NARROW_CHROME: Record<Density, number> = {
   sliver: 0,
 };
 
-/** How many lines each wrappable element of a wide block may take. */
 interface LineBudget {
-  /** Description lines. */
   title: number;
-  /** Text lines inside each category / project chip. */
   chip: number;
-  /** Whether chips may flow onto further rows. */
   wrapRow: boolean;
 }
 
 interface BudgetInput {
-  /** Height the block's content box has. */
   room: number;
   titleLine: number;
-  /** Height the content takes with every element on a single line. */
   base: number;
-  /** Chips whose text can wrap (category, project). */
   chips: number;
-  /** Everything sharing the chip row, which can stack when it wraps. */
   rowItems: number;
   rowLine: number;
   rowGap: number;
 }
 
 /**
- * Splits the room left over once every element has one line. The description
- * gets the first spare line, then the chip row, then they take turns; an
- * element only grows by a whole line that fits, so nothing is ever clipped
- * mid-line and whatever cannot grow keeps truncating.
+ * Splits the room left after one line each: description first, then the chip
+ * row, then they alternate. Elements grow only by whole lines, so nothing clips
+ * mid-line.
  */
 function budgetLines({
   room,
@@ -117,7 +105,6 @@ function budgetLines({
   return budget;
 }
 
-/** Wraps to at most `lines` lines, then cuts off with an ellipsis. */
 export function clampStyle(lines: number): CSSProperties {
   return {
     display: "-webkit-box",
@@ -178,7 +165,6 @@ function wideBudget(
   });
 }
 
-/** Week-column blocks: the first and second text rows share the spare room. */
 function narrowBudget(
   density: Density,
   height: number,
@@ -244,22 +230,15 @@ interface EntryBlockProps {
   selected: boolean;
   category?: Category;
   project?: Project;
-  /**
-   * Week columns: a smaller block that drops the description when the
-   * column is too narrow for it, keeping the category.
-   */
   narrow?: boolean;
   onSelect: (id: string) => void;
   now?: number;
-  /** The session capturing right now; the now line rides its bottom edge. */
   recording?: boolean;
 }
 
 /**
- * One time entry on a Calendar timeline. Height follows duration; the block
- * takes the accent colour; the state shows as solid (approved),
- * hatched with a dashed border (pending), hatched gray (needs you),
- * shimmering (categorizing), or dotted (still recording).
+ * One time entry on a Calendar timeline; height follows duration, the state
+ * sets the look.
  */
 export function EntryBlock({
   entry,
@@ -468,10 +447,6 @@ export function EntryBlock({
   );
 }
 
-/**
- * A week-column block: the description when the column has room for it
- * (a container query on the block), otherwise just the category.
- */
 function NarrowContent({
   density,
   height,

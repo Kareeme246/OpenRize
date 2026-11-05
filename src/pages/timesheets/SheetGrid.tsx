@@ -23,12 +23,10 @@ import {
 import type { TimeEntry } from "../../lib/types";
 import { useDismiss } from "./useDismiss";
 
-/** Weekend columns are struck through with Rise's diagonal hatch. */
 const HATCH: CSSProperties = {
   backgroundImage:
     "repeating-linear-gradient(135deg, var(--line) 0 1px, transparent 1px 9px)",
 };
-/** The current day's column carries a faint accent wash top to bottom. */
 const TODAY: CSSProperties = {
   backgroundColor: "color-mix(in srgb, var(--accent) 7%, transparent)",
 };
@@ -59,16 +57,12 @@ export interface SheetGridProps {
   rows: SheetRows;
   onRowsChange: (rows: SheetRows) => void;
   catalog: Catalog;
-  /** The scale's expected hours, the denominator of every progress line. */
   targetMs: number;
   emptyTitle: string;
   emptyHint?: string;
   emptyAction?: ReactNode;
-  /** Week: a day cell zooms into that day. */
   onOpenDay: (dayStart: number) => void;
-  /** A review badge opens My Timesheet's review queue for the range. */
   onReview: () => void;
-  /** Day: an expanded row's entries can be accepted in place. */
   onApprove: (entry: TimeEntry) => void;
 }
 
@@ -78,7 +72,6 @@ function columnStyle(column: Column): CSSProperties | undefined {
   return undefined;
 }
 
-/** `+5.4`: the part of a cell still waiting on review. */
 function Delta({ ms, inset = "right-1.5" }: { ms: number; inset?: string }) {
   if (ms <= 0) return null;
   return (
@@ -116,7 +109,6 @@ function ReviewBadge({
   );
 }
 
-/** `4.6h / 40h` under a row's name, as Rise draws a member's capacity. */
 function ProgressLine({
   ms,
   targetMs,
@@ -166,7 +158,6 @@ function Chevron({ open }: { open: boolean }) {
   );
 }
 
-/** The header cell's row picker, Rise's `TEAM MEMBER ⌄`. */
 function RowsMenu({
   value,
   onChange,
@@ -282,13 +273,6 @@ function EntryAction({
   );
 }
 
-/**
- * The Analyze > Timesheets matrix (Rise's Timesheets week grid): named rows
- * with a progress line, one column per day with the current day lit and
- * weekends hatched, a total column carrying the review badge, and a footer
- * total row. An expanded row breaks down by the other dimension in Week, and
- * lists its entries in Day.
- */
 export function SheetGrid({
   sheet,
   edges,

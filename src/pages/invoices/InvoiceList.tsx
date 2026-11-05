@@ -23,13 +23,11 @@ interface InvoiceListProps {
   invoices: InvoiceSummary[];
   loading: boolean;
   onOpen: (id: string) => void;
-  /** Deletes a draft and releases its time; the list refreshes afterwards. */
   onDeleteDraft: (id: string) => Promise<void>;
   onCreate: () => void;
   onSettings: () => void;
 }
 
-/** Sums the totals of invoices in `status`. */
 function sum(list: InvoiceSummary[], wanted: DisplayStatus): number {
   return list
     .filter((invoice) => displayStatus(invoice) === wanted)

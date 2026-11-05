@@ -43,16 +43,10 @@ interface ClientDetailProps {
   onEdit: () => void;
   onOpenProject: (project: Project) => void;
   onOpenInvoice: (id: string) => void;
-  /** Start an invoice for this client. */
   onInvoice: () => void;
   onChanged: () => void;
 }
 
-/**
- * One client: its contact and billing details, its numbers, the projects
- * assigned to it (attach an existing one, detach another), its invoices, and
- * the Edit / Archive / Delete actions.
- */
 export function ClientDetail({
   client,
   rollup,
@@ -75,7 +69,6 @@ export function ClientDetail({
   const currency = client.currency || "USD";
   const now = Date.now();
 
-  /** Runs `action`, then confirms it with `message`. */
   const run = async (
     action: () => Promise<unknown>,
     message: string,

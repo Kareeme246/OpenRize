@@ -1,32 +1,6 @@
-//! Which folder holds the app's data when older Windows builds kept it in
-//! Roaming AppData and current ones keep it in Local AppData (`paths.rs`).
-//! Roaming profiles and folder redirection copy that folder off the machine,
-//! which is wrong for a live SQLite database and for data that must stay here.
-//!
-//! The app calls [`adopt`] once at startup, before any store is opened or the
-//! lock is taken; it moves the old folder's contents into the new one. `rize`
-//! calls [`choose`], which applies the same rule without touching anything, so
-//! both always name the same folder: the new one once it has data, the old one
-//! until the app has run, and the new one when there is no data yet.
-//!
-//! "Has data" means the database or the account list is there. The new folder
-//! cannot be judged by existing: WebView2 keeps its profile, the app its logs
-//! and Windows its settings (`paths::CONFIG_DIR`) in it. That `config` folder
-//! is never counted, moved or removed here.
-//!
-//! Entries move by rename. When the old folder is on another volume (Roaming
-//! redirected to a drive or a share, the very case this exists for) a rename
-//! cannot work, so everything is copied instead and the old entries are
-//! removed only once the copy is complete and verified.
-//!
-//! A marker file in the new folder (`MARKER_FILE`) is written before the first
-//! entry moves and removed after the last. If the app dies in between, the
-//! folders can disagree (the account list moved, the database not yet), so
-//! while the marker exists `choose` follows the database, `rize` refuses to
-//! edit, and the app's next start resumes the move.
-//!
-//! macOS and Linux resolve both locations to the same folder, so nothing is
-//! ever moved there.
+//! Data folder choice: older Windows builds used Roaming AppData, current ones Local. The app calls
+//! [`adopt`] at startup to move old contents; `rize` calls [`choose`], the same rule read-only. A
+//! marker file in the new folder marks a move under way; "has data" means a db or account list.
 use std::collections::hash_map::DefaultHasher;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
@@ -37,15 +11,11 @@ use std::path::{Path, PathBuf};
 use crate::paths::{ACCOUNTS_FILE, CONFIG_DIR, DATABASE_FILE, LOCK_FILE};
 use crate::state::lock_stores;
 
-/// Prefix of the folder a copy is assembled in before it is published.
 const STAGING_PREFIX: &str = ".migrating-";
 
-/// Written into `local` (holding the old folder's path) before the first entry
-/// moves and removed after the last. Present, it means a move was interrupted,
-/// so the two folders cannot be read at face value: the account list and
-/// settings can already be in `local` while the database is still in `legacy`.
-/// Not data, and never listed or moved. (Not under `STAGING_PREFIX`, which is
-/// swept as leftover copies.)
+/// Holds the old folder's path in `local` while a move is under way; present means it was
+/// interrupted, so the account list can already be in `local` while the database is still in
+/// `legacy`. Not data. (Not under `STAGING_PREFIX`, which is swept as leftover copies.)
 const MARKER_FILE: &str = ".moving-from";
 
 /// The two file system operations a move uses, replaceable so tests can make a
@@ -68,7 +38,6 @@ const REAL_IO: Io<'static> = Io {
     copy: &real_copy,
 };
 
-/// Whether `dir` holds the app's data, as opposed to merely existing.
 pub fn has_data(dir: &Path) -> bool {
     dir.join(DATABASE_FILE).is_file() || dir.join(ACCOUNTS_FILE).is_file()
 }
@@ -77,18 +46,14 @@ fn marker_path(local: &Path) -> PathBuf {
     local.join(MARKER_FILE)
 }
 
-/// Whether a move into `local` was started and not finished (the app was
-/// stopped part-way). While it is, the data may be split between the two
-/// folders, so nothing but the app, which finishes the move at its next start,
-/// should work on it: `rize` refuses to edit.
+/// Whether a move into `local` was started and not finished. The data may be split between the
+/// folders, so `rize` refuses to edit; the app finishes the move at its next start.
 pub fn move_unfinished(local: &Path) -> bool {
     marker_path(local).is_file()
 }
 
-/// The folder holding the data, read-only: `local` once it has data (or when
-/// neither does), `legacy` while only it has. Never creates or moves anything.
-/// While a move is unfinished, `legacy` as long as it still has the database
-/// (accounts and settings can already be in `local`, so they say nothing).
+/// The folder holding the data, read-only: `local` once it has data (or neither does), else
+/// `legacy`. While a move is unfinished, `legacy` as long as it still has the database.
 pub fn choose(legacy: &Path, local: &Path) -> PathBuf {
     if legacy == local {
         return local.to_path_buf();
@@ -113,16 +78,9 @@ fn unfinished_dir(legacy: &Path, local: &Path) -> PathBuf {
     }
 }
 
-/// The folder to open at startup, after moving the data out of `legacy` into
-/// `local` when only `legacy` has any. Nothing is overwritten or merged: if
-/// both have data `local` wins and `legacy` stays as it was, and if the move
-/// fails everything is put back (or the partial copy deleted) and `legacy` is
-/// used for this launch (the next launch tries again). Old entries are deleted
-/// only after a verified copy to another volume. A marker file in `local`
-/// records that a move is under way, so one interrupted part-way (a crash, a
-/// power cut) is resumed here, whatever the two folders look like meanwhile.
-/// Call it with no store open and before the lock is taken: it takes the old
-/// folder's lock itself, which waits out a `rize` edit.
+/// The folder to open at startup, moving data from `legacy` into `local` when only `legacy` has
+/// any. Nothing is merged; on failure everything is put back and `legacy` serves this launch. Call
+/// before any store is open: it takes the old folder's lock itself, waiting out `rize`.
 pub fn adopt(legacy: &Path, local: &Path) -> PathBuf {
     adopt_with(legacy, local, &REAL_IO)
 }
@@ -161,7 +119,6 @@ fn adopt_with(legacy: &Path, local: &Path, io: &Io) -> PathBuf {
     }
 }
 
-/// Why a move stopped, and whether it left the folders as it found them.
 struct MoveError {
     message: String,
     clean: bool,
@@ -189,7 +146,6 @@ fn migrate(legacy: &Path, local: &Path, io: &Io, resuming: bool) -> Result<(), S
     };
     remove_stale_staging(local);
     if !resuming {
-        // Written and flushed before the first entry moves.
         if let Err(error) = write_marker(local, legacy) {
             remove_entry(&marker_path(local));
             return Err(format!("could not record the move: {error}"));
@@ -232,9 +188,7 @@ fn write_marker(local: &Path, legacy: &Path) -> io::Result<()> {
     file.sync_all()
 }
 
-/// What has to move last, so that an interruption leaves the old folder as the
-/// one with data: the database's journal files, then the database, are what
-/// make a folder look like it holds the data.
+/// Moves last, so an interruption leaves the old folder looking like the one with data.
 fn rank(name: &OsStr) -> u8 {
     let name = name.to_string_lossy();
     if name == DATABASE_FILE {
@@ -248,7 +202,6 @@ fn rank(name: &OsStr) -> u8 {
     }
 }
 
-/// A rename that failed because the two folders are on different volumes.
 fn crosses_devices(error: &io::Error) -> bool {
     // ERROR_NOT_SAME_DEVICE on Windows, EXDEV elsewhere.
     const NOT_SAME_DEVICE: i32 = if cfg!(windows) { 17 } else { 18 };
@@ -264,10 +217,9 @@ fn move_entries(legacy: &Path, local: &Path, io: &Io, resuming: bool) -> Result<
         .filter(|name| name != LOCK_FILE && name != CONFIG_DIR && name != MARKER_FILE)
         .collect();
     names.sort_by(|a, b| rank(a).cmp(&rank(b)).then_with(|| a.cmp(b)));
-    // Nothing already in the new folder is replaced: refuse before moving any.
-    // The exception is resuming, where an entry present on both sides was
-    // published before the interruption: once the two are verified identical
-    // the old one is redundant and goes.
+    // Nothing already in the new folder is replaced: refuse before moving any, except when
+    // resuming, where an entry on both sides that verifies identical was already published and the
+    // old one goes.
     let mut pending: Vec<OsString> = Vec::new();
     for name in names {
         let theirs = local.join(&name);
@@ -325,15 +277,9 @@ fn move_entries(legacy: &Path, local: &Path, io: &Io, resuming: bool) -> Result<
     Ok(())
 }
 
-/// Copies every entry into a staging folder inside `local`, verifies it, puts
-/// the entries in place by rename (same volume now) and only then removes the
-/// old ones. The old folder's lock is held throughout, and with it nothing
-/// writes the database, so its file set (`.db`, `-wal`, `-shm`) is copied as
-/// one consistent set; opening the copy replays the journal as it would have
-/// in place. A raw copy is used rather than SQLite's backup API because the
-/// folder holds more than one database (each account has its own), and one
-/// mechanism that is verified byte for byte covers all of them. Any failure
-/// before the removal deletes what was copied and leaves the old folder whole.
+/// Copies every entry into a staging folder in `local`, verifies it, renames it into place, then
+/// removes the old ones. Holding the old lock keeps the `.db`/`-wal`/`-shm` set consistent; a raw
+/// copy, not SQLite's backup API, since the folder holds one database per account.
 fn copy_entries(legacy: &Path, local: &Path, names: &[OsString], io: &Io) -> Result<(), MoveError> {
     let staging = local.join(format!("{STAGING_PREFIX}{}", uuid::Uuid::now_v7().simple()));
     fs::create_dir(&staging)
@@ -455,7 +401,6 @@ fn remove_entry(path: &Path) -> bool {
     }
 }
 
-/// Whether two files or folders hold the same bytes under the same names.
 fn trees_equal(a: &Path, b: &Path) -> bool {
     let (Ok(ma), Ok(mb)) = (fs::symlink_metadata(a), fs::symlink_metadata(b)) else {
         return false;
@@ -608,7 +553,6 @@ mod tests {
         assert!(!legacy.exists(), "an emptied old folder is removed");
         assert_eq!(choose(&legacy, &local), local);
 
-        // A second launch finds it done.
         assert_eq!(adopt(&legacy, &local), local);
         let _ = fs::remove_dir_all(root);
     }
@@ -806,7 +750,6 @@ mod tests {
         fs::create_dir_all(local.join("EBWebView")).unwrap();
         fs::create_dir_all(local.join(CONFIG_DIR)).unwrap();
         fs::write(local.join("config/settings.json"), "mine").unwrap();
-        // The copy path must have been the one taken.
         let renames = crossing(&legacy);
 
         assert_eq!(adopt_with(&legacy, &local, &with_rename(&renames)), local);
@@ -912,7 +855,6 @@ mod tests {
         assert!(!has_data(&local) && !local.join("invoices").exists());
         assert!(staging_entries(&local).is_empty());
 
-        // Retrying with a working copy path then succeeds.
         let renames = crossing(&legacy);
         assert_eq!(adopt_with(&legacy, &local, &with_rename(&renames)), local);
         assert_eq!(contents(&local, "activity.db"), "db");
@@ -1063,7 +1005,6 @@ mod tests {
         fs::remove_file(legacy.join("activity.db")).unwrap();
         assert_eq!(choose(&legacy, &local), local);
 
-        // With the marker gone the usual rule applies again.
         fs::remove_file(local.join(MARKER_FILE)).unwrap();
         fs::write(legacy.join("activity.db"), "db").unwrap();
         assert_eq!(choose(&legacy, &local), local);

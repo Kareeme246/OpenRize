@@ -32,7 +32,6 @@ fn deleting_an_entry_removes_only_the_entry_and_its_activity() {
         ),
         1
     );
-    // The sibling and the catalog around it are untouched.
     assert_eq!(count(&store, "SELECT count(*) FROM time_entries WHERE deleted_at IS NULL AND category_id='c' AND project_id='p'"), 1);
     assert_eq!(
         count(
@@ -250,7 +249,6 @@ fn split_and_undo_redo_round_trip() {
         3
     );
 
-    // Undo the split
     assert!(store.undo(500).map(|step| step.is_some()).unwrap());
     assert_eq!(
         count(
@@ -267,7 +265,6 @@ fn split_and_undo_redo_round_trip() {
         .unwrap();
     assert_eq!(a_end, 200);
 
-    // Redo the split
     assert!(store.redo(600).map(|step| step.is_some()).unwrap());
     assert_eq!(
         count(
@@ -288,7 +285,6 @@ fn split_and_undo_redo_round_trip() {
 #[test]
 fn merge_and_undo_redo_round_trip() {
     let mut store = store();
-    // 'a' is 100..200, 'b' is 200..300. They share border 200.
     let merged = store.merge_time_entries("a", "b", 400).unwrap();
     assert_eq!(merged.started_at, 100);
     assert_eq!(merged.ended_at, 300);
@@ -300,7 +296,6 @@ fn merge_and_undo_redo_round_trip() {
         1
     );
 
-    // Undo the merge
     assert!(store.undo(500).map(|step| step.is_some()).unwrap());
     assert_eq!(
         count(
@@ -326,7 +321,6 @@ fn merge_and_undo_redo_round_trip() {
     assert_eq!(a_end, 200);
     assert_eq!(b_start, 200);
 
-    // Redo the merge
     assert!(store.redo(600).map(|step| step.is_some()).unwrap());
     assert_eq!(
         count(
@@ -358,7 +352,6 @@ fn add_and_undo_redo_round_trip() {
         3
     );
 
-    // Undo the add
     assert!(store.undo(500).map(|step| step.is_some()).unwrap());
     assert_eq!(
         count(
@@ -368,7 +361,6 @@ fn add_and_undo_redo_round_trip() {
         2
     );
 
-    // Redo the add
     assert!(store.redo(600).map(|step| step.is_some()).unwrap());
     assert_eq!(
         count(
@@ -388,8 +380,6 @@ fn add_and_undo_redo_round_trip() {
     assert_eq!(created_deleted, None);
 }
 
-/// Every row a deletion could touch, flattened so two states compare equal
-/// only if nothing changed.
 fn rows(store: &ActivityStore) -> String {
     [
         "SELECT group_concat(id||':'||ifnull(category_id,'')||':'||ifnull(project_id,'')||':'||ifnull(deleted_at,'')||':'||updated_at||':'||status) FROM (SELECT * FROM time_entries ORDER BY id)",
@@ -434,7 +424,6 @@ fn previewing_a_deletion_reports_it_and_leaves_everything_as_it_was() {
     assert_eq!(preview.categories[0].id, "c");
     assert!(!preview.categories[0].was_archived);
 
-    // Nothing was written, and nothing can be undone or redone.
     assert_eq!(rows(&store), before);
     assert!(store.undo_stack.is_empty());
     assert!(store.redo_stack.is_empty());
@@ -455,7 +444,6 @@ fn previewing_a_refused_deletion_fails_with_the_real_message_and_changes_nothing
     assert_eq!(preview.unwrap_err(), crate::activity::LOCKED);
     assert_eq!(real.unwrap_err(), crate::activity::LOCKED);
 
-    // The project's approved entry blocks it too, with the same words.
     let preview = store.preview_deletion(&[], None, Some("p"), 400);
     let real = store.delete_project("p", 400);
     assert_eq!(preview.unwrap_err(), real.unwrap_err());

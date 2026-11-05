@@ -4,8 +4,8 @@ import type { AccessibilityState } from "../lib/types";
 import { useTauriEvent } from "./useTauriEvent";
 
 /**
- * The backend's view of Accessibility, kept live by `permissions-changed`.
- * `null` until the first answer, so nothing is claimed before it arrives.
+ * The backend's Accessibility state from `permissions-changed`; `null` until
+ * the first answer.
  */
 export function useAccessibilityState(): AccessibilityState | null {
   const [state, setState] = useState<AccessibilityState | null>(null);

@@ -21,14 +21,9 @@ import { StatusPill } from "./StatusPill";
 interface InvoiceViewProps {
   invoiceId: string;
   onBack: () => void;
-  /** Something changed (paid, voided): the list should refresh. */
   onChanged: () => void;
 }
 
-/**
- * A finalized invoice: the archived PDF exactly as issued, its facts, and the
- * only things that can still happen to it (export, mark paid, void).
- */
 export function InvoiceView({
   invoiceId,
   onBack,
@@ -57,7 +52,6 @@ export function InvoiceView({
     void load();
   }, [load]);
 
-  /** Runs `action`, then confirms it with `message`. */
   const act = async (
     action: () => Promise<void>,
     message: string,

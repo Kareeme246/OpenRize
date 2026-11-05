@@ -16,9 +16,8 @@ pub struct ActivitySegment {
     pub url: Option<String>,
     pub domain: Option<String>,
     pub entry_id: Option<String>,
-    /// Captured in a private browsing window. Its title, URL and domain are
-    /// erased once its entry is classified (see `activity::redact`), leaving
-    /// `PRIVATE_TITLE`; the app and the times stay.
+    /// Captured in a private browsing window. Its title, URL and domain are erased once its entry
+    /// is classified (see `activity::redact`), leaving `PRIVATE_TITLE`.
     #[serde(default)]
     pub private: bool,
 }
@@ -294,7 +293,6 @@ pub struct TimeEntry {
     pub dominant_app: Option<String>,
 }
 
-/// What a Calendar block needs to know about an entry's AI suggestion.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct EntryAi {
@@ -388,7 +386,6 @@ pub struct EntryDetail {
     pub apps: Vec<AppContribution>,
     pub titles: Vec<TitleItem>,
     pub events: Vec<EntryEvent>,
-    /// The latest suggestion per field (category, then project).
     pub suggestions: Vec<FieldSuggestion>,
     /// "Always categorize figma.com as Design?", after 3+ consistent
     /// corrections for the entry's dominant app or domain.
@@ -434,12 +431,10 @@ pub struct Alternative {
 pub struct FieldSuggestion {
     pub id: String,
     pub entry_id: String,
-    /// `category` or `project`.
     pub field: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value_id: Option<String>,
     pub confidence: f64,
-    /// The "Why" line, joined from `signals`.
     pub rationale: String,
     pub signals: Vec<Signal>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -461,11 +456,9 @@ pub struct RuleSuggestion {
     pub field: String,
     pub match_kind: String,
     pub pattern: String,
-    /// Human label for the pattern (app name or domain).
     pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value_id: Option<String>,
-    /// How many consistent corrections back this suggestion.
     pub corrections: u32,
 }
 

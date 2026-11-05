@@ -3,7 +3,6 @@ import * as api from "../lib/api";
 import type { UpdateStatus } from "../lib/types";
 import { useTauriEvent } from "./useTauriEvent";
 
-/** The updater's status, kept live by `update-status`. */
 export function useUpdates(): UpdateStatus | null {
   const [status, setStatus] = useState<UpdateStatus | null>(null);
 

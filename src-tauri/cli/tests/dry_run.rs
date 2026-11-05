@@ -1,6 +1,5 @@
-//! `rize --dry-run` end to end, with the app closed (the harness is
-//! `offline.rs`'s): every command `rize` confirms can be previewed, the
-//! preview resolves and refuses exactly as the real command does, and it
+//! `rize --dry-run` end to end with the app closed (harness as in `offline.rs`): every
+//! confirmable command can be previewed, resolves and refuses as the real one does, and
 //! changes nothing.
 
 use std::fs;
@@ -27,7 +26,6 @@ impl Store {
         ));
         fs::create_dir_all(root.join("data")).unwrap();
         fs::create_dir_all(root.join("config")).unwrap();
-        // What the app's first launch leaves behind.
         ActivityStore::load(&root.join("data")).unwrap();
         Self { root }
     }
@@ -37,14 +35,12 @@ impl Store {
             .arg("--data-dir")
             .arg(self.root.join("data"))
             .args(args)
-            // No app anywhere rize could find one.
             .env("RIZE_APP", self.root.join("missing-openrize"))
             .env("XDG_CONFIG_HOME", self.root.join("config"))
             .output()
             .unwrap()
     }
 
-    /// Runs with `--json`: the envelope and the exit code.
     fn run(&self, args: &[&str]) -> (Value, i32) {
         let mut all = vec!["--json"];
         all.extend_from_slice(args);
@@ -59,7 +55,6 @@ impl Store {
         (envelope, output.status.code().unwrap())
     }
 
-    /// Runs with `--json` and returns `data`, asserting success.
     fn ok(&self, args: &[&str]) -> Value {
         let (envelope, code) = self.run(args);
         assert_eq!(envelope["ok"], true, "rize {args:?}: {envelope}");
@@ -67,8 +62,6 @@ impl Store {
         envelope["data"].clone()
     }
 
-    /// Runs with `--json`, asserting failure: the error code, the message and
-    /// the exit code.
     fn fail(&self, args: &[&str]) -> (String, String, i32) {
         let (envelope, code) = self.run(args);
         assert_eq!(envelope["ok"], false, "rize {args:?}: {envelope}");
@@ -79,8 +72,6 @@ impl Store {
         )
     }
 
-    /// `rize <args> --dry-run --json`, with no `--yes`, asserting that it
-    /// succeeded as a preview.
     fn dry(&self, args: &[&str]) -> Value {
         let mut all = args.to_vec();
         all.push("--dry-run");
@@ -89,7 +80,6 @@ impl Store {
         data
     }
 
-    /// Everything the seven commands could change, as `rize` lists it.
     fn snapshot(&self) -> Value {
         json!([
             self.ok(&[
@@ -117,17 +107,11 @@ impl Drop for Store {
 }
 
 struct Seed {
-    /// An approved entry on the project "Acme site".
     approved: String,
-    /// A pending entry on the project "Solo" and the category "Admin".
     pending: String,
-    /// A pending entry with no project or category.
     loose: String,
 }
 
-/// Acme with one project, a project nobody approved time on, a category in
-/// use and one nobody uses, three entries on 2026-09-01, and a timer that has
-/// been started.
 fn seed(store: &Store) -> Seed {
     store.ok(&["clients", "add", "Acme"]);
     store.ok(&["projects", "add", "Acme site", "--client", "acme"]);
@@ -190,10 +174,9 @@ fn every_confirmed_command_previews_and_changes_nothing() {
         (&["categories", "rm", "spare"], "categoryDelete"),
     ];
     for (args, operation) in commands {
-        // The real command refuses to run without --yes off a terminal...
+        // The real command refuses without --yes off a terminal; the dry run needs neither.
         let (code, _, exit) = store.fail(args);
         assert_eq!((code.as_str(), exit), ("INVALID_ARGUMENT", 2), "{args:?}");
-        // ...and the dry run needs neither --yes nor a prompt.
         let data = store.dry(args);
         assert_eq!(data["operation"], operation, "{args:?}");
         assert!(data["refused"].is_null(), "{args:?}: {data}");
@@ -220,8 +203,6 @@ fn a_timer_reset_preview_matches_the_real_reset() {
     assert_eq!(preview["effect"], "reset");
     assert_eq!(preview["timer"]["label"], "Deep work");
     assert!(preview["timer"]["startedAt"].is_number());
-    // What would be lost is shown as it is stored: a start, an end and the
-    // length between them.
     let segment = &preview["timer"]["segments"][0];
     assert_eq!(segment["durationMs"], 1_800_000);
     assert_eq!(
@@ -247,7 +228,6 @@ fn an_entry_preview_agrees_with_the_real_delete() {
     let store = Store::new();
     let seed = seed(&store);
 
-    // Approved entries are locked, and the preview says so in the real words.
     let preview = store.dry(&["entries", "rm", &seed.approved]);
     assert_eq!(
         preview["refused"],
@@ -260,7 +240,6 @@ fn an_entry_preview_agrees_with_the_real_delete() {
         ("FAILED", LOCKED, 1)
     );
 
-    // A pending entry lists what goes, and the real delete removes exactly it.
     let preview = store.dry(&["entries", "rm", &seed.loose, &seed.pending]);
     assert!(preview["refused"].is_null());
     let mut previewed = strings(&preview["deletion"]["deletedEntries"]);
@@ -284,7 +263,6 @@ fn a_project_preview_agrees_with_the_real_delete() {
     let store = Store::new();
     let seed = seed(&store);
 
-    // Approved time on the project locks it.
     let preview = store.dry(&["projects", "rm", "acme site"]);
     let message = preview["refused"]["message"].as_str().unwrap().to_string();
     assert_eq!(preview["refused"]["code"], "FAILED");
@@ -294,7 +272,6 @@ fn a_project_preview_agrees_with_the_real_delete() {
         ("FAILED".into(), message, 1)
     );
 
-    // A project with only pending time can go; its entry stays, unlinked.
     let preview = store.dry(&["projects", "rm", "solo"]);
     assert!(preview["refused"].is_null());
     assert_eq!(preview["deletion"]["deletedEntries"], json!([]));
@@ -376,7 +353,6 @@ fn a_rebuild_preview_lists_the_entries_in_range_and_does_not_rebuild() {
         .starts_with("Closed entries are frozen"));
     assert_eq!(store.snapshot(), before);
 
-    // The range is checked exactly as for the real command.
     assert_eq!(
         store.fail(&[
             "entries",
@@ -437,7 +413,6 @@ fn other_commands_reject_dry_run_before_touching_the_data() {
         );
     }
 
-    // Not even a missing database is looked at.
     fs::remove_file(store.root.join("data/activity.db")).unwrap();
     assert_eq!(
         store.fail(&["entries", "list", "--dry-run"]),

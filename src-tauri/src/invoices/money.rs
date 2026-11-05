@@ -35,7 +35,6 @@ pub fn line_amount_cents(quantity_hundredths: i64, rate_cents: i64) -> Result<i6
     Ok(amount)
 }
 
-/// `$1,234.56`.
 pub fn format_money(cents: i64) -> String {
     let sign = if cents < 0 { "-" } else { "" };
     let cents = cents.unsigned_abs();
@@ -66,7 +65,6 @@ pub fn parse_date(value: &str) -> Result<NaiveDate, String> {
         .map_err(|_| "Dates must look like 2026-09-29".to_string())
 }
 
-/// `September 29, 2026`.
 pub fn format_date(date: NaiveDate) -> String {
     const MONTHS: [&str; 12] = [
         "January",
@@ -90,7 +88,6 @@ pub fn format_date(date: NaiveDate) -> String {
     )
 }
 
-/// The due date for a payment term, as `YYYY-MM-DD`.
 pub fn due_date(issue_date: &str, terms_days: i64) -> Result<String, String> {
     let issue = parse_date(issue_date)?;
     let due = issue

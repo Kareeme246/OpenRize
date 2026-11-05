@@ -1,14 +1,6 @@
-//! What `rize` asks of OpenRize (`crate::protocol`), answered from the
-//! stores. Two processes answer, with the same code:
-//!
-//! - **The running app** serves requests on its local endpoint
-//!   (`crate::ipc`) and passes itself as `Live`, so a change shows in open
-//!   windows and the tray at once, and the few things only a running app can
-//!   do (open a window, quit, focus sessions) work.
-//! - **`rize` itself** answers when the app is closed, holding the stores'
-//!   lock (`state::lock_stores`) for the one request. Nothing is tracked;
-//!   the app picks up edits at its next launch, exactly as if they were made
-//!   before it quit.
+//! What `rize` asks of OpenRize (`crate::protocol`), answered from the stores by the same code in
+//! the running app (as `Live`, so windows update and it can open, quit, focus) or in `rize` itself
+//! when the app is closed, holding the stores' lock (`state::lock_stores`) per request.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -36,10 +28,8 @@ pub trait Live {
     fn quit(&self);
     fn start_focus(&self, label: Option<String>) -> Result<(), String>;
     fn stop_focus(&self) -> Result<(), String>;
-    /// The break reminder's state, as the Breaks tab shows it.
     fn breaks(&self) -> Option<Value>;
     fn settings_changed(&self, previous: &Settings, next: &Settings);
-    /// Emits what a window command would after `operation` succeeded.
     fn changed(&self, state: &AppState, operation: &Operation);
 }
 
@@ -518,10 +508,8 @@ impl Context<'_> {
         }
     }
 
-    /// What a delete, reset or rebuild would change, through the same
-    /// resolution the real command uses, and without changing anything. When
-    /// the real command would be refused the preview still succeeds and
-    /// carries the refusal as `refused`.
+    /// What a delete, reset or rebuild would change, through the real command's resolution; a
+    /// refusal is carried as `refused`.
     fn preview(&self, operation: &Operation) -> Outcome {
         use Operation as O;
         let now = now_epoch_ms();
@@ -619,7 +607,6 @@ impl Context<'_> {
         }
     }
 
-    /// The common shape of a preview's answer around its own `fields`.
     fn previewed(
         &self,
         operation: &Operation,
@@ -737,13 +724,11 @@ impl Context<'_> {
         pick(&names, reference, "tag", same, same)
     }
 
-    /// The id of the section a reference names, by id, name or a unique prefix.
     fn section(&self, reference: &str) -> Result<String, ApiError> {
         let sections = lock(&self.state.store)?.sections().map_err(fail)?;
         pick(&sections, reference, "section", |s| &s.id, |s| &s.name)
     }
 
-    /// Every section with every timer, the answer to each section operation.
     fn sections(&self) -> Outcome {
         let store = lock(&self.state.store)?;
         Ok(json!({

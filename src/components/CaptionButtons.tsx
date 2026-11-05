@@ -4,7 +4,6 @@ import { type Ref, type RefObject, useEffect, useRef, useState } from "react";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import { BAR_OPENS_WINDOW_MENU } from "../lib/platform";
 
-/** Sent by src-tauri/src/caption.rs: what the pointer is doing to the maximize button. */
 const EVENT_MAXIMIZE_BUTTON = "caption-maximize-button";
 
 interface MaximizeButtonState {
@@ -14,7 +13,6 @@ interface MaximizeButtonState {
 
 type CaptionIcon = "minimize" | "maximize" | "restore" | "close";
 
-/** The caption glyphs of Segoe Fluent Icons (Windows 11) and Segoe MDL2 Assets. */
 const GLYPHS: Record<CaptionIcon, string> = {
   minimize: "",
   maximize: "",
@@ -25,9 +23,8 @@ const GLYPHS: Record<CaptionIcon, string> = {
 const ICON_FONT = '"Segoe Fluent Icons", "Segoe MDL2 Assets"';
 
 /**
- * The icon fonts ship with Windows 10 and 11, but a stripped-down image can
- * lack them, and a missing glyph draws as an empty box. A glyph from a font
- * that is there measures differently from the same glyph in the fallback.
+ * A stripped-down Windows image can lack the icon fonts, and a glyph measures
+ * differently in the fallback font.
  */
 const hasIconFont = (() => {
   let known: boolean | undefined;
@@ -50,7 +47,6 @@ const hasIconFont = (() => {
   };
 })();
 
-/** Where the maximize button is, in the physical pixels of the window's client area. */
 interface ButtonRect {
   x: number;
   y: number;
@@ -63,11 +59,9 @@ function reportMaximizeButton(rect: ButtonRect | null): Promise<void> {
 }
 
 /**
- * Opens the system window menu where the pointer is for a right click on the
- * bar's empty space (a click on a control keeps that control's own behaviour),
- * on platforms where the bar replaces the native caption. Rust draws the menu
- * because WebView2's own caption menu shows stale Maximize and Restore states
- * for a window it did not maximize itself.
+ * Opens the system window menu on a right click on the bar's empty space. Rust
+ * draws it because WebView2's own caption menu shows stale Maximize/Restore
+ * states for a window it did not maximize.
  */
 export function useWindowMenu(bar: RefObject<HTMLElement | null>): void {
   useEffect(() => {
@@ -92,14 +86,9 @@ export function useWindowMenu(bar: RefObject<HTMLElement | null>): void {
 }
 
 /**
- * The window buttons at the right end of the top bar, drawn like Windows 11's
- * own: 46px wide, as tall as the bar, with the system's icon font.
- *
- * Minimize and close are plain buttons. The maximize button must also raise
- * Windows 11's snap layouts flyout, which only the system can do for a window
- * that answers a hit test (see src-tauri/src/caption.rs). So this tells Rust
- * where the button is, a native window sits over it, and that window reports
- * the pointer back as an event: the page itself never sees the mouse there.
+ * Windows 11 window buttons. Snap Layouts only appears for a window that
+ * answers a hit test, so a native window sits over Maximize and reports the
+ * pointer back as an event (src-tauri/src/caption.rs).
  */
 export function CaptionButtons() {
   const [maximized, setMaximized] = useState(false);
@@ -117,15 +106,13 @@ export function CaptionButtons() {
       .catch(() => undefined);
   };
   useEffect(refreshMaximized, []);
-  // Maximizing, restoring and snapping all resize the window.
   useTauriEvent<unknown>("tauri://resize", refreshMaximized);
   useTauriEvent<unknown>("tauri://focus", () => setActive(true));
   useTauriEvent<unknown>("tauri://blur", () => setActive(false));
   useTauriEvent<MaximizeButtonState>(EVENT_MAXIMIZE_BUTTON, setPointer);
 
-  // Keeps Rust told where the maximize button is: when it resizes (UI scale),
-  // when the window resizes or is zoomed (the button hugs the right edge), and
-  // when the display scale changes (moving between monitors).
+  // Tells Rust where the maximize button is: on UI scale, window resize/zoom
+  // and monitor changes.
   useEffect(() => {
     const button = maximizeRef.current;
     if (!button) return;
@@ -214,8 +201,8 @@ export function CaptionButtons() {
         active={active}
         danger
         onClick={() => {
-          // The same close request as Alt+F4: Rust decides between hiding to
-          // the tray and quitting.
+          // Same close request as Alt+F4: Rust chooses between hiding to the
+          // tray and quitting.
           current.close().catch((cause: unknown) => {
             console.error("Could not close the window", cause);
           });
@@ -240,12 +227,10 @@ function CaptionButton({
   icon: CaptionIcon;
   active: boolean;
   danger?: boolean;
-  /** Set from outside when the page cannot see the pointer over the button. */
   hovered?: boolean;
   pressed?: boolean;
   onClick: () => void;
 }) {
-  // Windows 11: a faint wash on hover, fainter pressed; Close goes red.
   const wash = danger
     ? "hover:bg-[#c42b1c] hover:text-white active:bg-[#c42b1c]/90 active:text-white/70"
     : "hover:bg-surface-strong active:bg-surface";

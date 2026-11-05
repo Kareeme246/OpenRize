@@ -29,22 +29,18 @@ interface StopwatchCardProps {
   onStart: (id: string) => void;
   onPause: (id: string) => void;
   onReset: (id: string) => void;
-  /** Resets quietly once "Add to calendar" has logged the time. */
   onClear: (id: string) => void;
   onRename: (id: string, label: string) => void;
   onSetTag: (id: string, tag: string | null) => void;
-  /** Every tag in use, with what its linked stopwatches add up to. */
   tags: TimerTag[];
   onStartTag: (tag: string) => void;
   onPauseTag: (tag: string) => void;
-  /** Every section, offered by "Move to". */
   sections: TimerSection[];
   onMoveToSection: (id: string, sectionId: string | null) => void;
-  /** Adds a section and moves this stopwatch into it. */
   onCreateSection: (name: string, id: string) => void;
   /**
-   * Keeps the tag chip's row even without a tag, so rings and times line up
-   * across a row of cards when any card on the page is tagged.
+   * Keeps the tag chip's row even without a tag so rings and times line up
+   * across cards.
    */
   reserveTagRow?: boolean;
   onAddSegment: (id: string, startedAt: number, endedAt: number) => void;
@@ -96,7 +92,6 @@ export function StopwatchCard({
   const elapsed = elapsedMs(timer, now);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(timer.label);
-  /** Which confirmation is up, if any. Both destroy real accumulated time. */
   const [pending, setPending] = useState<"reset" | "delete" | null>(null);
   const [dialog, setDialog] = useState<
     "info" | "calendar" | "tag" | "section" | null
@@ -405,7 +400,6 @@ function LinkIcon({ className }: { className: string }) {
   );
 }
 
-/** The tag chip's row: one fixed height, whether it holds a chip or not. */
 const TAG_ROW = "-mt-1.5 h-5 shrink-0";
 
 interface TagChipProps {
@@ -414,7 +408,6 @@ interface TagChipProps {
   onPause: (tag: string) => void;
 }
 
-/** The card's tag, which opens what its linked stopwatches add up to. */
 function TagChip({ tag, onStart, onPause }: TagChipProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -494,7 +487,6 @@ interface NewSectionSheetProps {
   onClose: () => void;
 }
 
-/** Names a new section for "Move to", which then holds this stopwatch. */
 function NewSectionSheet({ label, onCreate, onClose }: NewSectionSheetProps) {
   const [draft, setDraft] = useState("");
   const name = draft.trim();

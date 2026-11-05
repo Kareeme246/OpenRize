@@ -1,40 +1,21 @@
-//! Isotonic calibration of the displayed confidence (P4).
-//!
-//! The arbiter's blended score (`raw`) ranks labels well but is not a
-//! probability: a raw 0.8 might be accepted 95% of the time for one person
-//! and 60% for another. Calibration maps raw scores onto the accept rate the
-//! user actually shows, so a displayed "90%" means about 9 in 10 accepted.
-//!
-//! - **Fit**: pool-adjacent-violators over `(raw, accepted)` pairs gives the
-//!   best monotone step function. Each block's rate is Laplace-smoothed,
-//!   `(k + 1) / (n + 2)`, so a handful of outcomes can never promise 100%,
-//!   and a second weighted pass restores monotonicity after smoothing.
-//! - **Apply**: linear interpolation between block centers, flat beyond the
-//!   first and last, so the curve is continuous and never decreasing.
-//! - **Cold start**: with no calibrator yet (fewer than `MIN_SAMPLES`
-//!   verdicts), displayed confidence is capped at `COLD_START_CAP`.
-//!
-//! Rule hits are p = 1.0 by definition and are neither calibrated nor used as
-//! samples.
+//! Isotonic calibration (PAV with Laplace smoothing) mapping the arbiter's raw score
+//! to the user's actual accept rate, so a displayed "90%" means about 9 in 10 accepted.
+//! Rule hits are p = 1.0 and are neither calibrated nor used as samples.
 
 use serde::{Deserialize, Serialize};
 
 use super::{COLD_START_CAP, COLD_START_OUTCOMES};
 
-/// Verdicts needed before a calibrator replaces the cold-start cap.
 pub const MIN_SAMPLES: usize = COLD_START_OUTCOMES as usize;
 
-/// A fitted calibration curve, stored as JSON in `model_artifacts`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Calibrator {
-    /// Knots, raw score to accept rate, both ascending.
     pub x: Vec<f64>,
     pub y: Vec<f64>,
     pub samples: u32,
 }
 
 impl Calibrator {
-    /// Fits a curve, or `None` below `MIN_SAMPLES`.
     pub fn fit(samples: &[(f64, bool)]) -> Option<Self> {
         if samples.len() < MIN_SAMPLES {
             return None;
@@ -93,7 +74,6 @@ impl Calibrator {
     }
 }
 
-/// The confidence the user sees for a model (non-rule) score.
 pub fn display(raw: f64, calibrator: Option<&Calibrator>) -> f64 {
     match calibrator {
         Some(calibrator) => calibrator.apply(raw),
@@ -120,8 +100,7 @@ impl Block {
     }
 }
 
-/// Pool adjacent violators: merges neighboring blocks until their means never
-/// decrease. Blocks must arrive in ascending `x` order.
+/// Pool adjacent violators; blocks must arrive in ascending `x` order.
 fn pav(blocks: impl IntoIterator<Item = Block>) -> Vec<Block> {
     let mut out: Vec<Block> = Vec::new();
     for block in blocks {
@@ -142,21 +121,16 @@ fn pav(blocks: impl IntoIterator<Item = Block>) -> Vec<Block> {
     out
 }
 
-/// One bucket of the reliability chart: what was promised vs what happened.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReliabilityBin {
     pub lo: f64,
     pub hi: f64,
     pub count: u32,
-    /// Mean displayed confidence in the bucket.
     pub predicted: f64,
-    /// Share of the bucket the user accepted.
     pub actual: f64,
 }
 
-/// Buckets `(shown, accepted)` pairs into `bins` equal-width bins, dropping
-/// empty ones. The top bin includes 1.0.
 pub fn reliability(samples: &[(f64, bool)], bins: usize) -> Vec<ReliabilityBin> {
     let bins = bins.max(1);
     let mut sums = vec![(0u32, 0.0f64, 0u32); bins];
@@ -181,8 +155,7 @@ pub fn reliability(samples: &[(f64, bool)], bins: usize) -> Vec<ReliabilityBin> 
         .collect()
 }
 
-/// Expected calibration error: the count-weighted gap between promised and
-/// actual accept rates. 0 is perfect.
+/// Expected calibration error: count-weighted gap between promised and actual accept rate.
 pub fn expected_error(bins: &[ReliabilityBin]) -> Option<f64> {
     let total: u32 = bins.iter().map(|b| b.count).sum();
     (total > 0).then(|| {
@@ -197,7 +170,6 @@ pub fn expected_error(bins: &[ReliabilityBin]) -> Option<f64> {
 mod tests {
     use super::*;
 
-    /// `n` samples at `raw`, `accepted` of them accepted.
     fn at(raw: f64, n: usize, accepted: usize) -> Vec<(f64, bool)> {
         (0..n).map(|i| (raw, i < accepted)).collect()
     }
@@ -211,12 +183,10 @@ mod tests {
 
     #[test]
     fn an_overconfident_model_is_pulled_down_to_its_accept_rate() {
-        // Raw 0.9 was accepted 60% of the time, raw 0.6 only 30%.
         let samples = [at(0.9, 100, 60), at(0.6, 100, 30)].concat();
         let c = Calibrator::fit(&samples).unwrap();
         assert!((c.apply(0.9) - 61.0 / 102.0).abs() < 1e-9);
         assert!((c.apply(0.6) - 31.0 / 102.0).abs() < 1e-9);
-        // Between knots it interpolates; beyond them it is flat.
         let mid = c.apply(0.75);
         assert!(mid > c.apply(0.6) && mid < c.apply(0.9));
         assert!((c.apply(0.99) - c.apply(0.9)).abs() < 1e-9);
@@ -233,8 +203,6 @@ mod tests {
 
     #[test]
     fn violations_are_pooled_so_the_curve_never_decreases() {
-        // 0.8 did worse than 0.7: the two are pooled into one level, 45 of
-        // 60 accepted, centered at 0.75.
         let samples = [at(0.7, 30, 27), at(0.8, 30, 18), at(0.95, 30, 29)].concat();
         let c = Calibrator::fit(&samples).unwrap();
         assert_eq!(c.x.len(), 2);

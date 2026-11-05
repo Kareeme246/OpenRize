@@ -6,11 +6,6 @@ import * as api from "../lib/api";
 import { describeError } from "../lib/api";
 import { formatTime } from "../lib/format";
 
-/**
- * Offers the work an account switch paused when the user left this account:
- * stopwatches that were running and a break that was on. It is never resumed
- * on its own; the cross keeps everything paused.
- */
 export function PausedOnSwitchBanner() {
   const [paused, setPaused] = useState<PausedOnSwitch | null>(null);
   const [busy, setBusy] = useState(false);
@@ -25,7 +20,6 @@ export function PausedOnSwitchBanner() {
       );
   }, []);
   useEffect(load, [load]);
-  // Starting one of the stopwatches by hand takes it off the list.
   useTauriEvent(api.TIMERS_CHANGED, load);
   useTauriEvent(api.BREAK_STATE_CHANGED, load);
 

@@ -10,8 +10,6 @@ default-run = "openrize"
 members = ["core", "cli"]
 resolver = "2"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
@@ -37,11 +35,10 @@ tauri-plugin-updater = "2"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "system-proxy"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 semver = "1"
-# Invoice PDFs are composed in Rust (see src/invoices/pdf.rs); the same bytes
-# are previewed in the webview, saved by the user and archived on finalize.
+# Invoice PDFs are composed in Rust (src/invoices/pdf.rs); the same bytes are previewed, saved and
+# archived.
 printpdf = { version = "=0.8.2", default-features = false, features = ["png", "jpeg"] }
 tauri-plugin-dialog = "2"
-# Logo import: decode, downsize and re-encode uploads before they are stored.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 # One running copy per data dir: two processes sharing activity.db each leave
 # the other's open segment behind, and one left open runs a session forever.
@@ -93,8 +90,6 @@ windows = { version = "0.61", features = [
   "Win32_UI_WindowsAndMessaging",
 ] }
 
-
-# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
 codegen-units = 1
 lto = true

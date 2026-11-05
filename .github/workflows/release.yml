@@ -34,8 +34,7 @@ permissions:
 
 jobs:
   prepare:
-    # Pin an explicit LTS image so runner-image migrations (such as ubuntu-latest
-    # moving to Ubuntu 26) cannot silently change the environment under us.
+    # Pinned LTS image so runner-image migrations cannot silently change the environment.
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -156,17 +155,12 @@ jobs:
           node-version: 24
           package-manager-cache: false
 
-      # Signed release artifacts must be compiled from the locked sources,
-      # never restored from lower-trust dependency or compiler-output caches.
+      # Signed release artifacts must be built from locked sources, never from lower-trust caches.
 
       - run: pnpm install --frozen-lockfile
 
-      # The Tauri CLI imports APPLE_CERTIFICATE into a temporary keychain,
-      # signs the app and the ML sidecar with the Developer ID identity, then
-      # notarizes and staples using the App Store Connect API key. It also
-      # packs the in-app updater's openrize.app.tar.gz and signs it with the
-      # TAURI_SIGNING_PRIVATE_KEY minisign key. See RELEASING.md for how these
-      # secrets are produced.
+      # The Tauri CLI signs and notarizes the app and ML sidecar, and packs and minisigns the
+      # updater's openrize.app.tar.gz (TAURI_SIGNING_PRIVATE_KEY). See RELEASING.md for the secrets.
       - name: Write App Store Connect API key
         env:
           APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
@@ -193,8 +187,8 @@ jobs:
           spctl --assess --type execute --verbose=2 "$app"
           xcrun stapler validate "$app"
 
-      # install.sh extracts the CLI from the updater's openrize.app.tar.gz and
-      # accepts it only under this exact requirement, so check it here first.
+      # install.sh accepts the CLI from the updater tarball only under this exact requirement; check
+      # it first.
       - name: Verify the bundled CLI passes the installer's check
         run: |
           cli=src-tauri/target/release/bundle/macos/openrize.app/Contents/MacOS/rize
@@ -251,13 +245,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: >-
             ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-      # Installs the unsigned installer on the runner, as a user would, and
-      # checks what the NSIS hooks promise: the app and rize land in the
-      # install folder, rize is on the user PATH (once, even after an in-app
-      # style update) and the uninstaller takes the PATH entry and the login
-      # item away again. The runner is discarded, so its registry is ours to
-      # use. The script bounds and reports every action, so a hang names the
-      # program that hung and fails in seconds rather than at this timeout.
+      # Installs the unsigned installer as a user would; checks app and rize land in the install
+      # folder, rize is on PATH once (even after an update), uninstall removes PATH and login item.
+      # Each action is bounded so a hang fails in seconds.
       - name: Smoke test the Windows installer
         timeout-minutes: 6
         env:
@@ -285,8 +275,7 @@ jobs:
       always() && !cancelled() && needs.prepare.result == 'success' &&
       (needs.macos.result == 'success' || needs.macos.result == 'skipped') &&
       (needs.windows.result == 'success' || needs.windows.result == 'skipped')
-    # Pin an explicit LTS image so runner-image migrations cannot silently
-    # change the environment under us.
+    # Pinned LTS image so runner-image migrations cannot silently change the environment.
     runs-on: ubuntu-24.04
     permissions:
       contents: write

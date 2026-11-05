@@ -90,8 +90,6 @@ export function describeError(error: unknown): string {
   return String(error);
 }
 
-// --- Preferences ---
-
 export async function getSettings(): Promise<Settings> {
   return await invoke<Settings>("get_settings");
 }
@@ -115,22 +113,18 @@ export async function setLaunchAtLogin(
   return await invoke<LoginItemState>("set_launch_at_login", { enabled });
 }
 
-/** Reads authorization status of system permissions (Accessibility, Automation, etc.). */
 export async function checkPermissions(): Promise<PermissionInfo[]> {
   return await invoke<PermissionInfo[]>("check_permissions");
 }
 
-/** Whether Accessibility is working in this process, or needs a relaunch. */
 export async function accessibilityState(): Promise<AccessibilityState> {
   return await invoke<AccessibilityState>("accessibility_state");
 }
 
-/** Shows macOS's Accessibility prompt. The answer arrives as `permissions-changed`. */
 export async function requestAccessibility(): Promise<void> {
   await invoke("request_accessibility");
 }
 
-/** Whether the first-run permissions screen has not been skipped or finished yet. */
 export async function onboardingNeeded(): Promise<boolean> {
   return await invoke<boolean>("onboarding_needed");
 }
@@ -139,67 +133,56 @@ export async function finishOnboarding(): Promise<void> {
   await invoke("finish_onboarding");
 }
 
-/** Developer tools: what the dev build is running as and what is simulated. Dev builds only. */
 export async function devToolsInfo(): Promise<DevToolsInfo> {
   return await invoke<DevToolsInfo>("dev_tools_info");
 }
 
-/** Developer tools: makes Accessibility report `state` (`null` for the real one). Dev builds only. */
 export async function devSimulateAccessibility(
   state: AccessibilityState | null,
 ): Promise<void> {
   await invoke("dev_simulate_accessibility", { state });
 }
 
-/** Developer tools: makes Automation report `granted` (`null` for the real one). Dev builds only. */
 export async function devSimulateAutomation(
   granted: boolean | null,
 ): Promise<void> {
   await invoke("dev_simulate_automation", { granted });
 }
 
-/** Developer tools: shows the first-run permissions screen again now. Dev builds only. */
 export async function devRerunOnboarding(): Promise<void> {
   await invoke("dev_rerun_onboarding");
 }
 
-/** Developer tools: clears every simulation and the onboarding re-run. Dev builds only. */
 export async function devReset(): Promise<void> {
   await invoke("dev_reset");
 }
 
-/** Restarts OpenRize, closing the open activity segment first. */
 export async function relaunchApp(): Promise<void> {
   await invoke("relaunch_app");
 }
-
-// --- Accounts ---
 
 export async function accountsState(): Promise<AccountsState> {
   return await invoke<AccountsState>("accounts_state");
 }
 
-/** What No account holds, or null when an account is open or it is empty. */
 export async function existingDataSummary(): Promise<DataSummary | null> {
   return await invoke<DataSummary | null>("existing_data_summary");
 }
 
-/** What switching accounts right now would pause. */
 export async function switchPreview(): Promise<SwitchPreview> {
   return await invoke<SwitchPreview>("switch_preview");
 }
 
 /**
- * Opens another account, or No account for null, by restarting the app.
- * Resolves at once; the restart follows after at least three seconds.
+ * Restarts into another account (null: No account); resolves at once, the
+ * restart follows after 3s+.
  */
 export async function switchAccount(to: string | null): Promise<void> {
   await invoke("switch_account", { to });
 }
 
 /**
- * Adds an account and opens it by restarting. `moveExisting` moves the data
- * that belongs to No account into it.
+ * `moveExisting` moves the data that belongs to No account into the new one.
  */
 export async function createAccount(
   name: string,
@@ -215,7 +198,6 @@ export async function renameAccount(
   return await invoke<Account>("rename_account", { id, name });
 }
 
-/** Moves the account's folder to the Trash and forgets it. */
 export async function deleteAccount(id: string): Promise<void> {
   await invoke("delete_account", { id });
 }
@@ -236,9 +218,6 @@ export async function dismissPaused(): Promise<void> {
   await invoke("dismiss_paused");
 }
 
-// --- Pulse panel ---
-
-/** Sizes the menu-bar panel to its content, keeping it under the icon. */
 export async function resizePulsePanel(height: number): Promise<void> {
   await invoke("resize_pulse_panel", { height });
 }
@@ -247,7 +226,6 @@ export async function hidePulsePanel(): Promise<void> {
   await invoke("hide_pulse_panel");
 }
 
-/** Closes the panel and brings the main window forward. */
 export async function openMainWindow(
   review: boolean,
   timerId?: string,
@@ -256,14 +234,12 @@ export async function openMainWindow(
 }
 
 /**
- * Undoes (or redoes) the last change to entries or the catalog. Resolves to
- * what it was ("Split", "Accept", ...), or null when there was nothing.
+ * Undoes (or redoes) the last entry or catalog change; resolves to what it was
+ * ("Split", ...), or null if none.
  */
 export async function undo(redo = false): Promise<string | null> {
   return await invoke<string | null>("undo", { redo });
 }
-
-// --- Break reminders ---
 
 export async function breakState(): Promise<BreakState> {
   return await invoke<BreakState>("break_state");
@@ -279,7 +255,6 @@ export async function dismissStopwatchReminder(
   });
 }
 
-/** Starts the pending reminder's break, or a manual one when none is pending. */
 export async function startBreak(): Promise<BreakState> {
   return await invoke<BreakState>("start_break");
 }
@@ -296,12 +271,10 @@ export async function skipBreak(): Promise<BreakState> {
   return await invoke<BreakState>("skip_break");
 }
 
-/** Re-expands a reminder that collapsed to the corner capsule. */
 export async function expandBreakReminder(): Promise<BreakState> {
   return await invoke<BreakState>("expand_break_reminder");
 }
 
-/** Adds five minutes to the running break. */
 export async function extendBreak(): Promise<BreakState> {
   return await invoke<BreakState>("extend_break");
 }
@@ -320,7 +293,6 @@ export async function listBreaks(
   return await invoke<BreakEntry[]>("list_breaks", { sinceMs, untilMs });
 }
 
-/** Sizes the top-right reminder panel to its card. */
 export async function resizeReminderPanel(
   width: number,
   height: number,
@@ -328,12 +300,10 @@ export async function resizeReminderPanel(
   await invoke("resize_reminder_panel", { width, height });
 }
 
-/** Brings the main window forward on Settings > Notifications. */
 export async function openBreakSettings(): Promise<void> {
   await invoke("open_break_settings");
 }
 
-/** Dev builds only: raises a sample reminder. */
 export async function devSampleBreakReminder(): Promise<BreakState> {
   return await invoke<BreakState>("dev_sample_break_reminder");
 }
@@ -341,8 +311,6 @@ export async function devSampleBreakReminder(): Promise<BreakState> {
 export async function previewBreakChime(): Promise<void> {
   await invoke("preview_break_chime");
 }
-
-// --- Activity & Capture ---
 
 export async function fetchActivitySnapshot(
   sinceMs: number,
@@ -353,8 +321,6 @@ export async function fetchActivitySnapshot(
 export async function setCaptureEnabled(enabled: boolean): Promise<void> {
   await invoke("set_capture_enabled", { enabled });
 }
-
-// --- Categories ---
 
 export async function listCategories(): Promise<Category[]> {
   return await invoke<Category[]>("list_categories");
@@ -392,8 +358,6 @@ export async function categoryStats(
     rangeEnd,
   });
 }
-
-// --- Projects ---
 
 export async function listProjects(): Promise<Project[]> {
   return await invoke<Project[]>("list_projects");
@@ -451,8 +415,6 @@ export async function importProjectsCsv(text: string): Promise<ImportSummary> {
   return await invoke<ImportSummary>("import_projects_csv", { text });
 }
 
-// --- Clients ---
-
 export async function listClients(): Promise<Client[]> {
   return await invoke<Client[]>("list_clients");
 }
@@ -471,8 +433,6 @@ export async function updateClient(
 export async function deleteClient(id: string): Promise<void> {
   await invoke("delete_client", { id });
 }
-
-// --- Invoices ---
 
 export async function listInvoices(): Promise<InvoiceSummary[]> {
   return await invoke<InvoiceSummary[]>("list_invoices");
@@ -496,12 +456,10 @@ export async function listBillableEntries(
   });
 }
 
-/** The draft priced and validated by Rust, without storing it. */
 export async function quoteInvoice(draft: InvoiceDraftInput): Promise<Invoice> {
   return await invoke<Invoice>("quote_invoice", { draft });
 }
 
-/** The DRAFT-watermarked PDF for a draft, straight from the Rust renderer. */
 export async function renderInvoicePreview(
   draft: InvoiceDraftInput,
 ): Promise<Uint8Array> {
@@ -509,7 +467,6 @@ export async function renderInvoicePreview(
   return new Uint8Array(bytes);
 }
 
-/** The archived PDF of a finalized invoice. */
 export async function getInvoicePdf(id: string): Promise<Uint8Array> {
   const bytes = await invoke<ArrayBuffer>("get_invoice_pdf", { id });
   return new Uint8Array(bytes);
@@ -542,9 +499,8 @@ export async function deleteVoidInvoice(id: string): Promise<void> {
 }
 
 /**
- * Asks where to save an invoice PDF. Pass `id` for a finalized invoice or
- * `draft` for a watermarked draft render. Resolves to the saved path, or null
- * when the user cancels.
+ * Pass `id` for a finalized invoice or `draft` for a watermarked render.
+ * Resolves to the saved path, or null on cancel.
  */
 export async function exportInvoicePdf(
   target: { id: string } | { draft: InvoiceDraftInput },
@@ -565,7 +521,6 @@ export async function updateInvoiceProfile(
   return await invoke<InvoiceProfile>("update_invoice_profile", { profile });
 }
 
-/** The stored logo (PNG), or an empty array when none is set. */
 export async function getInvoiceLogo(): Promise<Uint8Array> {
   return new Uint8Array(await invoke<ArrayBuffer>("get_invoice_logo"));
 }
@@ -578,8 +533,6 @@ export async function setInvoiceLogo(image: Uint8Array): Promise<void> {
 export async function clearInvoiceLogo(): Promise<void> {
   await invoke("clear_invoice_logo");
 }
-
-// --- Time Entries ---
 
 export async function listTimeEntries(
   startMs: number,
@@ -603,14 +556,12 @@ export async function approveTimeEntries(ids: string[]): Promise<TimeEntry[]> {
   return await invoke<TimeEntry[]>("approve_time_entries", { ids });
 }
 
-/** Returns approved entries to pending for editing; no AI re-run. */
 export async function unapproveTimeEntries(
   ids: string[],
 ): Promise<TimeEntry[]> {
   return await invoke<TimeEntry[]>("unapprove_time_entries", { ids });
 }
 
-/** One patch applied to many entries; returns them updated. */
 export async function updateTimeEntries(
   ids: string[],
   patch: UpdateTimeEntry,
@@ -618,9 +569,6 @@ export async function updateTimeEntries(
   return await invoke<TimeEntry[]>("update_time_entries", { ids, patch });
 }
 
-// --- Reports ---
-
-/** Entries matching a filter, newest first. */
 export async function queryTimeEntries(
   filter: EntryQuery,
   limit?: number,
@@ -628,10 +576,7 @@ export async function queryTimeEntries(
   return await invoke<TimeEntry[]>("query_time_entries", { filter, limit });
 }
 
-/**
- * Totals per group per bucket, summed in SQL. `boundaries` holds n + 1
- * ascending local-time edges for n buckets.
- */
+/** `boundaries` holds n + 1 ascending local-time edges for n buckets. */
 export async function entryRollup(
   filter: EntryQuery,
   boundaries: number[],
@@ -644,7 +589,6 @@ export async function entryRollup(
   });
 }
 
-/** Writes the filtered entries to Downloads; returns the file. */
 export async function exportTimeEntries(
   filter: EntryQuery,
   format: "csv" | "json",
@@ -695,8 +639,6 @@ export async function rebuildTimeEntries(
   return await invoke<TimeEntry[]>("rebuild_time_entries", { startMs, endMs });
 }
 
-// --- AI suggestions ---
-
 export async function aiStatus(): Promise<AiStatus> {
   return await invoke<AiStatus>("ai_status");
 }
@@ -712,8 +654,6 @@ export async function resolveRuleSuggestion(
   await invoke("resolve_rule_suggestion", { suggestion, accept });
 }
 
-// --- Learning loop ---
-
 export async function aiMetrics(days: number): Promise<AiMetrics> {
   return await invoke<AiMetrics>("ai_metrics", { days });
 }
@@ -726,8 +666,6 @@ export async function aiRetrain(): Promise<AiStatus> {
 export async function aiResetLearned(days: number): Promise<AiMetrics> {
   return await invoke<AiMetrics>("ai_reset_learned", { days });
 }
-
-// --- Apps ---
 
 export async function listApps(): Promise<AppRecord[]> {
   return await invoke<AppRecord[]>("list_apps");
@@ -746,8 +684,6 @@ export async function updateApp(
     excluded,
   });
 }
-
-// --- Timers (Legacy/Compat) ---
 
 export function listTimers(): Promise<Timer[]> {
   return invoke<Timer[]>("list_timers");
@@ -798,7 +734,6 @@ export function listTimerSections(): Promise<TimerSection[]> {
   return invoke<TimerSection[]>("list_timer_sections");
 }
 
-/** Adds a section after the others, and moves `timerId` into it if given. */
 export function createTimerSection(
   name: string,
   timerId?: string,
@@ -865,8 +800,6 @@ export function reorderTimers(ids: string[]): Promise<Timer[]> {
   return invoke<Timer[]>("reorder_timers", { ids });
 }
 
-// --- Battery & Energy ---
-
 export function getEnergySummary(days?: number): Promise<EnergySummary> {
   return invoke<EnergySummary>("get_energy_summary", { days });
 }
@@ -874,8 +807,6 @@ export function getEnergySummary(days?: number): Promise<EnergySummary> {
 export function resetEnergyHistory(): Promise<EnergySummary> {
   return invoke<EnergySummary>("reset_energy_history");
 }
-
-// --- Updates ---
 
 export function updateStatus(): Promise<UpdateStatus> {
   return invoke<UpdateStatus>("update_status");
@@ -885,10 +816,6 @@ export function checkForUpdates(): Promise<UpdateStatus> {
   return invoke<UpdateStatus>("check_for_updates");
 }
 
-/**
- * Notes of the installed release and the ones before it, newest first, from
- * GitHub Releases.
- */
 export function installedReleaseNotes(): Promise<ReleaseNotes[]> {
   return invoke<ReleaseNotes[]>("installed_release_notes");
 }

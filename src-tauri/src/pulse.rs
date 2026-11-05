@@ -1,26 +1,6 @@
-//! The Pulse panel: a small glance at capture and today, anchored to the
-//! tray icon (design board option A). Left click on the icon toggles it;
-//! right click keeps the native menu.
-//!
-//! The panel exists only while the icon does. It is created on the first
-//! click, hidden (not destroyed) between opens so reopening is instant, and
-//! destroyed when the icon is turned off.
-//!
-//! Sizing is driven by the page: it measures its content and calls
-//! `resize_pulse_panel`, and the window is re-anchored under the icon on every
-//! resize. The first open waits for that first measurement, so the panel is
-//! never shown at a guessed height.
-//!
-//! On Windows it opens in the work-area corner next to the taskbar, like the
-//! native flyouts, whichever monitor holds the icon and whether the icon is
-//! pinned or inside the overflow (^) flyout; see `placement`. It takes focus
-//! when it opens (Escape closes it and Ctrl+O opens the app, both from the
-//! page) and hides when focus leaves, so a second tray click closes it.
-//!
-//! On macOS the window is a panel that takes key focus but never becomes the
-//! app's main window, like a native menu bar extra. Tiling window managers
-//! (komorebi, for one) adopt whatever window an app reports as its main
-//! window, so a plain window here would be tiled the moment it took focus.
+//! Pulse panel anchored to the tray icon: created on first click, hidden between opens, destroyed
+//! when the icon is off. The page measures itself and calls `resize_pulse_panel`; the first open
+//! waits for it. macOS: a panel that never becomes the main window, so tiling WMs don't tile it.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -36,14 +16,11 @@ mod platform;
 
 pub const LABEL: &str = "pulse";
 
-/// Logical points, matching the approved mock.
 const WIDTH: f64 = 320.0;
-/// A placeholder until the page reports its real height.
 const INITIAL_HEIGHT: f64 = 360.0;
 
-/// A click on the icon also takes focus from the open panel, so the blur that
-/// hides it lands just before the click that would reopen it. A click this
-/// soon after a blur-hide is that same gesture and means "close".
+/// A click on the icon blurs (hides) the panel just before it lands, so a click this
+/// soon after a blur-hide is the same gesture and means "close".
 const REOPEN_GUARD: Duration = Duration::from_millis(300);
 
 #[derive(Default)]
@@ -51,20 +28,14 @@ pub struct PulseState(Mutex<Placement>);
 
 #[derive(Default)]
 struct Placement {
-    /// The icon's rect from the last click, in physical pixels.
     icon: Option<Rect>,
-    /// Logical content height the page last reported.
     height: Option<f64>,
-    /// Show as soon as the page reports its height (first open).
     show_when_sized: bool,
     hidden_by_blur_at: Option<Instant>,
 }
 
-/// Opens the panel under the icon, or closes it if it is open.
-///
-/// No window call is made while the placement lock is held: hiding or
-/// focusing a window can deliver focus events synchronously, and the blur
-/// handler takes the same lock.
+/// Opens the panel under the icon, or closes it. No window call while the placement lock is
+/// held: window calls can deliver focus events synchronously and the blur handler takes the lock.
 pub fn toggle(app: &AppHandle, icon: Rect) {
     let Some(window) = app.get_webview_window(LABEL) else {
         remember(app, |placement| {
@@ -114,7 +85,6 @@ enum Toggle {
     WaitForSize,
 }
 
-/// The page measured its content: size the window to it and keep it anchored.
 pub fn resize(app: &AppHandle, height: f64) {
     let Some(window) = app.get_webview_window(LABEL) else {
         return;
@@ -133,7 +103,6 @@ pub fn resize(app: &AppHandle, height: f64) {
     }
 }
 
-/// Focus left the panel (click away, another app, a Space switch).
 pub fn on_blur(app: &AppHandle) {
     let Some(window) = app.get_webview_window(LABEL) else {
         return;
@@ -153,7 +122,6 @@ pub fn hide(app: &AppHandle) {
     }
 }
 
-/// The icon was turned off, so the panel goes with it.
 pub fn destroy(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(LABEL) {
         let _ = window.destroy();
@@ -161,7 +129,6 @@ pub fn destroy(app: &AppHandle) {
     remember(app, |placement| *placement = Placement::default());
 }
 
-/// Runs `update` under the placement lock; `None` if the lock is poisoned.
 fn remember<T>(app: &AppHandle, update: impl FnOnce(&mut Placement) -> T) -> Option<T> {
     let state = app.state::<PulseState>();
     let mut placement = state.0.lock().ok()?;
@@ -169,18 +136,13 @@ fn remember<T>(app: &AppHandle, update: impl FnOnce(&mut Placement) -> T) -> Opt
 }
 
 fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
-    // Same bundle as the main window; the page picks its root by window label.
     let window = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("index.html".into()))
         .title("OpenRize")
         .inner_size(WIDTH, INITIAL_HEIGHT)
         .decorations(false)
-        // Rounded corners are drawn by the page; the window itself is clear.
         .transparent(true)
-        // On Windows the shadow is DWM's, drawn around the rectangle (and
-        // rounded to Windows 11's 8px, not the card's 12px), so it shows as a
-        // square halo behind the card's corners. Without it the card is the
-        // whole window, and tao stops padding the window by the shadow's
-        // hidden frame, so sizes and positions are exact.
+        // Windows' DWM shadow is a square halo behind the card's rounded corners; without
+        // it the card is the whole window and tao's hidden-frame padding goes, so sizes are exact.
         .shadow(cfg!(not(windows)))
         .resizable(false)
         .maximizable(false)
@@ -199,7 +161,6 @@ fn reveal(window: &WebviewWindow) {
     let _ = window.set_focus();
 }
 
-/// The icon's horizontal centre and vertical extent in physical pixels.
 struct Anchor {
     x: f64,
     top: f64,

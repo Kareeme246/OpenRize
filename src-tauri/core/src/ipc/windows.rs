@@ -1,8 +1,5 @@
-//! A local named pipe that only its owner can open. `interprocess` creates the
-//! first instance with `FILE_FLAG_FIRST_PIPE_INSTANCE` and rejects remote
-//! clients. Pipe names are global, so both ends also check that the other end
-//! runs as the same user: a pipe created first by someone else is never
-//! trusted.
+//! A local named pipe only its owner can open (first instance flagged, remote clients rejected).
+//! Pipe names are global, so both ends also check the other end runs as the same user.
 use std::io;
 use std::path::Path;
 
@@ -88,14 +85,9 @@ fn same_user(stream: &Stream) -> bool {
     }
 }
 
-/// Whether the client of a connection accepted here runs as this user, at any
-/// elevation. The client's process token is the wrong thing to ask for: an
-/// elevated process's token cannot be opened from a non-elevated one, so an
-/// administrator's `rize` would be refused by the app. Impersonating the pipe
-/// client instead yields a token for the connection itself, which this process
-/// may always query; the guard puts the thread back as it was on every path.
-/// Windows refuses to impersonate until the server has read from the pipe, so
-/// this only works after the request has started to arrive.
+/// Whether the client runs as this user at any elevation. Impersonating the pipe client yields a
+/// token this process can always query (an elevated process's own token cannot be opened); Windows
+/// allows it only after the server has read from the pipe.
 pub fn client_allowed(stream: &Stream) -> bool {
     let Stream::NamedPipe(pipe) = stream;
     let impersonation = pipe.inner().impersonate_client();
@@ -134,8 +126,7 @@ fn same_sid(peer: Option<Vec<u64>>, own: Option<Vec<u64>>) -> bool {
     }
 }
 
-/// The `TOKEN_USER` of a token, in a buffer that also holds its SID. Closes
-/// the token.
+/// The `TOKEN_USER` of a token, in a buffer that also holds its SID. Closes the token.
 unsafe fn token_user(token: HANDLE) -> Option<Vec<u64>> {
     let mut needed = 0;
     let _ = GetTokenInformation(token, TokenUser, None, 0, &mut needed);
@@ -157,7 +148,6 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
 
-    /// Whether this thread is running as someone else right now.
     fn impersonating() -> bool {
         let mut token = HANDLE::default();
         // SAFETY: the token, when there is one, is closed straight away.

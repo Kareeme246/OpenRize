@@ -62,7 +62,6 @@ interface CalendarProps {
   navigate: (route: Route) => void;
 }
 
-/** Category totals in catalog order for the day summary. */
 function categorySlices(
   totals: Map<string | null, number>,
   categoryById: Map<string, Category>,
@@ -101,7 +100,6 @@ export function Calendar({ route, navigate }: CalendarProps) {
   const range = useMemo(() => calendarRange(scale, date), [scale, date]);
   const startMs = range.start.getTime();
   const endMs = range.end.getTime();
-  // Month shows whole weeks, Monday first.
   const grid = useMemo(() => {
     const start = calendarDay(startOfWeek(range.start));
     const lastDay = addDays(range.end, -1);
@@ -125,7 +123,6 @@ export function Calendar({ route, navigate }: CalendarProps) {
   const shownKey = useRef(rangeKey);
   shownKey.current = rangeKey;
 
-  /** Reads the range without rebuilding (push events land here). */
   const refresh = useCallback(async (): Promise<void> => {
     setNow(Date.now());
     const key = `${scale}:${startMs}`;
@@ -166,11 +163,8 @@ export function Calendar({ route, navigate }: CalendarProps) {
     }
   }, [scale, startMs, endMs, grid]);
 
-  /**
-   * Full load: rebuild the range's entries from its segments (a past day
-   * may never have been built), then read. The rebuild emits
-   * `entries-changed`, which is why `refresh` must not rebuild.
-   */
+  /** Full load: rebuilds the range's entries from segments, which emits
+   * `entries-changed`, so `refresh` must not rebuild. */
   const load = useCallback(async (): Promise<void> => {
     const key = `${scale}:${startMs}`;
     setLoading(true);
@@ -239,7 +233,6 @@ export function Calendar({ route, navigate }: CalendarProps) {
     };
   }, [refresh]);
 
-  // Another view can open an entry or review mode here.
   const { select } = review;
   useEffect(() => {
     if (route.entryId) select(route.entryId);
@@ -252,7 +245,6 @@ export function Calendar({ route, navigate }: CalendarProps) {
       ),
     [entries, startMs, endMs, now],
   );
-  /** Entries waiting on the user, oldest first (review mode's queue). */
   const reviewQueue = useMemo(
     () => (scale === "month" ? [] : visible.filter(isReviewable)),
     [visible, scale],
@@ -287,7 +279,6 @@ export function Calendar({ route, navigate }: CalendarProps) {
     });
   };
 
-  /** After an action in review mode, move on to the next pending entry. */
   const advanceFrom = useCallback(
     async (id: string): Promise<void> => {
       const fresh = await api.listTimeEntries(startMs, endMs - 1);

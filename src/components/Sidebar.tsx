@@ -11,18 +11,14 @@ interface SidebarProps {
   captureEnabled?: boolean;
   trackingActive?: boolean;
   onToggleCapture?: () => void;
-  /** A break in progress: the status strip shows its countdown. */
   onBreak?: { label: string; remainingMs: number };
-  /** The newer version ready to install, when there is one. */
   updateVersion?: string;
   onOpenUpdate?: () => void;
-  /** Icons only, without labels. */
   collapsed?: boolean;
 }
 
 const CollapsedContext = createContext(false);
 
-/** A group's heading, or a divider between groups when the sidebar is icons only. */
 function GroupLabel({
   children,
   first,
@@ -130,7 +126,6 @@ export function Sidebar({
             collapsed ? "" : "pr-1"
           }`}
         >
-          {/* Track Group */}
           <div className="flex flex-col gap-0.5">
             <GroupLabel first>Track</GroupLabel>
             <NavTab
@@ -163,7 +158,6 @@ export function Sidebar({
             </NavTab>
           </div>
 
-          {/* Analyze Group */}
           <div className="flex flex-col gap-0.5">
             <GroupLabel>Analyze</GroupLabel>
             <NavTab
@@ -184,7 +178,6 @@ export function Sidebar({
             </NavTab>
           </div>
 
-          {/* Work Group */}
           <div className="flex flex-col gap-0.5">
             <GroupLabel>Work</GroupLabel>
             <NavTab
@@ -223,7 +216,6 @@ export function Sidebar({
             </NavTab>
           </div>
 
-          {/* Manual Group */}
           <div className="flex flex-col gap-0.5">
             <GroupLabel>Manual</GroupLabel>
             <NavTab
@@ -237,7 +229,6 @@ export function Sidebar({
           </div>
         </nav>
 
-        {/* Bottom Pinned Controls */}
         <div className="mt-auto flex shrink-0 flex-col gap-2 pt-2 border-t border-line">
           {updateVersion !== undefined && onOpenUpdate && (
             <Tooltip content={`OpenRize ${updateVersion} is available`}>
@@ -273,7 +264,6 @@ export function Sidebar({
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </NavTab>
 
-          {/* Live capture status strip */}
           <Tooltip content={statusText}>
             <div
               className={`flex items-center gap-2 rounded-lg bg-surface text-[11.5px] ${

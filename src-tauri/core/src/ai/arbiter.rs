@@ -1,20 +1,6 @@
-//! The arbiter: turns tier outputs into one value and one confidence per
-//! field, plus ranked alternatives and the signals behind them.
-//!
-//! - A T0 rule hit is p = 1.0, and we're done.
-//! - Otherwise each available tier contributes a distribution over labels:
-//!   kNN vote share (similarity-weighted, shrunk toward "unsure" when few
-//!   neighbors exist), the personal classifier's probabilities, the LLM's
-//!   vote share across samples, and (projects only) how much of the block's
-//!   titles and URLs mention each project.
-//! - `raw = Σ w·p / Σ w` over the tiers that fired. The LLM/kNN/personal
-//!   weights move from the LLM toward the personal tiers as labeled examples
-//!   accumulate: 0.7/0.2/0.1 at cold start, 0.3/0.35/0.35 at 500+ labels.
-//! - The displayed confidence is `raw` mapped through the isotonic
-//!   calibrator fitted on the user's accept/reject history
-//!   (`calibration.rs`). Until one exists, it is capped at `COLD_START_CAP`.
-//! - Each decision also records the tier that carried it (rule, personal,
-//!   or model) for the AI effectiveness metrics.
+//! The arbiter: blends tier outputs (rule hit = 1.0, else kNN, personal, LLM and
+//! project-mention distributions weighted by label count) into one value and
+//! calibrated confidence per field, plus alternatives and signals.
 
 use std::collections::HashMap;
 
@@ -23,12 +9,9 @@ use super::rules::RuleHit;
 use super::Field;
 use crate::models::{Dominant, Signal};
 
-/// A field value. `None` is "No project" on the project field; the
-/// category field never uses it.
 pub type Label = Option<String>;
 
-/// Pseudo-count of "unsure" mass added to the kNN vote, in similarity
-/// units: two perfect neighbors give 2/3, not 100%.
+/// Pseudo-count of "unsure" mass added to the kNN vote: two perfect neighbors give 2/3.
 const KNN_PRIOR: f64 = 1.0;
 const MENTION_WEIGHT: f64 = 0.25;
 const MAX_ALTERNATIVES: usize = 8;
@@ -52,15 +35,11 @@ impl Votes {
 pub struct Evidence<'a> {
     pub field: Field,
     pub rule: Option<&'a RuleHit>,
-    /// The field's label on each nearest neighbor, with its similarity.
     pub neighbors: Vec<(Label, f32)>,
     pub personal: Option<HashMap<Label, f64>>,
     pub llm: Option<Votes>,
-    /// Project field only: share of active time mentioning each project.
     pub mentions: HashMap<Label, f64>,
-    /// Approved, labeled entries so far (drives the weight schedule).
     pub labeled: u32,
-    /// The active calibration curve; `None` means cold start (capped).
     pub calibration: Option<&'a Calibrator>,
     pub dominant: Option<&'a Dominant>,
 }
@@ -68,23 +47,17 @@ pub struct Evidence<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Decision {
     pub value: Label,
-    /// Displayed (calibrated) confidence.
     pub confidence: f64,
-    /// The blended score before calibration, kept so calibration can be
-    /// refit on it.
     pub raw_confidence: f64,
     pub alternatives: Vec<(Label, f64)>,
     pub signals: Vec<Signal>,
-    /// rules | full | fallback
     pub engine: &'static str,
-    /// The tier that carried the decision: rule | personal | model.
     pub tier: &'static str,
 }
 
 impl Decision {
-    /// Keeps what a rule matched out of the "Why" line. A rule's pattern is a
-    /// site or a title the user wrote, and a hit on a private window would
-    /// otherwise write that the window was there into the stored suggestion.
+    /// Keeps what a rule matched out of the "Why" line: a hit on a private window
+    /// would otherwise record that the window existed.
     pub fn hide_rule_details(&mut self) {
         for signal in &mut self.signals {
             if signal.kind == "rule" {
@@ -101,20 +74,15 @@ pub const TIER_MODEL: &str = "model";
 /// Which kind of evidence a distribution came from.
 #[derive(Clone, Copy, PartialEq)]
 enum Source {
-    /// kNN, the personal classifier, and project mentions: learned from the
-    /// user's own data.
     Personal,
-    /// The Foundation Model.
     Model,
 }
 
-/// LLM / kNN / personal weights for the given number of labeled examples.
 pub fn weights(labeled: u32) -> (f64, f64, f64) {
     let t = (labeled as f64 / 500.0).min(1.0);
     (0.7 - 0.4 * t, 0.2 + 0.15 * t, 0.1 + 0.25 * t)
 }
 
-/// The fast tiers' pick, used to decide whether the LLM needs extra samples.
 pub fn t1_top(
     neighbors: &[(Label, f32)],
     personal: Option<&HashMap<Label, f64>>,
@@ -196,8 +164,6 @@ pub fn decide(evidence: &Evidence<'_>, name: &dyn Fn(&Label) -> String) -> Optio
     })
 }
 
-/// The tier whose weighted vote for `label` was largest: the Foundation
-/// Model, or the user's own data (kNN, personal model, project mentions).
 fn carried_by(tiers: &[(Source, f64, HashMap<Label, f64>)], label: &Label) -> &'static str {
     let share = |source: Source| -> f64 {
         tiers
@@ -213,7 +179,6 @@ fn carried_by(tiers: &[(Source, f64, HashMap<Label, f64>)], label: &Label) -> &'
     }
 }
 
-/// The "Why" line: only the signals that fired, in a fixed order.
 fn signals(evidence: &Evidence<'_>, value: &Label, name: &dyn Fn(&Label) -> String) -> Vec<Signal> {
     let mut out = Vec::new();
     let mut push = |kind: &str, text: String| {
@@ -340,7 +305,6 @@ fn blend(tiers: &[(Source, f64, HashMap<Label, f64>)]) -> HashMap<Label, f64> {
     out
 }
 
-/// Highest score wins; ties break on the label so results are deterministic.
 fn top_label<'a>(scores: impl Iterator<Item = (&'a Label, f64)>) -> Option<&'a Label> {
     scores
         .max_by(|a, b| a.1.total_cmp(&b.1).then_with(|| b.0.cmp(a.0)))
@@ -439,7 +403,6 @@ mod tests {
 
     #[test]
     fn calibration_maps_raw_scores_for_the_pick_and_its_alternatives() {
-        // A model that is right about half as often as it claims.
         let halve = Calibrator {
             x: vec![0.0, 1.0],
             y: vec![0.0, 0.5],
@@ -472,8 +435,6 @@ mod tests {
             labeled: 500,
             ..evidence()
         };
-        // At 500 labels kNN and the personal model (0.35 each) outvote the
-        // LLM (0.3).
         let decision = decide(&e, &name).unwrap();
         assert_eq!(decision.value, l("coding"));
         assert_eq!(decision.tier, TIER_PERSONAL);
@@ -505,7 +466,6 @@ mod tests {
             ..evidence()
         };
         let decision = decide(&e, &name).unwrap();
-        // Cold-start weights: LLM 0.7, kNN 0.2 (renormalized over 0.9).
         assert_eq!(decision.value, l("coding"));
         assert!((decision.confidence - 0.7 / 0.9).abs() < 1e-9);
         let (alt, p) = &decision.alternatives[0];

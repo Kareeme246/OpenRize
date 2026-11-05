@@ -359,11 +359,16 @@ cmd_start() {
   #   XDG_CONFIG_HOME -> settings.rs::config_dir(), which is NOT identifier-scoped
   #                      and would otherwise be the real ~/.config/openrize
   local overrides
-  overrides=$(printf '{"identifier":"%s","build":{"beforeDevCommand":"pnpm exec vite --port %s --strictPort","devUrl":"http://localhost:%s"}}' \
+  overrides=$(printf '{"identifier":"%s","build":{"beforeDevCommand":"vite --port %s --strictPort","devUrl":"http://localhost:%s"}}' \
     "$identifier" "$port" "$port")
 
   echo "==> starting isolated instance $id on port $port" >&2
-  XDG_CONFIG_HOME="$dir/config" nohup pnpm tauri dev --no-watch -c "$overrides" >"$dir/dev.log" 2>&1 &
+  # Not through pnpm: pnpm 12 re-execs itself in a new process group, which
+  # would put the app and Vite outside $pgid, so start could never find the
+  # app and stop could never kill them. node_modules/.bin on PATH is all
+  # `pnpm tauri` and `pnpm exec vite` add.
+  PATH="$REPO_ROOT/node_modules/.bin:$PATH" XDG_CONFIG_HOME="$dir/config" \
+    nohup bash scripts/tauri.sh dev --no-watch -c "$overrides" >"$dir/dev.log" 2>&1 &
   local pgid=$!
 
   cat >"$dir/meta" <<META

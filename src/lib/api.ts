@@ -41,6 +41,7 @@ import type {
   ProjectRule,
   ProjectStats,
   ProjectSuggestion,
+  ReleaseNotes,
   RollupCell,
   RollupGroup,
   RuleSuggestion,
@@ -847,6 +848,14 @@ export function updateStatus(): Promise<UpdateStatus> {
 
 export function checkForUpdates(): Promise<UpdateStatus> {
   return invoke<UpdateStatus>("check_for_updates");
+}
+
+/**
+ * Notes of the installed release and the ones before it, newest first, from
+ * GitHub Releases.
+ */
+export function installedReleaseNotes(): Promise<ReleaseNotes[]> {
+  return invoke<ReleaseNotes[]>("installed_release_notes");
 }
 
 /** Resolves only if the install fails to restart; otherwise the app relaunches. */

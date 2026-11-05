@@ -36,9 +36,11 @@ find_free_port() {
 PORT="$(find_free_port)"
 
 echo "==> starting isolated tauri dev on port $PORT (log: $LOG_FILE)" >&2
-CONFIG_OVERRIDE=$(printf '{"identifier":"com.offlinestudios.openrize.devshot%s","build":{"beforeDevCommand":"pnpm exec vite --port %s --strictPort","devUrl":"http://localhost:%s"}}' "$PORT" "$PORT" "$PORT")
+CONFIG_OVERRIDE=$(printf '{"identifier":"com.offlinestudios.openrize.devshot%s","build":{"beforeDevCommand":"vite --port %s --strictPort","devUrl":"http://localhost:%s"}}' "$PORT" "$PORT" "$PORT")
 
-pnpm tauri dev --no-watch -c "$CONFIG_OVERRIDE" >"$LOG_FILE" 2>&1 &
+# Not through pnpm: pnpm 12 re-execs itself in a new process group, which
+# would leave the app and Vite outside DEV_PGID and alive after cleanup.
+PATH="$PWD/node_modules/.bin:$PATH" bash scripts/tauri.sh dev --no-watch -c "$CONFIG_OVERRIDE" >"$LOG_FILE" 2>&1 &
 DEV_PGID=$!
 
 cleanup() {

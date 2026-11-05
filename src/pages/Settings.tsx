@@ -777,12 +777,23 @@ function ReleaseNotesList({ releases }: { releases: ReleaseNotes[] }) {
   );
 }
 
+/** The installed release's notes, fetched the first time the changelog opens. */
+type InstalledNotes =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "loaded"; releases: ReleaseNotes[] }
+  | { kind: "failed"; error: string };
+
 /**
  * The updater's status and controls. The Rust side checks on its own
  * schedule (see src-tauri/src/updater.rs); this only shows the result.
  */
 function UpdatesSetting({ status }: { status: UpdateStatus | null }) {
   const [requestError, setRequestError] = useState<string | null>(null);
+  const [changelogOpen, setChangelogOpen] = useState(false);
+  const [installedNotes, setInstalledNotes] = useState<InstalledNotes>({
+    kind: "idle",
+  });
 
   const check = (): void => {
     setRequestError(null);
@@ -801,47 +812,112 @@ function UpdatesSetting({ status }: { status: UpdateStatus | null }) {
   const error = requestError ?? status?.error ?? null;
   const available = status?.available ?? null;
 
+  const toggleChangelog = (): void => {
+    // Reopening retries a fetch that failed.
+    if (!changelogOpen && installedNotes.kind === "failed") {
+      setInstalledNotes({ kind: "idle" });
+    }
+    setChangelogOpen((open) => !open);
+  };
+
+  // With no update waiting, the changelog is the installed release's
+  // history, fetched once per visit and only once it is opened.
+  const wantsInstalledNotes =
+    changelogOpen && status !== null && available === null;
+  useEffect(() => {
+    if (!wantsInstalledNotes || installedNotes.kind !== "idle") return;
+    setInstalledNotes({ kind: "loading" });
+    api
+      .installedReleaseNotes()
+      .then((releases) => setInstalledNotes({ kind: "loaded", releases }))
+      .catch((cause: unknown) =>
+        setInstalledNotes({ kind: "failed", error: describeError(cause) }),
+      );
+  }, [wantsInstalledNotes, installedNotes.kind]);
+
   return (
     <SettingGroup title="Updates">
       <SettingRow
         title="OpenRize updates"
         description={status === null ? "Loading…" : updateSummary(status)}
       >
-        {available ? (
+        <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
-            disabled={busy}
-            onClick={install}
-            className="shrink-0 rounded-lg bg-accent px-3 py-1.5 font-semibold text-[12px] text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Install &amp; restart
-          </button>
-        ) : (
-          <button
-            type="button"
-            disabled={busy || status === null}
-            onClick={check}
+            aria-expanded={changelogOpen}
+            disabled={status === null}
+            onClick={toggleChangelog}
             className="shrink-0 rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] text-fg-muted hover:bg-surface-strong disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Check for updates
+            {changelogOpen ? "Hide changelog" : "View changelog"}
           </button>
-        )}
+          {available ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={install}
+              className="shrink-0 rounded-lg bg-accent px-3 py-1.5 font-semibold text-[12px] text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Install &amp; restart
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={busy || status === null}
+              onClick={check}
+              className="shrink-0 rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] text-fg-muted hover:bg-surface-strong disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Check for updates
+            </button>
+          )}
+        </div>
       </SettingRow>
       {error && (
         <div className="border-b border-line px-4 py-2 text-[11.5px] text-danger last:border-b-0">
           {error}
         </div>
       )}
-      {available && (
-        <SettingBlock
-          title="What's new"
-          description="Installing restarts OpenRize. A running tracking session ends and a new one starts when it reopens."
-        >
-          <ReleaseNotesList releases={available.releases} />
-        </SettingBlock>
-      )}
+      {changelogOpen &&
+        status !== null &&
+        (available ? (
+          <SettingBlock
+            title="What's new"
+            description="Installing restarts OpenRize. A running tracking session ends and a new one starts when it reopens."
+          >
+            <ReleaseNotesList releases={available.releases} />
+          </SettingBlock>
+        ) : (
+          <SettingBlock
+            title="Changelog"
+            description={`What changed in ${status.currentVersion} and the releases before it.`}
+          >
+            <InstalledNotesView notes={installedNotes} />
+          </SettingBlock>
+        ))}
     </SettingGroup>
   );
+}
+
+function InstalledNotesView({ notes }: { notes: InstalledNotes }) {
+  switch (notes.kind) {
+    case "idle":
+    case "loading":
+      return <p className="text-[11.5px] text-fg-muted">Loading changelog…</p>;
+    case "failed":
+      return (
+        <p className="text-[11.5px] text-danger">
+          Couldn't load the changelog: {notes.error}
+        </p>
+      );
+    case "loaded":
+      return notes.releases.length > 0 ? (
+        <ReleaseNotesList releases={notes.releases} />
+      ) : (
+        <p className="text-[11.5px] text-fg-muted">
+          No published release notes for this version.
+        </p>
+      );
+  }
 }
 
 function PermissionsSetting({

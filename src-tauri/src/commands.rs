@@ -21,7 +21,7 @@ use crate::reports::{self, EntryFilter, ExportFormat, ExportResult, GroupBy, Rol
 use crate::settings::Settings;
 use crate::timers::{now_epoch_ms, Timer, TimerSavedState};
 use crate::tray;
-use crate::updater::{self, UpdateStatus, UpdaterState};
+use crate::updater::{self, ReleaseNotes, UpdateStatus, UpdaterState};
 use crate::AppState;
 
 type Timers = Result<Vec<Timer>, String>;
@@ -1267,6 +1267,16 @@ pub fn update_status(app: AppHandle) -> Result<UpdateStatus, String> {
 pub async fn check_for_updates(app: AppHandle) -> Result<UpdateStatus, String> {
     updater::check(&app, true).await;
     app.state::<UpdaterState>().snapshot()
+}
+
+/// How many past releases the Settings changelog lists.
+const CHANGELOG_RELEASES: usize = 10;
+
+/// Notes of the installed release and the ones before it, newest first.
+#[tauri::command]
+pub async fn installed_release_notes(app: AppHandle) -> Result<Vec<ReleaseNotes>, String> {
+    let current = app.package_info().version.to_string();
+    updater::recent_release_notes(&current, CHANGELOG_RELEASES).await
 }
 
 /// Downloads and installs the available update, then restarts into it.

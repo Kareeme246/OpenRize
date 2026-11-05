@@ -14,13 +14,14 @@ verified: never
 
 # Updates
 
-OpenRize updates itself through `tauri-plugin-updater`. In a release build a background scheduler checks the newest GitHub Release 10 seconds after launch, then hourly, and again when a window regains focus if the last check is at least 5 minutes old. A found update shows as a green "Update available" button in the sidebar and as a card in Settings > Overview with the notes of every release between the installed and the offered version; "Install & restart" downloads it, verifies its signature and restarts into it. Nothing installs without that click. Publishing a release ships it to every user, and the check is a real network call, so this feature is the one where a driven instance must stay away from the real thing. A driven instance is always a debug build, which never checks the network; the UI can still be exercised with a simulated update.
+OpenRize updates itself through `tauri-plugin-updater`. In a release build a background scheduler checks the newest GitHub Release 10 seconds after launch, then hourly, and again when a window regains focus if the last check is at least 5 minutes old. A found update shows as a green "Update available" button in the sidebar and as a card in Settings > Overview whose "View changelog" button opens the notes of every release between the installed and the offered version (or, with no update waiting, the installed release and the ones before it); "Install & restart" downloads it, verifies its signature and restarts into it. Nothing installs without that click. Publishing a release ships it to every user, and the check is a real network call, so this feature is the one where a driven instance must stay away from the real thing. A driven instance is always a debug build, which never checks the network; the UI can still be exercised with a simulated update.
 
 ## Sub-features
 
 - scheduled-check: the launch, hourly and focus checks (release builds only).
 - manual-check: the Settings button "Check for updates".
-- update-card: Settings > Overview > Updates, with the row "OpenRize updates", its summary line and the "What's new" block listing the release notes.
+- update-card: Settings > Overview > Updates, with the row "OpenRize updates", its summary line and the always-present "View changelog" button.
+- changelog: "View changelog" ("Hide changelog" while open) toggles a block under the row, closed by default. With an update it is "What's new" with the offered releases; without one it is "Changelog" with the installed release and up to nine before it, fetched from GitHub Releases the first time it opens (a read-only request, made in debug builds too).
 - install: the button "Install & restart" that downloads, verifies and relaunches into the new version.
 - sidebar-banner: the sidebar button "Update available", which opens Settings on the Updates card.
 - simulated-update: a debug-only fake update (version 9.9.9) switched on by an environment variable.
@@ -51,15 +52,17 @@ To see the available-update state, start the session with the simulation variabl
 OPENRIZE_SIMULATE_UPDATE=1 scripts/app-drive.sh start
 scripts/app-drive.sh wait "Update available"
 scripts/app-drive.sh click "Update available"
+scripts/app-drive.sh click "View changelog"
 scripts/app-drive.sh wait "What's new"
 scripts/app-drive.sh tree
 ```
 
-The card then shows "Version 9.9.9 is available. You have <current version>." and a "What's new" list with 9.9.9 and 9.9.8 (the simulated notes "Simulated release notes for the in-app updater", "A second simulated line..." and "An older simulated release"). The button is "Install & restart". The simulation sets no downloadable payload, so pressing it fails with "There's no update to install." in the card; still, do not press it as a habit, because in a release build the same button downloads from the internet and restarts the app.
+The card then shows "Version 9.9.9 is available. You have <current version>." and, once "View changelog" is pressed, a "What's new" list with 9.9.9 and 9.9.8 (the simulated notes "Simulated release notes for the in-app updater", "A second simulated line..." and "An older simulated release"). The button is "Install & restart". The simulation sets no downloadable payload, so pressing it fails with "There's no update to install." in the card; still, do not press it as a habit, because in a release build the same button downloads from the internet and restarts the app.
 
 ## What proves it works
 
 - Idle debug build (required for a PASS of the plain card): the row "OpenRize updates" shows "Up to date · <version>" where the version equals the app's version (`scripts/app-drive.sh rize -- --json app status` has `data.appVersion` with the same number), and the button is "Check for updates", enabled.
+- Changelog without an update: "View changelog" opens the "Changelog" block, which lists published releases no newer than the app's version, newest first (or "Couldn't load the changelog: ..." offline); "Hide changelog" closes it.
 - After pressing "Check for updates": the red error line "Development builds don't check for updates." appears, no network request was made, and the summary line is unchanged.
 - Simulated update (required for a PASS of the available state): the sidebar button "Update available" exists, the summary reads "Version 9.9.9 is available. You have <version>.", the button changes to "Install & restart", and the block "What's new" lists two release versions with notes, with markdown headings and bold markers stripped and list items shown as bullets.
 - `shot` for the card and the sidebar banner.
@@ -79,6 +82,6 @@ The card then shows "Version 9.9.9 is available. You have <current version>." an
 ## Not reachable
 
 - The real network check against GitHub Releases, signature verification, download progress, installation and the restart into a new version: debug builds never check, and no tool here should trigger a real install.
-- The GitHub release notes fetch for versions between the installed and the offered one.
+- The GitHub release notes fetch for versions between the installed and the offered one (the installed-release changelog fetch is reachable).
 - The macOS and Windows installer behaviour after the app quits.
 - Any CLI path: update commands are planned but not shipped.

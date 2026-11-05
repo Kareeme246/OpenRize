@@ -349,6 +349,7 @@ pub fn run() {
             commands::open_main_window,
             commands::update_status,
             commands::check_for_updates,
+            commands::installed_release_notes,
             commands::install_update,
             accounts::accounts_state,
             accounts::existing_data_summary,

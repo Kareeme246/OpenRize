@@ -13,6 +13,8 @@
 //! - **Changelog.** `latest.json` only carries the newest release's notes, so
 //!   the notes of every release between the installed and the offered version
 //!   come from the GitHub Releases API, falling back to `latest.json`'s notes.
+//!   With no update waiting, Settings asks for the installed and older
+//!   releases' notes from the same API, only when its changelog is opened.
 //! - **Install.** Only on request. The restart goes through
 //!   [`AppHandle::request_restart`], so `RunEvent::Exit` still closes the open
 //!   activity segment and the relaunched app starts a fresh one. Windows quits
@@ -364,7 +366,33 @@ struct GithubRelease {
 async fn release_notes_between(current: &str, latest: &str) -> Result<Vec<ReleaseNotes>, String> {
     let current = semver::Version::parse(current).map_err(|error| error.to_string())?;
     let latest = semver::Version::parse(latest).map_err(|error| error.to_string())?;
+    Ok(published_releases()
+        .await?
+        .into_iter()
+        .filter(|(version, _)| *version > current && *version <= latest)
+        .map(|(_, notes)| notes)
+        .collect())
+}
 
+/// Notes of the newest `limit` published releases up to and including
+/// `current`, newest first: the changelog Settings shows when no update is
+/// waiting.
+pub async fn recent_release_notes(
+    current: &str,
+    limit: usize,
+) -> Result<Vec<ReleaseNotes>, String> {
+    let current = semver::Version::parse(current).map_err(|error| error.to_string())?;
+    Ok(published_releases()
+        .await?
+        .into_iter()
+        .filter(|(version, _)| *version <= current)
+        .take(limit)
+        .map(|(_, notes)| notes)
+        .collect())
+}
+
+/// Every published, non-prerelease GitHub release, newest first.
+async fn published_releases() -> Result<Vec<(semver::Version, ReleaseNotes)>, String> {
     // reqwest is built without a bundled crypto provider, like the updater's.
     if rustls::crypto::CryptoProvider::get_default().is_none() {
         let _ = rustls::crypto::ring::default_provider().install_default();
@@ -392,18 +420,16 @@ async fn release_notes_between(current: &str, latest: &str) -> Result<Vec<Releas
         .filter(|release| !release.draft && !release.prerelease)
         .filter_map(|release| {
             let version = semver::Version::parse(release.tag_name.trim_start_matches('v')).ok()?;
-            (version > current && version <= latest).then(|| {
-                let notes = ReleaseNotes {
-                    version: version.to_string(),
-                    published_at: release.published_at,
-                    notes: release.body.unwrap_or_default().trim().to_string(),
-                };
-                (version, notes)
-            })
+            let notes = ReleaseNotes {
+                version: version.to_string(),
+                published_at: release.published_at,
+                notes: release.body.unwrap_or_default().trim().to_string(),
+            };
+            Some((version, notes))
         })
         .collect();
     notes.sort_by(|a, b| b.0.cmp(&a.0));
-    Ok(notes.into_iter().map(|(_, notes)| notes).collect())
+    Ok(notes)
 }
 
 /// Debug builds only: pretend an update is available so the UI can be seen.

@@ -10,9 +10,8 @@ type PdfJs = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
 let pdfjs: Promise<PdfJs> | undefined;
 
 /**
- * pdf.js is large and only invoices use it, so it loads on first use, as its
- * own chunk. Its worker ships inside the app bundle; nothing is fetched from
- * the network.
+ * pdf.js is large and only invoices use it: a lazy chunk, with the worker in
+ * the app bundle.
  */
 function loadPdfJs(): Promise<PdfJs> {
   pdfjs ??= (async () => {
@@ -31,22 +30,15 @@ const PAGE_GAP = 16;
 const GUTTER = 8;
 
 interface PdfViewerProps {
-  /** The PDF to show; the previous one stays until this one is ready. */
   bytes: Uint8Array | null;
-  /** Dims the paper while a newer render is on its way. */
   stale?: boolean;
-  /** Names the document for assistive tech, e.g. "Invoice preview". */
   label: string;
-  /** Shown while there is nothing to display yet. */
   placeholder?: string;
 }
 
 /**
- * Displays PDF bytes as paper: pdf.js draws each page to a canvas, sharp on
- * retina, fit to width with zoom steps. Pages render lazily as they near the
- * viewport, and every render is finished off-screen and swapped in whole, so a
- * live preview updates without flicker. The bytes are the real document;
- * this component never lays out or prices anything.
+ * Renders PDF bytes as paper. Each render finishes off-screen and is swapped in
+ * whole, so live previews don't flicker. Never lays out or prices anything.
  */
 export function PdfViewer({
   bytes,

@@ -4,7 +4,6 @@ import { llmUnavailableReason } from "../hooks/useAiStatus";
 import { describeError } from "../lib/api";
 import type { AiStatus } from "../lib/types";
 
-/** Apple Intelligence & Siri pane of System Settings. */
 const APPLE_INTELLIGENCE_SETTINGS =
   "x-apple.systempreferences:com.apple.Siri-Settings.extension";
 
@@ -19,10 +18,8 @@ function readDismissed(): string | null {
 }
 
 /**
- * The one dismissible fallback banner: shown when Apple Intelligence could
- * be turned on (or is still downloading) and suggestions are running on
- * rules and the personal model alone. A Mac that can never run the model
- * gets no nag here; Settings explains it instead.
+ * Dismissible fallback shown when Apple Intelligence could be turned on and
+ * suggestions run on rules alone.
  */
 export function AiEngineBanner({ status }: { status: AiStatus | null }) {
   const [dismissed, setDismissed] = useState<string | null>(readDismissed);

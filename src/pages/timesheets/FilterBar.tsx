@@ -79,11 +79,6 @@ function Checklist({
   );
 }
 
-/**
- * Rise's filter row: a `Filters` button that opens every dimension at once,
- * then one chip per dimension (Clients, Projects, Categories) that opens
- * just its own list. Both edit the same selection.
- */
 export function FilterBar({
   catalog,
   filters,
@@ -94,7 +89,6 @@ export function FilterBar({
   onChange: (filters: TimesheetFilters) => void;
 }) {
   const [open, setOpen] = useState<Dimension | "all" | null>(null);
-  /** A chip's list opens under that chip. */
   const [anchor, setAnchor] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(null), []);

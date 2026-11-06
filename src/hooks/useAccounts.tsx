@@ -13,7 +13,6 @@ import { describeError } from "../lib/api";
 import { useTauriEvent } from "./useTauriEvent";
 import { useToast } from "./useToast";
 
-/** The switching screen is cleared if the restart has not come by then. */
 const RESTART_PATIENCE_MS = 20_000;
 
 /** Where a switch is headed; a null name is No account (Sign out). */
@@ -22,21 +21,15 @@ export interface Switching {
 }
 
 export interface AccountsApi {
-  /** Null until the first answer. */
   accounts: AccountView[] | null;
-  /** The open account, or null for No account (also while loading). */
   current: AccountView | null;
-  /** The account this launch could not open because its data is gone. */
   missing: Account | null;
-  /** A newer release wrote the accounts: they can be seen but not changed. */
   readOnly: boolean;
-  /** Set from the moment a switch is asked for until the app restarts. */
   switching: Switching | null;
-  /** Opens an account, or No account for null, by restarting the app. */
   switchTo: (account: Account | null) => Promise<void>;
   /**
-   * Adds an account and opens it by restarting the app. Resolves to why it
-   * could not (a name already taken, say), or null once it is under way.
+   * Resolves to why it could not (a name already taken, say), or null once
+   * under way.
    */
   create: (name: string, moveExisting: boolean) => Promise<string | null>;
   reload: () => void;
@@ -58,9 +51,8 @@ export function useAccounts(): AccountsApi {
 }
 
 /**
- * One reader of the accounts for the whole window. Switching is a restart, so
- * the list never changes under a live view except by a rename or a delete,
- * which arrive as `accounts-changed`.
+ * One reader of the accounts for the window; the list changes only by a rename
+ * or delete, via `accounts-changed`.
  */
 export function AccountsProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AccountsState | null>(null);
@@ -93,7 +85,6 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
   useTauriEvent(api.ACCOUNTS_CHANGED, reload);
   useEffect(() => () => window.clearTimeout(patience.current), []);
 
-  /** Raises the switching screen and starts the switch; null when it is under way. */
   const run = useCallback(
     async (
       name: string | null,

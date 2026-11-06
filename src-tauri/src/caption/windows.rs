@@ -1,25 +1,6 @@
-//! Windows: removes the native caption and gives the page's maximize button a
-//! native window to answer Snap Layouts with.
-//!
-//! # Why a native window over the button
-//!
-//! Windows 11 shows the snap flyout when the pointer rests on whatever answers
-//! `WM_NCHITTEST` with `HTMAXBUTTON`. WebView2 hosts the page in child windows
-//! that cover the whole client area, and the system asks the window *under the
-//! pointer* first, so the top-level window's own procedure never gets the
-//! question and cannot answer it. Subclassing the WebView2 windows would mean
-//! patching Chromium's internal, re-created windows; WebView2's non-client
-//! region support (`app-region`) only offers caption dragging, not caption
-//! buttons. So, like Tauri's own resize-border window for undecorated windows
-//! (`tauri-runtime-wry`), a small child window of the main window sits above the
-//! webview exactly over the maximize button and answers `HTMAXBUTTON`. No input
-//! is synthesized: the system raises the flyout itself.
-//!
-//! The overlay is a window of its own, so the pointer never reaches the page
-//! there. It therefore also does the button's work: a click restores or
-//! maximizes the window (`WM_SYSCOMMAND`, as the native button does), and hover
-//! and press are reported to the page as [`EVENT_MAXIMIZE_BUTTON`] so the DOM
-//! button can draw them. Minimize and close stay plain DOM buttons.
+//! Windows: removes the native caption and puts a small native child window over the page's
+//! maximize button to answer `WM_NCHITTEST` with `HTMAXBUTTON` (WebView2's child windows hide the
+//! top-level procedure from the system), and reports [`EVENT_MAXIMIZE_BUTTON`] to the page.
 
 use std::cell::Cell;
 use std::sync::Once;
@@ -52,10 +33,8 @@ const CLASS_NAME: PCWSTR = w!("OPENRIZE_MAXIMIZE_BUTTON");
 
 static REGISTER_CLASS: Once = Once::new();
 
-/// Removes the native caption but keeps the rest of the frame: tao draws the
-/// DWM shadow and keeps resize edges for an undecorated, resizable window, and
-/// Tauri adds the border window that resizes it. Windows 11 only rounds the
-/// corners of an undecorated window when asked to.
+/// Removes the native caption but keeps tao's shadow and resize edges; Windows 11 only
+/// rounds an undecorated window's corners when asked.
 pub fn prepare(window: &WebviewWindow) {
     if let Err(error) = window.set_decorations(false) {
         eprintln!("could not remove the native caption: {error}");
@@ -80,8 +59,7 @@ pub fn prepare(window: &WebviewWindow) {
     };
 }
 
-/// Puts the native window over the maximize button, creating it the first time
-/// and hiding it when the button is not on screen.
+/// Puts the native window over the maximize button, hiding it when the button is off screen.
 pub fn place_maximize_button(window: &WebviewWindow, rect: Option<ButtonRect>) {
     let Ok(parent) = window.hwnd() else {
         return;
@@ -118,12 +96,8 @@ pub fn place_maximize_button(window: &WebviewWindow, rect: Option<ButtonRect>) {
     }
 }
 
-/// Opens the system window menu at the pointer and runs what is chosen.
-///
-/// WebView2 can open one itself for a right click on a drag region, but it
-/// decides which items are enabled from its own idea of the window state and
-/// shows Restore on a window that is not maximized. The window's real state is
-/// asked for here.
+/// Opens the system window menu at the pointer and runs what is chosen. WebView2's own menu
+/// shows Restore on a window that is not maximized, so the real state is asked for here.
 pub fn show_system_menu(window: &WebviewWindow) {
     let Ok(hwnd) = window.hwnd() else {
         return;
@@ -184,7 +158,6 @@ struct Overlay {
     app: AppHandle,
     hovered: Cell<bool>,
     pressed: Cell<bool>,
-    /// Whether a `WM_NCMOUSELEAVE` is already requested.
     tracking: Cell<bool>,
 }
 
@@ -201,9 +174,8 @@ impl Overlay {
 }
 
 fn create_overlay(parent: HWND, app: &AppHandle) -> Option<HWND> {
-    // SAFETY: plain Win32 calls on the main thread. The class is registered
-    // once; its procedure is `overlay_proc` below. The state pointer given to
-    // `CreateWindowExW` is taken back by `WM_NCCREATE` and freed by
+    // SAFETY: plain Win32 calls on the main thread; the class is registered once. The state
+    // pointer given to `CreateWindowExW` is taken back by `WM_NCCREATE` and freed by
     // `WM_NCDESTROY`, or here when creation fails before that.
     unsafe {
         let instance = HINSTANCE(GetModuleHandleW(PCWSTR::null()).ok()?.0);
@@ -329,8 +301,8 @@ unsafe extern "system" fn overlay_proc(
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }
 
-/// Maximizes the main window, or restores it when it already is, the way its
-/// own caption button would. Posted so it runs after this message is done.
+/// Maximizes or restores the main window like its caption button; posted so it runs after this
+/// message.
 fn toggle_maximized(overlay: HWND) {
     // SAFETY: `overlay` is the window currently handling a message; its parent
     // is the main window.

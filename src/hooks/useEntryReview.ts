@@ -12,7 +12,7 @@ import { useTauriEvent } from "./useTauriEvent";
 
 /**
  * Where the split flow is: picking the cut on a timeline, or confirming it in
- * the split dialog. `at` is the cut so far.
+ * the dialog. `at` is the cut so far.
  */
 export interface SplitStage {
   stage: "pick" | "confirm";
@@ -20,11 +20,9 @@ export interface SplitStage {
 }
 
 /**
- * The one entry review panel's state and commands, shared by every view that
- * opens it (Calendar, My Timesheet, Time Entries, a project's recent
- * entries). Each command goes to Rust and re-reads the panel; the views'
- * lists refresh from the `entries-changed` event those commands emit. Each
- * one that changes something is confirmed by a toast with Undo.
+ * The entry review panel's state and commands, shared by every view that opens
+ * it. Commands go to Rust, re-read the panel, and toast with Undo when they
+ * change something.
  */
 export interface EntryReview {
   selectedId?: string;
@@ -34,25 +32,16 @@ export interface EntryReview {
   /** Resolves true once approved, false when it failed. */
   accept: (id: string) => Promise<boolean>;
   reject: (id: string) => Promise<boolean>;
-  /** Returns the open approved entry to pending so it can be edited. */
   unapprove: () => Promise<void>;
   setField: (field: SuggestionField, valueId: string | null) => Promise<void>;
   toggleBillable: () => Promise<void>;
   saveDescription: (description: string) => Promise<void>;
   setTimes: (startedAt: number, endedAt: number) => Promise<void>;
   splitting: SplitStage | null;
-  /**
-   * Starts splitting the open entry (or entry `id`, once it has opened), at
-   * its smart split point: on a timeline by picking the cut there (`pick`),
-   * elsewhere straight in the split dialog.
-   */
   beginSplit: (pick: boolean, id?: string) => void;
-  /** The cut picked on the timeline; moves on to the dialog. */
   pickSplit: (at: number) => void;
   cancelSplit: () => void;
-  /** Splits the open entry at `at`; resolves true once split. */
   split: (at: number) => Promise<boolean>;
-  /** Merges the open entry with an adjacent entry. */
   merge: (otherId: string) => Promise<void>;
   remove: () => Promise<void>;
   removeField: (field: SuggestionField, id: string) => Promise<void>;
@@ -60,7 +49,6 @@ export interface EntryReview {
   resolveRule: (suggestion: RuleSuggestion, accept: boolean) => Promise<void>;
 }
 
-/** The smart split point, on the minute like every cut the user picks. */
 function suggestedCut(detail: EntryDetail): number {
   return (
     Math.round(splitPoint(detail.entry, detail.segments) / 60_000) * 60_000
@@ -103,7 +91,6 @@ export function useEntryReview(initialId?: string): EntryReview {
     load(selectedId);
   }, [selectedId, load]);
 
-  // A split asked for before its entry had opened starts once it has.
   useEffect(() => {
     const pending = pendingSplit.current;
     if (!pending || detail?.entry.id !== pending.id) return;
@@ -126,7 +113,6 @@ export function useEntryReview(initialId?: string): EntryReview {
     setSelectedId(id);
   }, []);
 
-  /** Runs a command, surfacing its error, then re-reads the panel. */
   const run = useCallback(
     async (action: () => Promise<unknown>): Promise<boolean> => {
       try {

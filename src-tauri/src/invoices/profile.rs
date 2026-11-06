@@ -194,7 +194,6 @@ pub fn logo_bytes(conn: &Connection) -> Result<Option<Vec<u8>>, String> {
     .map_err(err)
 }
 
-/// Validates, downsizes and stores an uploaded PNG or JPEG as a PNG.
 pub fn set_logo(conn: &Connection, bytes: &[u8], now: u64) -> Result<(), String> {
     let normalized = normalize_logo(bytes)?;
     conn.execute(

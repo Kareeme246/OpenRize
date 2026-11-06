@@ -1,9 +1,6 @@
-//! Developer-only controls for testing the permission and onboarding states by
-//! hand (Settings > Developer in a dev build). They simulate; they never touch
-//! macOS privacy settings (TCC), never delete the onboarding marker (it is
-//! shared with the installed app), and never touch app data. Every command
-//! refuses unless `allowed` passes, and a release build never passes because
-//! debug_assertions is off there.
+//! Developer-only controls for testing permission and onboarding states by hand. They simulate:
+//! never TCC, the onboarding marker (shared with the installed app) or app data. Commands
+//! refuse unless `allowed` passes, which a release build never does (debug_assertions off).
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -11,10 +8,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::onboarding::Rerun;
 use crate::permissions::{AccessibilityState, Monitor};
 
-/// The dev scripts run under sub-identifiers of the release one (`.dev` for
-/// `pnpm tauri dev`, `.devshotNNNN` and `.driveNNNN` for the screenshot and
-/// drive scripts), each with its own app data. The release identifier itself
-/// never qualifies.
+/// Dev scripts run under sub-identifiers of the release one (`.dev`, `.devshotNNNN`,
+/// `.driveNNNN`), each with its own app data. The release identifier never qualifies.
 pub fn allowed(identifier: &str, debug_build: bool) -> bool {
     debug_build
         && identifier
@@ -35,15 +30,11 @@ fn require(app: &AppHandle) -> Result<(), String> {
 pub struct DevToolsInfo {
     pub identifier: String,
     pub release_identifier: String,
-    /// The simulated Accessibility state, if one is set.
     pub accessibility: Option<AccessibilityState>,
-    /// The simulated Automation answer, if one is set.
     pub automation: Option<bool>,
     pub onboarding_rerun: bool,
 }
 
-/// What the Developer panel shows: which identifier this is and what is
-/// currently simulated.
 #[tauri::command]
 pub fn dev_tools_info(app: AppHandle) -> Result<DevToolsInfo, String> {
     require(&app)?;
@@ -57,8 +48,7 @@ pub fn dev_tools_info(app: AppHandle) -> Result<DevToolsInfo, String> {
     })
 }
 
-/// Shows `state` in place of the real Accessibility state. `None` shows the
-/// real one again.
+/// `None` shows the real state again.
 #[tauri::command]
 pub fn dev_simulate_accessibility(
     app: AppHandle,
@@ -69,8 +59,7 @@ pub fn dev_simulate_accessibility(
     Ok(())
 }
 
-/// Shows `granted` in place of the real Automation answer. `None` shows the
-/// real one again.
+/// `None` shows the real answer again.
 #[tauri::command]
 pub fn dev_simulate_automation(app: AppHandle, granted: Option<bool>) -> Result<(), String> {
     require(&app)?;
@@ -78,12 +67,9 @@ pub fn dev_simulate_automation(app: AppHandle, granted: Option<bool>) -> Result<
     Ok(())
 }
 
-/// The simulation a re-run of the first-run screen needs, given the state now.
-/// The screen opens straight onto the question while Accessibility is off, and
-/// onto Restart while a restart is needed; in any other state it stays hidden
-/// or, for "checking", would hold its button disabled behind the overlay with
-/// no way to reach the dev tools and end the simulation. Those become a
-/// simulated "not granted", so a re-run always opens onto a button that works.
+/// The simulation a re-run of the first-run screen needs. While Accessibility is off or a
+/// restart is needed the screen opens onto a button; any other state would hide it or strand
+/// its disabled button, so those become a simulated "not granted".
 fn rerun_simulation(current: AccessibilityState) -> Option<AccessibilityState> {
     match current {
         AccessibilityState::NotGranted | AccessibilityState::RelaunchRequired => None,
@@ -91,8 +77,7 @@ fn rerun_simulation(current: AccessibilityState) -> Option<AccessibilityState> {
     }
 }
 
-/// Opens the first-run screen again, simulating "not granted" first when the
-/// current state would not show it or would strand its button.
+/// Opens the first-run screen again, simulating "not granted" if it would not show.
 #[tauri::command]
 pub fn dev_rerun_onboarding(app: AppHandle) -> Result<(), String> {
     require(&app)?;
@@ -105,8 +90,6 @@ pub fn dev_rerun_onboarding(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Ends every simulation and any pending re-run, so the app shows its real
-/// state again.
 #[tauri::command]
 pub fn dev_reset(app: AppHandle) -> Result<(), String> {
     require(&app)?;

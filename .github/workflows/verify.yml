@@ -17,10 +17,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS needs Xcode 26+ (src-tauri/build.rs compiles the Swift
-        # sidecar, which requires the Foundation Models SDK). macos-26 ships
-        # Xcode 26.6 as its default toolchain - see AGENTS.md "On-device AI
-        # sidecar". Windows checks the same code with its own cfg branches.
+        # macOS needs Xcode 26+ (build.rs compiles the Swift sidecar, which needs the Foundation
+        # Models SDK); macos-26 ships 26.6. See AGENTS.md "On-device AI sidecar".
         runner: [macos-26, windows-latest]
     runs-on: ${{ matrix.runner }}
     defaults:

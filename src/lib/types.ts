@@ -82,7 +82,6 @@ export interface UpdateClient {
   defaultRate?: number | null;
   currency?: string | null;
   notes?: string | null;
-  /** Archives or restores. */
   archived?: boolean;
 }
 
@@ -159,7 +158,6 @@ export interface InvoiceSummary {
   id: string;
   number?: string | null;
   clientId: string;
-  /** The name printed under Bill To. */
   clientName: string;
   status: InvoiceStatus;
   currency: string;
@@ -175,7 +173,6 @@ export interface InvoiceSummary {
 export interface Invoice extends InvoiceSummary {
   billToEmail?: string | null;
   billToAddress?: string | null;
-  /** This invoice's own From block (see InvoiceDraftInput). */
   fromName: string;
   fromAddress: string;
   fromEmail?: string | null;
@@ -204,8 +201,8 @@ export interface InvoiceDraftInput {
   billToAddress?: string;
   billToEmail?: string;
   /**
-   * The From block: defaulted from Invoice settings when the draft is created,
-   * then this invoice's own. Name and address are required to finalize.
+   * The From block: defaulted from Invoice settings at creation; name and
+   * address are required to finalize.
    */
   fromName: string;
   fromAddress: string;
@@ -219,7 +216,6 @@ export interface InvoiceDraftInput {
   lines: InvoiceLineInput[];
 }
 
-/** Approved, billable, uninvoiced time and the rate it would bill at. */
 export interface BillableEntry {
   entryId: string;
   projectId: string;
@@ -254,7 +250,6 @@ export interface InvoiceProfileInput {
   paymentInstructions?: string;
   defaultNotes?: string;
   defaultTermsDays: number;
-  /** Sets the next number for the current year; omit to leave it. */
   nextNumber?: number;
 }
 
@@ -277,7 +272,6 @@ export interface TimeEntry {
   descriptionOrigin: "template" | "ai" | "user" | string;
   /** Classification state and confidences (list views only). */
   ai?: EntryAi;
-  /** The app or site with most of the entry's time (list views only). */
   dominantApp?: string;
 }
 
@@ -291,7 +285,6 @@ export interface EntryAi {
 
 export type SuggestionField = "category" | "project";
 
-/** One piece of evidence behind a suggestion; the "Why" line joins them. */
 export interface Signal {
   kind: "dominant" | "rule" | "knn" | "personal" | "llm" | "mention" | string;
   text: string;
@@ -360,12 +353,10 @@ export interface AiStatus {
   /** A calibration curve is active (otherwise the cold-start 90% cap). */
   calibrated: boolean;
   retrain: "idle" | "queued" | "running";
-  /** The last retrain's result, or why a due retrain is waiting. */
   retrainNote?: string;
   lastError?: string;
 }
 
-/** One trained version in `model_artifacts`. */
 export interface ArtifactVersion {
   id: string;
   trainedAt: number;
@@ -375,7 +366,6 @@ export interface ArtifactVersion {
   active: boolean;
 }
 
-/** Displayed confidence vs actual accept rate for one 10% bucket. */
 export interface ReliabilityBin {
   lo: number;
   hi: number;
@@ -390,14 +380,11 @@ export interface ThresholdPreview {
   wrong: number;
 }
 
-/** Settings → Categories & AI: how the learning loop is doing. */
 export interface AiMetrics {
   days: number;
-  /** Entries that got a suggestion in the period. */
   entries: number;
   decided: number;
   autoApproved: number;
-  /** Per-field suggestions a person ruled on. */
   reviewed: number;
   accepted: number;
   changed: number;
@@ -407,7 +394,6 @@ export interface AiMetrics {
     bins: ReliabilityBin[];
     samples: number;
     expectedError?: number;
-    /** The active curve as [raw, displayed] knots. */
     curve?: [number, number][];
     history: ArtifactVersion[];
   };
@@ -477,10 +463,8 @@ export interface ActivitySnapshot {
 }
 
 /**
- * The lightweight push (1Hz focused / 30s heartbeat backgrounded) - same
- * numbers as `ActivitySnapshot`, minus `segments`. A structural change
- * always arrives as a full `ActivitySnapshot` instead, so the segment list
- * only ever comes from that path.
+ * Lightweight push (1Hz focused / 30s background): `ActivitySnapshot` minus
+ * `segments`; structural changes arrive as a full snapshot.
  */
 export interface ActivityTick {
   current: ActivitySegment | null;
@@ -523,7 +507,6 @@ export interface EntryDetail {
   apps: AppContribution[];
   titles: TitleItem[];
   events: EntryEvent[];
-  /** The latest suggestion per field, category first. */
   suggestions: FieldSuggestion[];
   ruleSuggestion?: RuleSuggestion;
   job?: ClassifyJob;
@@ -555,10 +538,9 @@ export type ProjectsTab = "active" | "completed" | "archived";
 export type ClientsTab = "active" | "archived";
 export type ProjectsRange = "week" | "month" | "30d" | "all";
 
-/** Time Entries' filter bar. Values are ids, or `none` for "no …". */
 /**
- * Analyze > Timesheets' multi-select narrowing, by id. `"none"` matches an
- * entry with no client, no project, or no category; an empty list matches all.
+ * Multi-select narrowing by id. `"none"` matches no client, project or
+ * category; empty matches all.
  */
 export interface TimesheetFilters {
   clientIds?: string[];
@@ -640,9 +622,7 @@ export type Route =
     }
   | {
       name: "invoices";
-      /** An existing invoice: an editor for a draft, the document otherwise. */
       invoiceId?: string;
-      /** A new invoice, optionally for a client and one project's time. */
       compose?: { clientId?: string; projectId?: string };
     }
   | {
@@ -650,7 +630,6 @@ export type Route =
       section?: string;
     };
 
-/** The Rust-side filter (src-tauri/src/reports.rs). */
 export interface EntryQuery extends EntryFilters {
   startMs: number;
   endMs: number;
@@ -682,7 +661,6 @@ export interface ProjectStats {
   monthMs: number;
   billableMs: number;
   billableMonthMs: number;
-  /** Approved, billable time not yet on an invoice. */
   unbilledMs: number;
   unbilledEntries: number;
   lastActivity?: number | null;
@@ -739,8 +717,6 @@ export interface EnergySummary {
   windowDays: number;
 }
 
-// --- Updates (src-tauri/src/updater.rs) ---
-
 export type UpdatePhase =
   | { kind: "idle" }
   | { kind: "checking" }
@@ -749,14 +725,12 @@ export type UpdatePhase =
 
 export interface ReleaseNotes {
   version: string;
-  /** RFC 3339 publish time, when known. */
   publishedAt: string | null;
   notes: string;
 }
 
 export interface AvailableUpdate {
   version: string;
-  /** Every release newer than the installed version, newest first. */
   releases: ReleaseNotes[];
 }
 
@@ -767,12 +741,6 @@ export interface UpdateStatus {
   error: string | null;
 }
 
-// --- Permissions (src-tauri/src/permissions.rs) ---
-
-/**
- * What the running app knows about its Accessibility access
- * (src-tauri/src/permissions/accessibility.rs).
- */
 export type AccessibilityState =
   | "notApplicable"
   | "notGranted"
@@ -792,19 +760,10 @@ export interface PermissionInfo {
   settingsUrl: string;
 }
 
-/**
- * What the developer tools panel reads (src-tauri/src/dev_tools.rs). Only a
- * dev build answers; the other commands refuse outside one.
- */
 export interface DevToolsInfo {
-  /** The bundle identifier this process runs as, e.g. `com.offlinestudios.openrize.dev`. */
   identifier: string;
-  /** The installed app's identifier, which the real macOS grants belong to. */
   releaseIdentifier: string;
-  /** The simulated Accessibility state, or `null` when the real one is in use. */
   accessibility: AccessibilityState | null;
-  /** The simulated Automation grant, or `null` when the real one is in use. */
   automation: boolean | null;
-  /** Whether the first-run permissions screen has been re-armed for this session. */
   onboardingRerun: boolean;
 }

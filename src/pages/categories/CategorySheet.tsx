@@ -19,18 +19,14 @@ import type {
 } from "../../lib/types";
 
 interface CategorySheetProps {
-  /** Editing an existing category; absent creates one. */
   category?: Category;
-  /** Existing categories, used to pick the least-used palette swatch. */
   categories?: Category[];
-  /** Usage stats across all entries for smart delete. */
   stats?: CategoryStats;
   onClose: () => void;
   onSaved: (category: Category) => void;
   onRemoved?: (category: Category, removal: CategoryRemoval) => void;
 }
 
-/** Pick the swatch least used by live categories. */
 function leastUsedSwatch(
   categories: Category[] = [],
   exceptId?: string,
@@ -56,10 +52,6 @@ function leastUsedSwatch(
   return best;
 }
 
-/**
- * Category editor sheet: name, palette swatch, "what counts" description,
- * optional apps & sites hints, work hours toggle, and smart delete/archive.
- */
 export function CategorySheet({
   category,
   categories = [],

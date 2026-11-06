@@ -1,14 +1,6 @@
-//! User preferences - theme, accent, size mode, close behavior, tray, retention.
-//!
-//! Storage policy: a single JSON file under the XDG config home
-//! (`$XDG_CONFIG_HOME/openrize/settings.json`, or `~/.config/openrize/...`;
-//! on Windows `%LOCALAPPDATA%\com.offlinestudios.openrize\config\settings.json`,
-//! which stays on the machine and goes with the app's data when it is deleted).
-//! Preferences are config, not data: they survive deleting the app-data
-//! directory, and they are portable between machines the way `.dotfiles` are.
-//!
-//! The file is written atomically (temp + rename) and a corrupt file is moved
-//! aside rather than silently reset, matching `timers.rs`.
+//! User preferences in one JSON file under the XDG config home (on Windows `config\settings.json`
+//! in Local AppData). Config, not data, so it survives deleting app data. Written atomically; a
+//! corrupt file is moved aside, not reset, as in `timers.rs`.
 
 use std::ffi::OsString;
 use std::fs;
@@ -57,8 +49,7 @@ pub enum SizeMode {
     VeryRelaxed,
 }
 
-/// How panels are drawn: spaced rounded cards, or edge-to-edge sections split
-/// by plain dividers.
+/// How panels are drawn: spaced rounded cards, or edge-to-edge sections split by dividers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum Shape {
@@ -75,7 +66,6 @@ pub enum CloseBehavior {
     Hide,
 }
 
-/// Placement of app-owned reminder, live-break, and welcome-back panels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum NotificationPlacement {
@@ -105,7 +95,6 @@ impl Default for StopwatchReminder {
     }
 }
 
-/// What the AI suggests for each entry (Rize's "Suggestion level").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum AiSuggest {
@@ -119,7 +108,6 @@ pub enum AiSuggest {
 pub const MIN_AUTO_ACCEPT_PERCENT: u8 = 50;
 pub const MAX_AUTO_ACCEPT_PERCENT: u8 = 100;
 const MAX_CUSTOM_PROMPT_CHARS: usize = 1_000;
-/// The work week the Calendar, My Timesheet, and Timesheets measure against.
 pub const DEFAULT_WEEKLY_TARGET_HOURS: u16 = 40;
 pub const MAX_WEEKLY_TARGET_HOURS: u16 = 168;
 
@@ -257,8 +245,7 @@ impl TrackingHours {
         self
     }
 
-    /// Whether the timestamp (in epoch milliseconds) is inside the configured tracking window.
-    /// Respects the local system timezone and DST.
+    /// Whether the timestamp (epoch ms) is inside the tracking window, in local time and DST.
     pub fn is_inside_window(&self, now_ms: u64) -> bool {
         use chrono::{DateTime, Datelike, Local, Timelike, Weekday};
 
@@ -331,7 +318,6 @@ impl Default for Weekdays {
 }
 
 impl Weekdays {
-    /// Whether the schedule repeats on `weekday`.
     pub fn includes(&self, weekday: chrono::Weekday) -> bool {
         use chrono::Weekday::{Fri, Mon, Sat, Sun, Thu, Tue, Wed};
         match weekday {
@@ -352,7 +338,6 @@ impl Weekdays {
 pub struct ScheduledBreak {
     pub id: String,
     pub label: String,
-    /// `HH:MM`, local time.
     pub at: String,
     pub minutes: u16,
     pub days: Weekdays,
@@ -410,9 +395,7 @@ pub struct BreakSettings {
     /// The reminder's snooze button snoozes for this long; its chevron offers
     /// every length in `SNOOZE_CHOICES`.
     pub snooze_minutes: u16,
-    /// An optional extra line on the reminder. Empty shows nothing.
     pub message: String,
-    /// Pause running stopwatches for a break and resume them after it.
     pub pause_stopwatches: bool,
     pub chime: bool,
     pub schedules: Vec<ScheduledBreak>,
@@ -468,7 +451,6 @@ pub struct Settings {
     pub accent: Accent,
     pub shape: Shape,
     pub size_mode: SizeMode,
-    /// What the window's close button does while the tray is enabled.
     pub close_behavior: CloseBehavior,
     pub tray_enabled: bool,
     /// Activity history older than this many days is deleted. 0 = forever.
@@ -478,7 +460,6 @@ pub struct Settings {
     /// `auto_accept_percent`.
     pub auto_accept: bool,
     pub auto_accept_percent: u8,
-    /// Appended to the Foundation Model's instructions.
     pub ai_custom_prompt: String,
     /// Expected work hours per week. A day's target is a fifth of it.
     pub weekly_target_hours: u16,
@@ -535,17 +516,9 @@ impl Settings {
     }
 }
 
-/// `$XDG_CONFIG_HOME/openrize`, falling back to `$HOME/.config/openrize`.
-///
-/// Deliberately not Tauri's `app_config_dir`: on macOS that lands under
-/// `~/Library/Application Support`, and this app keeps its preferences in the
-/// conventional `.config` location on every platform. Windows is the exception
-/// to the fallback: `HOME` exists only in shells like Git Bash, so honoring it
-/// would give the app (launched from Explorer) and `rize` different files.
-/// There the fallback is the `config` folder inside the app's Local AppData
-/// folder (Roaming would sync the file off the machine, and the plain
-/// `%LOCALAPPDATA%\openrize` is the installer's folder), and the first call
-/// moves a settings file left in an older location over (`migrate_legacy`).
+/// `$XDG_CONFIG_HOME/openrize`, else `$HOME/.config/openrize` (not Tauri's `app_config_dir`: every
+/// platform uses `.config`). Windows ignores `HOME` (only Git Bash sets it) and uses the `config`
+/// folder in Local AppData; the first call moves a legacy settings file there (`migrate_legacy`).
 pub fn config_dir() -> PathBuf {
     let env = ConfigEnv::from_process();
     let dir = env.resolve(cfg!(windows));
@@ -616,12 +589,9 @@ impl ConfigEnv {
         base.join("openrize")
     }
 
-    /// Where earlier Windows builds kept settings: the roaming folder, then
-    /// `%LOCALAPPDATA%\openrize` (the installer's folder, so only its
-    /// settings file is ever taken), and before those the profile, where the
-    /// app launched from Explorer (no `HOME`) wrote the first and `rize` run
-    /// from Git Bash (`HOME` set) the second. `migrate_legacy` takes the most
-    /// recently written.
+    /// Where earlier Windows builds kept settings: roaming, `%LOCALAPPDATA%\openrize` (the
+    /// installer's folder, so only its settings file is taken), and the profile (written by the
+    /// app, or by `rize` from Git Bash). `migrate_legacy` takes the most recently written.
     fn legacy_dirs(&self) -> Vec<PathBuf> {
         let mut dirs: Vec<PathBuf> = self
             .roaming
@@ -644,13 +614,9 @@ fn is_config_file(name: &str) -> bool {
     name == FILE_NAME || name.starts_with("settings.corrupt-")
 }
 
-/// Moves settings from the newest legacy directory that has any into `dir`,
-/// only when `dir` has no settings of its own, and removes that directory when
-/// nothing else is left in it. Safe for the app and `rize` starting together
-/// and never replaces a file already in `dir`: each file is copied under a
-/// private name, then published with a hard link, which fails instead of
-/// overwriting, so a reader sees a whole `settings.json` or none. Failures are
-/// logged and leave the legacy files where they were.
+/// Moves settings from the newest legacy directory that has any into `dir`, only when `dir` has
+/// none, then removes it once empty. Safe if the app and `rize` start together: files are copied
+/// privately, then hard-linked into place, which never overwrites. Failures are logged, not fatal.
 fn migrate_legacy(dir: &Path, legacy_dirs: &[PathBuf]) {
     if dir.join(FILE_NAME).exists() {
         return;
@@ -712,13 +678,9 @@ pub struct SettingsStore {
     settings: Settings,
 }
 
-/// Runs in every webview before the page's own scripts, and seeds the
-/// `localStorage` copy of the saved theme and shape that `index.html` paints
-/// from. Without it a user upgrading from a build that had no copy (or a fresh
-/// profile) gets the defaults on the first frame and only switches once the
-/// settings arrive over IPC. A copy that already exists is left alone: it is
-/// kept current by `applyAppearance` in `src/lib/settings.ts`, which owns the
-/// key names. Read-only, so a damaged file is still quarantined by `load`.
+/// Runs in every webview before the page's scripts, seeding the `localStorage` copy of the saved
+/// theme and shape that `index.html` paints from. An existing copy is left alone (`applyAppearance`
+/// in `src/lib/settings.ts` owns the keys). Read-only; `load` still quarantines a bad file.
 pub fn appearance_init_script(dir: &Path) -> String {
     let settings = fs::read(dir.join(FILE_NAME))
         .ok()
@@ -933,7 +895,6 @@ mod tests {
         ] {
             assert!(store.patch(key, value).is_err(), "accepted {key}");
         }
-        // Failed patches leave the file as it was.
         let reloaded = SettingsStore::load(&dir).unwrap().snapshot();
         assert_eq!(reloaded, store.snapshot());
         let _ = fs::remove_dir_all(dir);
@@ -1150,10 +1111,8 @@ mod tests {
         assert_eq!(defaults.break_minutes, 5);
         assert_eq!(defaults.snooze_minutes, 5);
         assert_eq!(defaults.message, "");
-        // Pausing stopwatches for a break is opt-in.
         assert!(!defaults.pause_stopwatches);
         assert!(defaults.schedules.is_empty());
-        // An older settings file loads with the defaults filled in.
         let loaded: Settings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
         assert_eq!(loaded.breaks, defaults);
     }
@@ -1199,7 +1158,6 @@ mod tests {
         fs::write(dir.join(FILE_NAME), b"{ not json").unwrap();
         let store = SettingsStore::load(&dir).unwrap();
         assert_eq!(store.snapshot(), Settings::default());
-        // The bad file is preserved under a quarantine name, not deleted.
         assert!(fs::read_dir(&dir)
             .unwrap()
             .filter_map(Result::ok)
@@ -1208,7 +1166,6 @@ mod tests {
 
     #[test]
     fn test_is_time_in_window_daytime() {
-        // 07:00 to 19:00
         assert!(!is_time_in_window(6, 59, "07:00", "19:00"));
         assert!(is_time_in_window(7, 0, "07:00", "19:00"));
         assert!(is_time_in_window(12, 30, "07:00", "19:00"));
@@ -1219,14 +1176,12 @@ mod tests {
 
     #[test]
     fn test_is_time_in_window_zero_length() {
-        // Zero length window means no capture
         assert!(!is_time_in_window(7, 0, "07:00", "07:00"));
         assert!(!is_time_in_window(12, 0, "07:00", "07:00"));
     }
 
     #[test]
     fn test_is_time_in_window_overnight() {
-        // 22:00 to 06:00
         assert!(!is_time_in_window(21, 59, "22:00", "06:00"));
         assert!(is_time_in_window(22, 0, "22:00", "06:00"));
         assert!(is_time_in_window(23, 59, "22:00", "06:00"));
@@ -1250,7 +1205,6 @@ mod tests {
             ..TrackingHours::default()
         };
         assert_eq!(th.monday.start, "10:00");
-        // Collapsing to single window:
         th.per_day = false;
         let normalized = th.normalized();
         assert_eq!(normalized.monday.start, "08:00");
@@ -1274,7 +1228,6 @@ mod tests {
             },
             ..TrackingHours::default()
         };
-        // Construct a Monday at 12:00 local time
         let dt = Local
             .with_ymd_and_hms(2026, 9, 28, 12, 0, 0)
             .single()
@@ -1421,7 +1374,6 @@ mod tests {
         let leftovers: Vec<_> = fs::read_dir(&new).unwrap().collect();
         assert_eq!(leftovers.len(), 2, "no staging files are left behind");
 
-        // Running again, as a second process would, changes nothing.
         migrate_legacy(&new, &[legacy]);
         assert!(new.join(FILE_NAME).is_file());
         let _ = fs::remove_dir_all(root);

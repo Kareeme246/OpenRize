@@ -9,24 +9,20 @@ import {
 
 interface LineItemsProps {
   lines: DraftLine[];
-  /** Amounts priced by Rust, by line index; null while a render is pending. */
   amounts: number[] | null;
-  /** Rust's total for the priced lines, when it is current. */
   total?: number;
   onChange: (key: string, patch: Partial<DraftLine>) => void;
   onRemove: (key: string) => void;
   onAddTime: () => void;
   onAddFixed: (kind: "retainer" | "manual") => void;
-  /** Tracked time waiting to be invoiced for the chosen client. */
   ready: { count: number; hundredths: number; cents: number } | null;
   onAddAllReady: () => void;
   disabled: boolean;
 }
 
 /**
- * The invoice's rows: tracked time (one per entry), a fixed retainer fee, or a
- * manual item. Quantity times rate is priced by Rust; the amounts shown here
- * are its answer, so the editor can never disagree with the paper.
+ * Rust prices quantity times rate; the amounts shown are its answer, so the
+ * editor never disagrees with the paper.
  */
 export function LineItems({
   lines,

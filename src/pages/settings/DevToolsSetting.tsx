@@ -42,10 +42,8 @@ const buttonClass =
   "shrink-0 cursor-pointer rounded-md border border-line bg-surface px-2.5 py-1 text-[11.5px] font-medium text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg";
 
 /**
- * Developer-only controls for testing permissions and onboarding by hand.
- * Rendered only in a macOS dev build (see `DEV_TOOLS`), and only answers when the
- * app runs under the dev identifier. Every status comes from re-reading
- * `dev_tools_info`, so the panel always shows what the backend holds.
+ * Dev-only permission and onboarding controls; statuses are re-read from
+ * `dev_tools_info`.
  */
 export function DevToolsSetting() {
   const showToast = useToast();
@@ -68,7 +66,6 @@ export function DevToolsSetting() {
   useTauriEvent(api.PERMISSIONS_CHANGED, load);
   useTauriEvent(api.ONBOARDING_CHANGED, load);
 
-  /** Runs a dev command, then re-reads what it changed. */
   const run = (action: () => Promise<void>): void => {
     action()
       .then(load)
@@ -232,7 +229,6 @@ export function DevToolsSetting() {
   );
 }
 
-/** One tool: its title, what it changes and does not, and its control. */
 function DevBlock({
   title,
   description,

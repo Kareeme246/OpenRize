@@ -3,20 +3,17 @@ import * as api from "../lib/api";
 import type { AiMetrics } from "../lib/types";
 import { useTauriEvent } from "./useTauriEvent";
 
-/** Coalesces a burst of entry and status events into one refetch. */
 const REFETCH_DEBOUNCE_MS = 400;
 
 export interface AiMetricsApi {
   metrics: AiMetrics | null;
   error: string | null;
-  /** Adopts a snapshot a mutating command already returned. */
   adopt: (metrics: AiMetrics) => void;
 }
 
 /**
- * The AI effectiveness snapshot for the last `days` days, refetched when
- * entries change (a review lands) or the engine status changes (a retrain
- * or calibration refit finished).
+ * The AI effectiveness snapshot for the last `days` days, refetched on entry or
+ * engine status changes.
  */
 export function useAiMetrics(days: number): AiMetricsApi {
   const [metrics, setMetrics] = useState<AiMetrics | null>(null);

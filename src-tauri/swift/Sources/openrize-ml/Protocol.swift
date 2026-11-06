@@ -1,10 +1,8 @@
 import Foundation
 
-// Wire protocol: one JSON object per line on stdin, one reply per line on
-// stdout. Requests are `{"id": 7, "m": "classify", "p": {...}}`; replies are
-// `{"id": 7, "r": {...}}` on success or `{"id": 7, "e": "message"}` on
-// failure. The sidecar is stateless apart from caches of loaded models, and
-// Rust (src-tauri/src/ai/sidecar.rs) owns every piece of user data.
+// One JSON object per line each way: `{"id": 7, "m": "classify", "p": {...}}` in, `{"id": 7,
+// "r": {...}}` or `{"id": 7, "e": "message"}` out. Stateless apart from model caches; Rust
+// (src-tauri/src/ai/sidecar.rs) owns all user data.
 
 struct Envelope: Decodable {
     let id: Int
@@ -30,8 +28,6 @@ struct SidecarError: Error, CustomStringConvertible {
     init(_ description: String) { self.description = description }
 }
 
-// MARK: capabilities
-
 struct CapabilitiesResult: Encodable {
     /// `available`, or why the Foundation Model can't be used:
     /// `appleIntelligenceNotEnabled`, `modelNotReady`, `deviceNotEligible`,
@@ -45,8 +41,6 @@ struct CapabilitiesResult: Encodable {
     let version: String
 }
 
-// MARK: embed
-
 struct EmbedParams: Decodable {
     let texts: [String]
 }
@@ -56,8 +50,6 @@ struct EmbedResult: Encodable {
     let vectors: [[Float]?]
     let dimension: Int
 }
-
-// MARK: classify
 
 struct Choice: Decodable {
     let id: String
@@ -76,7 +68,6 @@ struct Example: Decodable {
 struct ClassifyParams: Decodable {
     let features: String
     let categories: [Choice]
-    /// Absent when the user only wants category suggestions.
     let projects: [Choice]?
     let examples: [Example]?
     let customInstructions: String?
@@ -90,13 +81,10 @@ struct ClassifyResult: Encodable {
     let categoryVotes: [String: Int]
     /// Project id (or `none`) -> number of samples that picked it.
     let projectVotes: [String: Int]?
-    /// The first sample's one-sentence description.
     let description: String?
     let samples: Int
     let latencyMs: Int
 }
-
-// MARK: personal model
 
 struct TrainRow: Decodable {
     let text: String
@@ -105,9 +93,7 @@ struct TrainRow: Decodable {
 }
 
 struct TrainParams: Decodable {
-    /// JSON-lines file of `TrainRow`, written by Rust.
     let dataset: String
-    /// Destination directory for the compiled model (`.mlmodelc`).
     let out: String
 }
 
@@ -128,7 +114,6 @@ struct PredictParams: Decodable {
 }
 
 struct PredictResult: Encodable {
-    /// One label -> probability map per input text.
     let hypotheses: [[String: Double]]
 }
 

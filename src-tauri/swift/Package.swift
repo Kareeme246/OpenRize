@@ -1,6 +1,4 @@
 // swift-tools-version: 6.0
-// The on-device ML sidecar (`openrize-ml`). `src-tauri/build.rs` builds it and
-// stages it as the Tauri `externalBin` declared in `tauri.macos.conf.json`.
 import PackageDescription
 
 let package = Package(

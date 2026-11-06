@@ -5,7 +5,6 @@ use serde::Serialize;
 
 use super::engine::{streak_from_segments, BreakRecord};
 
-/// A row as the Calendar shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BreakEntry {

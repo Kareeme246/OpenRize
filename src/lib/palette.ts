@@ -1,7 +1,7 @@
 /**
- * The muted categorical palette (design board, theme T). Projects pick from
- * it; entities without a colour of their own (apps, clients) get one from it
- * by name, so a colour follows its entity rather than its rank in a chart.
+ * The muted categorical palette. Entities without a colour of their own (apps,
+ * clients) hash into it by name, so colour follows the entity, not its chart
+ * rank.
  */
 export const PALETTE = [
   "#75a4e5",
@@ -16,7 +16,6 @@ export const PALETTE = [
   "#9b87df",
 ];
 
-/** The palette slot `key` hashes to (FNV-1a over its UTF-16 code units). */
 function slotFor(key: string): number {
   let hash = 0x811c9dc5;
   for (let i = 0; i < key.length; i++) {
@@ -27,10 +26,8 @@ function slotFor(key: string): number {
 }
 
 /**
- * Colours for the entities one chart shows together. Each key starts at the
- * slot its name hashes to, so it keeps its colour as filters change, and
- * steps to the next free slot on a clash so no two share one (until there
- * are more keys than colours). Keys claim slots in name order, not rank.
+ * Colours for one chart's entities: each key starts at its hashed slot and
+ * steps to the next free one on a clash; keys claim slots in name order.
  */
 export function assignColors(keys: Iterable<string>): Map<string, string> {
   const colors = new Map<string, string>();

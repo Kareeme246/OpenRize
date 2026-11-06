@@ -436,9 +436,8 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
     }
 
-    // A segment captured in a private browsing window is marked, so its
-    // detail can be erased once its entry is classified (`activity::redact`),
-    // and so it never enters the title search index.
+    // Marks a segment captured in a private window so its detail can be erased once its entry is
+    // classified (`activity::redact`) and so it stays out of the title search index.
     if current_version < 14 {
         let tx = conn.transaction()?;
         if !table_has_column(&tx, "segments", "private")? {
@@ -451,11 +450,9 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
     }
 
-    // v15: a group becomes a tag (the same name on each timer, so a pure
-    // column rename keeps every existing group as a tag), and timers can sit
-    // under a section, an organizational subheading with its own order. A
-    // section's timers keep the one global `ordinal`, so the page reads them
-    // in that order within each section.
+    // v15: a group becomes a tag (a pure column rename, the same name on each timer), and timers
+    // can sit under a section, a subheading with its own order. Section timers keep the one global
+    // `ordinal`, so each section reads in that order.
     if current_version < 15 {
         let tx = conn.transaction()?;
         match (
@@ -498,11 +495,9 @@ fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool
     Ok(cols.any(|col| col.as_deref() == Ok(column)))
 }
 
-/// Private segments stay out of `segments_fts`: the index keeps trigrams of
-/// every title until it is merged, so erasing a title from `segments` would
-/// not erase it from there. A segment is indexed only while it is not
-/// private, and it never changes its mind after it is written. The partial
-/// index is what the redaction sweep walks; private rows are few.
+/// Private segments stay out of `segments_fts`: the index keeps trigrams of every title until
+/// merged, so erasing a title from `segments` would not erase it there. Segments are indexed only
+/// while not private; the partial index is what the redaction sweep walks.
 const PRIVATE_SEGMENTS_V14: &str = "
 CREATE INDEX IF NOT EXISTS idx_segments_private_detail ON segments (ended_at)
   WHERE private = 1 AND (url IS NOT NULL OR domain IS NOT NULL OR title <> 'Private window');
@@ -521,13 +516,9 @@ CREATE TRIGGER segments_fts_update AFTER UPDATE OF title, private ON segments BE
 END;
 ";
 
-/// A timer segment becomes a start and an end, as a time entry is, instead of
-/// a length. `recorded_at` is when the stretch was recorded, which for a pause
-/// is the end of the run, so the end is `recorded_at` and the start is a
-/// `duration_ms` before it. A stretch recorded sooner after the epoch than it
-/// is long (only seeded data) starts at 0 instead, so no start goes negative;
-/// either way `ended_at - started_at` is the old `duration_ms` exactly and
-/// every timer's total is unchanged.
+/// A timer segment becomes a start and an end instead of a length: the end is `recorded_at`, the
+/// start a `duration_ms` before it (clamped to 0 for seeded data near the epoch), so `ended_at -
+/// started_at` is the old `duration_ms` exactly and every timer's total is unchanged.
 const TIMER_SEGMENTS_V12: &str = "
 CREATE TABLE timer_segments_v12 (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -544,13 +535,9 @@ DROP TABLE timer_segments;
 ALTER TABLE timer_segments_v12 RENAME TO timer_segments;
 ";
 
-/// Agent jobs. A job is one agent turn (prompt to stop) on one project, seen
-/// through an agent bridge (see `agents/mod.rs`): `agent_transitions` holds its
-/// state changes with timestamps, and `agent_focus` the time the person had an
-/// agent's pane in front of them. Counted agent time becomes ordinary
-/// `time_entries` rows with `source = 'agent'`, linked back to their job by
-/// `agent_job_id`. Only a working directory that belongs to a project is ever
-/// stored. Purely additive, so existing installs upgrade in place untouched.
+/// Agent jobs: one agent turn on one project via an agent bridge (`agents/mod.rs`), with
+/// `agent_transitions` and `agent_focus` pane time. Counted agent time becomes `time_entries` rows
+/// with `source = 'agent'` and `agent_job_id`. Only a project's working directory is stored.
 const AGENTS_V9: &str = "
 CREATE TABLE agent_jobs (
   id             TEXT PRIMARY KEY,
@@ -598,20 +585,9 @@ ALTER TABLE time_entries ADD COLUMN agent_job_id TEXT;
 CREATE INDEX idx_time_entries_agent_job ON time_entries (agent_job_id);
 ";
 
-/// Removes the agent job tables and counted agent time that v9 added.
-///
-/// - Agent time (`source = 'agent'`) was derived from the job tables and was
-///   never part of the person's own work, so it goes with them. It is deleted
-///   outright, not soft-deleted: the entry builder treats every row in a
-///   range, deleted ones included, as already accounting for its span, and
-///   agent rows overlap the person's own time.
-/// - Invoices keep their amounts. A draft line that billed agent time becomes
-///   a fixed (`manual`) line with the same description, quantity, rate and
-///   amount, so the draft total does not move and the draft stays editable.
-///   Lines of issued invoices are left as they are: they are snapshots (the
-///   issued PDF is stored) and never read the entry again.
-/// - The person's own time that was carved out for an agent's folder keeps its
-///   project and stays as ordinary entries (`source = 'auto'`).
+/// Removes the agent job tables and agent time (`source = 'agent'`), deleted outright since the
+/// entry builder counts soft-deleted rows as covering their span. Draft invoice lines that billed
+/// it become `manual` lines with the same amounts; issued invoices are untouched.
 const REMOVE_AGENTS_V10: &str = "
 UPDATE invoice_lines
 SET kind = 'manual', entry_id = NULL, started_at = NULL, ended_at = NULL
@@ -637,9 +613,8 @@ DROP TABLE agent_jobs;
 DROP TABLE agent_focus;
 ";
 
-/// Timer persistence: stopwatch trackers (`timers`), their completed stretches of
-/// time (`timer_segments`), and on-demand snapshots (`timer_saved_states`).
-/// Purely additive, reconciling timer state into the versioned migration track.
+/// Timer persistence: `timers`, their completed stretches (`timer_segments`) and snapshots
+/// (`timer_saved_states`). Purely additive.
 const TIMERS_V11: &str = "
 CREATE TABLE IF NOT EXISTS timers (
   id             TEXT PRIMARY KEY,
@@ -664,10 +639,8 @@ CREATE TABLE IF NOT EXISTS timer_saved_states (
 );
 ";
 
-/// Break reminders: one row per break decision (taken, skipped, missed, or
-/// credited from idle time). The break itself stays a `break` segment; this
-/// table records the choice around it and links to its segment. Purely
-/// additive, so existing installs upgrade in place untouched.
+/// Break reminders: one row per break decision (taken, skipped, missed or credited from idle),
+/// linked to its `break` segment. Purely additive.
 const BREAKS_V8: &str = "
 CREATE TABLE breaks (
   id          TEXT PRIMARY KEY,
@@ -687,22 +660,16 @@ CREATE INDEX breaks_started_at ON breaks (started_at);
 CREATE INDEX breaks_due_at ON breaks (due_at);
 ";
 
-/// The Clients page: a client can be archived (kept, hidden from the active
-/// list and from the pickers that assign one) and carries free-form notes.
-/// Both columns are additive, so existing clients upgrade in place untouched.
+/// The Clients page: a client can be archived (hidden from the active list and pickers) and carries
+/// notes. Both columns are additive.
 const CLIENT_ARCHIVE_V7: &str = "
 ALTER TABLE clients ADD COLUMN archived_at INTEGER;
 ALTER TABLE clients ADD COLUMN notes TEXT;
 ";
 
-/// Real invoice documents. Rebuilds `invoices` and `invoice_lines` (their
-/// status CHECK and the one-row-per-entry primary key cannot be altered in
-/// place) and adds the issuer profile and per-year number sequences.
-///
-/// A USD draft becomes an editable draft (issue date from its creation day,
-/// Net 30); everything else is marked `legacy` here and deleted by v6, which
-/// also covers databases that already ran this migration. `sent` maps to
-/// `open`. Rates become cents and hours become hundredths.
+/// Real invoice documents. Rebuilds `invoices` and `invoice_lines` (CHECK and primary key cannot be
+/// altered in place), adds issuer profile and number sequences. USD drafts become editable (Net
+/// 30); the rest is marked `legacy` (deleted by v6); `sent` maps to `open`; rates become cents.
 const INVOICE_DOCUMENTS_V5: &str = "
 ALTER TABLE invoices RENAME TO invoices_v4;
 
@@ -814,14 +781,9 @@ CREATE INDEX idx_invoice_lines_invoice ON invoice_lines(invoice_id, position);
 CREATE INDEX idx_invoices_status ON invoices(status);
 ";
 
-/// Drops the `legacy` concept and gives every invoice its own From block.
-///
-/// v5 preserved pre-document invoices as read-only `legacy` rows; they are not
-/// supported, so they (and their lines) are deleted here, on fresh installs and
-/// on databases already upgraded through v5 alike. Time they reserved is
-/// released so no `invoice_id` dangles. The From columns are backfilled from
-/// each finalized invoice's issuer snapshot, and drafts start from the current
-/// Invoice settings.
+/// Drops the `legacy` concept and gives every invoice its own From block. Legacy rows and lines are
+/// deleted, releasing the time they reserved so no `invoice_id` dangles. From columns backfill from
+/// each finalized invoice's issuer snapshot; drafts start from current Invoice settings.
 const INVOICE_FROM_V6: &str = "
 UPDATE time_entries SET invoice_id = NULL
 WHERE invoice_id IN (SELECT id FROM invoices WHERE legacy = 1);
@@ -897,10 +859,9 @@ mod tests {
         assert_eq!(version, SCHEMA_VERSION);
     }
 
-    /// A structural fingerprint of tables, columns, indexes, and triggers.
-    /// Columns are unordered because the old ladder's `ALTER TABLE ADD COLUMN`
-    /// statements append them; `sqlite_master.sql` would report that harmless
-    /// difference despite equivalent table definitions.
+    /// A structural fingerprint of tables, columns, indexes and triggers. Columns are unordered
+    /// because `ALTER TABLE ADD COLUMN` appends them, which `sqlite_master.sql` would report as a
+    /// difference.
     fn schema_snapshot(conn: &Connection) -> Vec<String> {
         let mut lines = Vec::new();
 
@@ -1049,8 +1010,7 @@ mod tests {
         assert_eq!(schema_snapshot(&fresh), schema_snapshot(&legacy));
     }
 
-    /// The invoice tables and time-protection trigger exactly as main's v2 and
-    /// v3 steps leave them (the state of a shipped install at user_version 4).
+    /// The invoice tables and time-protection trigger as main's v2 and v3 steps leave them.
     const SHIPPED_V4_INVOICES: &str = "
         CREATE TABLE invoices (
           id TEXT PRIMARY KEY, client_id TEXT NOT NULL, client_name TEXT NOT NULL,
@@ -1074,9 +1034,8 @@ mod tests {
           NEW.status IS NOT OLD.status OR NEW.billable IS NOT OLD.billable OR NEW.deleted_at IS NOT OLD.deleted_at
         ) BEGIN SELECT RAISE(ABORT, 'Invoiced time cannot be edited; delete its draft invoice first'); END;";
 
-    /// A database as main ships it at user_version 4: the full pre-invoice
-    /// schema, the old invoice tables, and tracked data of every kind,
-    /// including time reserved by a USD draft and by a sent invoice.
+    /// A database as main ships it at user_version 4: the pre-invoice schema, the old invoice
+    /// tables and tracked data of every kind.
     fn shipped_v4_database() -> Connection {
         let mut conn = Connection::open_in_memory().unwrap();
         legacy_v1_through_v7::run(&mut conn).unwrap();
@@ -1104,9 +1063,8 @@ mod tests {
         conn
     }
 
-    /// Everything the upgrade must leave exactly as it found it, and what the
-    /// invoice steps must do: only the USD draft survives, still holding its
-    /// time; the deleted invoices release theirs.
+    /// What the upgrade must leave as it found it: only the USD draft survives, holding its time;
+    /// the deleted invoices release theirs.
     fn assert_upgraded_in_place(conn: &Connection) {
         let mut fresh = Connection::open_in_memory().unwrap();
         run_migrations(&mut fresh).unwrap();
@@ -1154,7 +1112,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(other, (1, 1, 1, 11));
-        // The draft's line survived, and invoiced time is still protected.
         let lines: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM invoice_lines WHERE entry_id = 'e-draft'",
@@ -1171,8 +1128,8 @@ mod tests {
             .is_err());
     }
 
-    /// A shipped install at user_version 4 upgrades in place to the schema a
-    /// new install gets, without touching anything it tracked.
+    /// A shipped install at user_version 4 upgrades in place to a new install's schema, losing
+    /// nothing.
     #[test]
     fn a_shipped_v4_database_upgrades_in_place_to_the_current_schema() {
         let mut conn = shipped_v4_database();
@@ -1180,9 +1137,7 @@ mod tests {
         assert_upgraded_in_place(&conn);
     }
 
-    /// The same for a database that already ran the v5 step (which kept legacy
-    /// rows and has no From columns): v6 deletes the legacy rows, adds the
-    /// columns, and backfills drafts from the current settings.
+    /// The same for a database that already ran the v5 step (legacy rows kept, no From columns).
     #[test]
     fn a_v5_database_upgrades_in_place_to_the_current_schema() {
         let mut conn = shipped_v4_database();
@@ -1219,7 +1174,6 @@ mod tests {
         );
     }
 
-    /// The v2 invoice tables as shipped, with one row of every kind.
     #[test]
     fn v5_upgrades_usd_drafts_and_v6_deletes_the_rest() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -1448,8 +1402,7 @@ mod tests {
         assert_eq!(v, SCHEMA_VERSION);
     }
 
-    /// A database as v6 shipped it: the fresh schema without the client
-    /// archive and notes columns, holding clients, projects, and tracked time.
+    /// A database as v6 shipped it: no client archive and notes columns.
     #[test]
     fn a_v6_database_upgrades_in_place_keeping_clients_projects_and_time() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -1528,7 +1481,6 @@ mod tests {
                 ("c2".into(), "Gone".into(), None, None, None, None),
             ]
         );
-        // Nothing is archived by the upgrade, and the soft delete survives.
         let flags: (i64, i64, Option<i64>) = conn
             .query_row(
                 "SELECT (SELECT COUNT(*) FROM clients WHERE archived_at IS NOT NULL),
@@ -1550,8 +1502,7 @@ mod tests {
         assert_eq!(linked, ("c1".into(), "p1".into(), 3_600_000));
     }
 
-    /// A database as v7 shipped it: the fresh schema without the `breaks`
-    /// table, holding clients, projects, tracked time and an invoice.
+    /// A database as v7 shipped it: no `breaks` table.
     #[test]
     fn a_v7_database_upgrades_in_place_keeping_clients_projects_time_and_invoices() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -1587,7 +1538,6 @@ mod tests {
         run_migrations(&mut fresh).unwrap();
         assert_eq!(schema_snapshot(&fresh), schema_snapshot(&conn));
 
-        // The new table starts empty and accepts a decision linked to a segment.
         let breaks: i64 = conn
             .query_row("SELECT COUNT(*) FROM breaks", [], |r| r.get(0))
             .unwrap();
@@ -1612,7 +1562,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(kept, (1, 1, 2, 1, 10_000, 1));
-        // Invoiced time is still protected after the upgrade.
         assert!(conn
             .execute(
                 "UPDATE time_entries SET description = 'x' WHERE id = 'e1'",
@@ -1683,7 +1632,6 @@ mod tests {
             .unwrap();
         assert_eq!(events, 1);
 
-        // The draft keeps its total: the agent line is now a fixed line.
         let lines: Vec<(String, String, Option<String>, i64)> = conn
             .prepare("SELECT id, kind, entry_id, amount_cents FROM invoice_lines ORDER BY id")
             .unwrap()
@@ -1709,11 +1657,8 @@ mod tests {
         assert_eq!(totals, 15_000);
     }
 
-    /// A database as v10 shipped it in 0.9.19: timers existed without an ordinal
-    /// column, timer_segments held completed stretches, and timer_saved_states
-    /// held user checkpoints. Upgrade must assign ordinals stably, keep every
-    /// timer, segment, and saved state with its values intact, and match a fresh
-    /// schema snapshot.
+    /// A database as v10 shipped it in 0.9.19: timers without an ordinal column. Upgrade must
+    /// assign ordinals stably, keep every row's values and match a fresh schema snapshot.
     #[test]
     fn a_v10_database_with_0_9_19_timers_upgrades_to_v11() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -1778,7 +1723,6 @@ mod tests {
             .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
 
-        // Verify ordinals assigned stably by created_at: t1 (000), t3 (010), t2 (020)
         let timers: Vec<(String, String, i64, Option<i64>, i64)> = conn
             .prepare("SELECT id, label, ordinal, started_at, created_at FROM timers ORDER BY ordinal ASC")
             .unwrap()
@@ -1801,13 +1745,11 @@ mod tests {
             ]
         );
 
-        // Verify all segments preserved
         let segment_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM timer_segments", [], |r| r.get(0))
             .unwrap();
         assert_eq!(segment_count, 4);
 
-        // Verify saved states preserved
         let saved_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM timer_saved_states", [], |r| r.get(0))
             .unwrap();
@@ -2225,7 +2167,6 @@ mod private_segments_tests {
         assert_eq!(private, 0);
         assert_eq!(indexed(&conn, "budget"), 1);
 
-        // The upgraded schema is the fresh one.
         let mut fresh = Connection::open_in_memory().unwrap();
         run_migrations(&mut fresh).unwrap();
         let columns = |conn: &Connection| {
@@ -2240,7 +2181,6 @@ mod private_segments_tests {
         };
         assert_eq!(columns(&conn), columns(&fresh));
 
-        // Running it again changes nothing.
         run_migrations(&mut conn).unwrap();
         assert_eq!(indexed(&conn, "budget"), 1);
     }
@@ -2272,7 +2212,6 @@ mod private_segments_tests {
         )
         .unwrap();
 
-        // A normal segment still moves through the index as before.
         conn.execute("UPDATE segments SET title = 'forecast model'", [])
             .unwrap();
         assert_eq!(indexed(&conn, "budget"), 0);

@@ -24,7 +24,6 @@ interface TimersProps {
   revealTimer?: { id: string };
 }
 
-/** The glowing line a dragged card would drop at. */
 const INSERTION_LINE =
   "pointer-events-none z-20 rounded-full bg-accent shadow-[0_0_8px_var(--accent)]";
 
@@ -45,7 +44,6 @@ export function Timers({ api: propApi, revealTimer }: TimersProps = {}) {
   const reorder = useTimerReorder(api, reorderLists);
   const target = reorder.target;
 
-  // Wait for the timer list before revealing a request from the hidden app.
   useEffect(() => {
     if (!revealTimer || api.loading) return;
     const element = document.getElementById(`timer-${revealTimer.id}`);
@@ -124,7 +122,6 @@ export function Timers({ api: propApi, revealTimer }: TimersProps = {}) {
     />
   );
 
-  /** A list's cards, with the line a dragged card would drop at. */
   const grid = (key: string | null, timers: Timer[]) => (
     <div
       ref={(element) => {
@@ -168,8 +165,7 @@ export function Timers({ api: propApi, revealTimer }: TimersProps = {}) {
         </div>
       </PageHeader>
 
-      {/* The end padding lets the last row of cards scroll clear of a toast
-          in the bottom-right corner. */}
+      {/* End padding: the last row scrolls clear of a bottom-right toast. */}
       <main
         ref={reorder.scrollRef}
         onDragEnter={reorder.onDragOver}
@@ -245,8 +241,8 @@ export function Timers({ api: propApi, revealTimer }: TimersProps = {}) {
                   aria-label={`Section ${section.name}`}
                   className="relative flex flex-col gap-1"
                 >
-                  {/* With every stopwatch in a section, the gap above the
-                      first one is where a card drops out of its section. */}
+                  {/* The gap above the first card is where a card drops out of
+                      its section. */}
                   {index === 0 && loose.length === 0 && (
                     <div
                       ref={(element) => {

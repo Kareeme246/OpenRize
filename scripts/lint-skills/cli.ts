@@ -1,9 +1,7 @@
 /**
- * Lint the repo skills and the drive-app feature map.
- *
- *   node scripts/lint-skills/cli.ts [check|coverage] [--json] [--root DIR]
- *
- * All rules live in lint.ts; this file only handles arguments and output.
+ * Lint the repo skills and the drive-app feature map: `node
+ * scripts/lint-skills/cli.ts [check|coverage] [--json] [--root DIR]`. Rules
+ * live in lint.ts.
  */
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

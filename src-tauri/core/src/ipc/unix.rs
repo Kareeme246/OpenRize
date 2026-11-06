@@ -15,14 +15,12 @@ pub struct Address {
     socket: PathBuf,
 }
 
-/// A bound listener. Dropping it removes the socket.
 pub struct Service {
     listener: Listener,
     socket: PathBuf,
 }
 
 impl Service {
-    /// Waits for the next client running as this user.
     pub fn accept(&self) -> io::Result<Stream> {
         loop {
             let stream = self.listener.accept()?;

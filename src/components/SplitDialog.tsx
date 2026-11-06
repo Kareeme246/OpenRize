@@ -4,29 +4,21 @@ import type { TimeEntry } from "../lib/types";
 import { FIELD } from "./Page";
 import { Field, Sheet } from "./Sheet";
 
-/** Neither half of a split may be shorter than this. */
 export const MIN_HALF_MS = 60_000;
 
 interface SplitDialogProps {
   entry: TimeEntry;
-  /** Where the cut starts out: the picked point, or the smart split point. */
   initialAt: number;
-  /** The entry's end; for the live entry, now. */
   endsAt: number;
   error: string | null;
   onSplit: (at: number) => void;
   onCancel: () => void;
 }
 
-/** `HH:MM` local time of an epoch ms. */
 function clock(ms: number): string {
   return new Date(ms).toTimeString().slice(0, 5);
 }
 
-/**
- * The time `HH:MM` names inside the entry: on its start day, or the next day
- * for an entry that runs past midnight.
- */
 function timeInside(entry: TimeEntry, value: string): number {
   const [hours, minutes] = value.split(":").map(Number);
   const date = new Date(entry.startedAt);
@@ -36,9 +28,8 @@ function timeInside(entry: TimeEntry, value: string): number {
 }
 
 /**
- * Confirms a split: where to cut (adjustable to the minute) and the two
- * entries that result. Splitting the live entry closes its first half and
- * keeps recording into the second.
+ * Confirms a split. Splitting the live entry closes its first half and keeps
+ * recording into the second.
  */
 export function SplitDialog({
   entry,

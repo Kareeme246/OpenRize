@@ -5,14 +5,12 @@ import { useTauriEvent } from "./useTauriEvent";
 
 export interface BreaksApi {
   state: BreakState;
-  /** A 1 Hz clock, running only while a countdown needs it. */
   now: number;
 }
 
 /**
- * Rust's break state, adopted from `break-state-changed`. Countdowns are
- * computed from the state's timestamps against `now`, so the event only
- * fires when something structural changes.
+ * Rust's break state from `break-state-changed`; countdowns derive from its
+ * timestamps against `now`, so events fire only on structural changes.
  */
 export function useBreaks(): BreaksApi {
   const [state, setState] = useState<BreakState>(IDLE_BREAK_STATE);

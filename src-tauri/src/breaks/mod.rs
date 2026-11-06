@@ -1,25 +1,6 @@
-//! Break reminders.
-//!
-//! A break is never a second concept: a taken break is a `break` activity
-//! segment (`activity::KIND_BREAK`), which the entry builder already keeps out
-//! of time entries and work hours. The only new durable record is the
-//! *decision* around a break - taken, skipped, missed, or credited from idle
-//! time - in the `breaks` table (`store.rs`).
-//!
-//! - `engine.rs` is the pure state machine: the work clock, the reminder
-//!   lifecycle, scheduled breaks and the quiet rules. It returns `Effect`s.
-//! - `store.rs` reads and writes the table.
-//! - `surface.rs` is the positioned reminder panel.
-//! - `stopwatch.rs` checks current stopwatch runs once a minute and yields
-//!   to breaks, using the same quiet rules and panel.
-//! - This file is the driver. The 1 Hz activity sampler calls `after_tick`;
-//!   the frontend's commands come through `command`. Both run under the
-//!   engine's lock, apply the effects (open or close the segment, pause or
-//!   resume stopwatches, write the row), then publish the new
-//!   `break-state-changed` event whenever the state changed.
-//!
-//! Lock order: the engine lock is taken first, then the activity or timer
-//! store locks. Nothing holds an activity lock while asking for the engine.
+//! Break reminders. A taken break is a `break` activity segment (`activity::KIND_BREAK`); the only
+//! new record is the decision (taken, skipped, missed, idle-credited) in `store.rs`. `engine.rs` is
+//! the pure state machine; this file drives it. Lock order: engine, then activity or timer stores.
 
 pub mod engine;
 mod sound;
@@ -47,7 +28,6 @@ const PAUSED_UNTIL_KEY: &str = "breaks_paused_until";
 /// Runs already reminded, so restarting the app does not repeat a card.
 const STOPWATCH_FIRED_KEY: &str = "stopwatch_reminder_fired";
 
-/// Extra minutes the "+5 min" control adds to a running break.
 pub const EXTEND_MINUTES: u16 = 5;
 
 pub struct BreakRuntime {
@@ -86,7 +66,6 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Called by the sampler after every activity tick.
 pub fn after_tick(app: &AppHandle, keeps_display_awake: bool, away: bool) {
     let now = now_epoch_ms();
     let state = app.state::<AppState>();
@@ -130,7 +109,6 @@ pub(crate) fn power_event(app: &AppHandle, event: crate::capture::PowerEvent) {
     });
 }
 
-/// The frontend (or the tray) asks for a break action.
 pub fn command(app: &AppHandle, command: Command) -> Result<BreakState, String> {
     let now = now_epoch_ms();
     let settings = app.state::<AppState>().settings_snapshot().breaks;
@@ -140,7 +118,6 @@ pub fn command(app: &AppHandle, command: Command) -> Result<BreakState, String> 
     .ok_or_else(|| "break state is unavailable".to_string())
 }
 
-/// "Keep going" dismisses just the run shown on the card.
 pub fn dismiss_stopwatch(app: &AppHandle, id: &str, started_at: u64) -> Result<BreakState, String> {
     let now = now_epoch_ms();
     let settings = app.state::<AppState>().settings_snapshot().breaks;
@@ -151,7 +128,6 @@ pub fn dismiss_stopwatch(app: &AppHandle, id: &str, started_at: u64) -> Result<B
     .ok_or_else(|| "break state is unavailable".to_string())
 }
 
-/// Silences reminders until `until` (epoch ms), or turns them back on for `None`.
 pub fn pause_reminders(app: &AppHandle, until: Option<u64>) -> Result<BreakState, String> {
     let now = now_epoch_ms();
     let settings = app.state::<AppState>().settings_snapshot().breaks;
@@ -188,7 +164,6 @@ pub fn list_breaks(
     store::list(&reader, since, until)
 }
 
-/// The app is quitting: close an open break so its row has an end.
 pub fn on_exit(app: &AppHandle) {
     let Some(runtime) = app.try_state::<BreakRuntime>() else {
         return;
@@ -204,7 +179,6 @@ pub fn on_exit(app: &AppHandle) {
     }
 }
 
-/// The running break as an account switch would record it, without ending it.
 pub fn running_break(app: &AppHandle) -> Option<engine::SwitchedBreak> {
     let runtime = app.try_state::<BreakRuntime>()?;
     let engine = runtime.engine.lock().ok()?;
@@ -226,7 +200,6 @@ pub fn pause_for_switch(app: &AppHandle) -> Option<engine::SwitchedBreak> {
     ended
 }
 
-/// Starts the rest of a break that a switch ended, from now.
 pub fn resume_switched_break(app: &AppHandle, ended: &engine::SwitchedBreak) -> Result<(), String> {
     let now = now_epoch_ms();
     let settings = app.state::<AppState>().settings_snapshot().breaks;
@@ -243,13 +216,10 @@ pub fn resume_switched_break(app: &AppHandle, ended: &engine::SwitchedBreak) -> 
     .ok_or_else(|| "break state is unavailable".to_string())
 }
 
-/// Whether two instants fall on the same local calendar day.
 pub fn same_local_day(a: u64, b: u64) -> bool {
     local_time(a).day_key == local_time(b).day_key
 }
 
-/// Raises a sample reminder so the panel can be looked at without waiting an
-/// hour. Dev builds only.
 #[cfg(debug_assertions)]
 pub fn dev_sample(app: &AppHandle) -> Result<BreakState, String> {
     let now = now_epoch_ms();
@@ -261,13 +231,10 @@ pub fn dev_sample(app: &AppHandle) -> Result<BreakState, String> {
     .ok_or_else(|| "break state is unavailable".to_string())
 }
 
-/// Plays the reminder chime (the setting's "Preview" button uses it too).
 pub fn chime() {
     sound::play_chime();
 }
 
-/// Runs `act` on the engine under its lock, applies the effects it returns,
-/// and publishes the state if it changed.
 fn run(
     app: &AppHandle,
     settings: &BreakSettings,
@@ -415,7 +382,6 @@ fn begin(
     }
 }
 
-/// Pauses every running stopwatch and returns the ones it paused.
 pub(crate) fn pause_running_timers(app: &AppHandle) -> Vec<(String, String)> {
     let running: Vec<(String, String)> = app
         .state::<AppState>()
@@ -459,7 +425,6 @@ fn local_time(now: u64) -> LocalTime {
     }
 }
 
-/// Local midnight at or before `now`, in epoch milliseconds.
 fn local_day_start(now: u64) -> u64 {
     let local = chrono::DateTime::from_timestamp_millis(now as i64)
         .map(|utc| utc.with_timezone(&Local))
@@ -476,7 +441,6 @@ mod tests {
     use super::*;
     use crate::capture::PowerEvent;
 
-    /// A store and engine with a break started at `start` in its own segment.
     fn on_break(start: u64) -> (crate::activity::ActivityStore, Engine, BreakRecord) {
         let mut activity = crate::activity::ActivityStore::from_conn(
             rusqlite::Connection::open_in_memory().unwrap(),

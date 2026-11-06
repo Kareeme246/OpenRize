@@ -1,7 +1,5 @@
-//! The activity store: folds the app's foreground-window samples into
-//! *segments* (one row per contiguous run of the same app + window title +
-//! url), and owns the entries, catalog and queries built on them. The app's
-//! sampler feeds it; `rize` reads and edits it directly.
+//! The activity store: folds foreground-window samples into segments (a run of one app + title +
+//! url) and owns the entries, catalog and queries built on them.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,8 +18,7 @@ use crate::timers::now_epoch_ms;
 
 pub const SAMPLE_SECS: u64 = 1;
 pub const APP_SWITCH_GRACE_MS: u64 = 20_000;
-/// How long after a segment opens a browser may still report that its window
-/// is private. The report can lag the window by a few reads.
+/// How long after a segment opens a browser may still report its window as private (reports lag).
 const LATE_PRIVATE_MS: u64 = 15_000;
 pub const DEFAULT_IDLE_THRESHOLD_MS: u64 = 5 * 60 * 1000;
 pub const DB_FILE: &str = crate::paths::DATABASE_FILE;
@@ -36,14 +33,10 @@ pub const KIND_BREAK: &str = "break";
 
 pub const IDLE_LABEL: &str = "Idle";
 
-/// How far apart two entries may sit and still count as one border to merge.
-/// Capture stops and starts a little either side of a switch, so neighbours
-/// rarely abut to the millisecond; a few minutes between them is the same
-/// border to the user. Mirrors `MERGE_GAP_MS` in `src/lib/merge.ts`, which
-/// decides which merge the review panel offers.
+/// Max gap between entries that still merge (capture stops/starts either side of a switch). Mirrors
+/// `MERGE_GAP_MS` in `src/lib/merge.ts`.
 pub const MERGE_GAP_MS: u64 = 300_000;
 
-/// Whether two instants fall on the same local calendar day.
 fn same_local_day(left: u64, right: u64) -> bool {
     use chrono::{Local, TimeZone};
     let day = |ms: u64| {
@@ -55,13 +48,9 @@ fn same_local_day(left: u64, right: u64) -> bool {
     day(left) == day(right)
 }
 
-/// The untracked time between two entries that are neighbours, or `None` when
-/// they are not. Entries that overlap are neighbours with no gap between them;
-/// otherwise only `MERGE_GAP_MS` of gap is tolerated, and the tolerance never
-/// widens because of an overlap on the entry's other side. Either way both
-/// entries must be on one local calendar day: time either side of midnight is
-/// a different day's work. The merge spans the earliest start to the latest
-/// end, so it claims exactly this gap as tracked time and absorbs any overlap.
+/// The untracked time between two neighbouring entries, or `None`. Overlapping entries are
+/// neighbours with no gap; otherwise at most `MERGE_GAP_MS`, and both must be on one local day. The
+/// merge claims exactly this gap.
 pub fn merge_gap(entry: &TimeEntry, other: &TimeEntry) -> Option<u64> {
     let (gap, near, far) = if other.started_at >= entry.ended_at {
         (
@@ -85,16 +74,12 @@ pub fn merge_gap(entry: &TimeEntry, other: &TimeEntry) -> Option<u64> {
     (gap <= MERGE_GAP_MS && same_local_day(near, far)).then_some(gap)
 }
 
-/// Why every change to an approved entry is refused. Approval freezes an
-/// entry; unapproving is the only way back to changing it.
+/// Why every change to an approved entry is refused (unapprove is the only way back).
 pub const LOCKED: &str = "Approved entries are locked. Unapprove to change them.";
 
 /// Why a change that would take minutes from approved entries is refused.
-/// Approved time is never given up to another entry, however the change is made.
 pub const APPROVED_OVERLAP: &str = "This time range overlaps approved entries. Unapprove those entries first, or choose a time that avoids them.";
 
-/// Fails when approved (or invoiced) time other than `except` lies in
-/// `start..end`.
 fn ensure_no_approved_overlap(
     conn: &Connection,
     start: u64,
@@ -119,11 +104,9 @@ fn ensure_no_approved_overlap(
     Ok(())
 }
 
-/// How long a statement waits on another connection's write lock. The AI
-/// worker reads on its own connection, so contention is brief but real.
+/// How long a statement waits on another connection's write lock (the AI worker reads on its own).
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// The window the background worker keeps rebuilt (see ai/worker.rs).
 pub const REBUILD_WINDOW_MS: u64 = ONE_DAY_MS;
 
 pub use crate::models::ActivitySegment;
@@ -222,7 +205,6 @@ pub struct LiveState {
     pub tracking_active: bool,
 }
 
-/// What the break engine needs to know about the open segment.
 #[derive(Debug, Clone)]
 pub struct SegmentInfo {
     pub id: i64,
@@ -264,24 +246,17 @@ mod overlap_claim;
 #[cfg(test)]
 mod split_regressions;
 
-/// What `ActivityStore::preview_category_removal` found.
 #[derive(Debug)]
 pub enum CategoryRemovalPreview {
-    /// Entries use the category, so removing it archives it.
     Archived,
-    /// Nothing uses it: the staged deletion, or the message it would fail with.
     Deleted(Result<DeletionPreview, String>),
 }
 
-/// What `ActivityStore::preview_delete_client` found.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientDeletionPreview {
     pub client: Client,
-    /// Projects that would lose the client link.
     pub detached_projects: Vec<Project>,
-    /// The message the real deletion would fail with. `rpc` reports it as the
-    /// answer's `refused`.
     #[serde(skip)]
     pub refused: Option<String>,
 }
@@ -295,12 +270,10 @@ pub struct ActivityStore {
     capture_enabled: bool,
     idle_threshold_ms: u64,
     last_idle_ms: u64,
-    /// When the foreground app was last seen keeping the display awake.
     watched_at_ms: Option<u64>,
     pub watch_since_ms: Option<u64>,
     tracking_hours: crate::settings::TrackingHours,
     manual_tracking: bool,
-    /// What the undoable change under way has touched; see `history.rs`.
     journal: Option<history::Journal>,
 }
 
@@ -361,13 +334,10 @@ impl ActivityStore {
             .map_err(|error| error.to_string())?;
         let now = now_epoch_ms();
         store.rollup_old_segments(now)?;
-        // Approvals the CLI made while the app was closed, and anything past
-        // the backstop.
         redact::redact_private_detail(&store.conn, now)?;
         Ok(store)
     }
 
-    /// The writer connection, for the AI worker's writes (see ai/store.rs).
     pub fn conn(&self) -> &Connection {
         &self.conn
     }
@@ -444,14 +414,9 @@ impl ActivityStore {
         if sample.as_ref().is_some_and(|s| s.keeps_display_awake) {
             self.watched_at_ms = Some(now);
         }
-        // Normalized once, so the comparisons below see what is stored.
         let sample = sample.map(WindowSample::for_storage);
-        // Watching a video gives no input, so while an activity segment is
-        // open, the foreground app keeping the display awake counts as the
-        // user being there: idle runs from the last input or the last moment
-        // they were watching, whichever is later. That also rides out the
-        // gaps where a player briefly drops its assertion. It never ends a
-        // break, though: only input brings an idle user back.
+        // Display-awake counts as the user being there (watching video gives no input), riding out
+        // brief assertion drops, but it never ends a break: only input does.
         let idle_ms = match (&self.current, self.watched_at_ms) {
             (Some(current), Some(watched_at)) if current.kind == KIND_ACTIVITY => {
                 idle_ms.min(now.saturating_sub(watched_at))
@@ -491,9 +456,8 @@ impl ActivityStore {
             return Ok(false);
         }
 
-        // Privacy and exclusion: an excluded app must take effect immediately.
-        // It must never be attributed to the previous app, delayed by a grace period,
-        // or stored as billable activity.
+        // An excluded app must take effect immediately: never attributed to the previous app or
+        // billed.
         if let Some(ref sample) = sample {
             if self.is_sample_excluded(sample) {
                 self.pending_switch = None;
@@ -564,7 +528,6 @@ impl ActivityStore {
                     self.close_current(idle_since)?;
                     self.manual_tracking = false;
 
-                    // If outside window, do not open an Idle break segment
                     if !in_window {
                         return Ok(true);
                     }
@@ -613,13 +576,11 @@ impl ActivityStore {
                     Some(sample) => {
                         let same_app = is_same_app(&app, bundle_id.as_deref(), &sample);
                         if same_app {
-                            // User is in the current app (or returned to it from a brief detour).
                             self.pending_switch = None;
 
-                            // A window's privacy can reach us a moment after the window
-                            // does (the browser answers late). The segment it opened as a
-                            // normal one is then the same window, so it is marked private
-                            // instead of being left as a normal piece.
+                            // A window's privacy can arrive late (the browser answers late): the
+                            // segment opened as normal is then the same window, so it is marked
+                            // private.
                             let (url, private) = if sample.private
                                 && !private
                                 && self.current.as_ref().is_some_and(|cur| {
@@ -652,7 +613,6 @@ impl ActivityStore {
                                 Ok(false)
                             }
                         } else {
-                            // User is in a different app.
                             match self.pending_switch.take() {
                                 None => {
                                     self.pending_switch = Some(PendingSwitch {
@@ -697,7 +657,6 @@ impl ActivityStore {
                                             Ok(false)
                                         }
                                     } else {
-                                        // A -> B -> C burst: previous detour aborted without fragmenting
                                         self.pending_switch = Some(PendingSwitch {
                                             sample,
                                             started_at: now,
@@ -739,9 +698,8 @@ impl ActivityStore {
         self.close_current(now)
     }
 
-    /// Nobody is at the Mac (see `capture::user_is_away`): end the activity
-    /// segment now, not at the last input, and treat the time as idle until
-    /// the user is back.
+    /// Nobody is at the Mac (`capture::user_is_away`): end the segment now, not at the last input,
+    /// and treat the time as idle.
     pub fn tick_away(&mut self, now: u64) -> Result<bool, String> {
         self.pending_switch = None;
         let closed = if self
@@ -806,7 +764,6 @@ impl ActivityStore {
     }
 
     pub fn purge_older_than(&mut self, days: u32, now: u64) -> Result<u64, String> {
-        // Whatever private detail is due goes whether or not history is kept.
         redact::redact_private_detail(&self.conn, now)?;
         if days == 0 {
             return Ok(0);
@@ -888,12 +845,9 @@ impl ActivityStore {
 
         let segment_id = self.conn.last_insert_rowid();
 
-        // Browser tabs are tracked per domain, not per browser app, so a
-        // domain (when present) takes priority over the bundle id as the
-        // identifier; errors here are swallowed because a failed apps-table
-        // upsert must not stop the segment itself from being recorded.
-        // A private window is not a site the user visits: it is recorded as
-        // the browser, so no private domain is left in the apps list.
+        // Browser tabs are tracked per domain (priority over bundle id); a failed apps upsert must
+        // not stop the segment being recorded. A private window is recorded as the browser so no
+        // private domain lands in the apps list.
         if kind == KIND_ACTIVITY {
             let domain = domain.filter(|_| !private);
             let identifier = domain.unwrap_or(bundle_id.unwrap_or(app));
@@ -925,7 +879,6 @@ impl ActivityStore {
         Ok(true)
     }
 
-    /// Marks the open segment as a private window's, and trims its address.
     fn mark_current_private(&mut self) -> Result<(), String> {
         let Some(current) = self.current.as_mut() else {
             return Ok(());
@@ -955,10 +908,8 @@ impl ActivityStore {
         Ok(true)
     }
 
-    // --- P1: Categories CRUD --------------------------------------------
-
-    /// Every category that is not deleted, archived ones included (past
-    /// entries still show them), in the user's order.
+    /// Every non-deleted category, archived included (past entries still show them), in the user's
+    /// order.
     pub fn list_categories(&self) -> Result<Vec<Category>, String> {
         let mut stmt = self
             .conn
@@ -975,7 +926,6 @@ impl ActivityStore {
             .map_err(|e| e.to_string())
     }
 
-    /// Creates a category after the last one, with its hint rules.
     pub fn create_category(&mut self, cat: NewCategory, now: u64) -> Result<Category, String> {
         let name = self.category_name(&cat.name, None)?;
         let id = uuid::Uuid::now_v7().to_string();
@@ -1075,10 +1025,8 @@ impl ActivityStore {
         self.delete_undoable(&[], Some(id), None, now)
     }
 
-    /// Removes a category the way the Categories page's Delete does. One that
-    /// any time entry uses is archived: approved entries are frozen and
-    /// reports group by category, so its history keeps it, while pickers and
-    /// suggestions drop it. One nobody used is deleted (undoably).
+    /// Removes a category: archived if any time entry uses it (approved entries are frozen and
+    /// reports group by it), else deleted (undoably).
     pub fn remove_category(&mut self, id: &str, now: u64) -> Result<CategoryRemoval, String> {
         if self.category_is_used(id)? {
             let patch = UpdateCategory {
@@ -1093,10 +1041,8 @@ impl ActivityStore {
         }
     }
 
-    /// What `remove_category` would do, changing nothing: archiving needs no
-    /// staging, and a deletion is staged and rolled back (see
-    /// `preview_deletion`). The inner `Err` is the message the real deletion
-    /// would fail with.
+    /// What `remove_category` would do, changing nothing; the inner `Err` is the message the real
+    /// deletion would fail with.
     pub fn preview_category_removal(
         &mut self,
         id: &str,
@@ -1114,8 +1060,6 @@ impl ActivityStore {
         }
     }
 
-    /// Whether any time entry still uses the category, which decides between
-    /// archiving and deleting it.
     fn category_is_used(&self, id: &str) -> Result<bool, String> {
         self.conn
             .query_row(
@@ -1126,9 +1070,8 @@ impl ActivityStore {
             .map_err(|e| e.to_string())
     }
 
-    /// Puts `ids` first, in that order, and the rest after them in their
-    /// current order. Order decides which categories hold the review panel's
-    /// number keys.
+    /// Puts `ids` first, in that order (order decides the review panel's number keys), then the
+    /// rest.
     pub fn reorder_categories(&mut self, ids: &[String], now: u64) -> Result<(), String> {
         let current = self.list_categories()?;
         if let Some(missing) = ids.iter().find(|id| !current.iter().any(|c| &c.id == *id)) {
@@ -1149,9 +1092,8 @@ impl ActivityStore {
         tx.commit().map_err(|e| e.to_string())
     }
 
-    /// A trimmed, unique (case-insensitively, among categories that are not
-    /// deleted) name, or why it can't be one. `except` is the category being
-    /// renamed.
+    /// A trimmed, unique (case-insensitive, among non-deleted) name, or why it can't be one.
+    /// `except` is the category being renamed.
     fn category_name(&self, name: &str, except: Option<&str>) -> Result<String, String> {
         let name = name.trim().to_string();
         if name.is_empty() {
@@ -1181,8 +1123,6 @@ impl ActivityStore {
             )
             .map_err(|e| e.to_string())
     }
-
-    // --- P1: Projects CRUD ----------------------------------------------
 
     pub fn list_projects(&self) -> Result<Vec<Project>, String> {
         let mut stmt = self
@@ -1381,7 +1321,6 @@ impl ActivityStore {
     }
 
     /// Soft-deletes a project and unlinks its time entries and rules.
-    /// Historical time remains intact, but is no longer assigned to a project.
     pub fn delete_project(&mut self, id: &str, now: u64) -> Result<(), String> {
         self.delete_undoable(&[], None, Some(id), now)
     }
@@ -1414,11 +1353,7 @@ impl ActivityStore {
         ).map_err(|e| e.to_string())
     }
 
-    // --- P1: Clients CRUD -----------------------------------------------
-
-    /// Every client that is not deleted, archived ones included: projects
-    /// still resolve their client's name, and the views split active from
-    /// archived themselves.
+    /// Every non-deleted client, archived included.
     pub fn list_clients(&self) -> Result<Vec<Client>, String> {
         let mut stmt = self
             .conn
@@ -1494,7 +1429,6 @@ impl ActivityStore {
             client.notes = notes;
         }
         if let Some(archived) = patch.archived {
-            // Archiving twice keeps the first date.
             client.archived_at = match (archived, client.archived_at) {
                 (true, Some(at)) => Some(at),
                 (true, None) => Some(now),
@@ -1522,10 +1456,8 @@ impl ActivityStore {
         Ok(client)
     }
 
-    /// Soft-deletes a client and detaches its projects, which keep their
-    /// status, time, and rules but lose the client link (so none is left
-    /// pointing at a client that no longer lists). A client with invoices
-    /// cannot be deleted: those documents bill it, so it can only be archived.
+    /// Soft-deletes a client and detaches its projects. Refused when it has invoices (they bill
+    /// it): archive instead.
     pub fn delete_client(&mut self, id: &str, now: u64) -> Result<(), String> {
         let client = self.get_client(id)?;
         let tx = self.conn.transaction().map_err(|e| e.to_string())?;
@@ -1543,9 +1475,7 @@ impl ActivityStore {
         tx.commit().map_err(|e| e.to_string())
     }
 
-    /// What `delete_client` would do, changing nothing: the client, the
-    /// projects that would lose it, and the refusal the real command would
-    /// fail with, if any.
+    /// What `delete_client` would do, changing nothing, including the refusal if any.
     pub fn preview_delete_client(&self, id: &str) -> Result<ClientDeletionPreview, String> {
         let client = self.get_client(id)?;
         let refused = Self::ensure_client_deletable(&self.conn, &client).err();
@@ -1561,7 +1491,6 @@ impl ActivityStore {
         })
     }
 
-    /// A client with invoices cannot be deleted: those documents bill it.
     fn ensure_client_deletable(conn: &Connection, client: &Client) -> Result<(), String> {
         let invoiced: bool = conn
             .query_row(
@@ -1588,8 +1517,6 @@ impl ActivityStore {
             )
             .map_err(|e| e.to_string())
     }
-
-    // --- P1: Time Entries -----------------------------------------------
 
     pub fn list_time_entries(&self, start_ms: u64, end_ms: u64) -> Result<Vec<TimeEntry>, String> {
         let mut stmt = self
@@ -1618,7 +1545,6 @@ impl ActivityStore {
         Ok(list)
     }
 
-    /// The entries with these ids, in the order given (missing ids skipped).
     pub fn time_entries(&self, ids: &[String]) -> Result<Vec<TimeEntry>, String> {
         let mut out = Vec::with_capacity(ids.len());
         for id in ids {
@@ -1782,7 +1708,6 @@ impl ActivityStore {
         Ok(updated.remove(0))
     }
 
-    /// One patch applied to many entries, as one undoable change.
     pub fn update_time_entries(
         &mut self,
         ids: &[String],
@@ -1886,8 +1811,8 @@ impl ActivityStore {
             ],
         ).map_err(|e| e.to_string())?;
 
-        // Re-categorizing an entry the AI already had approved (or the user
-        // accepted) is a correction: the suggestion becomes `changed`.
+        // Re-categorizing an already approved entry is a correction: the suggestion becomes
+        // `changed`.
         crate::ai::store::record_edit(
             &self.conn,
             id,
@@ -1926,8 +1851,6 @@ impl ActivityStore {
             if entry.status == "approved" {
                 continue;
             }
-            // Approval is final: the live session closes now, and capture
-            // carries on in a new one.
             let ended_at = if entry.status == "building" {
                 entry.ended_at.max(now)
             } else {
@@ -1941,9 +1864,8 @@ impl ActivityStore {
                 self.describe_closed(id)?;
             }
 
-            // Feedback loop: the suggestion's outcome (accepted or changed)
-            // feeds calibration and rule suggestions, and the entry joins the
-            // kNN store as soon as it has a vector.
+            // Feedback loop: the outcome feeds calibration and rule suggestions; the entry joins
+            // the kNN store once it has a vector.
             crate::ai::store::record_approval(
                 &self.conn,
                 id,
@@ -1968,14 +1890,12 @@ impl ActivityStore {
         Ok(())
     }
 
-    /// Reject clears the suggestion and leaves the entry pending with no
-    /// category, recording negative feedback. A project the AI pre-filled is
-    /// cleared too; one the user picked stays.
+    /// Clears the suggestion (and an AI-prefilled project), leaving the entry pending, and records
+    /// negative feedback.
     pub fn reject_time_entry(&mut self, id: &str, now: u64) -> Result<(), String> {
         self.edit("Reject", &[id.to_string()], |store| store.reject(id, now))
     }
 
-    /// The live session keeps recording: only its suggestion goes.
     fn reject(&mut self, id: &str, now: u64) -> Result<(), String> {
         let entry = self.time_entry(id)?;
         if entry.status == "approved" {
@@ -2002,9 +1922,8 @@ impl ActivityStore {
         Ok(())
     }
 
-    /// Returns approved entries to pending, keeping their category and
-    /// project so they can be edited and approved again. Invoiced time stays
-    /// frozen. Does not re-run AI classification.
+    /// Returns approved entries to pending, keeping category and project. Invoiced time stays
+    /// frozen; no re-classification.
     pub fn unapprove_time_entries(&mut self, ids: &[String], now: u64) -> Result<(), String> {
         self.edit("Unapprove", ids, |store| store.unapprove(ids, now))
     }
@@ -2029,8 +1948,6 @@ impl ActivityStore {
         Ok(())
     }
 
-    /// Queues an entry for (re)classification, e.g. "Couldn't categorize ·
-    /// Retry".
     pub fn queue_classification(&mut self, id: &str, now: u64) -> Result<(), String> {
         let entry = self.time_entry(id)?;
         if entry.status == "approved" {
@@ -2039,9 +1956,8 @@ impl ActivityStore {
         crate::ai::store::enqueue(&self.conn, id, crate::ai::store::JOB_CLASSIFY, now)
     }
 
-    /// Accepts or dismisses an inline rule suggestion. Accepting creates a
-    /// `suggested` rule; dismissing stores a disabled one so the same prompt
-    /// never comes back.
+    /// Accepts (creates a `suggested` rule) or dismisses (stores a disabled one so it never
+    /// returns) a rule suggestion.
     pub fn resolve_rule_suggestion(
         &mut self,
         suggestion: &crate::models::RuleSuggestion,
@@ -2131,8 +2047,6 @@ impl ActivityStore {
         if unclassified && new_entry.ended_at <= now {
             crate::ai::store::enqueue(&self.conn, id, crate::ai::store::JOB_CLASSIFY, now)?;
         } else if !pending {
-            // A labeled hand-made entry contributes to kNN; one left for
-            // review is embedded once it is approved.
             crate::ai::store::enqueue(&self.conn, id, crate::ai::store::JOB_EMBED, now)?;
         }
 
@@ -2172,13 +2086,9 @@ impl ActivityStore {
         self.list_time_entries(start_ms, end_ms)
     }
 
-    /// Re-runs the entry builder over the range and saves the result.
-    ///
-    /// Only the open (`building`) entry is re-segmented; every closed entry is
-    /// frozen, so its id, suggestion, and edits survive. An entry that has
-    /// just closed is queued for classification. Returns whether anything a
-    /// view shows changed (an entry closed, appeared, or went away), as
-    /// opposed to the open entry merely growing.
+    /// Re-runs the entry builder over the range. Only the open (`building`) entry is re-segmented;
+    /// closed entries are frozen. Returns whether anything a view shows changed, as opposed to the
+    /// open entry merely growing.
     pub fn rebuild_range(&mut self, start_ms: u64, end_ms: u64, now: u64) -> Result<bool, String> {
         use crate::entry_builder::{build_entries, BuiltTimeEntry, EntrySettings, SegmentInput};
 
@@ -2214,10 +2124,9 @@ impl ActivityStore {
                 .map_err(|e| e.to_string())?
         };
 
-        // Every entry touching the range, deleted ones included: a deleted
-        // entry's time stays unassigned instead of being rebuilt. So is any
-        // entry that owns a segment in it, even one that lies outside: its
-        // segments are its own, not free to be built into a new session.
+        // Every entry touching the range, deleted ones included (their time stays unassigned), plus
+        // any owning a segment in it: those segments are theirs, not free to build into a new
+        // session.
         let existing: Vec<TimeEntry> = {
             let mut stmt = tx
                 .prepare(
@@ -2320,21 +2229,15 @@ impl ActivityStore {
             changed = true;
         }
 
-        // Entries from before the AI pipeline existed (or whose job was lost)
-        // get classified the first time their day is rebuilt.
         changed |= crate::ai::store::enqueue_unclassified(&tx, start_ms, end_ms, now)? > 0;
 
         tx.commit().map_err(|e| e.to_string())?;
-        // Entries that just closed or were approved may have had a private
-        // window in them; whatever is due to be forgotten is forgotten here.
         redact::redact_private_detail(&self.conn, now)?;
         Ok(changed)
     }
 
-    /// Capture may still be writing a segment of a session the user closed
-    /// (approved it, set its end, merged it into a finished entry). What it
-    /// records past that entry's end belongs to the next session, so the
-    /// segment is cut there rather than lost inside a frozen entry.
+    /// Capture may still be writing a segment of a session the user closed; what it records past
+    /// that entry's end belongs to the next session, so the segment is cut there.
     fn release_live_tail(&mut self, now: u64) -> Result<(), String> {
         let Some(current) = self.current.as_ref() else {
             return Ok(());
@@ -2367,10 +2270,9 @@ impl ActivityStore {
             .map(|_| ())
     }
 
-    /// The same for a segment no entry owns that began inside a closed
-    /// entry's time, as when a hand-made entry reaching past now was dragged
-    /// over the live session: once the clock passes that entry's end,
-    /// recording carries on in a new session from there.
+    /// Same for a segment no entry owns that began inside a closed entry's time (e.g. a hand-made
+    /// entry dragged over the live session): once the clock passes its end, recording continues in
+    /// a new session.
     fn release_unowned_tail(&mut self, now: u64) -> Result<(), String> {
         let Some(current) = self.current.as_ref() else {
             return Ok(());
@@ -2396,11 +2298,8 @@ impl ActivityStore {
         }
     }
 
-    /// The live session never records into time another entry holds. A closed
-    /// entry dragged out past now starts after the live session's recorded
-    /// end; once the clock reaches it, what the live session recorded from
-    /// there on is cut off, so the session ends where that entry begins.
-    /// (An entry the live session already runs through is left as it is.)
+    /// The live session never records into time another entry holds: when the clock reaches a
+    /// closed entry dragged out past now, the live session is cut where that entry begins.
     fn fence_live_session(&mut self, now: u64) -> Result<(), String> {
         let fences: Vec<(String, i64)> = {
             let mut statement = self
@@ -2431,8 +2330,6 @@ impl ActivityStore {
         }
         Ok(())
     }
-
-    // --- P1: Apps -------------------------------------------------------
 
     pub fn list_apps(&self) -> Result<Vec<AppRecord>, String> {
         let mut stmt = self.conn.prepare(
@@ -2548,8 +2445,6 @@ impl ActivityStore {
     }
 }
 
-/// Maps the `time_entries` column list used throughout this module (the 14
-/// P1 columns plus `description_origin`).
 pub use crate::time_entry_from_row;
 
 pub fn segment_from_row(row: &Row<'_>) -> rusqlite::Result<ActivitySegment> {
@@ -2571,8 +2466,7 @@ pub fn segment_from_row(row: &Row<'_>) -> rusqlite::Result<ActivitySegment> {
     })
 }
 
-/// The `categories c` columns `category_from_row` reads, in its order. The
-/// last is the category's hint rules, in the order they were written.
+/// The `categories c` columns `category_from_row` reads, in its order (last: hint rules).
 const CATEGORY_COLUMNS: &str = "c.id, c.name, c.color, c.description, c.ai_prompt, c.billable_default, c.counts_as_work, c.archived, c.sort, c.created_at, c.updated_at, c.deleted_at,
      (SELECT group_concat(r.pattern, ', ' ORDER BY r.created_at, r.rowid) FROM rules r
       WHERE r.category_id = c.id AND r.origin = 'hint' AND r.deleted_at IS NULL)";
@@ -2595,7 +2489,6 @@ fn category_from_row(row: &Row<'_>) -> rusqlite::Result<Category> {
     })
 }
 
-/// The `clients` columns `client_from_row` reads, in its order.
 const CLIENT_COLUMNS: &str =
     "id, name, email, address, default_rate, currency, notes, archived_at, created_at, updated_at, deleted_at";
 
@@ -2794,16 +2687,13 @@ mod tests {
         let mut store = store();
         store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
         assert!(!store.tick(sample("Code", "main.rs"), 0, 4_000).unwrap());
-        // Slack is first seen at 7_000; 20-second grace period starts, so tick returns false
         assert!(!store.tick(sample("Slack", "#general"), 0, 7_000).unwrap());
 
-        // While within the grace period, Code remains the open segment
         let intermediate = store.snapshot(0, 7_000).unwrap();
         assert_eq!(intermediate.segments.len(), 1);
         assert_eq!(intermediate.segments[0].app, "Code");
         assert_eq!(intermediate.segments[0].ended_at, None);
 
-        // Sustained visit reaches 20 seconds (7_000 + 20_000 = 27_000)
         assert!(store.tick(sample("Slack", "#general"), 0, 27_000).unwrap());
 
         let snapshot = store.snapshot(0, 27_000).unwrap();
@@ -2820,12 +2710,10 @@ mod tests {
         let mut store = store();
         store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
         store.tick(sample("Slack", "#general"), 0, 5_000).unwrap();
-        // Sustain Slack past the 20s grace threshold (5_000 + 20_000 = 25_000)
         store.tick(sample("Slack", "#general"), 0, 25_000).unwrap();
         let entries = store
             .rebuild_time_entries_in_range(0, 25_000, 25_000)
             .unwrap();
-        // One live session covers both apps.
         assert_eq!(entries.len(), 1);
         let code_entry = entries.first().unwrap();
 
@@ -2869,7 +2757,6 @@ mod tests {
         let snapshot = store.snapshot(0, 130_000).unwrap();
         let current = snapshot.current.unwrap();
         assert_eq!(current.kind, KIND_ACTIVITY);
-        // The break is backdated to the last input, 90s before it was noticed.
         assert_eq!(snapshot.segments[0].ended_at, Some(10_000));
         assert_eq!(snapshot.break_ms, 120_000);
     }
@@ -2894,9 +2781,8 @@ mod tests {
         assert_eq!(current.started_at, 20_000);
     }
 
-    /// Ticks once a second through `[from, to)` with Zen in front. `inputs`
-    /// are the moments the user touched the keyboard or mouse, and
-    /// `watching` says whether Zen keeps the display awake at a moment.
+    /// Ticks once a second through `[from, to)` with Zen in front; `inputs` are user input moments,
+    /// `watching` says when Zen keeps the display awake.
     fn watch_zen(
         store: &mut ActivityStore,
         (from, to): (u64, u64),
@@ -2911,10 +2797,9 @@ mod tests {
         }
     }
 
-    /// Three hours of a show in Zen, touched only now and then, the way the
-    /// evening of 2026-09-25 was captured: the player drops its display
-    /// assertion for 40 seconds every 10 minutes (between episodes, ads) and
-    /// the show is paused at 3h, after which nobody touches the Mac.
+    /// Three hours of a show in Zen with sparse input (as captured on 2026-09-25): the player drops
+    /// its display assertion for 40s every 10 minutes and pauses at 3h, after which nobody touches
+    /// the Mac.
     const SHOW_END: u64 = 180 * MIN;
     const SHOW_INPUTS: [u64; 6] = [0, 21 * MIN, 47 * MIN, 88 * MIN, 131 * MIN, 170 * MIN];
 
@@ -2937,8 +2822,6 @@ mod tests {
             .iter()
             .map(|s| (s.kind.as_str(), s.started_at, s.ended_at))
             .collect();
-        // The break starts when the show stopped playing, not at the last
-        // input 10 minutes before it.
         let paused = SHOW_END - 1_000;
         assert_eq!(
             spans,
@@ -2952,7 +2835,6 @@ mod tests {
             .iter()
             .map(|e| (e.started_at, e.ended_at, e.status.as_str()))
             .collect();
-        // Closed, so it is queued for classification.
         assert_eq!(entries, vec![(0, paused, "processing")]);
     }
 
@@ -2992,7 +2874,6 @@ mod tests {
             )
             .unwrap();
 
-        // Mark the entry as AI origin
         store
             .conn
             .execute(
@@ -3001,7 +2882,6 @@ mod tests {
             )
             .unwrap();
 
-        // Update the description
         let patch = UpdateTimeEntry {
             description: Some("Final User Title".to_string()),
             category_id: None,
@@ -3024,7 +2904,6 @@ mod tests {
         assert_eq!(parsed["draft"], "AI Title Draft");
         assert_eq!(parsed["final"], "Final User Title");
 
-        // Subsequent edit on 'user' origin entry should not record draft/final payload
         let patch2 = UpdateTimeEntry {
             description: Some("Another Title".to_string()),
             category_id: None,
@@ -3151,7 +3030,7 @@ mod tests {
     fn categories_crud_works() {
         let mut store = store();
         let cats = store.list_categories().unwrap();
-        assert_eq!(cats.len(), 11); // Seeded default 11 categories
+        assert_eq!(cats.len(), 11);
 
         let created = store
             .create_category(
@@ -3197,7 +3076,6 @@ mod tests {
     #[test]
     fn categories_name_validation() {
         let mut store = store();
-        // Empty name rejected
         assert!(store
             .create_category(
                 NewCategory {
@@ -3209,7 +3087,6 @@ mod tests {
             )
             .is_err());
 
-        // Duplicate name rejected (case-insensitive)
         let err = store
             .create_category(
                 NewCategory {
@@ -3222,7 +3099,6 @@ mod tests {
             .unwrap_err();
         assert!(err.contains("already exists"));
 
-        // If archived, suggests restoring
         let coding = store
             .list_categories()
             .unwrap()
@@ -3265,7 +3141,6 @@ mod tests {
                 1_000,
             )
             .unwrap();
-        // Unused category is really deleted
         let removal = store.remove_category(&unused.id, 2_000).unwrap();
         assert_eq!(removal, CategoryRemoval::Deleted);
 
@@ -3279,7 +3154,6 @@ mod tests {
                 3_000,
             )
             .unwrap();
-        // Add an entry with this category
         store
             .create_manual_entry(
                 NewTimeEntry {
@@ -3295,14 +3169,12 @@ mod tests {
             )
             .unwrap();
 
-        // Used category is archived, not deleted
         let removal = store.remove_category(&used.id, 5_000).unwrap();
         assert_eq!(removal, CategoryRemoval::Archived);
         let cat = store.get_category(&used.id).unwrap();
         assert!(cat.archived);
         assert!(cat.deleted_at.is_none());
 
-        // Reorder categories
         let cats = store.list_categories().unwrap();
         let mut ids: Vec<String> = cats.iter().map(|c| c.id.clone()).collect();
         ids.reverse();
@@ -3401,7 +3273,6 @@ mod tests {
         assert_eq!(renamed.name, "Acme Inc");
         assert_eq!(renamed.email, None);
         assert_eq!(renamed.default_rate, Some(90.0));
-        // Untouched fields stay.
         assert_eq!(renamed.address.as_deref(), Some("1 Main St."));
         assert_eq!(renamed.currency.as_deref(), Some("EUR"));
         assert_eq!(renamed.notes.as_deref(), Some("Net 15"));
@@ -3428,12 +3299,10 @@ mod tests {
         let archive: UpdateClient = serde_json::from_str(r#"{"archived": true}"#).unwrap();
         let archived = store.update_client(&client.id, archive, 10).unwrap();
         assert_eq!(archived.archived_at, Some(10));
-        // Archiving again keeps the first date.
         let again: UpdateClient = serde_json::from_str(r#"{"archived": true}"#).unwrap();
         let again = store.update_client(&client.id, again, 20).unwrap();
         assert_eq!(again.archived_at, Some(10));
 
-        // Still listed (so its projects resolve its name) and still linked.
         let listed = store.list_clients().unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].archived_at, Some(10));
@@ -3509,7 +3378,6 @@ mod tests {
 
         let refused = store.delete_client(&client.id, 50).unwrap_err();
         assert!(refused.contains("Archive it instead"), "{refused}");
-        // Nothing changed: still listed, project still attached.
         assert_eq!(store.list_clients().unwrap().len(), 1);
         let projects = store.list_projects().unwrap();
         assert_eq!(projects[0].id, project.id);
@@ -3518,8 +3386,6 @@ mod tests {
 
     const MIN: u64 = 60_000;
 
-    /// Code then Slack for 20 minutes, 10 minutes away, then back to Code:
-    /// the first session closes, the second is still building.
     fn tracked_morning(store: &mut ActivityStore) {
         store.set_idle_threshold_ms(5 * MIN).unwrap();
         store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
@@ -3553,7 +3419,6 @@ mod tests {
         let ids = |list: &[TimeEntry]| list.iter().map(|e| e.id.clone()).collect::<Vec<_>>();
         assert_eq!(ids(&first), ids(&second));
         assert_eq!(ids(&second), ids(&third));
-        // The open block kept its id while it grew.
         assert_eq!(third[1].status, "building");
         assert_eq!(third[1].ended_at, 38 * MIN);
     }
@@ -3637,7 +3502,6 @@ mod tests {
     fn a_manual_session_dragged_over_the_live_entry_closes_it_before_the_new_entry() {
         let mut store = store();
         let start = 13 * 60 * MIN;
-        // Tracking since 1:00 PM, still going at 2:00 PM.
         store.tick(sample("Code", "main.rs"), 0, start).unwrap();
         let now = start + 60 * MIN;
         store.tick(sample("Code", "main.rs"), 0, now).unwrap();
@@ -3646,7 +3510,6 @@ mod tests {
         assert_eq!(live.len(), 1);
         assert_eq!(live[0].status, "building");
 
-        // Drag a session from 1:30 PM to 2:30 PM.
         let dragged = store
             .create_manual_entry(
                 NewTimeEntry {
@@ -3684,7 +3547,6 @@ mod tests {
             .unwrap();
         assert_eq!(orphaned, 0);
 
-        // Capture resumes after the new entry, not inside it.
         let later = now + 31 * MIN;
         store.tick(sample("Code", "main.rs"), 0, later).unwrap();
         store.rebuild_range(0, later + MIN, later).unwrap();
@@ -3796,7 +3658,6 @@ mod tests {
         assert_eq!(entry.ended_at, 7 * MIN);
     }
 
-    /// Seeds a pending entry with a suggestion, as the worker would.
     fn suggested_entry(
         store: &mut ActivityStore,
         started: u64,
@@ -3876,7 +3737,6 @@ mod tests {
         };
         assert_eq!(outcome(&kept).as_deref(), Some("accepted"));
         assert_eq!(outcome(&changed).as_deref(), Some("changed"));
-        // Both now wait for a vector so they can join the kNN store.
         assert_eq!(crate::ai::store::queued_count(&store.conn).unwrap(), 2);
     }
 
@@ -3924,7 +3784,6 @@ mod tests {
             .unwrap()
             .rule_suggestion
             .is_none());
-        // A dismissed suggestion is stored disabled, so T0 never applies it.
         let rules = crate::ai::store::load_rules(&store.conn).unwrap();
         assert!(rules.is_empty());
     }
@@ -3977,7 +3836,6 @@ mod tests {
                 .clone()
         };
         assert_eq!(outcome(&auto).as_deref(), Some("changed"));
-        // Saving the same value again is not a correction.
         assert_eq!(outcome(&accepted).as_deref(), Some("accepted"));
     }
 
@@ -4101,7 +3959,6 @@ mod tests {
             ..crate::settings::TrackingHours::default()
         });
 
-        // Start session at 18:58 (inside window)
         let dt_start = chrono::Local
             .with_ymd_and_hms(2026, 9, 25, 18, 58, 0)
             .single()
@@ -4110,7 +3967,6 @@ mod tests {
         store.tick(sample("Code", "main.rs"), 0, start_ms).unwrap();
         assert!(store.snapshot(0, start_ms).unwrap().current.is_some());
 
-        // At 19:02 (outside window): switch to Slack. Session continues!
         let dt_outside = chrono::Local
             .with_ymd_and_hms(2026, 9, 25, 19, 2, 0)
             .single()
@@ -4128,7 +3984,6 @@ mod tests {
         assert!(live.tracking_active);
         assert_eq!(live.current.as_ref().unwrap().app, "Slack");
 
-        // At 19:10: idle detected (idle for 5 min, since 19:05). Idle ends it naturally.
         let dt_idle = chrono::Local
             .with_ymd_and_hms(2026, 9, 25, 19, 10, 0)
             .single()
@@ -4152,7 +4007,6 @@ mod tests {
             Some(dt_cutoff.timestamp_millis() as u64)
         );
 
-        // Further activity outside window does not start new capture
         let dt_later = chrono::Local
             .with_ymd_and_hms(2026, 9, 25, 19, 15, 0)
             .single()
@@ -4209,9 +4063,7 @@ mod tests {
     fn test_nineteen_second_detour_does_not_create_switch_fragment() {
         let mut store = store();
         store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
-        // Switch to Slack at 10_000
         assert!(!store.tick(sample("Slack", "#general"), 0, 10_000).unwrap());
-        // Still in Slack at 29_000 (19s in Slack < 20s grace period)
         assert!(!store.tick(sample("Slack", "#general"), 0, 29_000).unwrap());
 
         let snap_during = store.snapshot(0, 29_000).unwrap();
@@ -4219,7 +4071,6 @@ mod tests {
         assert_eq!(snap_during.segments[0].app, "Code");
         assert_eq!(snap_during.segments[0].ended_at, None);
 
-        // Return to Code at 29_500: detour is discarded
         assert!(!store.tick(sample("Code", "main.rs"), 0, 29_500).unwrap());
         assert!(!store.tick(sample("Code", "main.rs"), 0, 40_000).unwrap());
 
@@ -4257,14 +4108,11 @@ mod tests {
     fn test_exact_twenty_second_boundary_switches_app() {
         let mut store = store();
         store.tick(sample("Code", "main.rs"), 0, 10_000).unwrap();
-        // Switch to Slack at 20_000
         assert!(!store.tick(sample("Slack", "#general"), 0, 20_000).unwrap());
 
-        // At 39_999 (19_999 ms in Slack): still pending
         assert!(!store.tick(sample("Slack", "#general"), 0, 39_999).unwrap());
         assert_eq!(store.snapshot(0, 39_999).unwrap().segments.len(), 1);
 
-        // At exactly 40_000 (20_000 ms in Slack): threshold reached!
         assert!(store.tick(sample("Slack", "#general"), 0, 40_000).unwrap());
 
         let snapshot = store.snapshot(0, 40_000).unwrap();
@@ -4275,7 +4123,6 @@ mod tests {
         assert_eq!(snapshot.segments[1].app, "Slack");
         assert_eq!(snapshot.segments[1].started_at, 20_000);
         assert_eq!(snapshot.segments[1].ended_at, None);
-        // Continuous total work time without double counting or gaps
         assert_eq!(snapshot.tracked_ms, 30_000);
     }
 
@@ -4284,9 +4131,7 @@ mod tests {
         let mut store = store();
         store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
         store.tick(sample("Slack", "#general"), 0, 10_000).unwrap();
-        // Sustained for 25s
         assert!(store.tick(sample("Slack", "#general"), 0, 35_000).unwrap());
-        // Continues further in Slack
         store.tick(sample("Slack", "#general"), 0, 60_000).unwrap();
 
         let snapshot = store.snapshot(0, 60_000).unwrap();
@@ -4294,7 +4139,6 @@ mod tests {
         assert_eq!(snapshot.segments[0].app, "Code");
         assert_eq!(snapshot.segments[0].ended_at, Some(10_000));
         assert_eq!(snapshot.segments[1].app, "Slack");
-        // Real start timestamp retained rather than starting at 30_000 or 35_000
         assert_eq!(snapshot.segments[1].started_at, 10_000);
         assert_eq!(snapshot.tracked_ms, 59_000);
     }
@@ -4304,7 +4148,6 @@ mod tests {
         let mut store = store();
         store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
 
-        // Rapid switches: Code -> Slack (5s) -> Chrome (7s) -> Terminal (8s) -> Slack (6s) -> Code
         store.tick(sample("Slack", "#general"), 0, 10_000).unwrap();
         store.tick(sample("Chrome", "Google"), 0, 15_000).unwrap();
         store.tick(sample("Terminal", "zsh"), 0, 22_000).unwrap();
@@ -4327,11 +4170,8 @@ mod tests {
     fn test_burst_switches_a_b_c_commits_sustained_candidate() {
         let mut store = store();
         store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
-        // Switch to Slack at 10_000
         store.tick(sample("Slack", "#general"), 0, 10_000).unwrap();
-        // Switch to Chrome at 15_000 (Slack was 5s < 20s, aborted)
         store.tick(sample("Chrome", "Docs"), 0, 15_000).unwrap();
-        // Chrome reaches 20 seconds at 35_000
         assert!(store.tick(sample("Chrome", "Docs"), 0, 35_000).unwrap());
 
         let snapshot = store.snapshot(0, 35_000).unwrap();
@@ -4357,7 +4197,6 @@ mod tests {
     #[test]
     fn test_first_event_opens_immediately_without_grace_delay() {
         let mut store = store();
-        // First sample opens immediately
         let changed = store.tick(sample("Code", "main.rs"), 0, 5_000).unwrap();
         assert!(changed, "First event must open immediately");
 
@@ -4373,10 +4212,7 @@ mod tests {
         let mut store = store();
         store.set_idle_threshold_ms(300_000).unwrap();
         store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
-        // Switch to Slack at 10_000
         store.tick(sample("Slack", "#general"), 0, 10_000).unwrap();
-        // Last input at 15_000 (5s in Slack)
-        // At 315_000, idle threshold (300s) crossed:
         let changed = store
             .tick(sample("Slack", "#general"), 300_000, 315_000)
             .unwrap();
@@ -4384,10 +4220,8 @@ mod tests {
 
         let snapshot = store.snapshot(0, 315_000).unwrap();
         assert_eq!(snapshot.segments.len(), 2);
-        // Code closed at idle_since (15_000)
         assert_eq!(snapshot.segments[0].app, "Code");
         assert_eq!(snapshot.segments[0].ended_at, Some(15_000));
-        // Break opened at 15_000
         assert_eq!(snapshot.segments[1].kind, KIND_BREAK);
         assert_eq!(snapshot.segments[1].started_at, 15_000);
 
@@ -4410,7 +4244,6 @@ mod tests {
         let mut store = store();
         store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
         store.tick(sample("Slack", "#general"), 0, 10_000).unwrap();
-        // At 18_000 (8s in Slack), close active segment (e.g. system sleep or tracking stop)
         store.close_active_segment(18_000).unwrap();
 
         let snapshot = store.snapshot(0, 18_000).unwrap();
@@ -4433,7 +4266,6 @@ mod tests {
     #[test]
     fn test_ignored_excluded_apps_take_effect_immediately_without_grace_delay() {
         let mut store = store();
-        // Insert an excluded app into apps table
         store
             .conn
             .execute(
@@ -4454,7 +4286,6 @@ mod tests {
         });
 
         store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();
-        // Switch to excluded app 1Password at 10_000
         let changed = store.tick(op_sample.clone(), 0, 10_000).unwrap();
         assert!(
             changed,
@@ -4470,7 +4301,6 @@ mod tests {
             "Excluded app must not open a segment"
         );
 
-        // Stays in 1Password for 15 seconds (10_000 to 25_000)
         assert!(!store.tick(op_sample.clone(), 0, 25_000).unwrap());
         let snap2 = store.snapshot(0, 25_000).unwrap();
         assert_eq!(snap2.segments.len(), 1);
@@ -4479,35 +4309,25 @@ mod tests {
             "1Password time must never be attributed to Code or tracked"
         );
 
-        // Returns to Code at 25_000: opens immediately (first event attribution)
         assert!(store.tick(sample("Code", "main.rs"), 0, 25_000).unwrap());
         let snap3 = store.snapshot(0, 30_000).unwrap();
         assert_eq!(snap3.segments.len(), 2);
         assert_eq!(snap3.segments[1].app, "Code");
         assert_eq!(snap3.segments[1].started_at, 25_000);
-        // Code ran 1_000..10_000 (9s) + 25_000..30_000 (5s) = 14s. 1Password was excluded for 15s.
         assert_eq!(snap3.tracked_ms, 14_000);
     }
 
     #[test]
     fn test_constant_total_work_time_preserved_across_detours_and_switches() {
         let mut store = store();
-        // 0..10_000: Code
         store.tick(sample("Code", "main.rs"), 0, 0).unwrap();
-        // 10_000..15_000: Slack detour (5s)
         store.tick(sample("Slack", "#general"), 0, 10_000).unwrap();
-        // 15_000..30_000: Back to Code
         store.tick(sample("Code", "main.rs"), 0, 15_000).unwrap();
-        // 30_000: Sustained switch to Chrome
         store.tick(sample("Chrome", "GitHub"), 0, 30_000).unwrap();
-        // 50_000: Chrome sustained (20s)
         store.tick(sample("Chrome", "GitHub"), 0, 50_000).unwrap();
-        // 60_000: Stop tracking
         store.close_active_segment(60_000).unwrap();
 
         let snapshot = store.snapshot(0, 60_000).unwrap();
-        // Total work time from 0 to 60_000 was 60_000 ms.
-        // Segments: Code [0..30_000] (30s) + Chrome [30_000..60_000] (30s) = 60s total.
         assert_eq!(snapshot.segments.len(), 2);
         assert_eq!(snapshot.segments[0].app, "Code");
         assert_eq!(snapshot.segments[0].started_at, 0);

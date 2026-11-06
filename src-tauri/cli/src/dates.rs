@@ -8,14 +8,12 @@ use chrono::{
 
 pub const HELP: &str = "a date (2026-09-01), an ISO 8601 date-time (2026-09-01T09:00, local unless it has an offset), today, yesterday, a weekday (monday), this-week, last-week, this-month or last-month";
 
-/// A local calendar span, `[start, end)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
     pub start: NaiveDate,
     pub end: NaiveDate,
 }
 
-/// The span a word names, relative to `today`.
 pub fn named(word: &str, today: NaiveDate) -> Option<Span> {
     let day = |date: NaiveDate| Span {
         start: date,
@@ -130,7 +128,6 @@ pub fn duration(input: &str) -> Result<u64, String> {
     amount.checked_mul(unit_ms).ok_or_else(error)
 }
 
-/// The local midnights that split `[from, to)` into days, weeks or months.
 pub fn boundaries(from: u64, to: u64, per: &str) -> Result<Vec<u64>, String> {
     if per == "total" {
         return Ok(vec![from, to]);
@@ -166,7 +163,6 @@ pub fn today() -> NaiveDate {
     Local::now().date_naive()
 }
 
-/// The local date an instant falls on.
 pub fn date_of(ms: u64) -> NaiveDate {
     Local
         .timestamp_millis_opt(ms as i64)

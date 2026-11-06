@@ -35,16 +35,11 @@ interface WeekViewProps {
   projectById: Map<string, Project>;
   onSelect: (id: string) => void;
   onOpenDay: (date: string) => void;
-  /** Split mode: the selected entry whose cut is being picked. */
   splitPick?: { id: string; at: number };
   onPickSplit?: (at: number) => void;
   now?: number;
 }
 
-/**
- * Seven day columns with the Day view's blocks. Each header shows the day's
- * total and opens that day; a block opens the same review panel.
- */
 export function WeekView({
   weekStart,
   entries,
@@ -195,7 +190,6 @@ export function WeekView({
             const recording = isToday
               ? recordingEntry(column.entries, now)
               : undefined;
-            // Pinned to the recording block's live edge, as in the Day view.
             const nowTop = recording
               ? (() => {
                   const { top, height } = place(

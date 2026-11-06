@@ -1,22 +1,6 @@
-//! Local accounts, the app side. `openrize_core::accounts` owns the files (the
-//! registry, the folders, the move of existing data); this file is what the
-//! running app does with them.
-//!
-//! **A switch is a restart.** Everything the app opens - the store lock,
-//! `AppState`, the samplers, the AI worker, the breaks engine, the `rize`
-//! endpoint - is opened once at launch from one folder (`lib.rs` `setup`), so
-//! switching writes down which account to open, leaves a `Handoff`, and calls
-//! `AppHandle::request_restart`, the path the updater already takes. Nothing
-//! here teaches a store to change folders or holds a handle across accounts.
-//!
-//! **Work in progress stays with its account.** A switch pauses every running
-//! stopwatch and ends a live break (`pause_for_switch`), and records what it
-//! paused in the account's own database under [`SWITCH_PAUSED_KEY`]. The next
-//! account sees nothing of it. When the user returns, the banner offers to
-//! resume it; nothing ever resumes by itself.
-//!
-//! **The switch takes at least [`SWITCH_MIN_MS`]**, measured from the command,
-//! so the "Switching to..." screen is never a flash.
+//! Local accounts, the app side. A switch is a restart: it writes a `Handoff`,
+//! pauses running work into [`SWITCH_PAUSED_KEY`] and calls `request_restart`.
+//! Nothing resumes by itself; the switch lasts at least [`SWITCH_MIN_MS`].
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,20 +18,14 @@ use crate::breaks::engine::{Source, SwitchedBreak};
 use crate::timers::now_epoch_ms;
 use crate::{breaks, commands, AppState, EVENT_ACCOUNTS_CHANGED};
 
-/// How long a switch takes at the least, from the moment it is asked for. A
-/// switch that looks instant feels broken.
+/// Minimum switch time, so the "Switching" screen is never a flash.
 pub const SWITCH_MIN_MS: u64 = 3_000;
 
-/// Key in the account's database `settings` table: the work its last switch
-/// paused (see [`Record`]).
 const SWITCH_PAUSED_KEY: &str = "switch_paused";
 
-/// The folder this process opened, managed once at launch.
 pub struct ActiveAccount {
     root: PathBuf,
-    /// The folder every store was opened in: `root`, or the account's.
     dir: PathBuf,
-    /// The open account's id, or `None` for No account.
     id: Option<String>,
     /// The account the registry named whose data was gone, until dismissed.
     missing: Mutex<Option<Account>>,
@@ -71,12 +49,10 @@ impl ActiveAccount {
     }
 }
 
-/// The folder the stores are open in.
 pub fn data_dir(app: &AppHandle) -> PathBuf {
     active(app).dir.clone()
 }
 
-/// Puts the main window back where the switch found it.
 pub fn restore_window(app: &AppHandle, bounds: WindowBounds) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_size(PhysicalSize::new(bounds.width, bounds.height));
@@ -84,10 +60,8 @@ pub fn restore_window(app: &AppHandle, bounds: WindowBounds) {
     }
 }
 
-/// Whether the main window is showing, and where. The position is the outer
-/// one and the size the inner one, the pair `restore_window` sets, so a switch
-/// never nudges the window. A maximized, full-screen or minimized window has
-/// no bounds to put back.
+/// Position is the outer one and size the inner one, the pair `restore_window`
+/// sets. A maximized, full-screen or minimized window has no bounds to restore.
 fn main_window(app: &AppHandle) -> (bool, Option<WindowBounds>) {
     let Some(window) = app.get_webview_window("main") else {
         return (false, None);
@@ -116,8 +90,6 @@ fn changed(app: &AppHandle) {
     let _ = app.emit(EVENT_ACCOUNTS_CHANGED, ());
 }
 
-// --- What the frontend lists ------------------------------------------------
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountView {
@@ -125,20 +97,16 @@ pub struct AccountView {
     pub name: String,
     pub created_at: u64,
     pub size_bytes: u64,
-    /// Listed, but its data folder is gone.
     pub missing: bool,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountsState {
-    /// The open account's id, or `None` for No account.
     pub current: Option<String>,
     pub accounts: Vec<AccountView>,
-    /// The account this launch could not open because its data is gone.
     pub missing: Option<Account>,
-    /// This launch finished moving No account's data into the account. True
-    /// once: the first read clears it.
+    /// True once: the first read clears it.
     pub just_adopted: bool,
     /// A newer release wrote the accounts; they can be seen but not changed.
     pub read_only: bool,
@@ -172,8 +140,7 @@ pub fn accounts_state(app: AppHandle) -> AccountsState {
     }
 }
 
-/// What No account holds, for the question of moving it into a new account.
-/// `None` when an account is open, or when there is nothing to move.
+/// `None` when an account is open or there is nothing to move.
 #[tauri::command]
 pub fn existing_data_summary(app: AppHandle) -> Result<Option<DataSummary>, String> {
     if active(&app).id.is_some() {
@@ -198,7 +165,6 @@ pub struct BreakPreview {
     pub remaining_ms: u64,
 }
 
-/// What a switch right now would pause.
 #[derive(Debug, Serialize)]
 pub struct SwitchPreview {
     pub stopwatches: Vec<Labeled>,
@@ -230,9 +196,6 @@ pub fn switch_preview(app: AppHandle) -> Result<SwitchPreview, String> {
     })
 }
 
-// --- Switching --------------------------------------------------------------
-
-/// Writes the handoff the next launch reads, with the window as it is now.
 fn write_handoff(app: &AppHandle, to: Option<&str>, adopt: bool) -> Result<(), String> {
     let (show, window) = main_window(app);
     Handoff {
@@ -244,9 +207,8 @@ fn write_handoff(app: &AppHandle, to: Option<&str>, adopt: bool) -> Result<(), S
     .write(&active(app).root)
 }
 
-/// Restarts once [`SWITCH_MIN_MS`] has passed since `started`. The frontend
-/// has the "Switching" screen up until then, and the command has already
-/// returned, so it stays painted.
+/// Waits out [`SWITCH_MIN_MS`] while the frontend keeps the "Switching" screen
+/// up; the command has already returned.
 fn restart_when_due(app: AppHandle, started: Instant, to: Option<String>, adopt: bool) {
     std::thread::spawn(move || {
         if let Some(rest) = Duration::from_millis(SWITCH_MIN_MS).checked_sub(started.elapsed()) {
@@ -279,7 +241,6 @@ fn editable(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Opens another account, or No account for `None` (Sign out), by restarting.
 /// Returns at once; the restart follows after the minimum time.
 #[tauri::command]
 pub fn switch_account(app: AppHandle, to: Option<String>) -> Result<(), String> {
@@ -304,9 +265,8 @@ pub fn switch_account(app: AppHandle, to: Option<String>) -> Result<(), String> 
     Ok(())
 }
 
-/// Adds an account and opens it by restarting. With `move_existing`, No
-/// account's data moves into it (renamed, not copied) as the next launch
-/// starts; that only makes sense from No account.
+/// With `move_existing`, No account's data is renamed (not copied) into the new
+/// account as the next launch starts; only valid from No account.
 #[tauri::command]
 pub fn create_account(
     app: AppHandle,
@@ -351,8 +311,7 @@ pub fn rename_account(app: AppHandle, id: String, name: String) -> Result<Accoun
     Ok(account)
 }
 
-/// Moves an account's folder to the Trash and forgets it. An account whose
-/// folder is already gone is only forgotten. Never deletes for good.
+/// Never deletes for good; an account whose folder is gone is only forgotten.
 #[tauri::command]
 pub fn delete_account(app: AppHandle, id: String) -> Result<(), String> {
     let root = active(&app).root.clone();
@@ -381,7 +340,7 @@ pub fn delete_account(app: AppHandle, id: String) -> Result<(), String> {
     Ok(())
 }
 
-/// The Trash, or an error: there is no fallback to deleting for good.
+/// No fallback to deleting for good.
 fn move_to_trash(path: &Path) -> Result<(), String> {
     #[allow(unused_mut)]
     let mut context = trash::TrashContext::default();
@@ -397,7 +356,6 @@ fn move_to_trash(path: &Path) -> Result<(), String> {
         .map_err(|error| format!("Couldn't move the account to the Trash or Recycle Bin: {error}"))
 }
 
-/// The user saw the missing-account dialog and chose to keep it listed.
 #[tauri::command]
 pub fn dismiss_missing_account(app: AppHandle) {
     if let Ok(mut missing) = active(&app).missing.lock() {
@@ -406,15 +364,10 @@ pub fn dismiss_missing_account(app: AppHandle) {
     changed(&app);
 }
 
-// --- Work paused by a switch ------------------------------------------------
-
-/// What a switch paused, kept in the account's own database as JSON.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Record {
-    /// When the latest switch away paused something.
     at: u64,
-    /// Stopwatches that were running.
     #[serde(default)]
     stopwatches: Vec<String>,
     #[serde(default, rename = "break")]
@@ -424,13 +377,11 @@ struct Record {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RecordedBreak {
-    /// When the break ended; it can be taken up again that day only.
     at: u64,
     label: String,
     source: String,
     schedule_id: Option<String>,
     remaining_ms: u64,
-    /// The stopwatches (id, label) the break had paused.
     paused_stopwatches: Vec<(String, String)>,
 }
 
@@ -439,7 +390,6 @@ impl Record {
         self.stopwatches.is_empty() && self.break_.is_none()
     }
 
-    /// Adds what a later switch away paused, when the first was never resumed.
     fn merge(&mut self, later: Record) {
         self.at = later.at;
         for id in later.stopwatches {
@@ -505,11 +455,8 @@ fn write_record(app: &AppHandle, record: &Record) -> Result<(), String> {
     store.write_setting(SWITCH_PAUSED_KEY, &json)
 }
 
-/// Pauses everything running in the open account and records it there: every
-/// running stopwatch is paused the ordinary way (its run becomes a timer
-/// segment) and a live break ends now, its own stopwatches staying paused.
-/// Asked again after a switch away that was never resumed, it adds to the
-/// record. Does nothing when nothing is running.
+/// Pauses every running stopwatch and ends a live break now (its own
+/// stopwatches stay paused), adding to any record a prior switch left unresumed.
 pub fn pause_for_switch(app: &AppHandle) -> Result<(), String> {
     let now = now_epoch_ms();
     let ended = breaks::pause_for_switch(app);
@@ -603,7 +550,6 @@ fn offer(app: &AppHandle) -> Result<Option<Offer>, String> {
     }))
 }
 
-/// The banner's content.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PausedOnSwitch {
@@ -625,7 +571,6 @@ pub fn paused_on_switch(app: AppHandle) -> Result<Option<PausedOnSwitch>, String
     }))
 }
 
-/// Takes up the paused stopwatches and the break, from now.
 #[tauri::command]
 pub fn resume_paused(app: AppHandle) -> Result<(), String> {
     let Some(offer) = offer(&app)? else {
@@ -643,7 +588,6 @@ pub fn resume_paused(app: AppHandle) -> Result<(), String> {
     }
 }
 
-/// Keeps everything paused and stops offering.
 #[tauri::command]
 pub fn dismiss_paused(app: AppHandle) -> Result<(), String> {
     write_record(&app, &Record::default())

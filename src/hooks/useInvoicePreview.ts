@@ -2,28 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import * as api from "../lib/api";
 import type { Invoice, InvoiceDraftInput } from "../lib/types";
 
-/** Quiet time after the last edit before a preview is requested. */
 export const PREVIEW_DEBOUNCE_MS = 400;
 
 export interface InvoicePreview {
-  /** The last successfully rendered draft PDF; kept while a newer one loads. */
   pdf: Uint8Array | null;
-  /** The same draft priced by Rust: line amounts, total, due date. */
   quote: Invoice | null;
-  /** A render is queued or in flight. */
   pending: boolean;
-  /** Why the current draft cannot be previewed, if it cannot. */
   problem: string | null;
 }
 
 /**
- * Renders the editor's draft through Rust as the user types.
- *
- * Every change (re)starts a quiet-period timer, so typing never renders per
- * keystroke; a request that finishes after a newer one was issued is
- * discarded, and the previous good PDF and quote stay on screen while the next
- * renders, so the paper never blanks or flickers. A draft that Rust rejects
- * (say, no lines yet) reports `problem` and leaves the last document alone.
+ * Renders the draft through Rust after a quiet period; stale results are
+ * discarded and the last good PDF stays up. A rejected draft sets `problem`.
  */
 export function useInvoicePreview(
   draft: InvoiceDraftInput | null,

@@ -10,7 +10,6 @@ pub struct Installation {
     pub executable: String,
     /// The symlink (macOS, Linux) or the folder added to PATH (Windows).
     pub path: String,
-    /// Already set up by an earlier run; nothing changed.
     pub unchanged: bool,
 }
 
@@ -82,8 +81,7 @@ pub fn uninstall() -> Result<String, String> {
     Ok(format!("Removed {}", path.display()))
 }
 
-/// Adds this executable's folder to the user's PATH. The PATH editing itself
-/// lives in `openrize_core::user_path`, which the app also uses at launch.
+/// Adds this executable's folder to the user's PATH (via `openrize_core::user_path`).
 #[cfg(windows)]
 pub fn install(dir: Option<PathBuf>) -> Result<Installation, String> {
     if dir.is_some() {

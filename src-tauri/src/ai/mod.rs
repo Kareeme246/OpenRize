@@ -1,32 +1,6 @@
-//! On-device AI categorization (P2).
-//!
-//! Closed time entries are queued in `classify_jobs` and drained one at a
-//! time by a background worker (`worker.rs`). Each entry runs through three
-//! tiers, and an arbiter blends them into a calibrated confidence per field
-//! (category and project):
-//!
-//! - **T0 rules** (`rules.rs`): user and app rules. A hit is p = 1.0.
-//! - **T1 personal** (`knn.rs` + the sidecar): kNN over NLEmbedding vectors
-//!   of approved entries, plus a Create ML text classifier trained on them.
-//! - **T2 Foundation Model** (the sidecar): guided generation constrained to
-//!   the live category and project lists. Absent without Apple Intelligence,
-//!   in which case the engine runs in fallback (T0 + T1).
-//!
-//! Corrections feed back three ways (P4): an approved or corrected entry's
-//! vector joins the kNN store and few-shot pool at once; three consistent
-//! corrections for one app or domain offer a rule (`store::rule_suggestion`);
-//! and the worker periodically retrains the personal models (idle, on AC,
-//! outside Low Power Mode; `power.rs`) and refits the isotonic calibration
-//! of displayed confidence on the accept/reject history (`calibration.rs`).
-//! `metrics.rs` reports how well all of it is working.
-//!
-//! Everything except the ML calls runs in Rust. The ML calls go to the Swift
-//! sidecar `openrize-ml` over JSON lines on stdio (`sidecar.rs`). Nothing
-//! here makes a network call.
-//!
-//! The data side (`rules`, `knn`, `calibration`, `arbiter`, `store`) lives in
-//! `openrize_core::ai`, so `rize` can record approvals and corrections with
-//! the app closed; it is re-exported here.
+//! On-device AI categorization. A worker (`worker.rs`) runs each closed entry through T0 rules, T1
+//! personal (kNN + Create ML via the sidecar) and T2 Foundation Model (absent without Apple
+//! Intelligence; fallback T0+T1); an arbiter blends them. No network. Data: `openrize_core::ai`.
 
 pub mod features;
 pub mod metrics;
@@ -48,7 +22,6 @@ pub const EVENT_SUGGESTION_READY: &str = "suggestion-ready";
 /// Emitted whenever the engine status changes. Payload: `AiStatus`.
 pub const EVENT_AI_STATUS_CHANGED: &str = "ai-status-changed";
 
-/// Engine health as the UI shows it (fallback banner, Settings).
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AiStatus {
@@ -69,12 +42,10 @@ pub struct AiStatus {
     pub queued: u32,
     /// Verdicts calibration can learn from so far; see `COLD_START_OUTCOMES`.
     pub outcomes: u32,
-    /// Whether a calibration curve is active (otherwise the cold-start cap).
     pub calibrated: bool,
     /// Personal-model retraining: `idle`, `queued` (Retrain now pressed), or
     /// `running`.
     pub retrain: String,
-    /// The last retrain's result, or why a due retrain is waiting.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retrain_note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -100,7 +71,6 @@ impl Default for AiStatus {
     }
 }
 
-/// Tauri-managed state shared by the worker thread and the commands.
 #[derive(Default)]
 pub struct AiRuntime {
     status: Mutex<AiStatus>,
@@ -119,7 +89,6 @@ impl AiRuntime {
             .unwrap_or_default()
     }
 
-    /// Whether on-device AI inference or model retraining is actively running.
     pub fn is_busy(&self) -> bool {
         self.is_busy.load(Ordering::Relaxed)
     }
@@ -128,7 +97,6 @@ impl AiRuntime {
         self.is_busy.store(busy, Ordering::Relaxed);
     }
 
-    /// The PID of the currently running ML sidecar process, if any.
     pub fn sidecar_pid(&self) -> Option<u32> {
         let pid = self.sidecar_pid.load(Ordering::Relaxed);
         if pid > 0 {
@@ -142,8 +110,6 @@ impl AiRuntime {
         self.sidecar_pid.store(pid.unwrap_or(0), Ordering::Relaxed);
     }
 
-    /// Wakes the worker so a freshly queued job starts now instead of at the
-    /// next poll.
     pub fn nudge(&self) {
         if let Ok(mut woken) = self.wake.lock() {
             *woken = true;
@@ -151,8 +117,7 @@ impl AiRuntime {
         }
     }
 
-    /// "Retrain now": the worker retrains on its next pass, skipping the
-    /// idle/power gate and the new-label threshold.
+    /// Skips the idle/power gate and the new-label threshold.
     pub fn request_retrain(&self) {
         self.retrain_requested.store(true, Ordering::SeqCst);
         self.nudge();
@@ -176,8 +141,6 @@ impl AiRuntime {
     }
 }
 
-/// Applies `change` to the status and emits `ai-status-changed` when it
-/// actually changed.
 pub fn update_status(app: &AppHandle, change: impl FnOnce(&mut AiStatus)) {
     let runtime = app.state::<AiRuntime>();
     let next = {
@@ -194,7 +157,6 @@ pub fn update_status(app: &AppHandle, change: impl FnOnce(&mut AiStatus)) {
     let _ = app.emit(EVENT_AI_STATUS_CHANGED, &next);
 }
 
-/// Nudges the worker, if it is running. Safe to call from any command.
 pub fn nudge(app: &AppHandle) {
     if let Some(runtime) = app.try_state::<AiRuntime>() {
         runtime.nudge();

@@ -1,5 +1,3 @@
-//! IPC surface.
-
 use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
@@ -33,8 +31,6 @@ pub(crate) fn refresh_tray(app: &AppHandle, timers: &[Timer]) {
     }
 }
 
-// --- Timers -------------------------------------------------------------
-
 #[tauri::command]
 pub fn list_timers(app: AppHandle) -> Timers {
     let state = app.state::<AppState>();
@@ -67,7 +63,6 @@ pub fn start_timer(app: AppHandle, id: String) -> Timers {
     Ok(timers)
 }
 
-/// Starts the timer and every timer its tag links to it.
 pub fn start_timer_by_id(app: &AppHandle, id: &str) -> Timers {
     let timers = {
         let state = app.state::<AppState>();
@@ -83,7 +78,6 @@ pub fn pause_timer(app: AppHandle, id: String) -> Timers {
     pause_timer_by_id(&app, &id)
 }
 
-/// Pauses the timer and every timer its tag links to it.
 pub fn pause_timer_by_id(app: &AppHandle, id: &str) -> Timers {
     let timers = {
         let state = app.state::<AppState>();
@@ -248,8 +242,7 @@ pub fn move_timer(app: AppHandle, id: String, delta: i32) -> Timers {
     Ok(timers)
 }
 
-/// Puts a timer under `section_id` (or in no section) at `index` among that
-/// section's timers, or after them when `index` is left out.
+/// `index` is among the section's timers; omitted means after them.
 #[tauri::command]
 pub fn move_timer_to_section(
     app: AppHandle,
@@ -266,10 +259,7 @@ pub fn move_timer_to_section(
     Ok(timers)
 }
 
-// --- Stopwatch sections -------------------------------------------------
-
-/// Broadcasts the sections, as `refresh_tray` does the timers, so every
-/// window adopts a change made anywhere, `rize` included.
+/// Broadcasts the sections so every window adopts a change, `rize` included.
 pub(crate) fn sections_changed(app: &AppHandle, sections: &[TimerSection]) {
     let _ = app.emit(crate::EVENT_TIMER_SECTIONS_CHANGED, sections);
 }
@@ -281,8 +271,6 @@ pub fn list_timer_sections(app: AppHandle) -> Sections {
     store.sections()
 }
 
-/// Adds a section after the others and, when `timer_id` is given, moves that
-/// timer into it.
 #[tauri::command]
 pub fn create_timer_section(app: AppHandle, name: String, timer_id: Option<String>) -> Sections {
     let (sections, timers) = {
@@ -313,7 +301,7 @@ pub fn rename_timer_section(app: AppHandle, id: String, name: String) -> Section
     Ok(sections)
 }
 
-/// Deletes a section; its timers stay, with their time, in no section.
+/// Deletes a section; its timers stay, in no section.
 #[tauri::command]
 pub fn delete_timer_section(app: AppHandle, id: String) -> Sections {
     let (sections, timers) = {
@@ -336,8 +324,6 @@ pub fn reorder_timer_sections(app: AppHandle, ids: Vec<String>) -> Sections {
     sections_changed(&app, &sections);
     Ok(sections)
 }
-
-// --- Activity capture ---------------------------------------------------
 
 #[tauri::command]
 pub fn activity_snapshot(app: AppHandle, since_ms: u64) -> Result<ActivitySnapshot, String> {
@@ -419,8 +405,6 @@ pub fn mark_segment_reviewed(app: AppHandle, id: i64) -> Result<(), String> {
     Ok(())
 }
 
-// --- P1: Categories -----------------------------------------------------
-
 #[tauri::command]
 pub fn list_categories(app: AppHandle) -> Result<Vec<Category>, String> {
     let state = app.state::<AppState>();
@@ -498,8 +482,6 @@ pub fn category_stats(
     })
 }
 
-// --- P1: Projects -------------------------------------------------------
-
 #[tauri::command]
 pub fn list_projects(app: AppHandle) -> Result<Vec<Project>, String> {
     let state = app.state::<AppState>();
@@ -534,8 +516,6 @@ pub fn delete_project(app: AppHandle, id: String) -> Result<(), String> {
     Ok(())
 }
 
-// --- P1: Clients --------------------------------------------------------
-
 #[tauri::command]
 pub fn list_clients(app: AppHandle) -> Result<Vec<Client>, String> {
     let state = app.state::<AppState>();
@@ -567,9 +547,6 @@ pub fn delete_client(app: AppHandle, id: String) -> Result<(), String> {
     store.delete_client(&id, now)
 }
 
-// --- Invoices -----------------------------------------------------------
-
-/// Runs an invoice mutation on the writer connection.
 fn with_writer<T>(
     app: &AppHandle,
     run: impl FnOnce(&mut rusqlite::Connection) -> Result<T, String>,
@@ -602,19 +579,16 @@ pub fn list_billable_entries(
     })
 }
 
-/// The draft resolved and priced, without storing it.
 #[tauri::command]
 pub fn quote_invoice(app: AppHandle, draft: DraftInput) -> Result<Invoice, String> {
     with_reader(&app, |conn| invoices::quote(conn, &draft))
 }
 
-/// The DRAFT-watermarked PDF bytes for an unsaved or saved draft.
 #[tauri::command]
 pub fn render_invoice_preview(app: AppHandle, draft: DraftInput) -> Result<Response, String> {
     with_reader(&app, |conn| invoices::render_draft(conn, &draft)).map(Response::new)
 }
 
-/// The archived PDF bytes of a finalized invoice.
 #[tauri::command]
 pub fn get_invoice_pdf(app: AppHandle, id: String) -> Result<Response, String> {
     with_reader(&app, |conn| invoices::stored_pdf(conn, &id)).map(Response::new)
@@ -666,9 +640,7 @@ pub fn delete_void_invoice(app: AppHandle, id: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Asks where to save an invoice PDF and writes it: a finalized invoice's
-/// archived bytes (`id`), or a fresh DRAFT render of `draft`. Returns the saved
-/// path, or `None` when the user cancels.
+/// Returns the saved path, or `None` when the user cancels.
 #[tauri::command]
 pub async fn export_invoice_pdf(
     app: AppHandle,
@@ -725,7 +697,6 @@ pub fn update_invoice_profile(
     with_writer(&app, |conn| profile::update(conn, profile, now_epoch_ms()))
 }
 
-/// The logo image bytes (PNG), or an empty response when none is set.
 #[tauri::command]
 pub fn get_invoice_logo(app: AppHandle) -> Result<Response, String> {
     with_reader(&app, |conn| {
@@ -734,7 +705,6 @@ pub fn get_invoice_logo(app: AppHandle) -> Result<Response, String> {
     .map(Response::new)
 }
 
-/// Stores the raw bytes of the request body as the logo (PNG or JPEG in).
 #[tauri::command]
 pub fn set_invoice_logo(app: AppHandle, request: Request<'_>) -> Result<(), String> {
     let InvokeBody::Raw(bytes) = request.body() else {
@@ -748,10 +718,7 @@ pub fn clear_invoice_logo(app: AppHandle) -> Result<(), String> {
     with_writer(&app, |conn| profile::clear_logo(conn, now_epoch_ms()))
 }
 
-// --- P1: Time Entries ---------------------------------------------------
-
-/// Tells views to refetch, and wakes the AI worker: an entry mutation can
-/// queue work (an approval queues its embedding, a rebuild a classification).
+/// Tells views to refetch and wakes the AI worker, which an entry mutation can give work.
 pub(crate) fn entries_changed(app: &AppHandle) {
     let _ = app.emit(crate::EVENT_ENTRIES_CHANGED, ());
     ai::nudge(app);
@@ -791,7 +758,6 @@ pub fn update_time_entry(
     Ok(entry)
 }
 
-/// Returns the approved entries, so a caller adopts them without a refetch.
 #[tauri::command]
 pub fn approve_time_entries(app: AppHandle, ids: Vec<String>) -> Result<Vec<TimeEntry>, String> {
     let now = now_epoch_ms();
@@ -805,8 +771,6 @@ pub fn approve_time_entries(app: AppHandle, ids: Vec<String>) -> Result<Vec<Time
     Ok(entries)
 }
 
-/// Returns the entries, back to pending, so a caller adopts them without a
-/// refetch.
 #[tauri::command]
 pub fn unapprove_time_entries(app: AppHandle, ids: Vec<String>) -> Result<Vec<TimeEntry>, String> {
     let now = now_epoch_ms();
@@ -820,8 +784,6 @@ pub fn unapprove_time_entries(app: AppHandle, ids: Vec<String>) -> Result<Vec<Ti
     Ok(entries)
 }
 
-/// One patch applied to many entries (My Timesheet's bulk bar). Returns the
-/// updated entries.
 #[tauri::command]
 pub fn update_time_entries(
     app: AppHandle,
@@ -899,8 +861,7 @@ pub fn delete_time_entries(app: AppHandle, ids: Vec<String>) -> Result<(), Strin
     Ok(())
 }
 
-/// Undoes (or redoes) the last change to entries or the catalog. Returns
-/// what it was ("Split", "Accept", ...), or `None` when there was nothing.
+/// Returns the undone change's label, or `None` when there was nothing.
 #[tauri::command]
 pub fn undo(app: AppHandle, redo: bool) -> Result<Option<String>, String> {
     let step = {
@@ -946,8 +907,6 @@ pub fn rebuild_time_entries(
     Ok(entries)
 }
 
-// --- P1: Apps -----------------------------------------------------------
-
 #[tauri::command]
 pub fn list_apps(app: AppHandle) -> Result<Vec<AppRecord>, String> {
     let state = app.state::<AppState>();
@@ -969,14 +928,11 @@ pub fn update_app(
     store.update_app(&id, default_category_id, default_project_id, excluded, now)
 }
 
-// --- P2: AI suggestions --------------------------------------------------
-
 #[tauri::command]
 pub fn ai_status(app: AppHandle) -> AiStatus {
     app.state::<AiRuntime>().status()
 }
 
-/// "Couldn't categorize · Retry", or re-running a suggestion on demand.
 #[tauri::command]
 pub fn retry_classification(app: AppHandle, id: String) -> Result<(), String> {
     let now = now_epoch_ms();
@@ -989,7 +945,6 @@ pub fn retry_classification(app: AppHandle, id: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Accepts (creating a rule) or dismisses an inline rule suggestion.
 #[tauri::command]
 pub fn resolve_rule_suggestion(
     app: AppHandle,
@@ -1002,10 +957,6 @@ pub fn resolve_rule_suggestion(
     store.resolve_rule_suggestion(&suggestion, accept, now)
 }
 
-// --- P4: Learning loop -----------------------------------------------------
-
-/// Settings → Categories & AI: effectiveness, calibration, the threshold
-/// preview, and personal-model versions over the last `days` days.
 #[tauri::command]
 pub fn ai_metrics(app: AppHandle, days: u32) -> Result<AiMetrics, String> {
     let state = app.state::<AppState>();
@@ -1013,8 +964,7 @@ pub fn ai_metrics(app: AppHandle, days: u32) -> Result<AiMetrics, String> {
     ai::metrics::metrics(&reader, days, now_epoch_ms())
 }
 
-/// "Retrain now": queues a personal-model retrain that skips the idle/power
-/// gate. The result arrives as `ai-status-changed`.
+/// Skips the idle/power gate; the result arrives as `ai-status-changed`.
 #[tauri::command]
 pub fn ai_retrain(app: AppHandle) -> AiStatus {
     ai::update_status(&app, |s| {
@@ -1025,9 +975,7 @@ pub fn ai_retrain(app: AppHandle) -> AiStatus {
     app.state::<AiRuntime>().status()
 }
 
-/// "Reset learned data": forgets the personal models, calibration, and the
-/// kNN store, keeping entries, categories, projects, and rules. Returns the
-/// updated metrics.
+/// Forgets models, calibration and the kNN store; keeps entries, categories, projects, rules.
 #[tauri::command]
 pub fn ai_reset_learned(app: AppHandle, days: u32) -> Result<AiMetrics, String> {
     let now = now_epoch_ms();
@@ -1054,10 +1002,8 @@ pub fn ai_reset_learned(app: AppHandle, days: u32) -> Result<AiMetrics, String> 
     Ok(metrics)
 }
 
-// --- P3: Reports (Time Entries, My Timesheet, Calendar Month) -----------
-//
-// Read-only queries go through the reader connection so an aggregation over
-// a year never holds the writer the sampler needs (decision A6).
+// Read-only queries use the reader connection so a year-long aggregation
+// never holds the writer the sampler needs (decision A6).
 
 fn with_reader<T>(
     app: &AppHandle,
@@ -1092,7 +1038,6 @@ pub fn entry_rollup(
     })
 }
 
-/// Writes the filtered entries to the Downloads folder as CSV or JSON.
 #[tauri::command]
 pub fn export_time_entries(
     app: AppHandle,
@@ -1109,8 +1054,6 @@ pub fn export_time_entries(
         reports::export_entries(conn, &filter, format, &dir)
     })
 }
-
-// --- P3: Projects ------------------------------------------------------
 
 #[tauri::command]
 pub fn project_stats(
@@ -1131,7 +1074,6 @@ pub fn project_rules(app: AppHandle, project_id: String) -> Result<Vec<ProjectRu
     })
 }
 
-/// "Would have matched 14h in the last 30 days", per hint.
 #[tauri::command]
 pub fn preview_project_hints(
     app: AppHandle,
@@ -1163,8 +1105,6 @@ pub fn import_projects_csv(app: AppHandle, text: String) -> Result<ImportSummary
     crate::projects::import_csv(&mut store, &text, now)
 }
 
-// --- Pulse panel -------------------------------------------------------
-
 #[tauri::command]
 pub fn resize_pulse_panel(app: AppHandle, height: f64) {
     crate::pulse::resize(&app, height);
@@ -1175,8 +1115,6 @@ pub fn hide_pulse_panel(app: AppHandle) {
     crate::pulse::hide(&app);
 }
 
-/// The panel's doors into the app: closes the panel and brings the main
-/// window forward, on today's review queue when `review` is set.
 #[tauri::command]
 pub fn open_main_window(app: AppHandle, review: bool, timer_id: Option<String>) {
     crate::pulse::hide(&app);
@@ -1188,8 +1126,6 @@ pub fn open_main_window(app: AppHandle, review: bool, timer_id: Option<String>) 
         let _ = app.emit_to("main", "open-timer", id);
     }
 }
-
-// --- Preferences -------------------------------------------------------
 
 #[tauri::command]
 pub fn get_settings(app: AppHandle) -> Settings {
@@ -1209,7 +1145,6 @@ pub fn update_settings(app: AppHandle, settings: Settings) -> Result<Settings, S
     Ok(next)
 }
 
-/// Carries a settings change out to the parts of the app that hold a copy.
 pub(crate) fn apply_settings_change(app: &AppHandle, previous: &Settings, next: &Settings) {
     if next.tray_enabled != previous.tray_enabled {
         let timers = {
@@ -1262,7 +1197,6 @@ pub fn sweep_retention(app: &AppHandle) -> Result<u64, String> {
 
 pub use openrize_core::state::StoragePaths;
 
-/// Whether macOS will launch OpenRize at login (see login_item.rs).
 #[tauri::command]
 pub fn launch_at_login() -> LoginItemState {
     login_item::state()
@@ -1273,17 +1207,14 @@ pub fn set_launch_at_login(enabled: bool) -> Result<LoginItemState, String> {
     login_item::set(enabled)
 }
 
-/// Current authorization status of required/requested system permissions.
 #[tauri::command]
 pub fn check_permissions(app: AppHandle) -> Vec<crate::permissions::PermissionInfo> {
     let monitor = app.state::<crate::permissions::Monitor>();
     crate::permissions::check_permissions(monitor.state(), monitor.automation())
 }
 
-/// Shows the system's Accessibility prompt. The answer arrives as
-/// `permissions-changed`, not as a return value: the user answers in System
-/// Settings, not in this call. Allow ends a simulated state (dev builds only),
-/// so the flow carries on with the real one.
+/// The answer arrives as `permissions-changed`, not a return value. Allow ends a
+/// simulated state (dev builds only), so the flow carries on with the real one.
 #[tauri::command]
 pub fn request_accessibility(app: AppHandle) {
     app.state::<crate::permissions::Monitor>()
@@ -1291,15 +1222,12 @@ pub fn request_accessibility(app: AppHandle) {
     crate::permissions::request_accessibility();
 }
 
-/// Whether Accessibility is working in this process, and if a relaunch is
-/// what it needs. The state also arrives as `permissions-changed`.
 #[tauri::command]
 pub fn accessibility_state(app: AppHandle) -> crate::permissions::AccessibilityState {
     app.state::<crate::permissions::Monitor>().state()
 }
 
-/// Restarts through the same path as an update, so the open activity segment
-/// is closed first.
+/// Restarts through the update path so the open activity segment is closed first.
 #[tauri::command]
 pub fn relaunch_app(app: AppHandle) {
     app.request_restart();
@@ -1351,8 +1279,6 @@ pub fn reset_energy_history(app: AppHandle) -> Result<crate::energy::EnergySumma
     Ok(summary)
 }
 
-// --- Updates -----------------------------------------------------------
-
 #[tauri::command]
 pub fn update_status(app: AppHandle) -> Result<UpdateStatus, String> {
     app.state::<UpdaterState>().snapshot()
@@ -1364,23 +1290,18 @@ pub async fn check_for_updates(app: AppHandle) -> Result<UpdateStatus, String> {
     app.state::<UpdaterState>().snapshot()
 }
 
-/// How many past releases the Settings changelog lists.
 const CHANGELOG_RELEASES: usize = 10;
 
-/// Notes of the installed release and the ones before it, newest first.
 #[tauri::command]
 pub async fn installed_release_notes(app: AppHandle) -> Result<Vec<ReleaseNotes>, String> {
     let current = app.package_info().version.to_string();
     updater::recent_release_notes(&current, CHANGELOG_RELEASES).await
 }
 
-/// Downloads and installs the available update, then restarts into it.
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
     updater::install(&app).await
 }
-
-// --- Break reminders ----------------------------------------------------
 
 #[tauri::command]
 pub fn break_state(app: AppHandle) -> Result<breaks::engine::BreakState, String> {
@@ -1396,7 +1317,6 @@ pub fn dismiss_stopwatch_reminder(
     breaks::dismiss_stopwatch(&app, &id, started_at)
 }
 
-/// Starts the pending reminder's break, or a manual one when none is pending.
 #[tauri::command]
 pub fn start_break(app: AppHandle) -> Result<breaks::engine::BreakState, String> {
     breaks::command(&app, breaks::engine::Command::StartBreak)
@@ -1433,7 +1353,6 @@ pub fn extend_break(app: AppHandle) -> Result<breaks::engine::BreakState, String
     )
 }
 
-/// Silences reminders until `until` (epoch ms); `None` turns them back on.
 #[tauri::command]
 pub fn pause_break_reminders(
     app: AppHandle,
@@ -1456,15 +1375,12 @@ pub fn resize_reminder_panel(app: AppHandle, width: f64, height: f64) {
     breaks::surface::resize(&app, width, height);
 }
 
-/// The reminder's "Reminder settings…": brings the main window forward on
-/// Settings > Notifications.
 #[tauri::command]
 pub fn open_break_settings(app: AppHandle) {
     tray::show_main_window(&app);
     let _ = app.emit_to("main", crate::EVENT_OPEN_BREAK_SETTINGS, ());
 }
 
-/// Dev builds only: raises a sample reminder (Settings > Notifications).
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn dev_sample_break_reminder(app: AppHandle) -> Result<breaks::engine::BreakState, String> {

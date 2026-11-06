@@ -1,6 +1,5 @@
-//! The Windows user PATH (`HKCU\Environment`). `rize install-path` and
-//! `uninstall-path` edit it, and the app checks its entry at every launch;
-//! both go through here so they agree on what "on PATH" means.
+//! The Windows user PATH (`HKCU\Environment`), edited by `rize install-path` and `uninstall-path`
+//! and checked by the app at every launch.
 
 /// The user PATH as a list of folders, compared the way Windows does:
 /// ignoring case and a trailing backslash.
@@ -110,14 +109,12 @@ fn edit(change: impl FnOnce(&str) -> Option<String>) -> Result<bool, String> {
     Ok(true)
 }
 
-/// Adds `folder` to the user PATH unless it is already there. Returns whether
-/// the PATH was written, so callers can skip work when nothing changed.
+/// Adds `folder` to the user PATH unless already there. Returns whether the PATH was written.
 pub fn ensure_folder(folder: &str) -> Result<bool, String> {
     edit(|path| (!path_list::contains(path, folder)).then(|| path_list::with(path, folder)))
 }
 
-/// Removes every entry for `folder` from the user PATH, however it is written.
-/// Returns whether the PATH was written.
+/// Removes every entry for `folder` from the user PATH. Returns whether the PATH was written.
 pub fn remove_folder(folder: &str) -> Result<bool, String> {
     edit(|path| path_list::contains(path, folder).then(|| path_list::without(path, folder)))
 }

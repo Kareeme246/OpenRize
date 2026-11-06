@@ -29,15 +29,13 @@ extern "C" {
     fn CGDisplayIsAsleep(display: u32) -> u32;
 }
 
-/// Nobody can be at the Mac: the screen is locked, the session is switched
-/// out, or every display is asleep. macOS briefly wakes a sleeping Mac for
-/// background work (Power Nap, iCloud) with the display off, and the idle
-/// clock alone can read as fresh input then.
+/// Nobody can be at the Mac: locked, session switched out, or every display asleep. macOS wakes a
+/// sleeping Mac for background work (Power Nap, iCloud) with the display off, and the idle clock
+/// alone reads as fresh input then.
 pub fn user_is_away() -> bool {
     screen_is_locked() || all_displays_asleep()
 }
 
-/// Milliseconds since the last keyboard or mouse input.
 pub fn idle_ms() -> u64 {
     user_idle3::UserIdle::get_time()
         .map(|idle| idle.duration().as_millis() as u64)
@@ -97,8 +95,6 @@ pub fn read_active_window() -> Option<WindowSample> {
 
     let bundle_id = front_app.bundleIdentifier().map(|s| s.to_string());
 
-    // Titles come from the Accessibility API (see `title` for the order tried),
-    // so Screen Recording permission is not needed.
     let title = window_title(pid, bundle_id.as_deref());
 
     let browser = match bundle_id {
@@ -123,14 +119,12 @@ pub fn read_active_window() -> Option<WindowSample> {
     })
 }
 
-/// `kAXErrorNoValue`: the attribute exists but nothing is set.
 const AX_ERROR_NO_VALUE: i32 = -25212;
 
-/// How long one Accessibility call may wait on a stuck app before giving up,
-/// instead of the system default holding up the sampler thread.
+/// How long one Accessibility call may wait on a stuck app, instead of the system default stalling
+/// the sampler.
 const AX_MESSAGING_TIMEOUT_SECS: f32 = 1.0;
 
-/// An app with many windows is not walked past this many.
 const MAX_WINDOWS_READ: usize = 8;
 
 /// One failure line per kind per this long; the sampler runs every second.
@@ -141,9 +135,7 @@ fn failure_log() -> &'static Mutex<FailureLog> {
     LOG.get_or_init(|| Mutex::new(FailureLog::new(FAILURE_LOG_INTERVAL_MS)))
 }
 
-/// The title of `pid`'s frontmost window, or an empty string. Why a title was
-/// not found is logged, since the sampler would otherwise record nothing and
-/// say nothing.
+/// The title of `pid`'s frontmost window, or an empty string; why none was found is logged.
 fn window_title(pid: libc::pid_t, bundle_id: Option<&str>) -> String {
     let resolution = resolve_title(pid);
     if let Some(key) = title::failure_to_log(bundle_id, &resolution) {
@@ -250,9 +242,8 @@ fn copy_attribute(element: &CFType, name: &'static str) -> Result<CFType, i32> {
     Ok(unsafe { CFType::wrap_under_create_rule(value) })
 }
 
-/// Whether `pid` holds an active display-sleep assertion, directly or through
-/// a system service acting on its behalf. Only the assertion's type is read:
-/// its name (for example "video-playing") is never stored.
+/// Whether `pid` holds an active display-sleep assertion, directly or through a system service
+/// acting for it. Only the assertion's type is read; its name is never stored.
 fn keeps_display_awake(pid: libc::pid_t) -> bool {
     use core_foundation::array::CFArray;
     use core_foundation::base::CFType;
@@ -301,11 +292,9 @@ fn keeps_display_awake(pid: libc::pid_t) -> bool {
     })
 }
 
-/// What asking a browser about its front window answered.
 struct BrowserWindow {
     url: Option<String>,
     domain: Option<String>,
-    /// The window is a private (incognito) one.
     incognito: bool,
 }
 
@@ -317,10 +306,9 @@ impl BrowserWindow {
     };
 }
 
-/// The script that asks a Chromium browser for its front window's URL and
-/// mode, one per line. Only a Chromium window has a `mode` ("normal" or
-/// "incognito"); a browser that does not answer it is read as normal, so the
-/// URL is never lost to it.
+/// The script asking a Chromium browser for its front window's URL and mode, one per line. Only
+/// Chromium has a `mode`; a browser that does not answer is read as normal so the URL is never
+/// lost.
 fn chromium_script(app: &str) -> String {
     format!(
         r#"tell application "{app}"

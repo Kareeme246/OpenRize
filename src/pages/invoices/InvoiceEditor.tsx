@@ -40,16 +40,11 @@ import { ProfileSheet } from "./ProfileSheet";
 import { TimePicker } from "./TimePicker";
 
 interface InvoiceEditorProps {
-  /** An existing draft to edit; omit for a new invoice. */
   invoiceId?: string;
-  /** Start a new invoice for a client, optionally filled from one project. */
   compose?: { clientId?: string; projectId?: string };
   catalog: Catalog;
-  /** The draft was stored (first save or a later one). */
   onSaved: (id: string) => void;
-  /** The draft became a numbered invoice. */
   onFinalized: (id: string) => void;
-  /** Leave the editor without an invoice to show (cancel, delete). */
   onExit: () => void;
 }
 
@@ -74,7 +69,6 @@ function entryLine(entry: BillableEntry): DraftLine {
   };
 }
 
-/** Everything that would be stored, minus React keys, to spot unsaved edits. */
 function snapshot(form: DraftForm): string {
   return JSON.stringify({
     ...form,
@@ -85,9 +79,8 @@ function snapshot(form: DraftForm): string {
 const tomorrow = (): number => addDays(startOfDay(new Date()), 1).getTime();
 
 /**
- * Create or edit a draft: a left column of Rise-style sections and, beside it,
- * the real invoice PDF re-rendered by Rust a moment after each change. Nothing
- * is stored until Save draft; Finalize stores, numbers and locks it.
+ * Edit a draft: sections on the left, the real invoice PDF re-rendered by Rust
+ * beside it.
  */
 export function InvoiceEditor({
   invoiceId,
@@ -110,15 +103,13 @@ export function InvoiceEditor({
   const [editingProfile, setEditingProfile] = useState(false);
   const [pane, setPane] = useState<"edit" | "preview">("edit");
 
-  // Load once: an existing draft, or the defaults for a new one (and, when
-  // started from a project, its ready time as lines). Props are read at mount;
-  // later changes (the route moving to this draft's id after its first save)
-  // must not reset the user's edits.
+  // Load once; props are read at mount, so the route moving to this draft's id
+  // after its first save must not reset the user's edits.
   const initial = useRef({ invoiceId, compose });
   const started = useRef(false);
   const wantedClient = initial.current.compose?.clientId;
-  // The catalog loads alongside the page; a client named by the route must be
-  // in it before the draft can be pre-filled from that client.
+  // A client named by the route must be in the catalog before the draft can be
+  // pre-filled.
   const clientReady =
     wantedClient === undefined ||
     catalog.clientById.has(wantedClient) ||
@@ -197,7 +188,6 @@ export function InvoiceEditor({
     [form?.lines],
   );
 
-  // Time waiting to be invoiced for this client that is not on the draft yet.
   useEffect(() => {
     if (!clientId) {
       setReady([]);
@@ -249,7 +239,6 @@ export function InvoiceEditor({
       billToName: client.name,
       billToAddress: client.address ?? "",
       billToEmail: client.email ?? "",
-      // Tracked time belongs to one client's projects.
       lines: form.lines.filter((line) => line.kind !== "time"),
     });
   };
@@ -284,7 +273,6 @@ export function InvoiceEditor({
     }
   };
 
-  /** Stores the draft; resolves to its id. */
   const store = async (): Promise<string> => {
     if (!form || !input) throw new Error("Finish the draft before saving");
     const saved = await api.saveInvoiceDraft(input);

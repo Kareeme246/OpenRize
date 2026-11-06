@@ -4,11 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
-    // The Swift ML sidecar is macOS-only; rize ships on macOS and Windows.
-    // Each must exist before `tauri_build::build()` runs, because that step
-    // copies every `bundle.externalBin` (tauri.macos.conf.json,
-    // tauri.windows.conf.json) next to the app binary and fails if one is
-    // missing.
+    // The Swift ML sidecar is macOS-only. Each externalBin must exist before
+    // `tauri_build::build()`, which copies it next to the app binary and fails if one is missing.
     let os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     if os == "macos" {
         build_ml_sidecar();
@@ -62,9 +59,8 @@ fn build_cli_sidecar() {
     }
 }
 
-/// Builds `swift/` (the `openrize-ml` executable) and stages it as
-/// `binaries/openrize-ml-<target triple>`, the name Tauri's externalBin
-/// convention expects.
+/// Builds `swift/` (the `openrize-ml` executable) and stages it as `binaries/openrize-ml-<target
+/// triple>`.
 fn build_ml_sidecar() {
     println!("cargo:rerun-if-changed=swift/Package.swift");
     println!("cargo:rerun-if-changed=swift/Sources");

@@ -1,24 +1,17 @@
-//! Choosing a window title, and recording why none could be read.
-//!
-//! The OS calls live in `macos.rs`. What they should do with the answers does
-//! not depend on the OS, so it lives here where a test can reach it: the order
-//! titles are tried in, which results count as a title, which browsers we
-//! expect to read titles from, and how often a failure is worth a log line.
+//! Choosing a window title and recording why none could be read. The OS calls live in `macos.rs`;
+//! the order titles are tried, what counts as a title, covered browsers and log limits live here so
+//! tests reach them.
 
 use std::collections::HashMap;
 
-/// Where a window's title can come from, in the order they are tried. The
-/// first window an app reports as focused is the right one almost always, but
-/// not for a popup, a picture-in-picture window or a detached DevTools panel:
-/// there the focused window can be missing or untitled while the main window
-/// still has the title the user is working under.
+/// Where a window's title can come from, in order tried. The focused window is almost always right,
+/// but not for a popup, picture-in-picture or detached DevTools panel, where it can be missing or
+/// untitled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TitleSource {
     FocusedWindow,
     MainWindow,
-    /// The window that contains the focused control.
     FocusedElementWindow,
-    /// The app's window list, front to back.
     WindowList,
 }
 
@@ -31,27 +24,21 @@ impl TitleSource {
     ];
 }
 
-/// What one attempt at a title produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Attempt {
     Title(String),
-    /// A window answered but its title is empty or blank.
     Empty,
-    /// The OS refused or had nothing to say; carries its error code.
     Failed(i32),
 }
 
-/// The outcome of walking every source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolution {
     pub title: Option<String>,
-    /// What each source that was tried said, in the order tried.
     pub attempts: Vec<(TitleSource, Attempt)>,
 }
 
 impl Resolution {
-    /// The first error code any source reported, the most useful single fact
-    /// when no title came back.
+    /// The first error code any source reported, the most useful fact when no title came back.
     pub fn first_error(&self) -> Option<i32> {
         self.attempts.iter().find_map(|(_, attempt)| match attempt {
             Attempt::Failed(code) => Some(*code),
@@ -60,14 +47,11 @@ impl Resolution {
     }
 }
 
-/// Whether a title is worth keeping: an empty or blank title is "no title",
-/// not a successful read that happens to say nothing.
+/// An empty or blank title is "no title", not a successful read.
 pub fn is_usable(title: &str) -> bool {
     !title.trim().is_empty()
 }
 
-/// The first usable title among windows listed in order, with the error or
-/// emptiness of the front window kept for the log when none is usable.
 pub fn pick_from_windows(windows: impl IntoIterator<Item = Attempt>) -> Attempt {
     let mut first_miss = None;
     for attempt in windows {
@@ -80,8 +64,7 @@ pub fn pick_from_windows(windows: impl IntoIterator<Item = Attempt>) -> Attempt 
     first_miss.unwrap_or(Attempt::Empty)
 }
 
-/// Tries each source in order and stops at the first usable title. `read` is
-/// called lazily, so a focused window with a title costs one lookup.
+/// Tries each source in order, stopping at the first usable title; `read` is lazy.
 pub fn resolve(mut read: impl FnMut(TitleSource) -> Attempt) -> Resolution {
     let mut attempts = Vec::new();
     for source in TitleSource::IN_ORDER {
@@ -105,7 +88,6 @@ pub fn resolve(mut read: impl FnMut(TitleSource) -> Attempt) -> Resolution {
     }
 }
 
-/// The browser engines whose window titles we expect to read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowserFamily {
     Firefox,
@@ -121,14 +103,9 @@ impl BrowserFamily {
     }
 }
 
-/// Every browser bundle id we name as covered. Titles are read the same way
-/// for any app, so an id missing here still gets a title when macOS allows it;
-/// what the list buys is that a failure is logged under the browser's family
-/// and a browser that is not listed is logged as unlisted, which says plainly
-/// that nobody has checked it. Add an id here when someone has.
-///
-/// Ids for Firefox, Firefox Developer Edition, Zen and Chrome were read off
-/// installed bundles; the rest are the publishers' documented identifiers.
+/// Every browser bundle id named as covered. Titles are read the same for any app, but a listed id
+/// logs failures under its browser family and an unlisted one logs as unlisted (nobody has checked
+/// it). Add an id when someone has.
 pub const BROWSERS: &[(&str, BrowserFamily)] = &[
     ("org.mozilla.firefox", BrowserFamily::Firefox),
     (
@@ -174,10 +151,8 @@ pub fn browser_family(bundle_id: &str) -> Option<BrowserFamily> {
         .map(|(_, family)| *family)
 }
 
-/// Lets a repeating failure through once per interval per key, and counts what
-/// it held back so the next line can say how often it happened. The sampler
-/// runs once a second; without this a permission that is simply off would fill
-/// the log.
+/// Lets a repeating failure through once per interval per key and counts what it held back, so a
+/// permission that is simply off does not fill the log.
 pub struct FailureLog {
     interval_ms: u64,
     seen: HashMap<String, Seen>,
@@ -196,9 +171,8 @@ impl FailureLog {
         }
     }
 
-    /// `Some(held_back)` when the failure under `key` should be logged now,
-    /// where `held_back` is how many identical ones were skipped since the
-    /// last line; `None` when it should stay quiet.
+    /// `Some(held_back)` when the failure under `key` should be logged now, with how many were
+    /// skipped since the last line; `None` to stay quiet.
     pub fn admit(&mut self, key: &str, now_ms: u64) -> Option<u32> {
         match self.seen.get_mut(key) {
             None => {
@@ -225,10 +199,9 @@ impl FailureLog {
     }
 }
 
-/// What to log when no source gave a title, or `None` when saying so would
-/// only be noise. An app with no window at all (a menu bar app, Finder with
-/// every window closed) answers "no value" and is not a problem; a refused
-/// call, or any trouble reading a browser, is.
+/// What to log when no source gave a title, or `None` when it is noise: an app with no window (menu
+/// bar app, Finder with all closed) answers "no value"; a refused call, or trouble with a browser,
+/// is not.
 pub fn failure_to_log(bundle_id: Option<&str>, resolution: &Resolution) -> Option<String> {
     const NO_VALUE: i32 = -25212;
     if resolution.title.is_some() {
@@ -245,7 +218,6 @@ pub fn failure_to_log(bundle_id: Option<&str>, resolution: &Resolution) -> Optio
     Some(failure_key(bundle_id, resolution))
 }
 
-/// The key a failure is rate limited under, which doubles as its log text.
 pub fn failure_key(bundle_id: Option<&str>, resolution: &Resolution) -> String {
     let family = bundle_id
         .and_then(browser_family)

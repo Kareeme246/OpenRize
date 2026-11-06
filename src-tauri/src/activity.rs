@@ -1,8 +1,6 @@
-//! Activity capture - the automatic tracker.
-//!
-//! Samples the OS foreground window, whether that app keeps the display awake,
-//! and user idle time every second and folds consecutive samples into the
-//! segments `openrize_core::activity` stores.
+//! Activity capture: every second, samples the foreground window, display-awake
+//! state and idle time, folding samples into the segments
+//! `openrize_core::activity` stores.
 
 use std::sync::atomic::Ordering;
 use std::time::Duration;

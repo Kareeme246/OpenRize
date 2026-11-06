@@ -1,7 +1,5 @@
-//! Reaching OpenRize's data: through the running app over its local
-//! endpoint, or, with the app closed, straight from the stores the app made
-//! (`openrize_core::rpc`, the same code the app answers with). rize never
-//! creates the data: without the app's database there is nothing to work on.
+//! Reaching OpenRize's data through the running app's local endpoint, or,
+//! with the app closed, straight from its stores. rize never creates the data.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -17,14 +15,10 @@ use openrize_core::protocol::{code, Hello, Operation, Request, Response};
 use openrize_core::rpc;
 use openrize_core::state::{self, AppState, NO_DATA};
 
-/// How long a freshly launched app may take to answer.
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(60);
-/// How long a quitting app may take to close its stores.
 const QUIT_TIMEOUT: Duration = Duration::from_secs(30);
-/// Lets a dev or test build point rize at a specific app binary.
 const APP_ENV: &str = "RIZE_APP";
 
-/// The folder rize works on and the app endpoint that folder names.
 struct Target {
     data_dir: PathBuf,
     endpoint: Endpoint,
@@ -32,8 +26,8 @@ struct Target {
 
 pub struct Client {
     target: Mutex<Target>,
-    /// Whether the folder was worked out (no `--data-dir`), so it can change
-    /// when the app launched by `start_app` moves the data on its first run.
+    /// Whether the folder was derived (no `--data-dir`); it can change when
+    /// `start_app` moves the data on its first run.
     follows_app: bool,
 }
 
@@ -42,13 +36,11 @@ impl Client {
         Self::in_root(data_dir, paths::app_data_dir())
     }
 
-    /// `root` is the installed app's data directory, if the OS has one.
     fn in_root(data_dir: Option<&Path>, root: Option<PathBuf>) -> Result<Self, String> {
         let follows_app = data_dir.is_none();
         let data_dir = match data_dir {
             Some(dir) => std::path::absolute(dir).map_err(|e| e.to_string())?,
-            // The folder the app has open: the account it remembers, or the
-            // data directory itself for No account.
+            // The account the app remembers, else the data directory (No account).
             None => accounts::resolve(&root.ok_or("no home directory; pass --data-dir")?).dir,
         };
         let endpoint = Endpoint::new(&data_dir)?;
@@ -68,9 +60,8 @@ impl Client {
         self.target().data_dir.clone()
     }
 
-    /// The first run of an updated Windows app moves the data from the roaming
-    /// folder rize found it in to the local one, and serves from there. Looks
-    /// again, so a rize that started the app (or waited for it) follows.
+    /// An updated Windows app's first run moves the data from the roaming folder
+    /// to the local one; looks again so a rize that started the app follows.
     fn follow_app(&self) {
         if !self.follows_app {
             return;
@@ -91,8 +82,7 @@ impl Client {
         self.target().endpoint.connect().is_ok()
     }
 
-    /// Asks the running app, or answers from the stored data when it is
-    /// closed. An operation that needs the app fails with `APP_NOT_RUNNING`.
+    /// An operation that needs the app fails with `APP_NOT_RUNNING` when it is closed.
     pub fn request(&self, operation: Operation) -> Response {
         let request = Request::new(operation);
         let connected = self.target().endpoint.connect();
@@ -130,7 +120,6 @@ impl Client {
                 drop(lock);
                 response
             }
-            // The app was starting while we looked; it has the stores now.
             Ok(None) => match self.wait_for_app(LAUNCH_TIMEOUT) {
                 Ok(()) => self
                     .target()
@@ -143,9 +132,7 @@ impl Client {
         }
     }
 
-    /// Starts the app in the background (or with its window, `show`) unless
-    /// it is already running, and waits until it answers. Returns whether
-    /// this call launched it.
+    /// Returns whether this call launched the app.
     pub fn start_app(&self, show: bool) -> Result<bool, String> {
         if self.running() {
             return Ok(false);
@@ -163,8 +150,7 @@ impl Client {
         Ok(true)
     }
 
-    /// Asks the running app to quit, and returns once it has let go of the
-    /// data, so the next command already finds it closed.
+    /// Returns once the app has let go of the data.
     pub fn quit_app(&self) -> Response {
         let response = self.request(Operation::AppQuit {});
         if !response.ok {
@@ -203,9 +189,7 @@ impl Client {
     }
 }
 
-/// The OpenRize binary to run: `RIZE_APP`, else the `openrize` next to rize
-/// (rize bundled in the app, or a build directory), else the installed app,
-/// for a rize installed on its own.
+/// `RIZE_APP`, else the `openrize` next to rize, else the installed app.
 pub fn app_executable() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os(APP_ENV) {
         return Ok(PathBuf::from(path));
@@ -224,7 +208,6 @@ pub fn app_executable() -> Result<PathBuf, String> {
         })
 }
 
-/// Where an installed OpenRize usually lives.
 #[cfg(target_os = "macos")]
 fn installed_apps() -> Vec<PathBuf> {
     let executable = |app: PathBuf| app.join("Contents/MacOS/openrize");
@@ -251,8 +234,7 @@ fn installed_apps() -> Vec<PathBuf> {
     apps
 }
 
-/// The per-user install folder the Windows installer uses, then a machine-wide
-/// one. NTFS ignores case, so installs from before the folder was `OpenRize` match too.
+/// NTFS ignores case, so installs from before the folder was `OpenRize` match too.
 #[cfg(windows)]
 fn installed_apps() -> Vec<PathBuf> {
     ["LOCALAPPDATA", "ProgramFiles"]
@@ -271,8 +253,7 @@ fn installed_apps() -> Vec<PathBuf> {
 /// older app would only open its window, so rize never launches one.
 const FIRST_RIZE_VERSION: (u64, u64, u64) = (0, 8, 10);
 
-/// Refuses an installed app too old for rize to launch. Only a macOS bundle
-/// records its version; elsewhere rize is built with its app.
+/// Refuses an installed app too old to launch. Only a macOS bundle records its version.
 fn check_version(executable: &Path) -> Result<(), String> {
     let Some(bundle) = bundle(executable).filter(|_| cfg!(target_os = "macos")) else {
         return Ok(());
@@ -300,7 +281,6 @@ fn check_version(executable: &Path) -> Result<(), String> {
     }
 }
 
-/// The `.app` bundle an executable sits in, if any.
 fn bundle(executable: &Path) -> Option<&Path> {
     let macos = executable.parent()?;
     let contents = macos.parent()?;
@@ -346,8 +326,7 @@ fn launch(executable: &Path, show: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Runs the app outside this terminal's session, so closing the terminal
-/// does not end it.
+/// Runs the app outside this terminal's session so closing it does not end the app.
 #[cfg(unix)]
 fn detach(command: &mut Command) {
     use std::os::unix::process::CommandExt;
@@ -379,7 +358,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 
-        // Before any account, and with one chosen, the folder is the app's.
         let before = Client::in_root(None, Some(root.clone())).unwrap();
         assert_eq!(before.data_dir(), root);
 
@@ -391,7 +369,6 @@ mod tests {
             accounts::data_dir(&root, Some(&account.id))
         );
 
-        // Signed out again, and an explicit directory always wins.
         accounts::set_current(&root, None).unwrap();
         assert_eq!(
             Client::in_root(None, Some(root.clone()))

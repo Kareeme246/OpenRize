@@ -18,12 +18,9 @@ export interface ProjectDraft {
 }
 
 interface ProjectSheetProps {
-  /** Editing this project; absent creates one. */
   project?: Project;
-  /** Prefill for a new project, e.g. from a discovery suggestion. */
   draft?: ProjectDraft;
   clients: Client[];
-  /** Colours other projects already use; a new project starts on a free one. */
   usedColors?: string[];
   onClose: () => void;
   onSaved: (project: Project) => void;
@@ -36,11 +33,6 @@ const KIND_LABELS: Record<string, string> = {
   title_contains: "keyword",
 };
 
-/**
- * New or edit project: name, colour, client (pick or create inline),
- * description, AI hints with a live match preview, billing, budget, and due
- * date. Saving writes the hints' T0 rules too.
- */
 export function ProjectSheet({
   project,
   draft,
@@ -89,7 +81,6 @@ export function ProjectSheet({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // "Would have matched 14h in the last 30 days", recomputed as you type.
   useEffect(() => {
     if (!hints.trim()) {
       setPreview(null);

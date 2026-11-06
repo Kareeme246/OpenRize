@@ -1,10 +1,6 @@
-//! Keeps the `rize` CLI bundled with the app reachable from the shell. It is
-//! checked at every launch, so a link or PATH entry the user removed comes back,
-//! and it always points at the app that is running.
-//!
-//! - macOS: a symlink at `~/.local/bin/rize` to the bundled binary.
-//! - Windows: this folder on the user PATH (`rize.exe` sits next to the app).
-//! - Elsewhere: nothing to install.
+//! Keeps the bundled `rize` reachable from the shell, rechecked every launch:
+//! a macOS symlink at `~/.local/bin/rize`, or this folder on the Windows user
+//! PATH. Elsewhere nothing is installed.
 
 #[cfg_attr(target_os = "macos", path = "cli_install/macos.rs")]
 #[cfg_attr(windows, path = "cli_install/windows.rs")]
@@ -14,8 +10,6 @@
 )]
 mod imp;
 
-/// Called unconditionally at startup; each platform decides what, if anything,
-/// to do.
 pub fn install_bundled_cli() {
     imp::install_bundled_cli();
 }

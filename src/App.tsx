@@ -46,8 +46,8 @@ const SIDEBAR_COLLAPSED_KEY = "openrize.sidebarCollapsed";
 const AUTO_COLLAPSE_QUERY = "(max-width: 959px)";
 
 /**
- * Sidebar width is a per-viewer convenience, so it lives in localStorage.
- * `undefined` means the user never chose, so the window width decides.
+ * Sidebar width is a per-viewer convenience in localStorage; `undefined` means
+ * never chosen, so window width decides.
  */
 function readSidebarChoice(): boolean | undefined {
   try {
@@ -58,7 +58,6 @@ function readSidebarChoice(): boolean | undefined {
   }
 }
 
-/** Browser-style history: a stack plus where the user is standing in it. */
 interface NavState {
   entries: Route[];
   cursor: number;
@@ -156,7 +155,6 @@ export default function App() {
     }));
   }, []);
 
-  /* ⌘, (Ctrl+, elsewhere) - the macOS Settings convention. */
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (!hasPrimaryModifier(event) || event.altKey) return;
@@ -174,7 +172,6 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       const key = event.key.toLowerCase();
-      // Shift+Z redoes everywhere; Ctrl+Y redoes where REDO_KEY says so.
       const redo = event.shiftKey ? key === "z" : key === REDO_KEY;
       const undo = !event.shiftKey && key === "z";
       if (
@@ -215,7 +212,6 @@ export default function App() {
     navigate({ name: "timers" });
   });
 
-  // Initial load & capture events
   useEffect(() => {
     api
       .fetchActivitySnapshot(0)
@@ -249,7 +245,6 @@ export default function App() {
   useTauriEvent<ActivityTick>(api.ACTIVITY_TICK, adoptCapture);
   useTauriEvent<ActivitySnapshot>(api.ACTIVITY_CHANGED, adoptCapture);
 
-  // Entries waiting for review today (the Calendar's pending badge).
   const updatePending = useCallback(async (): Promise<void> => {
     try {
       const startOfDay = new Date();
@@ -270,7 +265,6 @@ export default function App() {
   useTauriEvent(api.ENTRIES_CHANGED, updatePending);
   useTauriEvent(api.SUGGESTION_READY, updatePending);
 
-  // The menu-bar panel's "N to review" button.
   useTauriEvent(api.OPEN_REVIEW, () => {
     navigate({
       name: "calendar",
@@ -281,7 +275,6 @@ export default function App() {
     setCalendarMount((count) => count + 1);
   });
 
-  // The break reminder's "Reminder settings".
   useTauriEvent(api.OPEN_BREAK_SETTINGS, () => {
     navigate({ name: "settings", section: "notifications" });
   });

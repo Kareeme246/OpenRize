@@ -7,7 +7,6 @@ import { useToast } from "./useToast";
 
 export interface TimersApi {
   timers: Timer[];
-  /** Shared 1 Hz clock; every card reads this same value. */
   now: number;
   error: string | null;
   loading: boolean;
@@ -18,11 +17,9 @@ export interface TimersApi {
   /** Resets without a toast, once the time has been logged elsewhere. */
   clear: (id: string) => void;
   rename: (id: string, label: string) => void;
-  /** Tags (links) a timer, or removes its tag when `tag` is null. */
   setTag: (id: string, tag: string | null) => void;
   startTag: (tag: string) => void;
   pauseTag: (tag: string) => void;
-  /** Puts a timer under a section (null: none) at `index` among its timers. */
   moveToSection: (id: string, sectionId: string | null, index?: number) => void;
   addSegment: (id: string, startedAt: number, endedAt: number) => void;
   updateSegment: (id: string, segmentId: number, edit: SegmentEdit) => void;
@@ -61,7 +58,7 @@ export function useTimers(): TimersApi {
   }, [setTimers]);
 
   // ONE interval for the whole page. N running stopwatches cost one repaint per
-  // second, not N — this is the reason the tick lives here and not in a card.
+  // second, not N - this is the reason the tick lives here and not in a card.
   useEffect(() => {
     const handle = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(handle);
@@ -75,7 +72,7 @@ export function useTimers(): TimersApi {
   });
 
   // Every command answers with the full list, so state is replaced, never
-  // patched — the UI cannot invent a timer that is not on disk. Resolves to
+  // patched - the UI cannot invent a timer that is not on disk. Resolves to
   // that list, or null when the command failed.
   const send = useCallback(
     (action: Promise<Timer[]>): Promise<Timer[] | null> =>

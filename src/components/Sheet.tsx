@@ -6,22 +6,15 @@ interface SheetProps {
   submitLabel: string;
   onSubmit: () => void;
   onClose: () => void;
-  /** Disables submit, e.g. while a required field is empty. */
   canSubmit?: boolean;
   error?: string | null;
   width?: "sm" | "md" | "lg";
-  /** False where changes apply as they are made, so there is nothing to cancel. */
   cancellable?: boolean;
   children: ReactNode;
 }
 
 const WIDTHS = { sm: "w-[440px]", md: "w-[560px]", lg: "w-[680px]" };
 
-/**
- * A modal form (Add time, New project, New client) on a real <dialog>, so
- * the browser provides the top layer, focus trap, and Escape to cancel, the
- * same way ConfirmDialog does.
- */
 export function Sheet({
   title,
   submitLabel,
@@ -113,7 +106,6 @@ export function Sheet({
   );
 }
 
-/** A labelled form row. */
 export function Field({
   label,
   htmlFor,

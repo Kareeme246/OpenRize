@@ -18,11 +18,6 @@ interface InvoicesProps {
   replace: (route: Route) => void;
 }
 
-/**
- * Invoices: the list, and from it a draft's editor (with the live PDF) or a
- * finalized invoice's document. The route says which; a draft opens the
- * editor, anything else opens the archived document.
- */
 export function Invoices({ route, navigate, replace }: InvoicesProps) {
   const catalog = useCatalog();
   const [invoices, setInvoices] = useState<InvoiceSummary[]>([]);

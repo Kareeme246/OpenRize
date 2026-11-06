@@ -1,11 +1,6 @@
-//! Windows capture: the foreground window through Win32, its app named from
-//! the executable's version resource (and told apart from others that share
-//! its executable, see `identity`), and a browser's URL read from its address
-//! bar through UI Automation.
-//!
-//! Sampling runs on the activity sampler thread, which owns per-thread caches;
-//! UI Automation runs on its own worker so a hung browser cannot stall it.
-//! Power notifications have their own message loop.
+//! Windows capture: the foreground window through Win32, its app named from the
+//! executable's version resource (see `identity`), and a browser's URL via UI Automation.
+//! Sampling runs on the sampler thread; UIA on its own worker; power on its own loop.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -41,10 +36,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use super::{domain_of, WindowSample};
 
-/// Keeps Windows from throttling the sampler. Windows 11 may put a process
-/// with no visible window (the app lives in the tray) into EcoQoS, which slows
-/// its threads and coalesces its timers, so the process opts out of execution
-/// speed throttling while capture runs.
+/// Keeps Windows 11 from putting the tray-only process into EcoQoS, which slows its
+/// threads and coalesces its timers.
 pub struct AppNapAssertion;
 
 impl AppNapAssertion {
@@ -59,13 +52,11 @@ impl AppNapAssertion {
 
 impl Drop for AppNapAssertion {
     fn drop(&mut self) {
-        // Hand the decision back to the system.
         let _ = set_execution_speed_throttling(None);
     }
 }
 
-/// Sets this process's execution speed throttling: forced on or off, or, with
-/// `None`, left to the system.
+/// Forces execution speed throttling on or off, or with `None` leaves it to the system.
 fn set_execution_speed_throttling(forced: Option<bool>) -> windows::core::Result<()> {
     let state = PROCESS_POWER_THROTTLING_STATE {
         Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
@@ -96,10 +87,8 @@ fn set_execution_speed_throttling(forced: Option<bool>) -> windows::core::Result
 /// Standby laptops turn the display off on lid close without ever sending
 /// PBT_APMSUSPEND, so this is the only sign nobody is looking.
 static DISPLAY_OFF: AtomicBool = AtomicBool::new(false);
-/// The session is locked, as last told by the power loop.
 static SESSION_LOCKED: AtomicBool = AtomicBool::new(false);
-/// Lock and unlock notifications are being delivered, so `SESSION_LOCKED` is
-/// authoritative and the polled lock flag is not consulted.
+/// Lock notifications arrive, so `SESSION_LOCKED` is authoritative over the polled flag.
 static SESSION_EVENTS_LIVE: AtomicBool = AtomicBool::new(false);
 
 /// Input this recent proves the display is on, whatever the last display
@@ -126,8 +115,7 @@ fn locked_after(code: u32) -> Option<bool> {
     }
 }
 
-/// Message-only windows do not receive broadcasts implicitly. Explicitly
-/// register this HWND for suspend/resume, including automatic background wakes,
+/// Message-only windows get no broadcasts implicitly: register this HWND for suspend/resume
 /// and for the display and lock state that decide `user_is_away`.
 pub fn register_sleep_listeners(app: tauri::AppHandle) {
     std::thread::spawn(move || {
@@ -227,7 +215,6 @@ fn power_message_loop(app: tauri::AppHandle) -> windows::core::Result<()> {
                 let _ = UnregisterPowerSettingNotification(display);
             }
             let _ = UnregisterSuspendResumeNotification(registration);
-            // Nothing keeps these current any more.
             SESSION_EVENTS_LIVE.store(false, Ordering::Relaxed);
             SESSION_LOCKED.store(false, Ordering::Relaxed);
             DISPLAY_OFF.store(false, Ordering::Relaxed);
@@ -295,7 +282,6 @@ unsafe extern "system" fn power_window_proc(
 /// window owned by another process.
 const FRAME_HOST: &str = "applicationframehost.exe";
 
-/// Executables whose address bar is read for the URL.
 const BROWSERS: [&str; 10] = [
     "chrome.exe",
     "msedge.exe",
@@ -310,16 +296,13 @@ const BROWSERS: [&str; 10] = [
 ];
 
 thread_local! {
-    /// Display names by executable path; version resources never change
-    /// while the file exists, and reading one every second is wasteful.
+    /// Display names by executable path; version resources never change.
     static APP_NAMES: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
 }
 
-/// Nobody can be at the PC: the display is off, the session is locked, or it
-/// is switched out to another user or a disconnected remote session. The
-/// same rule as macOS, whose displays-asleep and locked checks it mirrors.
-/// Display sleep is deliberately not a `PowerEvent`, as on macOS: it ends the
-/// segment through this, while the break engine only hears of real suspends.
+/// Nobody can be at the PC: display off, session locked, or switched to another user or
+/// remote session. Display sleep is not a `PowerEvent`: it ends the segment through this,
+/// while the break engine only hears of real suspends.
 pub fn user_is_away() -> bool {
     if DISPLAY_OFF.load(Ordering::Relaxed) {
         if idle_ms() < DISPLAY_OFF_STALE_MS {
@@ -332,10 +315,9 @@ pub fn user_is_away() -> bool {
     SESSION_LOCKED.load(Ordering::Relaxed) || session_is_inactive()
 }
 
-/// Polls the session: switched out or disconnected, and, only while no lock
-/// notifications arrive, locked. SessionFlags is read for that fallback alone
-/// because its LOCK/UNLOCK values are documented inconsistently between
-/// Windows versions.
+/// Polls for switched out or disconnected and, while no lock notifications arrive, locked.
+/// SessionFlags is read for that fallback only: its LOCK/UNLOCK values are documented
+/// inconsistently between Windows versions.
 fn session_is_inactive() -> bool {
     let mut buffer = PWSTR::null();
     let mut bytes = 0u32;
@@ -369,7 +351,6 @@ fn session_is_inactive() -> bool {
     away
 }
 
-/// Milliseconds since the last keyboard or mouse input.
 pub fn idle_ms() -> u64 {
     use windows::Win32::System::SystemInformation::{GetTickCount, GetTickCount64};
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
@@ -392,11 +373,9 @@ pub fn idle_ms() -> u64 {
 /// stamped just after the clock was read, not 49 days without any.
 const WRAPPED_IDLE_FLOOR: u64 = u32::MAX as u64 - 60_000;
 
-/// Idle time from two 32-bit tick counts. GetTickCount is coarse (about
-/// 15 ms), so the last input can carry a stamp slightly ahead of the clock
-/// read next to it; subtracting then wraps to nearly 49.7 days, which would
-/// turn the open segment into an Idle break. Such a difference, or one longer
-/// than the machine has been up, is that race and reads as no idle time.
+/// Idle time from two 32-bit tick counts. GetTickCount is coarse (~15 ms), so the last input can
+/// be stamped slightly ahead of the clock, wrapping to ~49.7 days and faking an Idle break. Such
+/// a difference, or one longer than uptime, reads as no idle time.
 fn idle_between(now_tick: u32, last_input_tick: u32, uptime_ms: u64) -> u64 {
     let idle = u64::from(now_tick.wrapping_sub(last_input_tick));
     if idle > uptime_ms || idle > WRAPPED_IDLE_FLOOR {
@@ -406,27 +385,17 @@ fn idle_between(now_tick: u32, last_input_tick: u32, uptime_ms: u64) -> u64 {
     }
 }
 
-/// Whether the foreground app is being watched or listened to, the Windows
-/// counterpart of macOS reading the front app's display-sleep assertion.
-///
-/// A fullscreen foreground window, game or presentation counts on its own:
-/// the shell already tells those apart from a background app, and games and
-/// slides often never raise a display request. Otherwise Windows has no
-/// per-process view of display requests without admin rights, only the
-/// system-wide one, which any background app can hold. So the request must be
-/// backed by something that ties it to the foreground app: it (the same
-/// process, another process of the same executable as in a multi-process
-/// browser, or a descendant process such as a WebView2 host) has an audio
-/// session playing sound or capturing the microphone. The cheap checks run
-/// first, so a tick costs two system calls unless a display request exists.
+/// Whether the foreground app is being watched or listened to. Fullscreen counts on its own.
+/// Otherwise the system-wide display request (which any background app can hold) must be backed
+/// by an audio session playing or capturing in the foreground app, its executable or descendants.
 fn keeps_display_awake(pid: u32) -> bool {
     watching(display_required, foreground_is_fullscreen, || {
         foreground_is_playing_or_recording(pid)
     })
 }
 
-/// The decision of `keeps_display_awake`, with each signal evaluated only if
-/// the ones before it did not settle the answer.
+/// The decision of `keeps_display_awake`, evaluating each signal only if earlier ones did not
+/// settle it.
 fn watching(
     display_required: impl FnOnce() -> bool,
     fullscreen: impl FnOnce() -> bool,
@@ -435,9 +404,7 @@ fn watching(
     fullscreen() || (display_required() && audio())
 }
 
-/// Some process holds the display on (ES_DISPLAY_REQUIRED), whether through
-/// SetThreadExecutionState or a power request, as browsers and players do
-/// for video and call apps do for a call.
+/// Some process holds the display on (ES_DISPLAY_REQUIRED), as video and call apps do.
 fn display_required() -> bool {
     use windows::Win32::System::Power::{
         CallNtPowerInformation, SystemExecutionState, ES_DISPLAY_REQUIRED,
@@ -457,8 +424,7 @@ fn display_required() -> bool {
     status.is_ok() && state & ES_DISPLAY_REQUIRED.0 != 0
 }
 
-/// The shell's own test for a fullscreen foreground app: a fullscreen window
-/// or game, a presentation, or Presentation Settings.
+/// The shell's own test for a fullscreen foreground app.
 fn foreground_is_fullscreen() -> bool {
     use windows::Win32::UI::Shell::{
         SHQueryUserNotificationState, QUERY_USER_NOTIFICATION_STATE, QUNS_BUSY,
@@ -483,8 +449,7 @@ thread_local! {
     static AUDIO_DEVICES: RefCell<Option<IMMDeviceEnumerator>> = const { RefCell::new(None) };
 }
 
-/// The foreground app has an active audio session that is playing sound, or
-/// capturing (a call, even with the microphone muted or the room quiet).
+/// The foreground app has an active audio session playing sound or capturing (even if muted).
 /// Only the default playback and capture devices are looked at.
 fn foreground_is_playing_or_recording(foreground_pid: u32) -> bool {
     use windows::Win32::Media::Audio::{eCapture, eCommunications, eConsole, eRender};
@@ -588,23 +553,18 @@ unsafe fn device_has_session(
     }
 }
 
-/// How long a process-parent map is reused. A call or media session is looked
-/// at every tick while it lasts, and a snapshot of every process is far
-/// costlier than the tick; a process started within this window is found by
-/// the next map instead.
+/// How long a process-parent map is reused: a snapshot of every process costs far more than
+/// the per-tick lookups; a process started within the window is found by the next map.
 const PARENTS_TTL: Duration = Duration::from_secs(5);
 
-/// Parent of every running process.
 type ParentMap = HashMap<u32, u32>;
 
 thread_local! {
-    /// The last `process_parents` result and when it was taken.
     static PARENTS: RefCell<Option<(Instant, Rc<ParentMap>)>> = const { RefCell::new(None) };
     /// The last process whose path could not be opened, and its executable name.
     static PROTECTED_NAMES: RefCell<Option<(u32, String)>> = const { RefCell::new(None) };
 }
 
-/// `process_parents`, reused for `PARENTS_TTL`.
 fn cached_process_parents() -> Rc<ParentMap> {
     PARENTS.with(|cache| {
         let mut cache = cache.borrow_mut();
@@ -619,7 +579,6 @@ fn cached_process_parents() -> Rc<ParentMap> {
     })
 }
 
-/// Parent of every running process, from one snapshot.
 fn process_parents() -> ParentMap {
     let mut parents = HashMap::new();
     each_process(|entry| {
@@ -629,9 +588,8 @@ fn process_parents() -> ParentMap {
     parents
 }
 
-/// The executable name (not the path) of a running process, read from a
-/// process snapshot. Unlike `process_path` it needs no access to the process,
-/// so it also names SYSTEM, protected and elevated ones.
+/// The executable name of a process, read from a snapshot; unlike `process_path` it needs
+/// no access to the process, so it also names SYSTEM, protected and elevated ones.
 fn process_exe_name(pid: u32) -> Option<String> {
     if let Some(name) = PROTECTED_NAMES.with(|last| {
         last.borrow()
@@ -660,8 +618,7 @@ fn process_exe_name(pid: u32) -> Option<String> {
     name
 }
 
-/// Calls `visit` on each running process of one snapshot until it returns
-/// false.
+/// Calls `visit` on each running process of one snapshot until it returns false.
 fn each_process(mut visit: impl FnMut(&PROCESSENTRY32W) -> bool) {
     use windows::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
@@ -685,7 +642,6 @@ fn each_process(mut visit: impl FnMut(&PROCESSENTRY32W) -> bool) {
     }
 }
 
-/// Whether `ancestor` is among the first few parents of `pid`.
 fn descends_from(pid: u32, ancestor: u32, parents: &HashMap<u32, u32>) -> bool {
     let mut current = pid;
     for _ in 0..8 {
@@ -711,13 +667,11 @@ mod presence_tests {
 
     #[test]
     fn idle_survives_the_tick_counter_wrapping() {
-        // Input 5 ticks before the wrap, clock 6 ticks after it.
         assert_eq!(idle_between(6, u32::MAX - 4, u64::from(u32::MAX) * 2), 11);
     }
 
     #[test]
     fn input_stamped_ahead_of_the_clock_is_not_a_49_day_idle() {
-        // The failure user-idle3 had: now - last underflowed to ~4.29e9.
         assert_eq!(idle_between(1_000, 1_016, u64::MAX), 0);
         assert_eq!(idle_between(0, 1, u64::MAX), 0);
     }
@@ -736,7 +690,6 @@ mod presence_tests {
 
     #[test]
     fn fullscreen_is_watching_without_a_display_request() {
-        // A game or presentation that never raises ES_DISPLAY_REQUIRED.
         assert!(watching(|| false, || true, || false));
         assert!(watching(|| true, || true, || false));
     }
@@ -822,10 +775,8 @@ pub fn read_active_window() -> Option<WindowSample> {
     let frame_pid = process_id(window)?;
     let mut process = identify(frame_pid)?;
     if process.executable == FRAME_HOST {
-        // Never the frame host itself, or every packaged app would merge into
-        // one "Application Frame Host". An unresolved frame reads as no
-        // sample, which the store takes as no change: the previous app keeps
-        // the time until the app behind the frame can be named.
+        // Never the frame host itself, or every packaged app would merge into one "Application
+        // Frame Host". An unresolved frame reads as no sample, which the store takes as no change.
         process = identify(hosted_app_pid(window, frame_pid)?)?;
     }
     let Process {
@@ -845,9 +796,8 @@ pub fn read_active_window() -> Option<WindowSample> {
         private: address_bar::is_private_window(window, &executable, &title),
         app: identity.name,
         title,
-        // The executable name is the stable identity: the full path moves
-        // with every update of apps that install into versioned folders. Only
-        // an executable that hosts many apps is qualified (see `identity`).
+        // The executable name is the stable identity: the full path moves with updates of
+        // apps in versioned folders. Only a many-apps host is qualified (see `identity`).
         bundle_id: Some(identity.id),
         url,
         domain,
@@ -868,19 +818,15 @@ fn window_title(window: HWND) -> String {
     String::from_utf16_lossy(&buffer[..copied.max(0) as usize])
 }
 
-/// Who a window's process is: what the sample records for it.
 struct Process {
     pid: u32,
-    /// What the user would call the app.
     app: String,
-    /// The lowercased executable name, the stable identity of the app.
     executable: String,
 }
 
-/// Names a process. When its path cannot be opened (SYSTEM, protected and some
-/// elevated processes such as LogonUI or consent.exe refuse even limited
-/// query rights) the executable name comes from a process snapshot instead,
-/// so the same app reads the same either way and the window is still seen.
+/// Names a process. When its path cannot be opened (SYSTEM, protected or elevated processes
+/// such as LogonUI refuse even limited rights) the name comes from a process snapshot,
+/// so the same app reads the same either way.
 fn identify(pid: u32) -> Option<Process> {
     if let Some(path) = process_path(pid) {
         return Some(Process {
@@ -897,7 +843,6 @@ fn identify(pid: u32) -> Option<Process> {
     })
 }
 
-/// An executable's name without the extension.
 fn exe_stem(name: &str) -> String {
     Path::new(name)
         .file_stem()
@@ -931,19 +876,15 @@ fn process_path(pid: u32) -> Option<String> {
     }
 }
 
-/// The window class of a packaged app's own window inside its frame.
 const CORE_WINDOW: &str = "Windows.UI.Core.CoreWindow";
 
-/// The process behind a packaged app's frame: the child window of class
-/// `CORE_WINDOW` if there is one, else the first child window that belongs to
-/// some other process than the frame host. `None` if the app is not (yet)
-/// there, as while it starts or is suspended.
+/// The process behind a packaged app's frame: the `CORE_WINDOW` child if there is one, else
+/// the first child owned by a process other than the frame host. `None` while the app starts
+/// or is suspended.
 fn hosted_app_pid(frame: HWND, host_pid: u32) -> Option<u32> {
     struct Search {
         host_pid: u32,
-        /// A child of another process, whatever its class.
         found: Option<u32>,
-        /// A `CORE_WINDOW` child of another process.
         core: Option<u32>,
     }
 
@@ -991,8 +932,7 @@ fn file_name(path: &str) -> &str {
     path.rsplit(['\\', '/']).next().unwrap_or(path)
 }
 
-/// What the user would call the app: the version resource's description
-/// ("Google Chrome" for chrome.exe), else the executable's name.
+/// The version resource's description ("Google Chrome" for chrome.exe), else the executable's name.
 fn app_name(path: &str) -> String {
     if let Some(name) = APP_NAMES.with(|names| names.borrow().get(path).cloned()) {
         return name;
@@ -1058,13 +998,9 @@ fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-// Reading a browser's address bar can stall on a hung browser, so it lives
-// on its own worker thread rather than on the sampler.
 #[path = "windows/address_bar.rs"]
 mod address_bar;
 
-// Names an app finely enough to tell the web apps of one browser, or the
-// programs of one script host, apart.
 #[path = "windows/identity.rs"]
 mod identity;
 

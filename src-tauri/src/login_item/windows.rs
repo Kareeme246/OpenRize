@@ -12,13 +12,12 @@ const APPROVED: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Star
 // (`src-tauri/windows/hooks.nsh`); keep the two in step.
 const VALUE: &str = "OpenRize";
 
-/// The executable's path, quoted because the install path usually has spaces.
 fn quoted(exe: &Path) -> String {
     format!("\"{}\"", exe.display())
 }
 
-/// The command Windows runs at sign-in: this executable, started in the
-/// background like `rize app start`, so signing in does not open the window.
+/// The sign-in command: this executable started in the background like `rize app start`, so signing
+/// in does not open the window.
 fn command_for(exe: &Path) -> String {
     format!("{} {}", quoted(exe), crate::BACKGROUND_ARG)
 }
@@ -28,15 +27,12 @@ fn command() -> Result<String, String> {
     Ok(command_for(&exe))
 }
 
-/// How a `Run` value relates to this executable.
 #[derive(Debug, PartialEq, Eq)]
 enum Registration {
-    /// This executable, started in the background.
     Current,
-    /// This executable without the flag, as earlier versions wrote it. It
-    /// opens the window at every sign-in but is still the user's choice.
+    /// Without the flag, as earlier versions wrote it: opens the window each sign-in but is still
+    /// the user's choice.
     Legacy,
-    /// Anything else, such as another install.
     Other,
 }
 
@@ -74,9 +70,8 @@ pub fn state() -> LoginItemState {
     }
 }
 
-/// Moves a value written by an earlier version onto the background command,
-/// so people who already launch at login stop getting a window at every
-/// sign-in. Task Manager's override is left as the user set it.
+/// Moves a value written by an earlier version onto the background command so people stop getting a
+/// window at every sign-in. Task Manager's override is left as the user set it.
 pub fn refresh() {
     if registration() == Some(Registration::Legacy) {
         if let (Ok(key), Ok(command)) = (CURRENT_USER.create(RUN), command()) {

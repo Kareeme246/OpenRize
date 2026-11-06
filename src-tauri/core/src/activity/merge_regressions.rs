@@ -1,14 +1,11 @@
-//! Merging neighbours: two entries may miss their shared border by up to
-//! `MERGE_GAP_MS` and still merge, and the merged entry spans the gap.
-//! Overlapping entries merge too, into the union of their spans. Entries on
-//! different local days, or further apart than the tolerance, never merge.
+//! Merging neighbours: entries within `MERGE_GAP_MS` of each other or overlapping merge;
+//! other days or beyond the tolerance never do.
 use super::*;
 use chrono::{Local, TimeZone};
 
 const MIN: u64 = 60_000;
 
-/// A local wall-clock time on an ordinary mid-month day, so the day-boundary
-/// cases hold in any timezone.
+/// A local wall-clock time on a mid-month day, so day-boundary cases hold in any timezone.
 fn at(hour: u32, minute: u32) -> u64 {
     day_at(15, hour, minute)
 }
@@ -23,13 +20,10 @@ fn day_at(day: u32, hour: u32, minute: u32) -> u64 {
 
 const NOW: u64 = 1_800_000_000_000;
 
-/// The first entry most tests start from: 10:00 to 10:20.
 fn first() -> (u64, u64) {
     (at(10, 0), at(10, 20))
 }
 
-/// Two captured sessions: `first()`, and a second one from `second_start`
-/// for six minutes.
 fn store(second_start: u64) -> ActivityStore {
     store_of(first(), (second_start, second_start + 6 * MIN))
 }
@@ -49,7 +43,6 @@ fn store_of(a: (u64, u64), b: (u64, u64)) -> ActivityStore {
     store
 }
 
-/// Live entries in start order: (id, start, end).
 fn entries(store: &ActivityStore) -> Vec<(String, u64, u64)> {
     store
         .list_time_entries(0, u64::MAX / 2)
@@ -61,7 +54,6 @@ fn entries(store: &ActivityStore) -> Vec<(String, u64, u64)> {
 
 fn assert_refused(store: &mut ActivityStore, original: &[(u64, u64)]) {
     assert!(store.merge_time_entries("a", "b", NOW).is_err());
-    // A refused merge leaves both entries exactly as they were.
     let list = entries(store);
     let spans: Vec<_> = list.iter().map(|entry| (entry.1, entry.2)).collect();
     assert_eq!(spans, original, "{list:?}");
@@ -83,7 +75,6 @@ fn abutting_entries_still_merge() {
 fn a_gap_inside_the_tolerance_merges_and_claims_the_gap() {
     let mut store = store(first().1 + 4 * MIN);
     let merged = store.merge_time_entries("a", "b", NOW).unwrap();
-    // The merged entry spans the gap, so the gap counts as tracked time.
     assert_eq!(merged.started_at, at(10, 0));
     assert_eq!(merged.ended_at, at(10, 30));
     assert_eq!(merged.ended_at - merged.started_at, 30 * MIN);
@@ -209,7 +200,6 @@ fn undoing_a_gap_merge_puts_the_gap_back() {
 fn undoing_an_overlap_merge_gives_each_entry_its_own_segments_back() {
     let b = (first().1 - 2 * MIN, first().1 + 6 * MIN);
     let mut store = store_of(first(), b);
-    // Interleaved in time: a's last segment starts after b's first.
     store
         .conn()
         .execute_batch(&format!(

@@ -598,11 +598,8 @@ enum SettingsCommand {
     Set { key: String, value: String },
 }
 
-/// What a command prints, and how.
 enum Outcome {
-    /// An answer from the app, rendered by `render`.
     Answer(Response),
-    /// Text rize produced itself (completions, an export written to stdout).
     Raw(String),
 }
 
@@ -673,7 +670,6 @@ fn invalid(message: impl Into<String>) -> Response {
     Response::error(code::INVALID_ARGUMENT, message)
 }
 
-/// The commands `confirm` guards, which `--dry-run` previews.
 fn previewable(command: Option<&Command>) -> bool {
     matches!(
         command,

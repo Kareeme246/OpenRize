@@ -32,19 +32,12 @@ function spanBounds(span: Span): { start: number; end: number } {
 interface TimePickerProps {
   clientId: string;
   invoiceId?: string;
-  /** Entries already on the draft, hidden from the list. */
   excluded: ReadonlySet<string>;
-  /** Start narrowed to one project, e.g. when invoicing from a project. */
   projectId?: string;
   onAdd: (entries: BillableEntry[]) => void;
   onClose: () => void;
 }
 
-/**
- * Auto-populate from tracked time: every approved, billable, uninvoiced entry
- * for the client, narrowed by period and project, all preselected. Each chosen
- * entry becomes its own invoice line at the rate its project (or client) bills.
- */
 export function TimePicker({
   clientId,
   invoiceId,

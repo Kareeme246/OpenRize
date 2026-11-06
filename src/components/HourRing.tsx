@@ -10,22 +10,15 @@ const CENTRE = SIZE / 2;
 const HOUR_MS = 3_600_000;
 
 interface HourRingProps {
-  /** This tracker's own elapsed time in ms — not the wall clock. */
   elapsed: number;
   running: boolean;
-  /** Toggles start/pause — the ring's center doubles as that control. */
   onToggle: () => void;
 }
 
-/** Fraction of the current tracked hour that has passed, 0–1. Zero at 0:00,
- *  a quarter at 15:00, wrapping back to zero at 1:00:00. */
 export function hourProgress(elapsed: number): number {
   return (elapsed % HOUR_MS) / HOUR_MS;
 }
 
-/** A dial that sweeps once per tracked hour and doubles as the play/pause
- *  button — its center shows a pause glyph while running, a play glyph
- *  while paused, so the icon always signals what tapping it will do. */
 export function HourRing({ elapsed, running, onToggle }: HourRingProps) {
   const progress = hourProgress(elapsed);
   const minutes = Math.floor((elapsed % HOUR_MS) / 60_000);

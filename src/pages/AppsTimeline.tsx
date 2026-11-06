@@ -51,7 +51,6 @@ export function AppsTimeline({ apps, categories, projects, onUpdate }: Props) {
     try {
       const snapshot = await api.fetchActivitySnapshot(dayStart);
       if (id !== request.current) return;
-      // The snapshot extends to now, even when viewing a previous day.
       setSegments(
         snapshot.segments.filter(
           (segment) =>

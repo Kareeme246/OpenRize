@@ -20,19 +20,14 @@ interface EntryReviewSheetProps {
   review: EntryReview;
   categories: Category[];
   projects: Project[];
-  /** "3 of 7" in review mode. */
   reviewPosition?: { index: number; total: number };
-  /** Neighbouring entries a merge may take in, and the gap it would claim. */
   mergeCandidates?: MergeCandidate;
-  /** Overrides approval, e.g. to advance review mode afterwards. */
   onAccept?: (id: string) => void;
   onReject?: (id: string) => void;
   onClose?: () => void;
   onManageCategories?: () => void;
-  /**
-   * The view draws entries on a timeline, so a split starts by picking the
-   * cut there (see `useEntryReview`'s `splitting`) instead of in the dialog.
-   */
+  /** The view draws a timeline, so a split picks the cut there (`splitting` in
+   * `useEntryReview`), not in the dialog. */
   pickSplitOnTimeline?: boolean;
 }
 
@@ -48,10 +43,8 @@ const MERGE_BLOCKED: Record<"prev" | "next", Record<MergeBlock, string>> = {
 };
 
 /**
- * The entry review panel bound to `useEntryReview`, with its keyboard
- * contract: ⌘↵ accepts, ⌘⌫ rejects, S splits, Esc closes (or leaves a
- * split in progress). Merging has no shortcut. The panel itself owns 1–3, C, P,
- * and E. Renders nothing while no entry is open.
+ * The review panel bound to `useEntryReview`: ⌘↵ accepts, ⌘⌫ rejects, S splits,
+ * Esc closes or leaves a split. The panel itself owns 1–3, C, P and E.
  */
 export function EntryReviewSheet({
   review,
@@ -86,7 +79,6 @@ export function EntryReviewSheet({
       if (isTyping(event.target)) return;
       const approved = detail.entry.status === "approved";
       const shortcut = entryShortcut(event);
-      // The split dialog handles its own keys.
       if (review.splitting?.stage === "confirm") return;
       if (shortcut === "close") {
         if (review.splitting) review.cancelSplit();

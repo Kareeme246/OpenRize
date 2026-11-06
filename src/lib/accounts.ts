@@ -12,7 +12,6 @@ export interface AccountView extends Account {
 }
 
 export interface AccountsState {
-  /** The open account's id, or null for No account. */
   current: string | null;
   accounts: AccountView[];
   /** The account this launch could not open because its data is gone. */
@@ -23,7 +22,6 @@ export interface AccountsState {
   readOnly: boolean;
 }
 
-/** What No account holds, for the question of moving it into a new account. */
 export interface DataSummary {
   entries: number;
   projects: number;
@@ -31,7 +29,6 @@ export interface DataSummary {
   invoices: number;
   stopwatches: number;
   segments: number;
-  /** Earliest tracked or entered time, epoch milliseconds. */
   since: number | null;
 }
 
@@ -45,7 +42,6 @@ export interface BreakPreview {
   remainingMs: number;
 }
 
-/** What a switch right now would pause. */
 export interface SwitchPreview {
   stopwatches: Labeled[];
   break: BreakPreview | null;
@@ -58,15 +54,10 @@ export interface PausedOnSwitch {
   break: BreakPreview | null;
 }
 
-/** The most characters an account name can have. */
 export const MAX_NAME_LENGTH = 40;
 
 const countFormat = new Intl.NumberFormat();
 
-/**
- * `You have 1,284 time entries, 12 projects and 4 stopwatches from before
- * accounts, going back to Mar 4, 2026.` Leaves out what there is none of.
- */
 export function formatDataSummary(summary: DataSummary): string {
   const counts: [number, string, string][] = [
     [summary.entries, "time entry", "time entries"],
@@ -98,7 +89,6 @@ export function formatDataSummary(summary: DataSummary): string {
   return `You have ${list} from before accounts${since}.`;
 }
 
-/** `Client onboarding`, `Client onboarding and Design`, `A, B and 2 more`. */
 export function listNames(names: string[], shown = 2): string {
   if (names.length <= shown) {
     return names.length <= 1
@@ -108,13 +98,11 @@ export function listNames(names: string[], shown = 2): string {
   return `${names.slice(0, shown).join(", ")} and ${names.length - shown} more`;
 }
 
-/** `Lunch break (8 min left)`, or `Lunch break` when it is about to end. */
 export function describeBreak(item: BreakPreview): string {
   const minutes = Math.ceil(item.remainingMs / 60_000);
   return minutes < 1 ? item.label : `${item.label} (${minutes} min left)`;
 }
 
-/** What a switch pauses, as a phrase: `Onboarding and your Lunch break (8 min left)`. */
 export function describePausedWork(
   stopwatches: Labeled[],
   breakItem: BreakPreview | null,
@@ -126,14 +114,12 @@ export function describePausedWork(
   return `${listNames(stopwatchNames)} and ${withBreak}`;
 }
 
-/** A stable `--cat-N` colour for an account, from its id. */
 export function accountColor(id: string): string {
   let hash = 0;
   for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
   return `var(--cat-${(hash % 12) + 1})`;
 }
 
-/** `38 MB`, `1.2 GB`: a folder size in the Settings list. */
 export function formatBytes(bytes: number): string {
   if (bytes < 1_000_000) return `${Math.max(1, Math.round(bytes / 1_000))} KB`;
   if (bytes < 1_000_000_000) return `${Math.round(bytes / 1_000_000)} MB`;
@@ -141,9 +127,8 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
- * The `localStorage` key for the Time Entries saved views. They hold project,
- * client and category ids from one account's data, so each account keeps its
- * own; No account keeps the key that existed before accounts did.
+ * localStorage key for the Time Entries saved views; per account since they
+ * hold its ids. No account keeps the pre-accounts key.
  */
 export function entriesViewsKey(accountId: string | null): string {
   return accountId === null

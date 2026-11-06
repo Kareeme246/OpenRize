@@ -1,21 +1,6 @@
-// JXA accessibility driver for a running OpenRize window. Invoked only by
-// scripts/app-drive.sh. See that script and .agents/skills/drive-app/SKILL.md.
-//
-// Why this exists: OpenRize renders through WKWebView, and System Events'
-// `entire contents` stops at the web view boundary (it reports a single empty
-// AXGroup). WebKit *does* publish the full web accessibility tree, it is just
-// only reachable by walking AXUIElement references directly, which is what
-// this file does. That gives coordinate-free, name-based driving of the real
-// OS webview: `AXPress` on a web AXButton dispatches a genuine DOM click.
-//
-// All input arrives via environment variables so arbitrary label text never has
-// to survive osascript argument quoting:
-//   AX_PID     target process id (required)
-//   AX_CMD     tree | find | click | windowid (required)
-//   AX_TARGET  accessible name to match (find/click/focus)
-//   AX_ROLE    optional AX role filter, e.g. AXRadioButton
-//   AX_INDEX   0-based pick when a match is ambiguous
-//   AX_FULL    "1" to print every node in `tree`, not just named/actionable ones
+// JXA accessibility driver for scripts/app-drive.sh (WKWebView hides its tree).
+// Env: AX_PID, AX_CMD tree|find|click|windowid (required); AX_TARGET (name),
+// AX_ROLE, AX_INDEX (0-based, when ambiguous), AX_FULL=1 (tree: every node).
 
 ObjC.import("ApplicationServices");
 ObjC.import("CoreGraphics");
@@ -40,8 +25,7 @@ function warn(text) {
 
 var MAX_DEPTH = 24;
 
-// Roles that represent something a user can act on. Used both to decide what
-// `tree` is worth printing and what `click`/`focus` are allowed to match.
+// Roles a user can act on: what `tree` prints and `click`/`focus` may match.
 var ACTIONABLE = {
   AXButton: 1,
   AXCheckBox: 1,
@@ -87,14 +71,11 @@ function children(element) {
   return kids ? ObjC.castRefToObject(kids) : null;
 }
 
-// The label a human would use for this node: buttons carry AXTitle, links and
-// aria-labelled controls carry AXDescription.
 function labelOf(element) {
   return strAttr(element, "AXTitle") || strAttr(element, "AXDescription");
 }
 
-// What `click`/`find` match on. Plain text nodes have no label, so their content
-// stands in for one.
+// Plain text nodes have no label, so their content stands in.
 function nameOf(element) {
   return labelOf(element) || strAttr(element, "AXValue");
 }
@@ -137,8 +118,8 @@ function describe(element, depth) {
   var label = clamp(labelOf(element));
   var value = clamp(strAttr(element, "AXValue"));
   var indent = new Array(depth + 1).join("  ");
-  // A labelled control shows both, so the current contents of a text field are
-  // visible without a screenshot; an unlabelled text node shows its value alone.
+  // A labelled control shows both so a text field's contents are visible
+  // without a screenshot.
   var text = label || value;
   if (label && value && value !== label) text = label + ' = "' + value + '"';
   return indent + "[" + role + "] " + text;
@@ -157,8 +138,8 @@ function commandTree(window) {
   return 0;
 }
 
-// Match in tiers so an exact label always beats an incidental substring hit:
-// exact, then case-insensitive exact, then case-insensitive substring.
+// Tiered so an exact label beats a substring hit: exact, case-insensitive
+// exact, case-insensitive substring.
 function matches(window, role, target) {
   var tiers = [[], [], []];
   var wanted = target.toLowerCase();
@@ -227,7 +208,7 @@ function commandClick(window) {
 }
 
 // The CGWindowID lets screencapture grab this exact window even when another
-// agent's instance overlaps it, which capturing a screen rectangle cannot do.
+// agent's instance overlaps it.
 function commandWindowId() {
   var pid = parseInt(env("AX_PID"), 10);
   var raw = $.CGWindowListCopyWindowInfo(

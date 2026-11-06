@@ -1,10 +1,7 @@
 /**
- * Vertical timeline geometry shared by the Day and Week views.
- *
- * The Day view places time by *elapsed* hours since local 5 AM and
- * labels its gutter from real timestamps, so a DST day renders as 23 or 25
- * hours (the repeated 1 AM shows twice). The Week view shares one gutter
- * across seven columns, so it places time by wall-clock hour instead.
+ * Timeline geometry shared by Day and Week. Day places time by elapsed hours
+ * since 5 AM (a DST day is 23 or 25 hours); Week shares one gutter across
+ * columns, so it uses wall-clock hours.
  */
 
 export type Placement = "elapsed" | "wall";
@@ -13,7 +10,6 @@ const HOUR_MS = 3_600_000;
 const DEFAULT_START = 8;
 const DEFAULT_END = 20;
 
-/** Hours from `dayStart` to `ms`, by the chosen placement. */
 export function hourOffset(
   ms: number,
   dayStart: number,
@@ -38,14 +34,9 @@ export interface Timeline {
   endHour: number;
   hourHeight: number;
   height: number;
-  /** Whole hours from start to end, for gutter lines. */
   hours: number[];
 }
 
-/**
- * 8 AM to 8 PM, stretched to fit anything earlier or later, and capped at
- * the length of the day.
- */
 export function timelineFor(
   spans: { start: number; end: number; dayStart: number }[],
   placement: Placement,
@@ -72,7 +63,6 @@ export function timelineFor(
   };
 }
 
-/** Top and height in px for a span, clipped to the timeline. */
 export function place(
   timeline: Timeline,
   start: number,
@@ -92,12 +82,10 @@ export function place(
   return { top, height };
 }
 
-/** `9 AM`, from a real timestamp. */
 export function hourLabel(ms: number): string {
   return new Date(ms).toLocaleTimeString([], { hour: "numeric" });
 }
 
-/** The gutter label for an hour line. */
 export function gutterLabel(
   hour: number,
   dayStart: number,
@@ -109,14 +97,12 @@ export function gutterLabel(
   return hourLabel(date.getTime());
 }
 
-/** Hours in a local day: 24, or 23/25 across a DST change. */
 export function dayLength(dayStart: number): number {
   const next = new Date(dayStart);
   next.setDate(next.getDate() + 1);
   return Math.round((next.getTime() - dayStart) / HOUR_MS);
 }
 
-/** The time at `y` px down the timeline: the inverse of `place`'s top. */
 export function timeAtOffset(
   timeline: Timeline,
   y: number,

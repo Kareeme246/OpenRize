@@ -46,7 +46,6 @@ const SCALES: SegmentedOption<Scale>[] = [
   { value: "week", label: "Week" },
 ];
 
-/** `Week 39 - September 21, 2026` or `Wednesday, September 23`, as Rise titles them. */
 function crumbFor(scale: Scale, date: Date, start: Date): string {
   if (scale === "day") {
     return date.toLocaleDateString(undefined, {
@@ -111,7 +110,6 @@ export function Timesheets({
   useTauriEvent(api.ENTRIES_CHANGED, () => void refresh());
   useTauriEvent(api.SUGGESTION_READY, () => void refresh());
 
-  // Until the new range arrives, the grid keeps drawing the last one.
   const shownEdges = useMemo(
     () =>
       loaded && (loaded.start !== start || loaded.end !== end)

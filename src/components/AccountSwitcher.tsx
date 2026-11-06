@@ -23,7 +23,6 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { BUTTON_PRIMARY } from "./Page";
 import { Tooltip } from "./Tooltip";
 
-/** A square tile: the account's first letter on its colour, or a person for No account. */
 export function AccountTile({
   account,
   size = 26,
@@ -139,7 +138,6 @@ function AccountRow({
 
 const Separator = () => <div className="mx-1 my-1.5 h-px bg-line" />;
 
-/** A switch waiting on the user to agree that running work pauses. */
 interface PendingSwitch {
   to: Account | null;
   preview: SwitchPreview;
@@ -151,11 +149,6 @@ interface AccountSwitcherProps {
   variant?: "bar" | "rail";
 }
 
-/**
- * The account switcher in the bar (or rail). Choosing another account (or
- * Sign out) restarts the app into it; running work pauses first and waits for
- * the user in the account it belongs to.
- */
 export function AccountSwitcher({
   onNavigate,
   collapsed = false,
@@ -175,7 +168,6 @@ export function AccountSwitcher({
   const subtitle = current ? "Local account" : "Add an account";
   const listed = accounts ?? [];
 
-  /** Asks for agreement first when anything is running, then switches. */
   const requestSwitch = async (to: Account | null): Promise<void> => {
     close();
     let preview: SwitchPreview;
@@ -384,7 +376,6 @@ export function AccountSwitcher({
   );
 }
 
-/** What pauses, where it stays, and where OpenRize reopens. */
 function pauseNotice(pending: PendingSwitch, from: Account | null): string {
   const { stopwatches, break: running } = pending.preview;
   const several = stopwatches.length + (running ? 1 : 0) > 1;

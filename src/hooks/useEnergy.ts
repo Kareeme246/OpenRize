@@ -13,10 +13,8 @@ export interface EnergyApi {
 }
 
 /**
- * Energy usage and battery monitor telemetry hook.
- *
- * Refetches on interval or whenever Rust emits `energy-changed`. With
- * `enabled` false (no monitor on this platform) it never asks Rust.
+ * Energy and battery telemetry; refetches on interval or `energy-changed`, and
+ * never asks Rust when `enabled` is false.
  */
 export function useEnergy(days = 7, enabled = true): EnergyApi {
   const [summary, setSummary] = useState<EnergySummary | null>(null);

@@ -9,14 +9,10 @@ import {
 } from "react";
 
 /**
- * The app's one way to confirm a short-lived result ("Entry deleted",
- * "Exported 12 entries"). Any component raises one with `useToast()`;
- * `<Toaster />` shows it. A toast only informs: it carries no action buttons
- * (only a control to close it), and errors that need fixing stay inline
- * (InlineError, a Sheet's error row).
+ * The app's one way to confirm a short-lived result. A toast only informs, with
+ * no action buttons; errors that need fixing stay inline.
  */
 
-/** `neutral` for plain facts, `success` for a finished job, `error` for a failed one. */
 export type ToastTone = "neutral" | "success" | "error";
 
 export interface ToastOptions {
@@ -33,9 +29,7 @@ export interface Toast {
   duration: number;
 }
 
-/** How long a toast stays while not paused. */
 const BASE_MS = 3000;
-/** A failure is worth a second read. */
 const ERROR_MS = 7000;
 
 export type ShowToast = (options: ToastOptions) => void;
@@ -44,14 +38,13 @@ interface ToastState {
   /** Newest first. `<Toaster />` shows the first few; the rest wait their turn. */
   stack: Toast[];
   /**
-   * Raised while the stack was held under the pointer or focus, newest first.
-   * They join the front once it is let go, so nothing shifts under a click.
+   * Raised while the stack was held under the pointer or focus; they join the
+   * front once it is let go.
    */
   pending: Toast[];
 }
 
 export interface ToasterApi {
-  /** Newest first. */
   toasts: Toast[];
   dismiss: (id: number) => void;
   /** The pointer is on the stack: don't add to it. */
@@ -65,12 +58,10 @@ const ToasterContext = createContext<ToasterApi>({
   hold: () => undefined,
 });
 
-/** Raises a toast from anywhere under `ToastProvider`. Stable across renders. */
 export function useToast(): ShowToast {
   return useContext(ShowContext);
 }
 
-/** For `<Toaster />` only. */
 export function useToaster(): ToasterApi {
   return useContext(ToasterContext);
 }

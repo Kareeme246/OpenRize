@@ -1,16 +1,6 @@
-//! A browser window's URL, read from its address bar through UI Automation.
-//!
-//! Every UI Automation call crosses into the browser's process and can block
-//! for as long as that process is busy or hung, so none of them run on the
-//! activity sampler. A worker thread owns the COM apartment and the
-//! automation object; the sampler asks it for a window and takes whatever
-//! answer is ready, waiting briefly only the first time a window is seen.
-//!
-//! What the sampler is told is smoothed by [`UrlTracker`], which holds no
-//! COM state: a read that fails keeps the last URL for a grace period, a new
-//! URL must be read twice before it replaces the old one (unless the window's
-//! title changed, which says the page did), and a window whose bar cannot be
-//! found is retried rarely instead of every second.
+//! A browser window's URL, read from its address bar through UI Automation on a
+//! worker thread, since UIA calls can block for as long as the browser is hung.
+//! [`UrlTracker`] smooths reads: grace period, two-read confirmation, retry backoff.
 
 use std::collections::HashMap;
 use std::ffi::c_void;
@@ -31,73 +21,51 @@ use windows::Win32::UI::Accessibility::{
     UIA_ValueValuePropertyId, UIA_CONTROLTYPE_ID,
 };
 
-/// A failed read keeps the last URL this long before the window has none.
 const GRACE: Duration = Duration::from_secs(8);
-/// While the worker is stuck nothing can be confirmed, so the last URL is
-/// kept longer than `GRACE` before it is given up.
+/// While the worker is stuck nothing can be confirmed, so the last URL outlives `GRACE`.
 const STALLED_GRACE: Duration = Duration::from_secs(30);
-/// Reads of a different URL that must agree before it replaces the shown one.
 const SWITCH_READS: u8 = 2;
-/// Consecutive misses after which a window is only retried every `BACKOFF`.
 const MISSES_BEFORE_BACKOFF: u32 = 3;
 const BACKOFF: Duration = Duration::from_secs(15);
-/// A window the sampler stopped asking about is forgotten after this long.
 const FORGET_AFTER: Duration = Duration::from_secs(60);
 const MAX_WINDOWS: usize = 8;
 
-/// How long locating the address bar may take before the read is a miss.
 const READ_DEADLINE: Duration = Duration::from_millis(800);
-/// A read running longer than this is treated as a stuck worker.
 const STALL_AFTER: Duration = Duration::from_millis(1500);
-/// How long the sampler waits for the first read of a window it has not
-/// seen lately, so its first sample already carries the URL.
+/// How long the sampler waits for the first read, so its first sample carries the URL.
 const FIRST_READ_WAIT: Duration = Duration::from_millis(80);
-/// Per-call limits on the browser answering, in milliseconds.
 const CONNECTION_TIMEOUT_MS: u32 = 500;
 const TRANSACTION_TIMEOUT_MS: u32 = 1000;
 
-/// How far the address bar search may go before giving up on a window.
 const SEARCH_MAX_DEPTH: usize = 12;
 const SEARCH_MAX_NODES: usize = 600;
 
-/// What one read of a window's address bar found.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Reading {
-    /// The bar's text, normalized; `None` when it holds no web page.
     Page(Option<String>),
-    /// The bar has keyboard focus. Its text, trimmed, is what the user is
-    /// editing; `None` when it could not be read.
+    /// The bar has focus: its trimmed text is what the user is editing.
     Typing(Option<String>),
-    /// No bar could be found or read.
     Missing,
 }
 
-/// The smoothed answer for one browser window. Times are passed in so the
-/// whole state machine can be tested without a clock.
+/// Smoothed answer per window; times are passed in so tests need no clock.
 #[derive(Debug, Default)]
 struct UrlTracker {
     shown: Option<String>,
-    /// The last time the bar was read, whatever it held.
     confirmed: Option<Instant>,
-    /// A different URL seen on the last reads, and how many agreed.
     pending: Option<(Option<String>, u8)>,
-    /// The window title at the last request, to notice the page changing.
     title: Option<String>,
-    /// The title changed since the last read, so `shown` may be the previous
-    /// page's: the next read replaces it without a second look.
+    /// The title changed, so `shown` may be the old page: replace it without a second read.
     retitled: bool,
     requested: Option<Instant>,
     misses: u32,
     retry_at: Option<Instant>,
-    /// Whether the window's accessible name marks it private. A window is
-    /// private or not for its whole life, so it is read once and kept, even
-    /// across the long gaps that make `touch` forget the page.
+    /// Fixed for a window's life, so it is kept even when `touch` forgets the page.
     private: Option<bool>,
 }
 
 impl UrlTracker {
-    /// The sampler asked about this window. After a long gap the old URL says
-    /// nothing about the window now (or the handle was reused), so it goes.
+    /// After a long gap the old URL (or a reused handle) means nothing, so it goes.
     fn touch(&mut self, now: Instant) {
         if self
             .requested
@@ -112,9 +80,7 @@ impl UrlTracker {
         self.requested = Some(now);
     }
 
-    /// The window's title as the sampler sees it. A new title means a tab
-    /// switch or navigation, and the bar already shows the new page, so the
-    /// next read need not be confirmed by a second one.
+    /// A new title means a navigation and the bar already shows it: skip confirmation.
     fn retitle(&mut self, title: &str) {
         if self.title.as_deref().is_some_and(|last| last != title) {
             self.retitled = true;
@@ -124,12 +90,10 @@ impl UrlTracker {
         }
     }
 
-    /// Whether the worker should read this window now.
     fn due(&self, now: Instant) -> bool {
         self.retry_at.is_none_or(|at| now >= at)
     }
 
-    /// No read has vouched for `shown` lately, so a result is worth waiting for.
     fn unread(&self, now: Instant) -> bool {
         self.retitled || !self.fresh(now, GRACE)
     }
@@ -169,9 +133,8 @@ impl UrlTracker {
         self.confirmed = Some(now);
     }
 
-    /// Whether the focused bar holds the user's edit of the page being shown,
-    /// so that page still stands. An empty bar (a new tab) or text that has
-    /// nothing to do with the page does not keep the previous URL.
+    /// Whether the focused bar holds an edit of the page being shown. An empty bar
+    /// or unrelated text does not keep the previous URL.
     fn editing(&self, text: Option<&str>) -> bool {
         let Some(text) = text.map(str::trim) else {
             return true;
@@ -182,7 +145,6 @@ impl UrlTracker {
         let Some(shown) = &self.shown else {
             return true;
         };
-        // The page changed under the bar (a new tab took the focus).
         if self.retitled {
             return false;
         }
@@ -212,10 +174,8 @@ impl UrlTracker {
     }
 }
 
-/// The URL shown in a browser window with the given title, without ever
-/// waiting long for it. A title that changed since the last call replaces
-/// the shown URL on the next read instead of the second, and the sampler
-/// waits briefly for that read.
+/// The URL shown in a browser window, without ever waiting long. A changed title
+/// makes the next read replace it unconfirmed, and the sampler waits briefly for it.
 pub(super) fn url_of_titled(window: HWND, title: &str) -> Option<String> {
     shared_url_of(window, Some(title))
 }
@@ -230,11 +190,9 @@ fn shared() -> Option<&'static Arc<Shared>> {
     READER.get_or_init(Shared::start).as_ref()
 }
 
-/// Whether a browser window is a private one. The title settles most
-/// browsers (Edge's `[InPrivate]`, the Firefox family's `Private Browsing`);
-/// Chrome does not put Incognito in the title, so the window's accessible
-/// name, which the worker reads once per window, is asked as well. Never
-/// waits: until the worker has read the window the answer is the title's.
+/// Whether a browser window is private. The title settles most (Edge `[InPrivate]`,
+/// Firefox `Private Browsing`); Chrome's Incognito is only in the accessible name,
+/// which the worker reads once. Never waits: until then the title's answer stands.
 pub(super) fn is_private_window(window: HWND, executable: &str, title: &str) -> bool {
     openrize_core::capture::title_marks_private(executable, title)
         || READER
@@ -243,13 +201,10 @@ pub(super) fn is_private_window(window: HWND, executable: &str, title: &str) -> 
             .is_some_and(|shared| shared.is_private(window.0 as isize))
 }
 
-/// What the sampler and the worker thread share. Windows are keyed by the
-/// handle's value, since an `HWND` is not `Send`.
+/// Shared by the sampler and the worker, keyed by handle value since `HWND` is not `Send`.
 struct Shared {
     state: Mutex<State>,
-    /// Signalled when the sampler wants a window read.
     wake: Condvar,
-    /// Signalled when the worker finishes a read.
     done: Condvar,
 }
 
@@ -257,7 +212,6 @@ struct Shared {
 struct State {
     windows: HashMap<isize, UrlTracker>,
     wanted: Option<isize>,
-    /// Requests handed to the worker, and the last one it has finished.
     issued: u64,
     finished: u64,
     busy_since: Option<Instant>,
@@ -326,7 +280,6 @@ impl Shared {
             .is_some_and(|tracker| tracker.private == Some(true))
     }
 
-    /// The worker thread: reads the window the sampler asked about last.
     fn run(&self) {
         let mut reader = Reader::default();
         loop {
@@ -384,7 +337,6 @@ impl State {
     }
 }
 
-/// The worker's UI Automation objects and the address bars it has found.
 #[derive(Default)]
 struct Reader {
     automation: Option<Automation>,
@@ -403,7 +355,6 @@ impl Reader {
             // SAFETY: COM calls on a live element; a failure ends the read.
             match unsafe { automation.read(bar) } {
                 Some(reading) => return reading,
-                // The element went away (tab torn off, window rebuilt).
                 None => {
                     self.bars.remove(&window);
                 }
@@ -429,8 +380,7 @@ impl Reader {
 }
 
 impl Reader {
-    /// Whether the window's accessible name marks it private; `None` when it
-    /// could not be read, so the next read tries again.
+    /// `None` when unreadable, so the next read retries.
     fn window_private(&mut self, window: isize) -> Option<bool> {
         let automation = self.automation.as_ref()?;
         // SAFETY: a COM call on a live automation object; the handle is only
@@ -442,12 +392,10 @@ impl Reader {
 
 struct Automation {
     automation: IUIAutomation,
-    /// Just the window's name, for [`Self::window_name`].
     named: IUIAutomationCacheRequest,
     /// Properties of the controls the search looks at, fetched with the
     /// children so the search needs one call per parent, not several per child.
     search: IUIAutomationCacheRequest,
-    /// The two things read from the bar, fetched in one call.
     value: IUIAutomationCacheRequest,
     controls: IUIAutomationCondition,
 }
@@ -494,9 +442,7 @@ impl Automation {
         }
     }
 
-    /// The name UI Automation gives the window itself: its title, and for
-    /// Chrome the profile or Incognito marker the title lacks.
-    ///
+    /// The window's own UIA name; for Chrome it includes the Incognito marker the title lacks.
     /// # Safety
     /// `window` is only handed to UI Automation, which rejects a stale handle.
     unsafe fn window_name(&self, window: HWND) -> Option<String> {
@@ -509,8 +455,6 @@ impl Automation {
         }
     }
 
-    /// The bar's text, or `None` when the element can no longer be read.
-    ///
     /// # Safety
     /// `bar` must be a live UI Automation element.
     unsafe fn read(&self, bar: &IUIAutomationElement) -> Option<Reading> {
@@ -529,10 +473,7 @@ impl Automation {
         }
     }
 
-    /// The address bar of `window`, searched for without descending into the
-    /// page (a Document): walking web content would make Chromium turn on
-    /// full accessibility for every tab.
-    ///
+    /// Skips the page (a Document): walking web content makes Chromium enable full accessibility.
     /// # Safety
     /// As for [`Self::walk`].
     unsafe fn find_bar(&self, window: HWND, deadline: Instant) -> Option<IUIAutomationElement> {
@@ -556,9 +497,7 @@ impl Automation {
         found.take().or(plain)
     }
 
-    /// Breadth-first search of `window`'s controls, ending when `visit`
-    /// finds something, the tree runs out, or a limit is hit.
-    ///
+    /// Breadth-first search of `window`'s controls until `visit` finds something or a limit is hit.
     /// # Safety
     /// `window` is only handed to UI Automation, which rejects a stale handle.
     unsafe fn walk(
@@ -616,14 +555,12 @@ impl Automation {
     }
 }
 
-/// What a search does with a control it has just met.
 enum Step {
     Descend,
     Skip,
     Found,
 }
 
-/// One control met during a search, with the properties fetched alongside it.
 struct Control {
     element: IUIAutomationElement,
     kind: UIA_CONTROLTYPE_ID,
@@ -637,29 +574,18 @@ impl Control {
     }
 }
 
-/// What a control in a browser window is to the search for the address bar.
 #[derive(Debug, PartialEq, Eq)]
 enum Match {
-    /// Certainly the address bar.
     Address,
-    /// A text field that is certainly not the address bar.
     Other,
-    /// A text field of no known kind; the first one stands in when no
-    /// control is certainly the address bar.
+    /// A text field of no known kind; the first stands in when none is certain.
     Fallback,
-    /// Not a text field; the search looks inside it.
     Not,
 }
 
-/// Judges a control by identifiers that browsers do not translate, so no
-/// language's UI strings are needed:
-///
-/// - Firefox family (Firefox, Zen, LibreWolf, Floorp): the URL bar's input has
-///   the AutomationId `urlbar-input`. It is exposed as a ComboBox, not an
-///   Edit, which is why a search for the first Edit never found it.
-/// - Chromium family: the omnibox is an Edit of the `OmniboxViewViews` view
-///   class (forks prefix it, e.g. `BraveOmniboxViewViews`). The find bar and
-///   other search fields are plain `Textfield`s.
+/// Judges a control by identifiers browsers do not translate. Firefox family: the
+/// AutomationId `urlbar-input` (a ComboBox, not an Edit). Chromium: an Edit of class
+/// `OmniboxViewViews` (forks prefix it); the find bar and others are plain `Textfield`s.
 fn classify(kind: UIA_CONTROLTYPE_ID, id: &str, class: &str) -> Match {
     let text_field = kind == UIA_EditControlTypeId || kind == UIA_ComboBoxControlTypeId;
     if !text_field {
@@ -678,8 +604,7 @@ fn classify(kind: UIA_CONTROLTYPE_ID, id: &str, class: &str) -> Match {
     }
 }
 
-/// Address bars hide the scheme ("github.com/openrize"), and an empty or
-/// search-text bar is no page at all. Only web pages count, as on macOS.
+/// Address bars hide the scheme; an empty or search-text bar is no page. Only web pages count.
 fn normalize_address(text: &str) -> Option<String> {
     let text = text.trim();
     if text.is_empty() || text.contains(char::is_whitespace) {
@@ -700,8 +625,7 @@ fn normalize_address(text: &str) -> Option<String> {
     (web && named).then_some(url)
 }
 
-/// A URL without its scheme, "www." and trailing slash, lower-cased, as the
-/// address bar shows it while being edited.
+/// A URL without scheme, "www." and trailing slash, lower-cased, as the bar shows it while edited.
 fn bare(url: &str) -> String {
     let url = url.to_lowercase();
     let url = url.split_once("://").map_or(url.as_str(), |(_, rest)| rest);
@@ -725,7 +649,6 @@ mod tests {
         Reading::Typing(Some(text.to_string()))
     }
 
-    /// A tracker read once at `start`, showing `url`.
     fn showing(url: &str, start: Instant) -> UrlTracker {
         let mut tracker = UrlTracker::default();
         tracker.touch(start);
@@ -777,7 +700,6 @@ mod tests {
             normalize_address("localhost:3000").as_deref(),
             Some("https://localhost:3000")
         );
-        // Other schemes stay out, whatever the host looks like.
         assert_eq!(normalize_address("chrome://newtab"), None);
         assert_eq!(normalize_address("ftp://server/"), None);
     }
@@ -786,22 +708,18 @@ mod tests {
     fn address_bars_are_told_from_other_text_fields() {
         let edit = UIA_EditControlTypeId;
         let combo = UIA_ComboBoxControlTypeId;
-        // Firefox family: the URL bar is a combo box with a fixed id.
         assert_eq!(
             classify(combo, "urlbar-input", "urlbar-input textbox-input"),
             Match::Address
         );
-        // Chromium family, in any language and under any fork's prefix.
         assert_eq!(
             classify(edit, "view_1017", "OmniboxViewViews"),
             Match::Address
         );
         assert_eq!(classify(edit, "", "BraveOmniboxViewViews"), Match::Address);
-        // Find bars and other fields are not the bar.
         assert_eq!(classify(edit, "", "Textfield"), Match::Other);
         assert_eq!(classify(edit, "findbar-textbox", ""), Match::Other);
         assert_eq!(classify(combo, "zoom-menu", ""), Match::Other);
-        // An unknown Edit is only a fallback; other controls are walked into.
         assert_eq!(classify(edit, "", "SomeEdit"), Match::Fallback);
         assert_eq!(classify(UIA_DocumentControlTypeId, "", ""), Match::Not);
     }
@@ -827,7 +745,6 @@ mod tests {
             Some("https://a.example/")
         );
         assert_eq!(tracker.url(start + GRACE + secs(1), false), None);
-        // The bar coming back with the same page needs no second look.
         tracker.record(page("https://a.example/"), start + GRACE + secs(2));
         assert_eq!(
             tracker.url(start + GRACE + secs(2), false).as_deref(),
@@ -867,7 +784,6 @@ mod tests {
                 Some("https://a.example/")
             );
         }
-        // Disagreeing candidates do not add up either.
         tracker.record(page("https://b.example/"), start + secs(5));
         tracker.record(page("https://c.example/"), start + secs(6));
         assert_eq!(
@@ -916,7 +832,6 @@ mod tests {
         assert!(tracker.url(start + secs(1), false).is_some());
         tracker.record(typing(""), start + secs(2));
         assert_eq!(tracker.url(start + secs(2), false), None);
-        // Typing a URL there keeps showing no page until it is loaded.
         tracker.record(typing("b.example"), start + secs(3));
         assert_eq!(tracker.url(start + secs(3), false), None);
     }
@@ -925,7 +840,6 @@ mod tests {
     fn text_unrelated_to_the_page_does_not_keep_its_url() {
         let start = Instant::now();
         let mut tracker = showing("https://www.github.com/openrize", start);
-        // An edit of the shown address, or any address, holds the page.
         for text in [
             "git",
             "github.com/open",
@@ -953,7 +867,6 @@ mod tests {
         tracker.touch(start + secs(1));
         tracker.retitle("A");
         assert!(!tracker.unread(start + secs(1)));
-        // A tab switch: the sampler waits for a read, which needs no second.
         tracker.touch(start + secs(2));
         tracker.retitle("B");
         assert!(tracker.unread(start + secs(2)));
@@ -967,7 +880,6 @@ mod tests {
             Some("https://b.example/")
         );
         assert!(!tracker.unread(start + secs(2)));
-        // Without a new title a different URL still needs two reads.
         tracker.record(page("https://c.example/"), start + secs(3));
         assert_eq!(
             tracker.url(start + secs(3), false).as_deref(),
@@ -1023,7 +935,6 @@ mod tests {
         assert!(!tracker.due(last + secs(1)));
         assert!(!tracker.due(last + BACKOFF - secs(1)));
         assert!(tracker.due(last + BACKOFF));
-        // Still missing: another long wait. Found: back to every tick.
         tracker.record(Reading::Missing, last + BACKOFF);
         assert!(!tracker.due(last + BACKOFF + secs(1)));
         tracker.record(page("https://a.example/"), last + BACKOFF * 2);
@@ -1039,7 +950,6 @@ mod tests {
         tracker.touch(back);
         assert!(tracker.unread(back));
         assert_eq!(tracker.url(back, false), None);
-        // A quick return keeps what was known.
         let mut tracker = showing("https://a.example/", start);
         tracker.touch(start + secs(2));
         assert_eq!(
@@ -1048,7 +958,6 @@ mod tests {
         );
     }
 
-    /// Visible top-level windows of the browsers in `BROWSERS`.
     fn browser_windows() -> Vec<(HWND, String)> {
         use windows::core::BOOL;
         use windows::Win32::Foundation::LPARAM;
@@ -1078,9 +987,9 @@ mod tests {
         windows
     }
 
-    /// Prints the text fields the search sees in each open browser window and
-    /// what reading the one it picks gives. Run by hand:
-    /// `cargo test --lib address_bar::tests::dump -- --ignored --nocapture`
+    /// Prints the text fields the search sees in each open browser window and what
+    /// reading the picked one gives. Run: `cargo test --lib address_bar::tests::dump -- --ignored
+    /// --nocapture`
     #[test]
     #[ignore = "reads the live UI of the browsers that are open"]
     fn dump() {
@@ -1123,9 +1032,8 @@ mod tests {
         }
     }
 
-    /// Asks `shared_url_of` about each open browser window once a second for a few
-    /// seconds, as the sampler does. Run by hand:
-    /// `cargo test --lib address_bar::tests::live_urls -- --ignored --nocapture`
+    /// Asks `shared_url_of` about each open browser window once a second, as the sampler does.
+    /// Run: `cargo test --lib address_bar::tests::live_urls -- --ignored --nocapture`
     #[test]
     #[ignore = "reads the live UI of the browsers that are open"]
     fn live_urls() {
@@ -1143,9 +1051,8 @@ mod tests {
         }
     }
 
-    /// Prints, for every open browser window, its executable, title, what the
-    /// window's accessible name says, and whether it counts as private. Open a
-    /// private window in each browser first. Run by hand:
+    /// Prints each open browser window's executable, title, accessible name and privacy.
+    /// Open a private window in each browser first. Run:
     /// `cargo test --lib address_bar::tests::live_private -- --ignored --nocapture`
     #[test]
     #[ignore = "reads the live UI of the browsers that are open"]

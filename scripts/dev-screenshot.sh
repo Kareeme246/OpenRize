@@ -1,13 +1,7 @@
 #!/usr/bin/env bash
-# Launches an isolated `tauri dev` instance, screenshots its window once
-# ready, tears the whole process tree down, and prints the screenshot path.
-#
-# Safe to run from multiple agents at the same time: each run gets its own
-# free port (so Vite dev servers never collide) and its own Tauri app
-# `identifier` (so app-data storage never collides with your real app data
-# or with another concurrent run). macOS only — screenshotting relies on
-# System Events + screencapture, and there is no supported Tauri WebDriver
-# backend for macOS to drive the window instead.
+# Launches an isolated `tauri dev` instance, screenshots its window once ready, tears the tree down,
+# prints the path. Safe to run concurrently: each run has its own free port and Tauri `identifier`.
+# macOS only (System Events + screencapture; Tauri has no WebDriver backend for macOS).
 set -euo pipefail
 set -m
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -53,7 +47,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Wait for the compiled binary (not cargo/rustc/vite) to actually be running.
 BIN_PID=""
 for _ in $(seq 1 90); do
   BIN_PID="$(pgrep -n -f 'target/debug/openrize$' || true)"
@@ -68,12 +61,9 @@ fi
 # Give the webview a moment to actually paint after the process exists.
 sleep 2
 
-# A raw wry/AppKit window has no AppleScript dictionary of its own, so it's
-# addressed through System Events' accessibility proxy — which, unlike a real
-# scriptable app, exposes position/size but not a CGWindowID `id` property.
-# So: bring it forward and pin it to a known on-screen spot (it may have
-# restored a position from a previous run that's now partly off-screen), then
-# look its CGWindowID up through CoreGraphics below.
+# A raw wry/AppKit window has no AppleScript dictionary, so System Events' accessibility proxy
+# exposes position/size but not a CGWindowID. Bring it forward at a known on-screen spot (a restored
+# position may be off-screen), then look the CGWindowID up through CoreGraphics below.
 HAS_WINDOW=""
 for _ in $(seq 1 20); do
   HAS_WINDOW="$(osascript -e "tell application \"System Events\" to get exists (first window of (first process whose unix id is $BIN_PID))" 2>/dev/null || true)"

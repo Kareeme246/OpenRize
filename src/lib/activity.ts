@@ -4,7 +4,7 @@ function segmentDuration(segment: ActivitySegment, now: number): number {
   return Math.max(0, (segment.endedAt ?? now) - segment.startedAt);
 }
 
-/** Local midnight — the day boundary is a browser concern, not Rust's. */
+/** Local midnight; the day boundary is a browser concern, not Rust's. */
 export function startOfToday(now: number = Date.now()): number {
   const date = new Date(now);
   date.setHours(0, 0, 0, 0);

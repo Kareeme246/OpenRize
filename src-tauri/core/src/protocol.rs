@@ -1,8 +1,5 @@
-//! What `rize` asks the app, and the envelope every answer comes back in.
-//! The same request runs in the app over IPC or, with the app closed, in
-//! `rize` itself (`crate::rpc`), so both sides share these types.
-//!
-//! References to projects, clients, categories, timers and entries are what
+//! What `rize` asks the app, and the envelope every answer comes back in. The same request runs in
+//! the app over IPC, or in `rize` itself (`crate::rpc`) with the app closed. References are what
 //! the person typed (an id, a name or a short id); the app resolves them.
 use std::io::{Read, Write};
 
@@ -15,18 +12,13 @@ use crate::models::{
 };
 use crate::EntryFilter;
 
-/// Bumped whenever an operation or its answer changes incompatibly, so an app
-/// and a `rize` that disagree stop at the version check instead of misreading
-/// each other. 3: every answer carrying a timer describes its segments by
-/// `startedAt` and `endedAt` (no `recordedAt`). 4: a timer's group became its
+/// Bumped on an incompatible change to an operation or its answer, so an app and a `rize` that
+/// disagree stop at the version check instead of misreading each other.
 pub const PROTOCOL_VERSION: u32 = 4;
-/// The `--json` envelope's version. Adding a field keeps it; removing or
-/// renaming one bumps it. 3: a timer segment's `durationMs` and `recordedAt`
-/// became `startedAt` and `endedAt` (`durationMs` stays, derived from them).
-/// 4: a timer's `group` became `tag`.
+/// The `--json` envelope's version: adding a field keeps it; removing or renaming one bumps it.
 pub const SCHEMA_VERSION: u32 = 4;
-/// Why a command that changes nothing destructive cannot take `--dry-run`;
-/// the core and `rize` give the same words.
+/// Why a command that changes nothing destructive cannot take `--dry-run`; core and `rize` share
+/// the words.
 pub const DRY_RUN_UNSUPPORTED: &str = "--dry-run only previews commands that delete, reset or rebuild; this one would run for real. Run it without --dry-run.";
 pub const MAX_REQUEST: usize = 1024 * 1024;
 pub const MAX_RESPONSE: usize = 64 * 1024 * 1024;
@@ -66,7 +58,6 @@ impl Request {
     deny_unknown_fields
 )]
 pub enum Operation {
-    /// The app's version and whether it is the running app.
     Hello {},
     Status {
         day_start: u64,
@@ -114,18 +105,15 @@ pub enum Operation {
         timer: String,
         tag: Option<String>,
     },
-    /// Starts every paused timer with the tag.
     TimerTagStart {
         tag: String,
     },
-    /// Pauses every running timer with the tag.
     TimerTagPause {
         tag: String,
     },
     /// Every section with every timer: `{ sections, timers }`. A section only
     /// arranges timers on the page; the section answers below are the same.
     TimerSectionsList {},
-    /// Adds an empty section after the others.
     TimerSectionCreate {
         name: String,
     },
@@ -143,7 +131,6 @@ pub enum Operation {
         timer: String,
         section: Option<String>,
     },
-    /// One timer with its segments, each a start and an end.
     TimerSegments {
         timer: String,
     },
@@ -257,13 +244,9 @@ pub enum Operation {
         value: Value,
     },
     Paths {},
-    /// What `operation` would change, answered without changing anything.
-    /// Only the commands `rize` confirms (`TimerReset`, `TimerDelete`,
-    /// `EntriesDelete`, `EntriesRebuild`, `ProjectDelete`, `ClientDelete`,
-    /// `CategoryDelete`) can be previewed; anything else, or a nested
-    /// preview, is `INVALID_ARGUMENT`. This adds an operation and changes no
-    /// existing request or answer. (The protocol version moved to 3 for the
-    /// segment change, not for this.)
+    /// What `operation` would change, without changing anything. Only commands `rize` confirms
+    /// (resets, deletes, rebuilds) can be previewed; anything else, or a nested preview, is
+    /// `INVALID_ARGUMENT`.
     Preview {
         operation: Box<Operation>,
     },
@@ -279,7 +262,6 @@ impl Operation {
     }
 }
 
-/// The answer to `Hello`.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Hello {

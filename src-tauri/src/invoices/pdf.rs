@@ -1,13 +1,6 @@
-//! Invoice PDF composition. One US Letter document per invoice, drawn with
-//! `printpdf` page operations and embedded Noto Sans (OFL, see
-//! `assets/fonts/OFL.txt`). This is the only renderer: the editor previews these
-//! exact bytes, "Export" saves them, and Finalize archives them.
-//!
-//! Coordinates are points from the top-left; `text` positions are baselines.
-//! Glyph advances are measured from the font so right alignment and wrapping
-//! are exact, but there is no kerning or complex-script shaping. Latin, Greek
-//! and Cyrillic render; scripts outside Noto Sans (e.g. CJK) show as missing
-//! glyphs.
+//! Invoice PDF composition: one US Letter document per invoice via `printpdf` and embedded
+//! Noto Sans (OFL, see `assets/fonts/OFL.txt`); the only renderer. Coordinates are points
+//! from the top-left, there is no kerning or complex-script shaping (CJK shows as missing glyphs).
 
 use std::rc::Rc;
 
@@ -50,17 +43,13 @@ const WATERMARK: Rgbf = (0.93, 0.93, 0.92);
 #[derive(Debug, Clone)]
 pub struct PaperLine {
     pub description: String,
-    /// A muted second line, e.g. `Project name · Sep 12, 2026`.
     pub detail: Option<String>,
     pub quantity_hundredths: i64,
-    /// Short unit shown after the quantity, e.g. `hrs`; may be empty.
     pub unit: String,
     pub rate_cents: i64,
     pub amount_cents: i64,
 }
 
-/// Everything the paper shows, already validated and formatted where the
-/// wording matters (dates), raw where the renderer formats (money, quantity).
 #[derive(Debug, Clone)]
 pub struct PaperInvoice {
     /// `None` renders a DRAFT: watermark and `Invoice: DRAFT`, no number.
@@ -126,7 +115,6 @@ fn point(x: f32, top: f32) -> Point {
     }
 }
 
-/// Strips control characters and normalizes tabs so measuring and drawing agree.
 fn clean(text: &str) -> String {
     text.chars()
         .map(|c| if c == '\t' { ' ' } else { c })
@@ -174,8 +162,7 @@ impl Ctx {
             .sum()
     }
 
-    /// Word-wraps to `max_width`, honoring newlines; a single word wider than
-    /// the column is split between characters.
+    /// Word-wraps to `max_width`, honoring newlines; a word wider than the column is split.
     fn wrap(&self, weight: Weight, text: &str, max_width: f32, size: f32) -> Vec<String> {
         let mut lines = Vec::new();
         for paragraph in clean(text).lines() {
@@ -292,7 +279,6 @@ impl Page {
         let width = ctx.width(Weight::Bold, "DRAFT", size);
         let angle = 45.0_f32;
         let (sin, cos) = angle.to_radians().sin_cos();
-        // Text runs along the rotated baseline from its start point; center it.
         let x = PAGE_WIDTH / 2.0 - width / 2.0 * cos - size * 0.36 * -sin;
         let y = PAGE_HEIGHT / 2.0 - width / 2.0 * sin - size * 0.36 * cos;
         let font = ctx.bold.clone();
@@ -322,7 +308,6 @@ enum RowText {
     Detail(String),
 }
 
-/// Flows content down pages, adding a continuation page when it runs out.
 struct Flow<'a> {
     ctx: &'a Ctx,
     draft: bool,
@@ -376,7 +361,6 @@ impl<'a> Flow<'a> {
         self.y = y + 27.0;
     }
 
-    /// Starts a new page (repeating the table header) unless `height` fits.
     fn ensure(&mut self, height: f32, in_table: bool) {
         if self.y + height > CONTENT_BOTTOM {
             self.new_page(in_table);
@@ -504,7 +488,6 @@ impl<'a> Flow<'a> {
     }
 }
 
-/// Fits the logo inside its box, keeping aspect ratio, at the page's top left.
 fn place_logo(page: &mut Page, id: &XObjectId, px: (usize, usize)) -> f32 {
     let (w, h) = (px.0 as f32, px.1 as f32);
     let scale = (LOGO_MAX_WIDTH / w).min(LOGO_MAX_HEIGHT / h);
@@ -544,7 +527,6 @@ pub fn render(invoice: &PaperInvoice) -> Result<Vec<u8>, String> {
         first.watermark(&ctx);
     }
 
-    // Header: optional logo, title and dates on the left, Bill To on the right.
     let mut header_top = 54.0;
     if let Some(bytes) = &invoice.logo {
         let image = RawImage::decode_from_bytes(bytes, &mut Vec::new())

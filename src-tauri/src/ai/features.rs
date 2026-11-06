@@ -1,17 +1,6 @@
-//! Feature extraction: the one deterministic rendering of an entry's
-//! segments that every tier reads.
-//!
-//! ```text
-//! Tue 10:15–10:48 (33 min)
-//! Xcode 78%: "activity.rs - OpenRize", "commands.rs - OpenRize"
-//! Safari 22% docs.rs: "AppHandle in tauri - Rust"
-//! Context: previous entry = Coding (09:38–10:15)
-//! ```
-//!
-//! Two renderings come out of it. `text` (above) goes to the Foundation
-//! Model. `content` drops the time and context lines, so two blocks of the
-//! same work embed close together whatever the hour; it feeds NLEmbedding,
-//! kNN, and the personal classifier.
+//! Feature extraction: the one deterministic rendering of an entry's segments.
+//! `text` goes to the Foundation Model; `content` drops the time and context lines
+//! so same-work blocks embed close together, and feeds NLEmbedding, kNN and the classifier.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -36,7 +25,6 @@ pub struct EntryFeatures {
     pub active_ms: u64,
 }
 
-/// The previous entry, when it ended shortly before this one.
 pub struct PreviousEntry<'a> {
     pub category: &'a str,
     pub started_at: u64,
@@ -100,10 +88,9 @@ pub fn is_tracker_segment(segment: &ActivitySegment) -> bool {
         || segment.app.eq_ignore_ascii_case("openrize")
 }
 
-/// A block has meaningful titles when it holds at least one non-tracker
-/// segment with a domain or a window title other than its app name (including
-/// after stripping a terminal host prefix). A private window never counts: what
-/// it showed must not be put into an entry's description.
+/// A block has meaningful titles when a non-tracker segment has a domain or a window
+/// title other than its app name (after stripping a terminal host prefix). A private
+/// window never counts: its title must not reach an entry's description.
 pub fn has_titles(segments: &[ActivitySegment]) -> bool {
     segments.iter().any(|segment| {
         if segment.kind == KIND_BREAK || segment.private || is_tracker_segment(segment) {
@@ -121,19 +108,15 @@ pub fn has_titles(segments: &[ActivitySegment]) -> bool {
     })
 }
 
-/// What a block's segments add up to: time per app with its titles and
-/// domains, the dominant app or site, and the active time.
 struct Usage {
     apps: Vec<AppUsage>,
     dominant: Option<Dominant>,
     active_ms: u64,
 }
 
-/// Adds up the block. With `scrub_private`, a private window counts as its
-/// app alone: no title, no domain, and it never makes a site the dominant
-/// key. What is stored or learned from must be built this way; only the
-/// one-shot prompt to the on-device model may see what a private window
-/// showed, and only until the entry is classified.
+/// With `scrub_private`, a private window counts as its app alone: no title, no domain,
+/// never the dominant key. Anything stored or learned from must be built this way; only
+/// the one-shot model prompt may see it.
 fn usage(
     started_at: u64,
     ended_at: u64,
@@ -169,8 +152,7 @@ fn usage(
         };
         let app = &mut apps[index];
         app.ms += ms;
-        // A private window whose detail was already erased reads as the
-        // marker; it says nothing, so it is never a title.
+        // An already-erased private window reads as the marker; never a title.
         let detail = !(segment.private && (scrub_private || segment.title == PRIVATE_TITLE));
         let domain = segment
             .domain
@@ -227,7 +209,6 @@ fn usage(
     }
 }
 
-/// The apps of a block as lines: share, domains, titles.
 fn render(usage: &Usage) -> String {
     let mut content = String::new();
     for app in usage.apps.iter().take(MAX_APPS) {
@@ -262,11 +243,9 @@ fn render(usage: &Usage) -> String {
     truncate(content.trim_end(), MAX_TEXT_CHARS)
 }
 
-/// Renders a block for every tier. `text` goes to the Foundation Model for
-/// this one classification and is never stored, so it may carry what a
-/// private window showed. `content` and `dominant` are what get stored
-/// (`entry_embeddings.features`), embedded, trained on and shown as the "Why"
-/// line, so a private window is only its app there.
+/// `text` goes to the Foundation Model once and is never stored, so it may carry a private
+/// window's detail. `content` and `dominant` are stored, embedded, trained on and shown as
+/// the "Why" line, so a private window is only its app there.
 pub fn extract(
     started_at: u64,
     ended_at: u64,
@@ -405,7 +384,6 @@ mod tests {
             strip_host_prefix_with("Mac.lan: WezTerm", Some("Mac.lan")),
             "WezTerm"
         );
-        // Does not touch arbitrary prefixes or words like Note:
         assert_eq!(
             strip_host_prefix_with("Note: important task", Some("Mac.lan")),
             "Note: important task"
@@ -430,22 +408,18 @@ mod tests {
 
     #[test]
     fn has_titles_evaluation() {
-        // Tracker only -> false
         let mut tracker = seg("openrize", "OpenRize", None, 0, 100_000);
         tracker.bundle_id = Some(openrize_core::APP_IDENTIFIER.to_string());
         assert!(!has_titles(&[tracker]));
 
-        // Non-tracker with empty title or title == app -> false
         let wezterm_empty = seg("WezTerm", "", None, 0, 100_000);
         assert!(!has_titles(&[wezterm_empty]));
         let wezterm_same = seg("WezTerm", "WezTerm", None, 0, 100_000);
         assert!(!has_titles(&[wezterm_same]));
 
-        // Domain present -> true
         let safari_domain = seg("Safari", "Safari", Some("docs.rs"), 0, 100_000);
         assert!(has_titles(&[safari_domain]));
 
-        // Non-app title present -> true
         let wezterm_title = seg("WezTerm", "cargo build", None, 0, 100_000);
         assert!(has_titles(&[wezterm_title]));
     }
@@ -469,7 +443,6 @@ mod tests {
         ];
         let features = extract(0, 1_000_000, &segments, None);
 
-        // What is embedded, stored and trained on has no title or site.
         assert_eq!(
             features.content,
             "Zen 60%\nXcode 40%: \"activity.rs - OpenRize\""
@@ -479,10 +452,8 @@ mod tests {
             (dominant.kind.as_str(), dominant.label.as_str()),
             ("app", "Zen")
         );
-        // The one-shot prompt to the model still gets it to classify with.
         assert!(features.text.contains("quarterly layoffs plan"));
         assert!(features.text.contains("hr.example"));
-        // Time is counted whole.
         assert_eq!(features.active_ms, 1_000_000);
     }
 

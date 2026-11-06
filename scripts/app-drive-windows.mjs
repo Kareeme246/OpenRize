@@ -1,25 +1,7 @@
 #!/usr/bin/env node
-// Launch an isolated OpenRize instance, click through its real webview UI, read
-// the result back, and tear the instance down. Windows only.
-//
-// This is the Windows counterpart of scripts/app-drive.sh. The macOS script
-// drives the app through the OS accessibility API; on Windows the webview is
-// WebView2 (Chromium), which can expose the Chrome DevTools Protocol (CDP) on a
-// local port when launched with `--remote-debugging-port`. Everything here goes
-// through that port: the accessibility tree comes from CDP's Accessibility
-// domain, clicks and keystrokes are real `Input.dispatch*` events, and
-// screenshots are `Page.captureScreenshot`, which captures the webview only
-// (never the desktop, which could show the user's private windows).
-//
-// It is plain ESM JavaScript with no dependencies (Node 22+ for the global
-// WebSocket and fetch), so it runs with just `node`; it is `.mjs` rather than
-// `.ts` like scripts/publish-r2 because nothing here needs the type-checking
-// project that the publisher has.
-//
-// Sessions are namespaced by the checkout they were started from, so two agents
-// in two worktrees never see or kill each other's sessions.
-//
-// See .agents/skills/drive-app-windows/SKILL.md for the workflow.
+// Launches an isolated OpenRize, drives its WebView2 over CDP, then tears down.
+// Windows counterpart of scripts/app-drive.sh; screenshots are webview-only.
+// Workflow: .agents/skills/drive-app-windows/SKILL.md
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomInt } from "node:crypto";
 import {
@@ -45,16 +27,13 @@ const SESSION_ROOT = join(tmpdir(), "openrize-app-drive", WORKSPACE_KEY);
 const SHOT_DIR = join(tmpdir(), "openrize-dev-screenshot");
 const TAURI_JS = join(REPO_ROOT, "node_modules", "@tauri-apps", "cli", "tauri.js");
 const VITE_JS = join(REPO_ROOT, "node_modules", "vite", "bin", "vite.js");
-/** The binary every session in this checkout runs (one live session per checkout). */
 const APP_EXE = join(REPO_ROOT, "src-tauri", "target", "debug", "openrize.exe");
 
-// How long `start` waits for the app. A warm src-tauri/target gets there in
-// seconds; the first cold `cargo build` of the dependency tree takes minutes.
+// A cold `cargo build` of the dependency tree takes minutes.
 const STARTUP_TIMEOUT = Number(process.env.OPENRIZE_DRIVE_TIMEOUT ?? 900);
 
-// Every identifier this tool ever creates matches this, and nothing it deletes
-// can be anything else. The real app's identifier (com.offlinestudios.openrize)
-// does not match.
+// Everything this tool deletes matches this; the real app's identifier does
+// not.
 const IDENTIFIER_PREFIX = "com.offlinestudios.openrize.drive";
 const IDENTIFIER_RE = /^com\.offlinestudios\.openrize\.drive\d+$/;
 
@@ -115,7 +94,6 @@ Examples:
     node scripts/app-drive-windows.mjs stop --all --dry-run`;
 
 class DriveError extends Error {}
-/** A usage error (missing arguments, unknown command): exits 2 instead of 1. */
 class UsageError extends DriveError {}
 
 function die(message) {
@@ -127,8 +105,6 @@ function usageError(message) {
 }
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
-
-// ---------------------------------------------------------------- session state
 
 function sessionDir(id) {
   return join(SESSION_ROOT, id);
@@ -158,12 +134,8 @@ function allSessionIds() {
   return readdirSync(SESSION_ROOT).filter((name) => /^d\d+$/.test(name));
 }
 
-/**
- * Running processes of this checkout's app binary. An app restart (switching
- * accounts, installing an update) replaces the app with a new process whose
- * command line carries neither the session's identifier nor its ports, and
- * ends `tauri dev`; the binary's path is what still identifies it.
- */
+// An app restart replaces the app with a process lacking our identifier/ports;
+// the binary path still identifies it.
 function appProcesses() {
   const path = APP_EXE.replace(/'/g, "''");
   const out = powershell(
@@ -175,12 +147,9 @@ function appProcesses() {
   return Array.isArray(parsed) ? parsed : [parsed];
 }
 
-/**
- * Alive while `tauri dev` runs, or, once an app restart has ended it, while the
- * restarted app does (its Vite server is ours and outlives `tauri dev`). Only
- * one session per checkout can be live, so a running copy of this checkout's
- * binary belongs to it; the session follows the app to its new pid.
- */
+// Alive while `tauri dev` runs, or, after an app restart ends it, while the
+// restarted app does (its Vite server outlives `tauri dev`). The session
+// follows the app to its new pid.
 function sessionAlive(meta) {
   if (pidAlive(meta.pid)) return true;
   if (!meta.vitePid || !pidAlive(meta.vitePid)) return false;
@@ -213,9 +182,6 @@ function resolveSession(options) {
   return live[0];
 }
 
-// ---------------------------------------------------------------------- helpers
-
-/** A port nothing listens on, on both loopback families (vite may bind either). */
 function portFree(port) {
   const tryHost = (host) =>
     new Promise((done) => {
@@ -242,7 +208,6 @@ async function pickPort(taken) {
   return die("could not find a free port");
 }
 
-/** PATH with ~/.cargo/bin in front, how every child that needs cargo is started. */
 function pathWithCargo() {
   const cargoBin = join(homedir(), ".cargo", "bin");
   const current = process.env.PATH ?? process.env.Path ?? "";
@@ -274,12 +239,8 @@ function taskkillTree(pid) {
   spawnSync("taskkill", ["/T", "/F", "/PID", String(pid)], { stdio: "ignore", windowsHide: true });
 }
 
-/**
- * Processes whose command line mentions this session's identifier or debugging
- * port: the WebView2 browser/renderer/GPU processes (`--user-data-folder` is
- * under the identifier) and the vite server. Used to find orphans after the
- * tree kill, and to learn the app's own pid at start.
- */
+// Processes mentioning this session's identifier or debugging port (WebView2,
+// vite); finds orphans after the tree kill.
 function sessionProcesses(meta) {
   const needles = [meta.identifier, `remote-debugging-port=${meta.cdpPort}`, `--port ${meta.port} --strictPort`];
   const conditions = needles.map((needle) => `$_.CommandLine -like '*${needle}*'`).join(" -or ");
@@ -296,11 +257,8 @@ function removeDir(path) {
   rmSync(path, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
 }
 
-/**
- * The directories Tauri creates for an identifier. Refuses anything that is not ours.
- * Roaming first, local second. The data lives in the second; the first is only
- * swept so sessions from before the move to Local AppData still clean up.
- */
+// Roaming is only swept so sessions from before the move to Local AppData still
+// clean up.
 function identifierDirs(identifier) {
   if (!IDENTIFIER_RE.test(identifier)) die(`refusing to touch data for identifier ${identifier}`);
   const dirs = [];
@@ -309,9 +267,6 @@ function identifierDirs(identifier) {
   return dirs.filter((dir) => basename(dir) === identifier);
 }
 
-// ------------------------------------------------------------------- CDP client
-
-/** A minimal Chrome DevTools Protocol connection to one page target. */
 class Cdp {
   constructor(socket) {
     this.socket = socket;
@@ -404,7 +359,6 @@ async function cdpTargets(meta) {
   return (await response.json()).filter((target) => target.type === "page");
 }
 
-/** The window label Tauri gave a page ("main", "pulse", ...), or "" if not Tauri yet. */
 async function windowLabel(target) {
   let cdp;
   try {
@@ -417,7 +371,6 @@ async function windowLabel(target) {
   }
 }
 
-/** Pick the page to drive: `--target` substring, else the window labelled "main". */
 async function pickTarget(meta, options) {
   const pages = await cdpTargets(meta);
   if (pages.length === 0) die("the instance has no webview page yet");
@@ -450,10 +403,7 @@ async function withPage(options, action) {
   }
 }
 
-// ------------------------------------------------------------ accessibility tree
-
-// Roles a user can act on: what `find`/`click`/`fill` match first, and what
-// `tree` always prints. CDP reports Chromium's role strings, compared lowercased.
+// Roles a user can act on, compared lowercased.
 const ACTIONABLE = new Set([
   "button",
   "checkbox",
@@ -477,7 +427,6 @@ const ACTIONABLE = new Set([
   "treeitem",
 ]);
 const TEXT_FIELDS = new Set(["textbox", "searchbox", "combobox", "spinbutton"]);
-// Structural noise: never printed (except by --full), and never matched by name.
 const NOISE = new Set(["generic", "none", "presentation", "inlinetextbox", "linebreak", "rootwebarea"]);
 
 async function axNodes(cdp) {
@@ -497,7 +446,6 @@ const nameOf = (node) => String(node.name?.value ?? "");
 const valueOf = (node) => (node.value?.value === undefined ? "" : String(node.value.value));
 const propOf = (node, name) => node.properties?.find((property) => property.name === name)?.value?.value;
 
-/** Depth-first walk of the non-ignored nodes, yielding each with its depth. */
 function* walk(nodes) {
   const byId = new Map(nodes.map((node) => [node.nodeId, node]));
   function* visit(node, depth) {
@@ -530,7 +478,6 @@ function describe(node) {
 
 function renderTree(nodes, full) {
   const lines = [];
-  // Indent by printed ancestors only, so skipped wrapper nodes do not widen the tree.
   const printed = [];
   for (const { node, depth } of walk(nodes)) {
     while (printed.length > 0 && printed[printed.length - 1] >= depth) printed.pop();
@@ -547,7 +494,6 @@ function renderTree(nodes, full) {
   return lines.join("\n");
 }
 
-/** Candidates for a name: actionable roles first, any named node as a fallback. */
 function matches(nodes, name, options) {
   const role = options.role?.toLowerCase();
   const wanted = name.toLowerCase();
@@ -584,9 +530,6 @@ function pickMatch(nodes, name, options) {
   return found[0];
 }
 
-// --------------------------------------------------------------- input dispatch
-
-/** Scroll a node into view and return the viewport point to click, checking nothing covers it. */
 async function locate(cdp, node) {
   if (!node.backendDOMNodeId) die(`[${roleOf(node)}] ${nameOf(node)} has no DOM node to act on`);
   const { object } = await cdp.send("DOM.resolveNode", { backendNodeId: node.backendDOMNodeId });
@@ -620,7 +563,6 @@ async function mouseClick(cdp, { x, y }) {
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
 }
 
-// Key names -> CDP key description. `vk` is the Windows virtual-key code.
 const NAMED_KEYS = {
   return: { key: "Enter", code: "Enter", vk: 13, text: "\r" },
   enter: { key: "Enter", code: "Enter", vk: 13, text: "\r" },
@@ -659,10 +601,8 @@ const PUNCTUATION = {
   "=": ["Equal", 187],
   "`": ["Backquote", 192],
 };
-// CDP modifier bitmask.
 const MODIFIERS = { alt: 1, opt: 1, option: 1, ctrl: 2, control: 2, cmd: 4, command: 4, meta: 4, win: 4, shift: 8 };
 
-/** Parse "ctrl+shift+tab", "ctrl+,", "ctrl++", "f5", "a" into a CDP key description. */
 function parseKeySpec(spec) {
   let rest = spec;
   let modifiers = 0;
@@ -706,17 +646,14 @@ async function pressKey(cdp, spec) {
   await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...base });
 }
 
-// --------------------------------------------------------------------- commands
-
 async function startSession() {
   if (process.platform !== "win32") die("app-drive-windows.mjs only works on Windows (macOS: scripts/app-drive.sh)");
   if (!existsSync(TAURI_JS)) die("dependencies are not installed - run 'pnpm install' first");
   mkdirSync(SESSION_ROOT, { recursive: true });
 
-  // Windows cannot overwrite a running .exe, and every session embeds its own
-  // identifier in the binary, so a second session in this checkout would fail to
-  // relink src-tauri/target/debug/openrize.exe. Separate worktrees are separate
-  // checkouts with their own target dirs and run side by side.
+  // Windows cannot overwrite a running .exe and each session embeds its own
+  // identifier in the binary, so one live session per checkout; separate
+  // worktrees have their own target dirs.
   const running = liveSessions();
   if (running.length > 0) {
     die(`session ${running[0].id} is still running from this checkout and holds src-tauri/target/debug/openrize.exe; stop it first (or use another worktree)`);
@@ -731,16 +668,9 @@ async function startSession() {
   mkdirSync(join(dir, "config"), { recursive: true });
   mkdirSync(join(dir, "shots"), { recursive: true });
 
-  // Isolation, both parts required:
-  //   identifier      -> Tauri's app_local_data_dir (the activity database; older
-  //                      builds used app_data_dir) and the WebView2 user-data folder
-  //   XDG_CONFIG_HOME -> where settings.json lives, which is not identifier-scoped
-  //                      and would otherwise be the real user's settings
-  //
-  // Vite is started here rather than as tauri's beforeDevCommand (null removes
-  // it from the merged config): `tauri dev` ends when its app process exits,
-  // which an app restart (an account switch, an update) does, and would take
-  // the dev server with it, leaving the restarted app with nothing to load.
+  // Both needed: the identifier scopes app_local_data_dir and the WebView2
+  // profile; XDG_CONFIG_HOME scopes settings.json. Vite runs here, not as
+  // beforeDevCommand: `tauri dev` restarts the app and would kill the server.
   const overrides = JSON.stringify({
     identifier,
     build: {
@@ -788,8 +718,6 @@ async function startSession() {
     appPid: null,
     vitePid: vite.pid,
     identifier,
-    // The folder holding the databases (the key the feature docs and `rize`
-    // passthrough use). Local AppData now; older builds used the roaming folder.
     appData: localData,
     localData,
     configHome: join(dir, "config"),
@@ -831,7 +759,6 @@ async function waitUntilDrivable(meta, logPath) {
         }
       }
     } catch {
-      // Not up yet; keep polling.
     }
     await sleep(1000);
   }
@@ -842,14 +769,12 @@ function stopSession(meta) {
   taskkillTree(meta.pid);
   if (meta.appPid && pidAlive(meta.appPid)) taskkillTree(meta.appPid);
   if (meta.vitePid && pidAlive(meta.vitePid)) taskkillTree(meta.vitePid);
-  // An app restarted inside the session runs this checkout's binary with no
-  // identifier or port on its command line. Unless another session from this
-  // checkout is live (then the binary is its app), it is this session's.
+  // A restarted app runs this checkout's binary with no identifier/port on its
+  // command line; unless another live session owns it, it is this session's.
   const others = liveSessions().filter((other) => other.id !== meta.id);
   if (others.length === 0) for (const app of appProcesses()) taskkillTree(app.ProcessId);
-  // Orphans whose parents died first are out of reach of /T: find them by
-  // their command line instead, which carries this session's identifier/ports.
-  // A session whose meta could not be read has neither, so there is nothing to sweep.
+  // Orphans whose parents died first are out of /T's reach: find them by
+  // command line.
   for (let sweep = 0; meta.identifier && sweep < 3; sweep++) {
     const leftovers = sessionProcesses(meta).filter((proc) => proc.ProcessId !== process.pid);
     if (leftovers.length === 0) break;
@@ -871,7 +796,6 @@ function cmdList() {
   for (const meta of live) {
     console.log(`${meta.id}  port=${meta.port}  cdp=${meta.cdpPort}  pid=${meta.pid}  identifier=${meta.identifier}`);
   }
-  // A window closed by hand ends the app without `stop`, which leaves its data.
   const dead = allSessionIds().filter((id) => !live.some((meta) => meta.id === id));
   if (dead.length > 0) console.log(`ended without stop (data left behind): ${dead.join(" ")} - run 'stop --all'`);
 }
@@ -922,7 +846,6 @@ async function cmdFill(options, [name, text]) {
   }
   await withPage(options, async (cdp) => {
     const nodes = await axNodes(cdp);
-    // Unless told otherwise, only text-entry roles are candidates.
     const node = pickMatch(nodes, name, options.role ? options : { ...options, roles: TEXT_FIELDS });
     if (propOf(node, "disabled")) die(`${describe(node)} is disabled`);
     await mouseClick(cdp, await locate(cdp, node));
@@ -971,7 +894,6 @@ async function cmdWait(options, [needle, seconds]) {
   });
 }
 
-/** Save a webview-only PNG into `dir`, or at `out` when given, and return its path. */
 async function captureTo(cdp, dir, out) {
   const { data } = await cdp.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
   const path = out ?? join(dir, `${Date.now()}-${randomInt(1000, 9999)}.png`);
@@ -1023,10 +945,8 @@ async function cmdEval(options, [expression]) {
   });
 }
 
-/**
- * What stopping a session would do, without doing it. `refused` is set when the
- * session's meta looks corrupted, in which case nothing is deleted for it.
- */
+// Dry run of stop. `refused` means the session's meta looks corrupted, so
+// nothing is deleted.
 function planStop(id, meta) {
   const dir = sessionDir(id);
   const pgid = Number.isInteger(meta.pid) && meta.pid > 0 ? meta.pid : null;
@@ -1051,7 +971,6 @@ function planStop(id, meta) {
   return plan;
 }
 
-/** Move the session's screenshots out of the directory stop is about to delete. */
 function keepEvidence(plan) {
   const shotsDir = join(sessionDir(plan.id), "shots");
   mkdirSync(plan.evidence, { recursive: true });
@@ -1066,7 +985,6 @@ async function cmdStop(options) {
   const dry = Boolean(options["dry-run"]);
   let ids;
   if (options.all) {
-    // Includes sessions whose process already died (or whose meta is gone), so their data still goes.
     ids = allSessionIds();
     if (ids.length === 0) {
       console.log(json ? JSON.stringify({ dryRun: dry, sessions: [] }) : `no sessions for ${REPO_ROOT}`);
@@ -1115,8 +1033,6 @@ async function cmdStop(options) {
     console.log("dry run: nothing was stopped or deleted");
   }
 }
-
-// ----------------------------------------------------------------------- doctor
 
 function cmdDoctor(options) {
   const checks = [];
@@ -1168,9 +1084,6 @@ function cmdDoctor(options) {
   process.exitCode = failures === 0 ? 0 : 1;
 }
 
-// ------------------------------------------------------------------------- rize
-
-/** Run the repo's rize CLI against the session's data directory and exit with its code. */
 function cmdRize(options, args, rizeArgs) {
   if (rizeArgs === undefined || rizeArgs.length === 0 || args.length > 0) {
     usageError("rize needs '--' followed by the rize arguments, e.g. node scripts/app-drive-windows.mjs rize -- --json entries list --from today");
@@ -1187,8 +1100,6 @@ function cmdRize(options, args, rizeArgs) {
   if (result.error) die(`could not run cargo: ${result.error.message}`);
   process.exit(result.status ?? 1);
 }
-
-// ------------------------------------------------------------------ entry point
 
 const COMMANDS = {
   doctor: cmdDoctor,

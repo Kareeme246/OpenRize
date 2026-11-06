@@ -1,11 +1,6 @@
-//! The classification worker: one background thread that keeps recent
-//! entries built, drains `classify_jobs` one job at a time, owns the Swift
-//! sidecar, retrains the personal models, and refits confidence calibration.
-//!
-//! Reads use the worker's own SQLite connection, so a slow query never
-//! blocks the 1 Hz sampler. Writes go through the `ActivityStore` writer and
-//! hold its lock only for the few statements that persist a result; no lock
-//! is held while the sidecar thinks.
+//! One background thread that builds entries, drains `classify_jobs`, owns the sidecar and
+//! retrains models. Reads use its own connection (never blocking the 1 Hz sampler); the
+//! writer lock is never held while the sidecar thinks.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -32,7 +27,6 @@ use crate::settings::{AiSuggest, Settings};
 use crate::timers::now_epoch_ms;
 use crate::AppState;
 
-/// Fallback poll when nothing nudges the worker.
 const POLL: Duration = Duration::from_secs(30);
 /// A burst of window switches rebuilds at most this often.
 const REBUILD_DEBOUNCE: Duration = Duration::from_secs(3);
@@ -49,14 +43,12 @@ const RETRAIN_AT_LEAST_EVERY_MS: u64 = 24 * 60 * 60 * 1000;
 /// One entry in `HOLDOUT_ONE_IN` is held out to judge a retrained model.
 const HOLDOUT_ONE_IN: u64 = 5;
 const CALIBRATION_CHECK_EVERY: Duration = Duration::from_secs(60);
-/// New verdicts that trigger refitting the calibration curve.
 const CALIBRATION_REFIT_AFTER: u32 = 10;
 /// With more choices than this, only the fast tiers' top picks are sent to
 /// the model, to stay inside its 4,096-token context.
 const MAX_LLM_CATEGORIES: usize = 16;
 const MAX_LLM_PROJECTS: usize = 15;
 const FEW_SHOT_EXAMPLES: usize = 4;
-/// A previous entry this close before the current one is context.
 const CONTEXT_GAP_MS: u64 = 15 * 60 * 1000;
 const BACKFILL_WINDOW_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 
@@ -92,13 +84,9 @@ struct Worker {
     applied: Option<Capabilities>,
 }
 
-/// What one personal-model retrain did.
 enum Retrained {
-    /// Not enough labeled data to train on yet.
     Skipped(String),
-    /// The new model beat (or tied) the old one on the holdout and replaced it.
     Swapped { accuracy: Option<f64> },
-    /// The new model did worse on the holdout; the old one stays.
     Kept { new: f64, old: f64 },
 }
 
@@ -160,9 +148,6 @@ impl Worker {
         }
     }
 
-    // --- Plumbing -----------------------------------------------------------
-
-    /// Runs `f` on the writer connection under the activity lock.
     fn write<T>(&self, f: impl FnOnce(&Connection) -> Result<T, String>) -> Result<T, String> {
         let state = self.app.state::<AppState>();
         let store = state.activity.lock().map_err(|e| e.to_string())?;
@@ -200,8 +185,6 @@ impl Worker {
         }
     }
 
-    // --- Engine status -----------------------------------------------------
-
     fn probe(&mut self) {
         self.last_probe = Some(Instant::now());
         if !self.sidecar.is_installed() {
@@ -235,9 +218,8 @@ impl Worker {
         }
     }
 
-    /// Mirrors the sidecar's latest capabilities into `AiStatus`, and when the
-    /// Foundation Model has just become available, re-queues the entries the
-    /// fallback engine handled.
+    /// Mirrors the sidecar's capabilities into `AiStatus`; when the Foundation
+    /// Model just became available, re-queues entries the fallback engine handled.
     fn apply_capabilities(&mut self) {
         let Some(caps) = self.sidecar.capabilities().cloned() else {
             return;
@@ -298,7 +280,7 @@ impl Worker {
         });
     }
 
-    /// Capabilities, starting the sidecar if needed. `None` means only T0.
+    /// `None` means only T0.
     fn capabilities(&mut self) -> Option<Capabilities> {
         if !self.sidecar.is_installed() {
             return None;
@@ -322,8 +304,6 @@ impl Worker {
             }
         }
     }
-
-    // --- Jobs --------------------------------------------------------------
 
     fn run_job(&mut self, job: Job) {
         {
@@ -452,8 +432,7 @@ impl Worker {
             .ok()
     }
 
-    /// Embeds the entry's content (reusing a stored vector for identical
-    /// text) and saves it to the kNN store.
+    /// Reuses a stored vector for identical text.
     fn vector_for(
         &mut self,
         entry_id: &str,
@@ -580,14 +559,12 @@ impl Worker {
                 }),
         );
 
-        // T0
         let rule_set = store::load_rules(&self.conn)?;
         let rule_category = rules::evaluate(&rule_set, &segments, Field::Category);
         let rule_project = want_project
             .then(|| rules::evaluate(&rule_set, &segments, Field::Project))
             .flatten();
 
-        // T1
         let caps = self.capabilities();
         let vector = match self.vector_for(&entry.id, &features, caps.as_ref()) {
             Ok(vector) => vector,
@@ -656,7 +633,6 @@ impl Worker {
         let labeled = store::labeled_count(&self.conn)?;
         let calibrator = store::active_calibration(&self.conn)?;
 
-        // T2
         let t1_category = arbiter::t1_top(&category_neighbors, personal_category.as_ref(), labeled);
         let t1_project = arbiter::t1_top(&project_neighbors, personal_project.as_ref(), labeled);
         let mut llm_category: Option<Votes> = None;
@@ -738,7 +714,6 @@ impl Worker {
             }
         }
 
-        // Arbiter
         let names: HashMap<&str, &str> = categories
             .iter()
             .chain(projects.iter())
@@ -871,12 +846,9 @@ impl Worker {
         ))
     }
 
-    // --- Personal model retraining -------------------------------------------
-
-    /// Retrains when "Retrain now" was pressed, or when a model is due (20+
-    /// new labels, or any new label a day after the last attempt) and the
-    /// Mac is idle, on AC power, and not in Low Power Mode. Calibration is
-    /// refit right after, since the raw scores it maps just changed.
+    /// Retrains on "Retrain now", or when due (20+ new labels, or any new one a day
+    /// after the last attempt) and the Mac is idle, on AC and not in Low Power Mode.
+    /// Calibration is refit right after, since the raw scores just changed.
     fn retrain_if_due(&mut self) {
         let requested = self.app.state::<AiRuntime>().take_retrain_request();
         if !requested
@@ -971,10 +943,9 @@ impl Worker {
             || (new > 0 && now.saturating_sub(last) >= RETRAIN_AT_LEAST_EVERY_MS)
     }
 
-    /// Trains a new personal classifier on the approved entries minus a 20%
-    /// holdout and swaps it in only if it scores at least as well as the
-    /// current one on that same holdout. Every attempt is versioned in
-    /// `model_artifacts`.
+    /// Trains on approved entries minus a 20% holdout and swaps the model in only
+    /// if it scores at least as well as the current one on that holdout. Every
+    /// attempt is versioned in `model_artifacts`.
     fn retrain(&mut self, field: Field) -> Result<Retrained, String> {
         let kind = field.as_str();
         let epoch = store::learning_since(&self.conn)?;
@@ -1075,12 +1046,9 @@ impl Worker {
         })
     }
 
-    // --- Calibration -----------------------------------------------------------
-
-    /// Refits the isotonic calibration curve once `CALIBRATION_REFIT_AFTER`
-    /// new verdicts exist (or the first time `MIN_SAMPLES` do), checked every
-    /// minute. `force` refits now, after the models changed. Fitting is pure
-    /// Rust over at most a few thousand rows, so it needs no power gate.
+    /// Refits isotonic calibration once `CALIBRATION_REFIT_AFTER` new verdicts exist
+    /// (or `MIN_SAMPLES` the first time), checked every minute; `force` refits now.
+    /// Pure Rust over a few thousand rows, so it needs no power gate.
     fn refit_calibration_if_due(&mut self, force: bool) {
         if !force
             && self
@@ -1170,13 +1138,9 @@ struct Outcome {
     rule_project: bool,
 }
 
-/// Saves suggestions and applies them to the entry, all or nothing.
-///
-/// - A field the user hasn't set is pre-filled when its suggestion is at
-///   least `PREFILL_THRESHOLD`; one the user already set is left alone.
-/// - The AI sentence replaces the builder's template description only.
-/// - The entry auto-approves when auto-accept is on, every suggested field
-///   clears the threshold, and the user hasn't touched the entry.
+/// Saves suggestions and applies them to the entry, all or nothing. Unset fields
+/// prefill at `PREFILL_THRESHOLD`; only the template description is replaced; the
+/// entry auto-approves if auto-accept is on, all fields clear it, and it is untouched.
 fn persist(
     conn: &Connection,
     entry_id: &str,

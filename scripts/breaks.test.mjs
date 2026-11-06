@@ -29,16 +29,13 @@ test("breaks the user started draw on the calendar", () => {
 
 test("rest credited from idle time draws nothing", () => {
   const rows = [
-    // A short pause at the desk between two pieces of work.
     row("pause", { source: "idle", dueAt: null }),
-    // Walked away, the Mac slept overnight: 17:30 to 08:50 the next day.
     row("overnight", {
       source: "idle",
       dueAt: null,
       startedAt: 17.5 * 60 * MIN,
       endedAt: (24 + 8) * 60 * MIN + 50 * MIN,
     }),
-    // Away at lunch time: the idle stretch is credited as the scheduled break.
     row("credited-lunch", {
       source: "scheduled",
       scheduleId: "lunch",
@@ -63,7 +60,6 @@ test("a backfilled idle stretch stays hidden and the official break beside it st
   });
   const rows = [backfilled, official];
   assert.deepEqual(ids(takenBreaks(rows)), ["official"]);
-  // The rows themselves are untouched.
   assert.equal(rows.length, 2);
   assert.equal(backfilled.status, "taken");
 });

@@ -1,11 +1,6 @@
-//! Filtered entry queries and SQL aggregations behind My Timesheet, Time
-//! Entries, Calendar Month, and the Projects page (P3).
-//!
-//! Totals and pivots are computed in SQL, following `compute_totals`, so a
-//! year of entries never crosses IPC just to be summed. Day, week, and month
-//! boundaries are local-time concepts: the caller passes bucket boundaries as
-//! epoch milliseconds instead of Rust guessing a timezone, so DST days come
-//! out as 23 or 25 hours on their own.
+//! Filtered entry queries and SQL aggregations behind My Timesheet, Time Entries, Calendar Month
+//! and Projects. Totals are computed in SQL so a year of entries never crosses IPC. Callers pass
+//! bucket boundaries as epoch ms, so DST days come out 23 or 25 hours without Rust guessing a zone.
 
 use std::collections::HashMap;
 use std::fs;
@@ -27,8 +22,6 @@ pub const MAX_BUCKETS: usize = 400;
 /// ends with its entry).
 const SEGMENT_MS: &str = "MAX(0, MIN(COALESCE(s.ended_at, te.ended_at), te.ended_at) - MAX(s.started_at, te.started_at))";
 
-/// Entries matching a filter, newest first, with the AI summary and the
-/// dominant app the list views show.
 pub fn query_entries(
     conn: &Connection,
     filter: &EntryFilter,
@@ -81,7 +74,6 @@ pub fn dominant_apps(
     Ok(best.into_iter().map(|(id, (app, _))| (id, app)).collect())
 }
 
-/// What a pivot row is keyed by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroupBy {
     Project,
@@ -117,27 +109,23 @@ impl GroupBy {
     }
 }
 
-/// One cell of a pivot: a group key in one bucket.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RollupCell {
     /// The group's id (or app/status name); `None` is "No project",
     /// "Uncategorized", "No client", or the single group of `none`.
     pub key: Option<String>,
-    /// Index into the buckets the caller passed.
     pub bucket: u32,
     pub ms: u64,
     pub entries: u32,
     pub approved_ms: u64,
-    /// Entries waiting for review (status `pending`).
     pub pending: u32,
     pub billable_ms: u64,
 }
 
-/// Sums the filtered entries per group per bucket. `boundaries` holds n + 1
-/// ascending epoch-ms values for n buckets; an entry lands in the bucket its
-/// start falls in. Grouping by app sums segment time instead, so one entry
-/// can contribute to several apps.
+/// `boundaries` holds n + 1 ascending epoch-ms values for n buckets; an entry lands in the
+/// bucket its start falls in. Grouping by app sums segment time instead, so one entry can
+/// contribute to several apps.
 pub fn rollup(
     conn: &Connection,
     filter: &EntryFilter,
@@ -220,8 +208,6 @@ pub fn rollup(
         .map_err(err)?;
     rows.collect::<rusqlite::Result<_>>().map_err(err)
 }
-
-// --- Export -----------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportFormat {
@@ -383,7 +369,6 @@ fn export_path(dir: &Path, filter: &EntryFilter, format: ExportFormat) -> PathBu
     path
 }
 
-/// Writes the filtered entries into `dir` and returns where they went.
 pub fn export_entries(
     conn: &Connection,
     filter: &EntryFilter,
@@ -401,7 +386,6 @@ pub fn export_entries(
     })
 }
 
-/// The export file's contents and how many entries it holds.
 pub fn export_body(
     conn: &Connection,
     filter: &EntryFilter,
@@ -433,7 +417,6 @@ mod tests {
         .unwrap()
     }
 
-    /// Inserts an entry with one segment per `(app, domain, title, minutes)`.
     #[allow(clippy::too_many_arguments)]
     fn entry(
         conn: &Connection,
@@ -720,10 +703,8 @@ mod tests {
         };
         // "where did I work on invoices.rs?": only a window title says so.
         assert_eq!(search("invoices.rs"), vec!["e1"]);
-        // Substring, case-insensitive.
         assert_eq!(search("rize"), vec!["e1"]);
         assert_eq!(search("slack"), vec!["e2"]);
-        // Every word must match somewhere.
         assert_eq!(search("tray serde"), vec!["e1"]);
         assert!(search("tray youtube").is_empty());
         // Short terms still work, through a scan.
@@ -782,7 +763,6 @@ mod tests {
         assert!(lines[1].contains("Acme"));
         assert!(!body.contains("invoices.rs"));
 
-        // A second export never overwrites the first.
         let again = export_entries(store.conn(), &filter, ExportFormat::Json, &dir).unwrap();
         let json: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&again.path).unwrap()).unwrap();

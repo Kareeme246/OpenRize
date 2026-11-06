@@ -15,7 +15,6 @@ export interface Catalog {
   reload: () => Promise<void>;
 }
 
-/** Categories, projects, and clients: the names every entry view resolves. */
 export function useCatalog(): Catalog {
   const [categories, setCategories] = useState<Category[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);

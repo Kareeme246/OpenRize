@@ -11,11 +11,9 @@ import type { TimeEntry } from "../src/lib/types";
 
 const MINUTE = 60_000;
 
-/** A local wall-clock time on an ordinary mid-month day. */
 const at = (hour: number, minute = 0, second = 0): number =>
   new Date(2026, 5, 15, hour, minute, second, 0).getTime();
 
-/** Local midnight, so the day-boundary cases hold in any timezone. */
 const midnight = new Date(2026, 5, 16, 0, 0, 0, 0).getTime();
 
 const entry = (id: string, startedAt: number, endedAt: number): TimeEntry => ({
@@ -198,7 +196,6 @@ test("a recording entry is measured from its live edge", () => {
   assert.equal(candidates.nextGapMs, 2 * MINUTE);
 });
 
-/** The locked rule the sheet uses: approved entries are frozen. */
 const approved = (e: TimeEntry): boolean => e.status === "approved";
 
 test("a lone session has both merge sides present and unavailable", () => {

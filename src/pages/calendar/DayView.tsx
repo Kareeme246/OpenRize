@@ -35,7 +35,6 @@ interface DayViewProps {
   onSelect: (id: string) => void;
   onEmpty: () => void;
   onCreate: (startMs: number, endMs: number) => void;
-  /** Split mode: the selected entry whose cut is being picked. */
   splitPick?: { id: string; at: number };
   onPickSplit?: (at: number) => void;
   now: number;
@@ -83,9 +82,8 @@ export function DayView({
     entry.status === "building"
       ? Math.min(Math.max(entry.startedAt, now), dayEnd)
       : entry.endedAt;
-  // While a session records, the now line rides its live bottom edge (the
-  // middle of the hairline gap under the block) instead of floating a few
-  // pixels off it.
+  // While recording, the now line rides the live bottom edge (middle of the
+  // hairline gap under the block) instead of floating a few pixels off it.
   const nowTop = recording
     ? (() => {
         const { top, height } = place(
@@ -152,7 +150,6 @@ export function DayView({
       const hour = (element.scrollTop + y - 16) / old;
       hourHeightRef.current = next;
       setHourHeight(next);
-      // Keep the point under the pointer fixed while zooming.
       element.scrollTop = Math.max(0, hour * next - y + 16);
     };
     const wheel = (event: WheelEvent): void => {
@@ -304,9 +301,6 @@ export function DayView({
             })}
           </div>
 
-          {/* Time Entries / Category / Projects / Productivity lanes, sharing one
-              continuous set of hour lines and one now line across the whole
-              width instead of a copy per lane. */}
           <div className="relative min-w-0 flex-1">
             {timeline.hours.map((hour) => (
               <div
@@ -541,14 +535,8 @@ interface BreakBandProps {
   now: number;
 }
 
-/** Shortest block that can hold one line of text without clipping it. */
 const TEXT_MIN_HEIGHT = 12;
 
-/**
- * A taken break: a neutral gray block in the gap the segment leaves behind.
- * It carries no category or project, only "Break" and its length when tall
- * enough to hold a line.
- */
 export function BreakBand({ entry, top, height, now }: BreakBandProps) {
   const start = entry.startedAt ?? now;
   const length = formatDuration(Math.max(0, breakEnd(entry, now) - start));
@@ -571,9 +559,7 @@ export function BreakBand({ entry, top, height, now }: BreakBandProps) {
   );
 }
 
-/** Line height of a lane label (10.5px, leading-tight). */
 const LANE_LINE = 13.125;
-/** Lane padding: one line sits in the middle, wrapped lines keep a margin. */
 const LANE_PAD = 4;
 
 interface LaneBlockProps {
@@ -586,10 +572,6 @@ interface LaneBlockProps {
   onSelect: (id: string) => void;
 }
 
-/**
- * A time entry's colour and name in the Category or Projects lane, aligned to
- * the same top/height as its block in the Time Entries lane.
- */
 function LaneBlock({
   entryId,
   top,
@@ -616,9 +598,7 @@ function LaneBlock({
           color: tone,
         }}
       >
-        {/* Like the entry cards beside it, a lane block too short for a
-            line shows no text (the tooltip and aria-label still name it)
-            rather than a half-clipped label. */}
+        {/* Too short for a line: no text (tooltip names it). */}
         {height >= TEXT_MIN_HEIGHT && (
           <span
             className="min-w-0"
@@ -626,7 +606,6 @@ function LaneBlock({
               ...clampStyle(
                 Math.max(1, Math.floor((height - LANE_PAD) / LANE_LINE)),
               ),
-              // A single squeezed line drops its leading so it fits whole.
               ...(height < LANE_LINE + LANE_PAD && { lineHeight: 1 }),
             }}
           >
@@ -640,17 +619,10 @@ function LaneBlock({
 
 interface NowLineProps {
   top: number;
-  /**
-   * The session being recorded, when there is one: the line then sits on
-   * its growing bottom edge, pulses, and (unless `compact`) is tagged with
-   * how long the recording has run.
-   */
   recording?: { startedAt: number; now: number };
-  /** Week columns: no room for the tag, so the pulse alone carries it. */
   compact?: boolean;
 }
 
-/** The current time across a timeline column, centred on `top`. */
 export function NowLine({ top, recording, compact = false }: NowLineProps) {
   if (!recording) {
     return (

@@ -50,11 +50,9 @@ define_class!(
     }
 );
 
-/// The reminder never takes focus: it is a non-activating panel on every
-/// Space. Pulse takes key focus (never main), so tiling window managers that
-/// adopt an app's main window leave it alone; it opens on whichever Space is
-/// current, including a full-screen app's, since without `FullScreenAuxiliary`
-/// showing it there would switch the display away from that app.
+/// The reminder never takes focus: non-activating on every Space. Pulse takes key focus (never
+/// main) so tiling window managers leave it alone, and opens on the current Space, including a
+/// full-screen app's.
 pub fn make_panel(window: &WebviewWindow, kind: Kind) {
     let target = window.clone();
     let _ = window.run_on_main_thread(move || {
@@ -66,11 +64,9 @@ pub fn make_panel(window: &WebviewWindow, kind: Kind) {
             Kind::Reminder => ReminderPanel::class(),
             Kind::Pulse => PulsePanel::class(),
         };
-        // SAFETY: `ns_window` is the live NSWindow behind this Tauri window and
-        // this runs on the main thread. Swapping an NSWindow to an NSPanel
-        // subclass with no extra instance variables is how the
-        // `tauri-nspanel` crate makes windows non-activating; the panel then
-        // overrides the predicates tao's own subclass used for focusability.
+        // SAFETY: `ns_window` is the live NSWindow, on the main thread. Swapping to an NSPanel
+        // subclass with no extra ivars is how `tauri-nspanel` makes windows non-activating; the
+        // panel overrides the focusability predicates tao's own subclass used.
         unsafe { objc2::ffi::object_setClass(object, class) };
         // SAFETY: the object is now a `ReminderPanel` or `PulsePanel`, an NSPanel.
         let panel = unsafe { &*object.cast::<NSPanel>() };

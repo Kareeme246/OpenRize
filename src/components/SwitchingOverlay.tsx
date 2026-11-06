@@ -2,10 +2,8 @@ import { useEffect, useRef } from "react";
 import { useAccounts } from "../hooks/useAccounts";
 
 /**
- * The screen held over the whole window from the moment an account switch is
- * asked for until the app restarts (at least three seconds, by the backend's
- * clock). A modal <dialog>, so nothing underneath can be reached meanwhile;
- * Escape does nothing, because there is nothing to cancel once it is under way.
+ * Held over the window from an account switch until restart; a modal <dialog>
+ * with nothing to cancel.
  */
 export function SwitchingOverlay() {
   const { switching } = useAccounts();

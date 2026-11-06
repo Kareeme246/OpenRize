@@ -3,10 +3,9 @@ import { formatDuration, formatHours } from "../lib/format";
 import { Tooltip } from "./Tooltip";
 
 /**
- * Small SVG charts for totals by category, project, or app. Identity is
- * never colour alone: category colours are user data, so every chart ships a
- * named legend, a 2px surface gap between touching marks, and a hover
- * tooltip, and each view that uses them also offers the numbers as a table.
+ * Small SVG charts. Identity is never colour alone: every chart ships a named
+ * legend, a surface gap between touching marks and a hover tooltip, and views
+ * also offer the numbers as a table.
  */
 
 export interface Slice {
@@ -19,7 +18,6 @@ export interface Slice {
 const GAP_PX = 2;
 const OTHER_KEY = "__other";
 
-/** Round the four corners of an annular slice, keeping its radial edges flat. */
 function roundedDonutPath(
   center: number,
   radius: number,
@@ -32,7 +30,6 @@ function roundedDonutPath(
   const point = (r: number, angle: number) =>
     `${center + r * Math.cos(angle)},${center + r * Math.sin(angle)}`;
 
-  // A single category is a continuous ring, without a seam or rounded ends.
   if (end - start >= 2 * Math.PI - 1e-6) {
     return [
       `M ${point(outer, 0)}`,
@@ -44,7 +41,6 @@ function roundedDonutPath(
     ].join(" ");
   }
 
-  // Limit rounding on narrow slices so their inner corners never cross.
   const corner = Math.min(2, thickness / 2, ((end - start) * inner) / 2);
   const outerTrim = corner / outer;
   const innerTrim = corner / inner;
@@ -64,7 +60,6 @@ function roundedDonutPath(
   ].join(" ");
 }
 
-/** A donut with a legend beside it: share of time by group. */
 export function Donut({
   slices,
   size = 132,
@@ -80,14 +75,10 @@ export function Donut({
   size?: number;
   title: string;
   emptyLabel?: string;
-  /** Past this many, the smallest groups fold into "Other". */
   maxLegend?: number;
-  /** Ring above the legend, for narrow cards side by side. */
   stacked?: boolean;
   showLegend?: boolean;
-  /** Roomier legend type. */
   large?: boolean;
-  /** Fold a lone leftover group into "Other" too, so the cap is exact. */
   foldLone?: boolean;
 }) {
   const [hovered, setHovered] = useState<string | null>(null);
@@ -112,7 +103,6 @@ export function Donut({
   const stroke = 14;
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
-  // One slice fills the ring; otherwise each leaves a surface gap.
   const gap = shown.length > 1 ? GAP_PX : 0;
   let offset = 0;
   const focus = shown.find((slice) => slice.key === hovered);
@@ -196,7 +186,6 @@ export function Donut({
               : emptyLabel}
         </text>
       </svg>
-      {/* Capped so a wide card keeps each value near its label. */}
       {showLegend && (
         <figcaption
           className={`min-w-0 max-w-sm flex-1 space-y-1 ${
@@ -251,11 +240,6 @@ export function Donut({
   );
 }
 
-/**
- * The "Other" legend row. Its button reveals the folded groups as a small
- * bar plus a ranked list on hover or focus, and click/tap pins it open, so
- * keyboard and touch users get the same breakdown.
- */
 function OtherRow({
   slice,
   parts,
@@ -351,14 +335,12 @@ function OtherRow({
   );
 }
 
-/** A thin horizontal bar split by group, for a month cell or a row. */
 export function StackedBar({
   slices,
   totalMs,
   height = 6,
 }: {
   slices: Slice[];
-  /** The bar's full width in ms; defaults to the slices' sum. */
   totalMs?: number;
   height?: number;
 }) {
@@ -397,7 +379,6 @@ export interface Column {
   slices: Slice[];
 }
 
-/** Clean hour ticks for a y-axis: 0, 2h, 4h, ... */
 function hourTicks(maxMs: number): number[] {
   const maxHours = Math.max(1, maxMs / 3_600_000);
   const steps = [0.5, 1, 2, 4, 5, 10, 20, 25, 50, 100, 200, 500];
@@ -412,7 +393,6 @@ function hourTicks(maxMs: number): number[] {
   return ticks;
 }
 
-/** Stacked columns, one per bucket (daily time by category). */
 export function StackedColumns({
   columns,
   legend,
@@ -420,7 +400,6 @@ export function StackedColumns({
   height = 180,
 }: {
   columns: Column[];
-  /** Every group that appears, in the chart's fixed colour order. */
   legend: Slice[];
   title: string;
   height?: number;
@@ -557,7 +536,6 @@ export function StackedColumns({
   );
 }
 
-/** A labelled bar for ranked lists ("top apps"). */
 export function BarRow({
   label,
   ms,
@@ -571,7 +549,6 @@ export function BarRow({
   maxMs: number;
   color?: string;
   trailing?: ReactNode;
-  /** Roomier type. */
   large?: boolean;
 }) {
   return (

@@ -1,5 +1,4 @@
-//! Splitting, merging and undoing entries while capture keeps running: the
-//! same tick and rebuild calls the app makes, end to end.
+//! Splitting, merging and undoing entries while capture keeps running, end to end.
 use super::*;
 
 const MIN: u64 = 60_000;
@@ -25,8 +24,6 @@ fn sample(title: &str) -> Option<WindowSample> {
 }
 
 /// Works from `from` to `to`, rebuilding every minute like the AI worker.
-/// `switch_every` changes the window title (a new segment) that often;
-/// `None` keeps one segment open the whole time.
 fn work(store: &mut ActivityStore, from: u64, to: u64, switch_every: Option<u64>) {
     let mut now = from;
     while now <= to {
@@ -41,7 +38,6 @@ fn work(store: &mut ActivityStore, from: u64, to: u64, switch_every: Option<u64>
     }
 }
 
-/// Live entries in start order: (id, start, end, status).
 fn entries(store: &ActivityStore) -> Vec<(String, u64, u64, String)> {
     store
         .list_time_entries(0, u64::MAX / 2)
@@ -51,7 +47,6 @@ fn entries(store: &ActivityStore) -> Vec<(String, u64, u64, String)> {
         .collect()
 }
 
-/// Every millisecond from `start` to `end` belongs to exactly one entry.
 fn assert_covered(store: &ActivityStore, start: u64, end: u64) {
     let list = entries(store);
     assert!(!list.is_empty(), "no entries at all");
@@ -83,7 +78,6 @@ fn splitting_the_live_entry_keeps_recording_into_the_second_half() {
         assert_eq!(first.status, "pending");
         assert_eq!(second.status, "building");
 
-        // Capture and the worker's rebuilds carry on.
         work(
             &mut store,
             start + 60 * MIN + TICK,
@@ -100,7 +94,6 @@ fn splitting_the_live_entry_keeps_recording_into_the_second_half() {
     }
 }
 
-/// One live session from 10 min, an hour long, title changing every 2 min.
 fn live_hour() -> (ActivityStore, String) {
     let mut store = store();
     work(&mut store, 10 * MIN, 70 * MIN, Some(2 * MIN));
@@ -137,7 +130,6 @@ fn undoing_a_live_split_rejoins_everything_recorded_since() {
 
 #[test]
 fn the_live_entry_splits_anywhere_up_to_now() {
-    // The stored end trails the clock until the next rebuild.
     let (mut store, id) = live_hour();
     work(
         &mut store,
@@ -251,7 +243,6 @@ fn undoing_an_entry_added_over_tracked_time_leaves_no_hole() {
     assert_eq!(store.time_entry(&added.id).unwrap().description, "Meeting");
 }
 
-/// A finished, classified session from 10 to 40 min.
 fn classified_session() -> (ActivityStore, String) {
     let mut store = store();
     work(&mut store, 10 * MIN, 40 * MIN, Some(2 * MIN));

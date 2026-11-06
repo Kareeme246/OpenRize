@@ -1,19 +1,12 @@
 /**
- * Layout of the OpenRize installers in the DOWNLOADS R2 bucket. OpenRize writes it; the offline-studios
- * website Worker reads it. Keep this file free of imports so Node can run it directly.
- *
- *   openrize/releases/<version>/<installer>      immutable installer objects
- *   openrize/releases/<version>/manifest.json    the builds that exist for that version
- *   openrize/current.json                        copy of the manifest for the version to serve
- *
- * The website parses this with its own strict copy of `parseManifest`; keep the format byte-identical.
+ * R2 layout: openrize/releases/<version>/<installer>, .../manifest.json,
+ * openrize/current.json. Import-free so Node can run it; the website has its
+ * own strict `parseManifest` copy, so keep the format byte-identical.
  */
 export type OpenRizeTarget = "macos-arm64" | "windows";
 
 export interface ManifestBuild {
-  /** Object key of the installer. */
   key: string;
-  /** Name the browser saves the file as. */
   filename: string;
   contentType: string;
   size: number;
@@ -22,7 +15,6 @@ export interface ManifestBuild {
 
 export interface ReleaseManifest {
   schema: 1;
-  /** Without the leading "v". */
   version: string;
   publishedAt: string;
   builds: Partial<Record<OpenRizeTarget, ManifestBuild>>;
@@ -37,7 +29,6 @@ export const CURRENT_MANIFEST_KEY = "openrize/current.json";
 /** At most 64 characters, so a version can never build an over-long object key. */
 const VERSION = /^(?=.{1,64}$)\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/;
 
-/** Installer file name and content type per target, derived from the version so keys stay predictable. */
 export function installerFor(
   target: OpenRizeTarget,
   version: string,
@@ -68,7 +59,6 @@ export function versionManifestKey(version: string): string {
   return `${releasePrefix(version)}manifest.json`;
 }
 
-/** Throws unless the value is a well-formed manifest whose every build points at its own version's objects. */
 export function parseManifest(input: unknown): ReleaseManifest {
   const fail = (why: string): never => {
     throw new Error(`Invalid OpenRize manifest: ${why}`);

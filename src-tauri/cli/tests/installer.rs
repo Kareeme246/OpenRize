@@ -115,7 +115,6 @@ cp "$TEST_ASSETS/${url##*/}" "$output""#,
     }
 }
 
-/// Archives `openrize.app` the way the release's updater bundle is laid out.
 fn pack(assets: &Path) {
     assert!(Command::new("/usr/bin/tar")
         .current_dir(assets)

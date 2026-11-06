@@ -1,22 +1,11 @@
-//! One owner per minute. A change that gives an entry minutes (add, drag,
-//! edit a start or end, merge) claims them: any entry that held those minutes
-//! gives them up, so the sums the app shows stay true and no minute is billed
-//! twice.
-//!
-//! The entry claiming wins. A live or pending entry it overlaps is trimmed,
-//! split around the claim, or removed when the claim covers it. Approved
-//! entries never give up a minute: the change is refused instead. Captured
-//! activity is never deleted; only which entry owns a segment changes, and the
-//! change's `Edit` (see `history.rs`) records that, so one Undo restores it.
-//!
-//! Only minutes an entry gains are claimed (`gained`): minutes it already
-//! held are not in dispute, so overlaps that were there before stay as they are.
+//! One owner per minute: an entry that gains minutes claims them, and others give them up
+//! (approved entries refuse the change instead). Only ownership of captured activity
+//! changes, recorded in the change's `Edit` so Undo restores it.
 
 use rusqlite::{named_params, params};
 
 use super::{ensure_no_approved_overlap, ActivityStore};
 
-/// The part of `start..end` that none of the `held` spans covers, in order.
 pub(super) fn gained(held: &[(u64, u64)], start: u64, end: u64) -> Vec<(u64, u64)> {
     let mut held: Vec<(u64, u64)> = held.iter().copied().filter(|(s, e)| s < e).collect();
     held.sort_unstable();
@@ -40,14 +29,11 @@ pub(super) fn gained(held: &[(u64, u64)], start: u64, end: u64) -> Vec<(u64, u64
     gained
 }
 
-/// SQL for where a `time_entries` row's held time ends (`:now` is now).
 const HELD_END: &str = "(CASE WHEN status = 'building' THEN MAX(ended_at, COALESCE((SELECT MAX(COALESCE(s.ended_at, :now)) FROM segments s WHERE s.entry_id = time_entries.id), 0)) ELSE ended_at END)";
 
 impl ActivityStore {
-    /// Takes the minutes in `ranges` from every entry but `except` that holds
-    /// them. Fails, having changed nothing, when an approved entry does.
-    /// Run it inside an undoable change (`edit`, or a merge) so the entries it
-    /// displaces are recorded for Undo.
+    /// Takes the minutes in `ranges` from every entry but `except`; fails, changing nothing, when
+    /// an approved one holds them.
     pub(super) fn claim(
         &mut self,
         except: &[&str],
@@ -66,14 +52,9 @@ impl ActivityStore {
         Ok(())
     }
 
-    /// The entries holding any of `start..end`, earliest first. A live entry
-    /// holds its recorded time, which its stored end trails: what it holds
-    /// runs to the end of the activity it owns (to now, if one is still open).
-    /// A live entry that is recording right now also holds the moment it is
-    /// about to record: a claim that reaches past now takes that from it, so
-    /// the session closes where the claim begins.
-    /// The fence in `rebuild_range` stops it growing into time an entry holds
-    /// after that.
+    /// Entries holding any of `start..end`, earliest first. A live entry holds through the end of
+    /// its activity (to now if open) plus the moment it is about to record, so a claim past now
+    /// closes it where the claim begins; `rebuild_range` fences growth after that.
     fn holders(
         &self,
         except: &[&str],
@@ -105,7 +86,6 @@ impl ActivityStore {
             .collect())
     }
 
-    /// Where an entry's held time ends; see `holders`.
     fn held_end(&self, id: &str, now: u64) -> Result<u64, String> {
         self.conn
             .query_row(
@@ -117,9 +97,7 @@ impl ActivityStore {
             .map_err(|e| e.to_string())
     }
 
-    /// Makes `id` give up `start..end`: removed when that is all it held,
-    /// otherwise cut back to what is left either side. A live entry is closed
-    /// before the claim; what it holds after the claim keeps recording.
+    /// Makes `id` give up `start..end`: removed if that is all it held, else cut back either side.
     fn displace(&mut self, id: &str, start: u64, end: u64, now: u64) -> Result<(), String> {
         let entry = self.time_entry(id)?;
         let held_end = self.held_end(id, now)?;
@@ -132,7 +110,6 @@ impl ActivityStore {
         self.note_segments_of(id)?;
 
         // The tail, if any, becomes its own entry; the live session's
-        // recording carries on in it.
         let tail = if keeps_head && keeps_tail {
             let tail = uuid::Uuid::now_v7().to_string();
             self.note_entry(&tail)?;
@@ -151,8 +128,6 @@ impl ActivityStore {
         };
 
         // Each piece owns exactly its own activity: segments running across
-        // the claim's edges are cut, and what lies inside the claim is owned
-        // by nobody (the claiming entry shows it).
         if keeps_tail && end <= now {
             let owner = tail.as_deref().unwrap_or(id);
             self.cut_segments(id, end, Some(owner))?;
@@ -161,7 +136,6 @@ impl ActivityStore {
             self.cut_segments(id, start, None)?;
         }
         // What the entry keeps lies in its pieces: a head the claim cut off
-        // starts at the claim's end, so activity before that is not its own.
         let released_from = if keeps_head { start } else { 0 };
         self.conn
             .execute(
@@ -203,11 +177,8 @@ impl ActivityStore {
         Ok(())
     }
 
-    /// Capture may be writing a segment that began inside the claim and runs
-    /// past its end. What it records after the claim belongs to the next
-    /// session, so the segment is cut where the claim ends. (A claim that
-    /// reaches into the future is cut once the clock gets there; see
-    /// `release_live_tail`.)
+    /// A segment capture is writing may begin inside the claim and run past it, so it is cut where
+    /// the claim ends.
     fn close_capture_before(&mut self, start: u64, end: u64, now: u64) -> Result<(), String> {
         let Some(current) = self.current.as_ref() else {
             return Ok(());

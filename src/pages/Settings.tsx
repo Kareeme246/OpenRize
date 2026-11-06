@@ -135,7 +135,6 @@ type SettingsSection =
   | "advanced"
   | "developer";
 
-/** The Developer section: dev builds only, and only where there are permissions to test. */
 const HAS_DEV_TOOLS = DEV_TOOLS && HAS_PERMISSIONS;
 
 const SETTINGS_SECTIONS: readonly SettingsSection[] = [
@@ -151,7 +150,6 @@ const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   ...(HAS_DEV_TOOLS ? (["developer"] as const) : []),
 ];
 
-/** The sections under the Advanced settings group in the nav. */
 const ADVANCED_SECTIONS: readonly SettingsSection[] = [
   "ai",
   ...(HAS_ENERGY_MONITOR ? (["advanced"] as const) : []),
@@ -183,7 +181,6 @@ const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
   { id: "notifications", label: "Notifications" },
 ];
 
-/** One line on which tiers are running and why. */
 function engineSummary(status: AiStatus | null): string {
   if (status === null || status.engine === "starting") {
     return "Starting the on-device models…";
@@ -197,7 +194,6 @@ function engineSummary(status: AiStatus | null): string {
   return "Using your rules only: on-device ML isn't available in this build";
 }
 
-/** 10–60 hours a week in steps of 5, plus a saved value off that grid. */
 function targetOptions(current: number): { value: number; label: string }[] {
   const values = new Set([current]);
   for (let hours = 10; hours <= 60; hours += 5) values.add(hours);
@@ -235,9 +231,8 @@ const LOGIN_ITEMS_SETTINGS =
   "x-apple.systempreferences:com.apple.LoginItems-Settings.extension";
 
 /**
- * Mirrors macOS's login item rather than a stored preference: it is re-read
- * whenever the window regains focus, because the user can switch it off in
- * System Settings behind the app's back.
+ * Mirrors macOS's login item, re-read on window focus because the user can
+ * switch it off in System Settings behind the app's back.
  */
 function LaunchAtLoginRow({
   onError,
@@ -408,7 +403,6 @@ function AppleIntelligenceRow({
   );
 }
 
-/** How far calibration has got: the reviews its confidence curve learns from. */
 function reviewedLabel(status: AiStatus | null): string {
   if (status === null) return "";
   return status.calibrated
@@ -416,10 +410,7 @@ function reviewedLabel(status: AiStatus | null): string {
     : `learning · ${status.outcomes}/50 reviewed`;
 }
 
-/**
- * What stands in for every on-device-model control while the build has no
- * model: suggestions come from the rules, and nothing here can be tuned.
- */
+/** Stands in for every on-device-model control when the build has no model. */
 function RulesOnlyRow({ status }: { status: AiStatus | null }) {
   return (
     <SettingRow
@@ -707,7 +698,6 @@ function TrackingHoursSetting({
   );
 }
 
-/** "Checking…", "Downloading 42%", or "Up to date · <version>". */
 function updateSummary(status: UpdateStatus): string {
   switch (status.phase.kind) {
     case "checking":
@@ -729,10 +719,7 @@ function updateSummary(status: UpdateStatus): string {
   return `Up to date · ${status.currentVersion}`;
 }
 
-/**
- * git-cliff writes Markdown; shown as plain text, minus the heading and bold
- * markers that would otherwise read as noise.
- */
+/** git-cliff Markdown shown as plain text, minus heading and bold markers. */
 function plainNotes(notes: string): string {
   return (
     notes
@@ -777,7 +764,6 @@ function ReleaseNotesList({ releases }: { releases: ReleaseNotes[] }) {
   );
 }
 
-/** The installed release's notes, fetched the first time the changelog opens. */
 type InstalledNotes =
   | { kind: "idle" }
   | { kind: "loading" }
@@ -785,8 +771,8 @@ type InstalledNotes =
   | { kind: "failed"; error: string };
 
 /**
- * The updater's status and controls. The Rust side checks on its own
- * schedule (see src-tauri/src/updater.rs); this only shows the result.
+ * The Rust side checks on its own schedule (updater.rs); this only shows the
+ * result.
  */
 function UpdatesSetting({ status }: { status: UpdateStatus | null }) {
   const [requestError, setRequestError] = useState<string | null>(null);
@@ -1128,7 +1114,6 @@ export function Settings({
 }: {
   route: Extract<Route, { name: "settings" }>;
   updates: UpdateStatus | null;
-  /** Bumped each time the sidebar asks for the Updates section. */
   revealUpdates: number;
   navigate?: (route: Route) => void;
 }) {

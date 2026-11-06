@@ -1,6 +1,5 @@
-//! The open stores one process works on, and the lock that makes it the only
-//! one. The app holds the lock for its whole life; `rize` takes it for one
-//! request while the app is closed.
+//! The open stores one process works on, and the lock that makes it the only one: the app holds it
+//! for its life, `rize` for one request while the app is closed.
 
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io;
@@ -24,13 +23,11 @@ pub const NO_DATA: &str =
 pub struct AppState {
     pub store: Mutex<TimerStore>,
     pub activity: Mutex<ActivityStore>,
-    /// Read-only-by-convention connection to the same database, kept off the
-    /// writer's mutex so a query never blocks behind (or blocks) the
-    /// sampler's tick - see activity.rs's module doc, decision A6.
+    /// Read-only-by-convention connection to the same database, off the writer's mutex so a query
+    /// never blocks the sampler's tick (activity.rs, decision A6).
     pub activity_reader: Mutex<Connection>,
-    /// Whether an OpenRize window (main or the Pulse panel) is focused.
-    /// Drives the push cadence to the frontend; the underlying sampling rate
-    /// is unaffected.
+    /// Whether an OpenRize window (main or the Pulse panel) is focused; drives the push cadence to
+    /// the frontend, not the sampling rate.
     pub foreground: AtomicBool,
     pub settings: Mutex<SettingsStore>,
 }
@@ -44,11 +41,9 @@ impl AppState {
         Self::with(dir, activity)
     }
 
-    /// Opens the stores the app already made, for `rize` while the app is
-    /// closed. Creates nothing and migrates nothing: a missing database means
-    /// the app never ran here, and one at another schema version belongs to a
-    /// different release than this `rize`. The caller must hold the stores'
-    /// lock.
+    /// Opens the stores the app already made, for `rize` with the app closed. Creates and migrates
+    /// nothing: a missing database or another schema version means this `rize` does not match the
+    /// app. The caller must hold the stores' lock.
     pub fn open_existing(dir: &Path) -> Result<Self, ApiError> {
         let path = dir.join(DB_FILE);
         if !path.is_file() {
@@ -104,10 +99,8 @@ impl AppState {
     }
 }
 
-/// Holds the stores for this process. `wait` blocks until a `rize` edit
-/// finishes (the app at launch); otherwise `None` means another process has
-/// them (`rize` finding the app open). Only the lock file is created: the
-/// caller decides whether the data directory may be.
+/// Holds the stores for this process. `wait` blocks until a `rize` edit finishes (the app at
+/// launch); otherwise `None` means another process has them. Only the lock file is created.
 pub fn lock_stores(data_dir: &Path, wait: bool) -> io::Result<Option<File>> {
     let file = OpenOptions::new()
         .create(true)

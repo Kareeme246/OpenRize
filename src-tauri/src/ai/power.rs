@@ -1,12 +1,9 @@
-//! When background retraining is allowed: only while the computer is idle, on
-//! AC power, and not in its battery saver (Low Power Mode on macOS, Battery
-//! Saver on Windows), so learning never costs the user battery or a stutter
-//! while they work. "Retrain now" in Settings skips this gate, since the user
-//! asked for it.
+//! When background retraining is allowed: idle, on AC power, and not in battery
+//! saver, so learning never costs battery or a stutter. "Retrain now" in
+//! Settings skips this gate.
 
 use std::time::Duration;
 
-/// How long the user must have been away from the keyboard and mouse.
 pub const MIN_IDLE: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,7 +23,6 @@ impl Conditions {
         }
     }
 
-    /// Why background retraining has to wait, or `None` when it may run.
     pub fn blocker(&self) -> Option<&'static str> {
         if self.low_power {
             Some("waiting for power saving to turn off")

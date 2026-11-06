@@ -53,10 +53,8 @@ interface ProjectsProps {
   replace: (route: Route) => void;
 }
 
-/** Discovery looks at the last two weeks of titles (design board C§3b). */
 const DISCOVERY_DAYS = 14;
 
-/** Editing state for the sheet: a project, or a draft for a new one. */
 type Editing = { project: Project } | { draft: ProjectDraft } | null;
 
 export function Projects({ route, navigate, replace }: ProjectsProps) {

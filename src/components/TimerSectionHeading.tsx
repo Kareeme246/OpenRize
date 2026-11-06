@@ -6,11 +6,9 @@ import { Tooltip } from "./Tooltip";
 
 interface TimerSectionHeadingProps {
   section: TimerSection;
-  /** How many stopwatches sit under it. */
   count: number;
   isFirst: boolean;
   isLast: boolean;
-  /** A dragged stopwatch would land in this section. */
   isDropTarget: boolean;
   onRename: (name: string) => void;
   onMoveUp: () => void;
@@ -18,10 +16,6 @@ interface TimerSectionHeadingProps {
   onDelete: () => void;
 }
 
-/**
- * A section's subheading: its name, how many stopwatches it holds and a rule
- * across the page. It only arranges; it never starts, pauses or totals.
- */
 export function TimerSectionHeading({
   section,
   count,

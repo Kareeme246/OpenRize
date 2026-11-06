@@ -201,7 +201,6 @@ test("Continue cannot be pressed while a fresh grant is still being checked", ()
 });
 
 test("no state leaves Continue pressable once a grant needs a restart", () => {
-  // The path from grant to restart: asking -> checking -> relaunch.
   const path: AccessibilityState[] = [
     "notGranted",
     "checking",

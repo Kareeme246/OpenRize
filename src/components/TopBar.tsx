@@ -21,13 +21,9 @@ interface TopBarProps {
 }
 
 /**
- * The app's own bar. On macOS `titleBarStyle: "Overlay"` (tauri.conf.json)
- * draws the webview under a transparent title bar, so this row *is* the title
- * bar and must leave room for the traffic lights on the left, and it names the
- * app. On Windows the native caption is removed (src-tauri/src/caption.rs), so
- * the row is the title bar there too, with the window buttons drawn at its
- * right end. Elsewhere it is a slimmer toolbar under the native caption, which
- * already names the app and carries the window buttons.
+ * The app's own bar: the title bar on macOS (`titleBarStyle: "Overlay"`, leave
+ * room for the traffic lights) and Windows (native caption removed,
+ * caption.rs); elsewhere a toolbar under the caption.
  */
 export function TopBar({
   canGoBack,

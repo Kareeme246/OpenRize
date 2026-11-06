@@ -54,7 +54,6 @@ function minutesLabel(minutes: number): string {
   return `${Math.floor(minutes / 60)}h${rest === 0 ? "" : ` ${rest}m`}`;
 }
 
-/** Sorted options that always include the current value. */
 function minuteOptions(
   values: number[],
   current: number,
@@ -226,7 +225,6 @@ function newSchedule(): ScheduledBreak {
   };
 }
 
-/** Settings > Notifications: interval reminders and scheduled breaks. */
 export function BreakSettingsGroups() {
   const showToast = useToast();
   const { settings, update } = useSettings();

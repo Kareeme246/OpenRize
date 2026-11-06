@@ -1,11 +1,6 @@
-//! Whether the first-run permissions screen has been dealt with.
-//!
-//! The screen itself is in the frontend, and which step it shows follows the
-//! Accessibility state the monitor reports (`permissions`). All that has to
-//! outlive a launch is one fact: the user has been through it, by allowing
-//! access or by skipping. It is kept as a marker file next to the settings
-//! rather than in them, because it is about this Mac and this install, not
-//! about an account or a preference the CLI should list.
+//! Whether the first-run permissions screen has been dealt with (allowed or
+//! skipped). Kept as a marker file next to the settings, not in them: it is
+//! about this install, not a preference the CLI should list.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -28,10 +23,9 @@ fn mark_done_in(dir: &Path) -> io::Result<()> {
     std::fs::write(marker(dir), b"")
 }
 
-/// A developer asked to see the screen again (dev builds only, see
-/// dev_tools.rs). Kept in memory, never by deleting the marker: config_dir() is
-/// shared with the installed app when a dev build runs without XDG_CONFIG_HOME,
-/// so removing the marker would change the release app too. Lost on relaunch.
+/// A dev build asked to see the screen again. Kept in memory, never by deleting
+/// the marker: config_dir() is shared with the installed app when XDG_CONFIG_HOME
+/// is unset, so removing it would change the release app too.
 #[derive(Default)]
 pub struct Rerun(AtomicBool);
 
@@ -60,7 +54,6 @@ pub fn onboarding_needed(rerun: tauri::State<'_, Rerun>) -> bool {
     needed(rerun.is_set(), &config_dir())
 }
 
-/// The user skipped, or finished. Never shown again, unless a developer asks.
 #[tauri::command]
 pub fn finish_onboarding(rerun: tauri::State<'_, Rerun>) -> Result<(), String> {
     rerun.clear();

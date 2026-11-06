@@ -1,7 +1,6 @@
 /**
- * Local-calendar arithmetic. The day boundary is a browser concern, not
- * Rust's: every range and bucket edge is computed here with `Date` setters,
- * so a DST day is 23 or 25 hours long instead of a fixed 86 400 000 ms.
+ * Local-calendar arithmetic with `Date` setters, so a DST day is 23 or 25
+ * hours, not a fixed 86 400 000 ms.
  */
 
 import type { CalendarScale } from "./types";
@@ -21,14 +20,12 @@ export function localDateTimeString(epochMs: number): string {
   return `${localDateString(date)}T${time}`;
 }
 
-/** Epoch ms of a local `datetime-local` value, or null when it is blank or invalid. */
 export function parseLocalDateTime(value: string): number | null {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(value)) return null;
   const epochMs = new Date(value).getTime();
   return Number.isNaN(epochMs) ? null : epochMs;
 }
 
-/** Local midnight of a `YYYY-MM-DD`, or of today when absent or invalid. */
 export function parseLocalDate(value?: string): Date {
   if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
     const [year, month, day] = value.split("-").map(Number);
@@ -54,7 +51,6 @@ export function addMonths(date: Date, months: number): Date {
   return new Date(date.getFullYear(), date.getMonth() + months, 1);
 }
 
-/** Weeks start on Monday, as ISO weeks do. */
 export function startOfWeek(date: Date): Date {
   const day = startOfDay(date);
   const offset = (day.getDay() + 6) % 7;
@@ -69,7 +65,6 @@ export function isSameDay(left: Date, right: Date): boolean {
   return localDateString(left) === localDateString(right);
 }
 
-/** ISO 8601 week number (the one containing the week's Thursday). */
 export function isoWeek(date: Date): number {
   const thursday = addDays(startOfWeek(date), 3);
   const firstThursday = addDays(
@@ -90,7 +85,6 @@ export interface DateRange {
   end: Date;
 }
 
-/** The day, Monday-to-Sunday week, or month containing `date`. */
 export function rangeFor(scale: CalendarScale, date: Date): DateRange {
   if (scale === "day") {
     const start = startOfDay(date);
@@ -111,7 +105,6 @@ export function calendarDay(date: Date): Date {
   return start;
 }
 
-/** Most recent calendar day for the current clock time. */
 export function currentCalendarDay(now: Date): Date {
   const start = calendarDay(now);
   return now < start ? addDays(start, -1) : start;
@@ -130,7 +123,6 @@ export function calendarDayEdges(start: Date, end: Date): number[] {
   return edges;
 }
 
-/** Moves by one unit of the scale. */
 export function stepDate(
   scale: CalendarScale,
   date: Date,
@@ -141,7 +133,6 @@ export function stepDate(
   return addMonths(date, direction);
 }
 
-/** Every local midnight from `start` up to and including `end`. */
 export function dayEdges(start: Date, end: Date): number[] {
   const edges: number[] = [];
   for (let day = startOfDay(start); day <= end; day = addDays(day, 1)) {
@@ -206,7 +197,6 @@ export function stackEdges(
   return edges;
 }
 
-/** `Mon 21`, `Sep 21`, or `Sep` for a bucket starting at `ms`. */
 export function bucketLabel(
   ms: number,
   stack: "day" | "week" | "month",

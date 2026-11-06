@@ -1,10 +1,5 @@
-//! Window geometry shared by the Pulse and reminder panels.
-//!
-//! Everything here is plain numbers in physical pixels so it can be tested
-//! without a display; the functions that touch a window are `set_bounds` and
-//! `place_under_icon`.
-//! Windows is the only user of the taskbar maths (macOS anchors Pulse under
-//! its menu bar item, see `place_under_icon`).
+//! Window geometry shared by the Pulse and reminder panels, as plain physical-pixel numbers so it
+//! tests without a display.
 
 #[cfg(any(windows, test))]
 use tauri::PhysicalSize;
@@ -12,7 +7,6 @@ use tauri::PhysicalSize;
 use tauri::{AppHandle, Rect};
 use tauri::{LogicalSize, PhysicalPosition, WebviewWindow};
 
-/// A rectangle in physical pixels.
 #[cfg(any(windows, test))]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PixelRect {
@@ -36,12 +30,10 @@ impl PixelRect {
     }
 }
 
-/// A logical size on a monitor with the given scale factor, in physical pixels.
 pub fn physical_size((width, height): (f64, f64), scale: f64) -> (f64, f64) {
     (width * scale, height * scale)
 }
 
-/// Which screen edge the taskbar occupies.
 #[cfg(any(windows, test))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TaskbarEdge {
@@ -51,10 +43,8 @@ pub enum TaskbarEdge {
     Right,
 }
 
-/// The edge the taskbar docks to, read from how far it shrinks the work area
-/// away from the monitor's bounds. With several bars (or a docked toolbar) the
-/// deepest wins. No difference at all means an auto-hidden taskbar, or a
-/// monitor without one; Windows' default, the bottom, is the best guess then.
+/// The edge the taskbar docks to, read from how far it shrinks the work area. The deepest of
+/// several wins; no difference means auto-hide or no taskbar, so the default (bottom) is guessed.
 #[cfg(any(windows, test))]
 pub fn taskbar_edge(bounds: PixelRect, work: PixelRect) -> TaskbarEdge {
     let insets = [
@@ -72,15 +62,9 @@ pub fn taskbar_edge(bounds: PixelRect, work: PixelRect) -> TaskbarEdge {
     best.0
 }
 
-/// Where a flyout of `size` goes, like the native Windows 11 flyouts (calendar,
-/// quick settings): in the work-area corner nearest the notification area,
-/// `margin` away from both edges, whether the clicked icon is pinned to the
-/// taskbar or inside the overflow flyout above it.
-///
-/// `icon` is the clicked icon's centre. It only picks the corner along the
-/// taskbar (the notification area is at the right of a horizontal taskbar and
-/// the bottom of a vertical one in a left-to-right layout, and mirrors in a
-/// right-to-left one), never how far from the edge the panel sits.
+/// Where a flyout of `size` goes, like native Windows 11 flyouts: the work-area corner nearest the
+/// notification area, `margin` from both edges. `icon` (the clicked icon's centre) only picks the
+/// corner along the taskbar, never the distance from the edge.
 #[cfg(any(windows, test))]
 pub fn flyout_origin(
     bounds: PixelRect,
@@ -105,14 +89,11 @@ pub fn flyout_origin(
     (x.max(at_left), y.max(at_top))
 }
 
-/// Space between the menu bar and the panel's top edge.
 #[cfg(not(windows))]
 const GAP: f64 = 6.0;
-/// Closest the panel may sit to a screen edge.
 #[cfg(not(windows))]
 const EDGE: f64 = 8.0;
 
-/// A screen's usable area in physical pixels.
 #[cfg(not(windows))]
 struct Area {
     left: f64,
@@ -121,9 +102,6 @@ struct Area {
     bottom: f64,
 }
 
-/// Centres the panel on the icon, kept inside the screen's usable area: under
-/// the menu bar item, or above it when there is no room below. Used where
-/// Pulse hangs off a menu bar rather than a taskbar (see `pulse::platform`).
 #[cfg(not(windows))]
 pub fn place_under_icon(app: &AppHandle, window: &WebviewWindow, icon: Rect, height: f64) {
     let anchor = super::anchor(app, icon);
@@ -168,27 +146,14 @@ pub fn place_under_icon(app: &AppHandle, window: &WebviewWindow, icon: Rect, hei
     set_bounds(window, scale, (panel_x, panel_y), (super::WIDTH, height));
 }
 
-/// Whether moving a window between monitors at these scale factors fires a DPI
-/// change.
 #[cfg(any(windows, test))]
 fn scale_changes(from: f64, to: f64) -> bool {
     (from - to).abs() > 1e-6
 }
 
-/// Moves and sizes `window` to `origin` (physical pixels) and `size` (logical
-/// points) on the monitor whose scale factor is `monitor_scale`.
-///
-/// Windows re-sizes and re-positions a window when it crosses onto a monitor
-/// with another DPI (`WM_DPICHANGED`, handled by tao): it keeps the logical
-/// size but moves the window to the rectangle Windows suggests. A logical size
-/// is resolved at the scale of the monitor the window is on *now*, so on a
-/// mixed-DPI desktop the window is moved first, which makes the DPI change
-/// happen before it is sized, and moved again afterwards to undo the move that
-/// change made.
-///
-/// Elsewhere it is a resize and then a move: on macOS a resize keeps the
-/// bottom-left corner fixed, so the position is set after it to pin the top
-/// edge.
+/// Moves and sizes `window`. On mixed-DPI Windows the move comes first so the `WM_DPICHANGED`
+/// happens before sizing, then again to undo the rectangle Windows suggests. Elsewhere resize then
+/// move, as macOS keeps the bottom-left fixed on resize.
 pub fn set_bounds(
     window: &WebviewWindow,
     monitor_scale: f64,

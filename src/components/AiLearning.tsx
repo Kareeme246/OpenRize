@@ -1,10 +1,6 @@
 /**
- * Settings → Categories & AI, the learning-loop half: the auto-accept
- * threshold with its expected-error preview, AI effectiveness (rates, the
- * tier split, and the calibration chart), and the personal models.
- *
- * Everything here renders a snapshot Rust computed (`ai_metrics`); nothing is
- * derived from local state beyond formatting.
+ * Settings → Categories & AI, learning-loop half. Renders a snapshot Rust
+ * computed (`ai_metrics`).
  */
 
 import { useEffect, useId, useState } from "react";
@@ -21,7 +17,6 @@ import { Tooltip } from "./Tooltip";
 
 const THRESHOLD_MIN = 50;
 const THRESHOLD_MAX = 100;
-/** Model suggestions show at most this until calibration starts. */
 const COLD_START_CAP_PERCENT = 90;
 const CALIBRATION_MIN = 50;
 const SAVE_DEBOUNCE_MS = 350;
@@ -39,9 +34,6 @@ function ago(epochMs: number, now: number = Date.now()): string {
   return `${Math.round(hours / 24)}d ago`;
 }
 
-// --- Auto-accept threshold ----------------------------------------------------
-
-/** "At 95%, 38% of the last 30 days' entries would have auto-approved…" */
 function previewText(
   metrics: AiMetrics | null,
   value: number,
@@ -67,10 +59,7 @@ function previewText(
   return `At ${value}%, ${share(row.autoApproved, metrics.entries)} of ${period}' entries (${row.autoApproved} of ${metrics.entries}) would have auto-approved${wrong}.${capped}`;
 }
 
-/**
- * A slider with a live readout. The preview follows the thumb; the setting
- * saves once dragging settles, so settings.json isn't rewritten per pixel.
- */
+/** The preview follows the thumb; the setting saves once dragging settles. */
 export function ThresholdSlider({
   value,
   disabled,
@@ -183,8 +172,6 @@ export function ThresholdSlider({
   );
 }
 
-// --- AI effectiveness ------------------------------------------------------------
-
 function Stat({
   label,
   value,
@@ -215,7 +202,6 @@ const TIERS = [
   { key: "model", label: "Model", fill: "bg-tier-model" },
 ] as const;
 
-/** Rules / Personal / Model share of decisions, as one stacked bar. */
 function TierSplit({ tiers }: { tiers: AiMetrics["tiers"] }) {
   const [hover, setHover] = useState<string | null>(null);
   const total = tiers.rule + tiers.personal + tiers.model;
@@ -274,9 +260,7 @@ const CHART = {
 };
 
 /**
- * Reliability diagram: each dot is a 10% bucket of displayed confidence,
- * placed at what was promised (x) vs how often it was accepted (y). On the
- * dashed diagonal, "90%" meant 9 in 10.
+ * Reliability diagram: x is promised confidence, y how often it was accepted.
  */
 function CalibrationChart({ bins }: { bins: ReliabilityBin[] }) {
   const [hover, setHover] = useState<number | null>(null);
@@ -524,8 +508,6 @@ export function AiEffectiveness({
     </div>
   );
 }
-
-// --- Personal models -----------------------------------------------------------------
 
 function modelLine(label: string, versions: ArtifactVersion[]): string {
   const current = versions.find((v) => v.active);

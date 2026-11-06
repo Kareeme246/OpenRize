@@ -1,18 +1,7 @@
 /**
- * Publish an OpenRize release to the DOWNLOADS R2 bucket.
- *
- *   pnpm publish-r2 --version 0.9.12 --remote --dir <installers>
- *
- * Installers come from --dir (files named like the GitHub release assets) or, by default, from the
- * public GitHub release. Order matters: installers are uploaded and read back first, then the version
- * manifest, and `current.json` last, so a visitor never sees a build that is not there.
- *
- *   --remote | --local   required; --remote needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID;
- *                        --local writes plain files under --persist-to DIR (default .r2-local)
- *   --no-current         upload and verify the version but leave `current.json` alone
- *   --promote            make an already published version current (rollback); uploads nothing
- *   --purge              delete the previous release's objects once the new one is current (by default every release is kept)
- *   --bucket NAME        default offline-studios-downloads
+ * Publishes a release to the DOWNLOADS R2 bucket (--remote needs
+ * CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID). Installers come from --dir
+ * or the GitHub release; --promote rolls back, --purge drops the previous one.
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -47,7 +36,6 @@ function remoteStore(bucket: string): ObjectStore {
   return cloudflareStore({ accountId, apiToken, bucket });
 }
 
-/** Default installer source: the public GitHub release. Missing platforms are skipped. */
 async function downloadFromGitHub(version: string): Promise<string> {
   for (const name of Object.values(releaseAssetNames(version))) {
     const response = await fetch(

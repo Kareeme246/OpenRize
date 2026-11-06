@@ -6,7 +6,6 @@ import {
 } from "../../lib/dates";
 import type { ProjectsRange } from "../../lib/types";
 
-/** The time-range choices Projects and Clients offer for their Time column. */
 export const RANGE_OPTIONS: { value: ProjectsRange; label: string }[] = [
   { value: "week", label: "This week" },
   { value: "month", label: "This month" },

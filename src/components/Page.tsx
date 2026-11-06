@@ -3,13 +3,6 @@ import { Picker, type PickerOption } from "./Picker";
 import { SegmentedControl, type SegmentedOption } from "./SegmentedControl";
 import { Tooltip } from "./Tooltip";
 
-/**
- * Shared view chrome (design board, D shared conventions): a header with a
- * title and breadcrumb, then ‹ Today ›, then a Day | Week | Month control;
- * lists with a written empty state, a skeleton while loading, and an inline
- * error with Retry.
- */
-
 export function PageHeader({
   title,
   crumb,
@@ -43,7 +36,6 @@ export function DateStepper({
   onToday,
   isToday = true,
 }: {
-  /** "day", "week", or "month", for the button labels. */
   unit: string;
   onStep: (direction: 1 | -1) => void;
   onToday: () => void;
@@ -127,9 +119,8 @@ export interface TabOption<T extends string> {
 }
 
 /**
- * Underlined tabs, the review panel's style, with optional counts. The
- * baseline is only as wide as the tabs themselves (`w-fit`), whatever the
- * container, so it never runs on to the window's edge.
+ * Underlined tabs; the baseline is `w-fit` so it never runs to the window's
+ * edge.
  */
 export function Tabs<T extends string>({
   tabs,
@@ -197,7 +188,6 @@ export function StatCard({
   sub?: ReactNode;
   active?: boolean;
   tone?: "review" | "accent" | "danger";
-  /** Roomier type, for a card that is the focus of its panel. */
   large?: boolean;
   onClick?: () => void;
   children?: ReactNode;
@@ -253,13 +243,11 @@ export function StatCard({
   );
 }
 
-/** A thin progress bar; danger once `warn` is reached, and when over 100%. */
 export function Progress({
   value,
   warnAt,
   label,
 }: {
-  /** 0–1, may exceed 1. */
   value: number;
   warnAt?: number;
   label: string;
@@ -326,7 +314,6 @@ export function InlineError({
   );
 }
 
-/** Placeholder rows while a list loads. */
 export function SkeletonRows({ rows = 5 }: { rows?: number }) {
   return (
     <div className="space-y-2 p-3" aria-hidden="true">
@@ -347,11 +334,9 @@ export const BUTTON_SECONDARY =
   "rounded-md border border-line bg-panel px-3 py-1.5 font-medium text-[12px] text-fg-soft transition-colors hover:bg-surface hover:text-fg disabled:cursor-not-allowed disabled:opacity-40";
 const FIELD_BASE =
   "w-full rounded-md border border-line bg-surface px-2.5 py-1.5 text-[12px] text-fg outline-hidden focus:border-accent";
-/** A sheet's input or select; the fixed height keeps the two kinds level. */
 export const FIELD = `${FIELD_BASE} h-8`;
 export const TEXTAREA_FIELD = FIELD_BASE;
 
-/** A themed picker dressed as a filter pill ("Category ▾"). */
 export function FilterSelect({
   label,
   value,
@@ -379,7 +364,6 @@ export function FilterSelect({
   );
 }
 
-/** The colour dot every category and project name carries. */
 export function Dot({ color, size = 8 }: { color: string; size?: number }) {
   return (
     <span

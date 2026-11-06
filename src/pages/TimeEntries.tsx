@@ -91,7 +91,6 @@ const STACK_OPTIONS: { value: EntriesStack; label: string }[] = [
   { value: "month", label: "Month" },
 ];
 
-/** What the pivot's cells count; the stat cards switch it. */
 type Metric = "time" | "entries" | "approved";
 
 function entriesRange(range: EntriesRange, date: Date): DateRange {
@@ -124,8 +123,6 @@ function rangeTitle(range: EntriesRange, date: Date, span: DateRange): string {
   )}`;
 }
 
-// --- Saved views (a named Route, per viewer and account) ---------------------
-
 interface SavedView {
   name: string;
   route: EntriesRoute;
@@ -154,17 +151,11 @@ function writeViews(key: string, views: SavedView[]): void {
   }
 }
 
-// --- Group labels -------------------------------------------------------------
-
 interface GroupLabel {
   label: string;
   color: string;
 }
 
-/**
- * Name and colour for a group key. Categories and projects carry their own
- * colour; apps and clients take theirs from `colors` (see `assignColors`).
- */
 function groupLabel(
   by: EntriesGroup,
   key: string | null | undefined,
@@ -202,7 +193,6 @@ function groupLabel(
     : { label: "No app activity", color: "var(--fg-ghost)" };
 }
 
-/** Adds the constraint a pivot row stands for to the page's filter. */
 function withGroup(
   query: EntryQuery,
   by: EntriesGroup,
@@ -252,7 +242,6 @@ export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
   const { accounts, current } = useAccounts();
   const viewsKey = entriesViewsKey(current?.id ?? null);
   const [views, setViews] = useState<SavedView[]>(() => readViews(viewsKey));
-  // The open account is known a moment after launch; its views follow it.
   useEffect(() => setViews(readViews(viewsKey)), [viewsKey]);
 
   const setRoute = useCallback(
@@ -267,7 +256,6 @@ export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
     setRoute({ filters: next });
   };
 
-  // Search types into a draft and reaches the route after a pause.
   const [searchDraft, setSearchDraft] = useState(filters.search ?? "");
   useEffect(() => setSearchDraft(filters.search ?? ""), [filters.search]);
   const filterRef = useRef(setFilter);
@@ -288,7 +276,6 @@ export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
       const [whole, days, apps] = await Promise.all([
         api.entryRollup(query, [query.startMs, query.endMs], "none"),
         api.entryRollup(query, dayEdges(span.start, span.end), "none"),
-        // The App filter's choices: every app in range under the other filters.
         api.entryRollup(withoutApp, [query.startMs, query.endMs], "app"),
       ]);
       setTotals(whole[0] ?? null);
@@ -340,7 +327,6 @@ export function TimeEntries({ route, navigate, replace }: TimeEntriesProps) {
     }
   };
 
-  /** Rewrites the saved views from what is stored now, then shows them. */
   const rewriteViews = (change: (stored: SavedView[]) => SavedView[]): void => {
     // Until the open account is known, the key could be another account's.
     if (accounts === null) return;
@@ -704,7 +690,6 @@ function InlineSelect<T extends string>({
   );
 }
 
-/** A <details> dropdown; children get a `close` to call after acting. */
 function Menu({
   label,
   children,
@@ -813,8 +798,6 @@ function ViewsMenu({
     </Menu>
   );
 }
-
-// --- Table tab -----------------------------------------------------------------
 
 interface PivotRow {
   key: string | null;
@@ -1165,8 +1148,6 @@ function StatusText({ entry }: { entry: TimeEntry }) {
   );
 }
 
-// --- Charts tab ------------------------------------------------------------------
-
 function ChartsView({
   query,
   span,
@@ -1272,8 +1253,6 @@ function ChartsView({
   );
 }
 
-// --- Log tab ------------------------------------------------------------------------
-
 type SortKey =
   | "start"
   | "description"
@@ -1377,7 +1356,6 @@ function LogView({
     sorted.length,
     Math.ceil((scrollTop + viewport) / ROW_HEIGHT) + OVERSCAN,
   );
-  // The description takes the most room; the labels share the rest.
   const template =
     "124px minmax(0,2.4fr) minmax(0,1fr) minmax(0,1fr) minmax(0,0.9fr) 84px 56px";
   const header = (key: SortKey, label: string, right = false) => (

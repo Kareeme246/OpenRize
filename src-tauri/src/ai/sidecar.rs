@@ -1,7 +1,6 @@
-//! The `openrize-ml` Swift sidecar: spawned lazily, spoken to over JSON
-//! lines on stdio, restarted with backoff after a crash, and stopped after
-//! ten idle minutes. The protocol is documented in
-//! `swift/Sources/openrize-ml/Protocol.swift`.
+//! The `openrize-ml` Swift sidecar: spawned lazily, JSON lines over stdio,
+//! restarted with backoff after a crash, stopped after ten idle minutes.
+//! Protocol: `swift/Sources/openrize-ml/Protocol.swift`.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
@@ -64,7 +63,6 @@ impl Sidecar {
         }
     }
 
-    /// Whether the binary ships with this build (macOS only).
     pub fn is_installed(&self) -> bool {
         self.path.is_some()
     }
@@ -73,17 +71,14 @@ impl Sidecar {
         self.process.is_some()
     }
 
-    /// The PID of the running child process, if any.
     pub fn pid(&self) -> Option<u32> {
         self.process.as_ref().map(|p| p.child.id())
     }
 
-    /// The last capabilities probe, refreshed on every (re)start.
     pub fn capabilities(&self) -> Option<&Capabilities> {
         self.capabilities.as_ref()
     }
 
-    /// Starts the sidecar (if needed) and returns its capabilities.
     pub fn probe(&mut self) -> Result<Capabilities, String> {
         self.ensure_running()?;
         self.capabilities
@@ -102,8 +97,6 @@ impl Sidecar {
         serde_json::from_value(result).map_err(|error| format!("bad {method} reply: {error}"))
     }
 
-    /// Stops a sidecar that has sat unused for `IDLE_STOP_AFTER`. Returns
-    /// whether it stopped one.
     pub fn stop_if_idle(&mut self) -> bool {
         if self.process.is_some() && self.last_used.elapsed() >= IDLE_STOP_AFTER {
             self.stop();

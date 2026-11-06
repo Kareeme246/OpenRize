@@ -1,6 +1,5 @@
 import { type ReactNode, useId, useState } from "react";
 
-/** A collapsible card of the invoice editor (Bill To, From, Details, ...). */
 export function EditorSection({
   title,
   summary,
@@ -8,7 +7,6 @@ export function EditorSection({
   children,
 }: {
   title: string;
-  /** Shown beside the title while collapsed, e.g. the chosen client. */
   summary?: ReactNode;
   defaultOpen?: boolean;
   children: ReactNode;

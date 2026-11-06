@@ -1,10 +1,6 @@
 /**
- * User preferences, mirroring `Settings` in src-tauri/src/settings.rs.
- *
- * The accent palette is the ONE place accent colours are defined. `applyAccent`
- * writes them onto `:root` as CSS variables, and every Tailwind utility
- * (`bg-accent`, `text-accent`, `border-accent/30`, ...) reads those variables -
- * so changing a hex here repaints the entire app, no component edits.
+ * User preferences, mirroring `Settings` in src-tauri/src/settings.rs. The
+ * accent palette here is the one place accent colours are defined.
  */
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -15,7 +11,6 @@ export type Accent = "green" | "blue" | "purple" | "orange";
 export type Shape = "rounded" | "sharper";
 export type SizeMode = "compact" | "normal" | "relaxed" | "veryRelaxed";
 export type CloseBehavior = "quit" | "hide";
-/** What the AI suggests for each entry (Rize's "Suggestion level"). */
 export type AiSuggest = "category" | "categoryProject";
 
 export interface DaySchedule {
@@ -77,8 +72,8 @@ function minutesOf(clock: string): number | undefined {
 }
 
 /**
- * A day's tracking window in minutes after midnight, or null when that day
- * does not track. `end` below `start` means the window runs past midnight.
+ * A day's tracking window in minutes after midnight, or null; `end` below
+ * `start` runs past midnight.
  */
 function dayWindow(
   th: TrackingHours,
@@ -96,7 +91,6 @@ function dayWindow(
   return { start: startMins, end: endMins };
 }
 
-/** Whether the given date is inside the configured tracking hours window. */
 export function isInsideTrackingHours(
   th: TrackingHours,
   date: Date = new Date(),
@@ -111,7 +105,6 @@ export function isInsideTrackingHours(
   return curMins >= window.start || curMins < window.end;
 }
 
-/** When the schedule next starts tracking, within a week; null if never. */
 export function nextTrackingStart(
   th: TrackingHours,
   now: Date = new Date(),
@@ -138,7 +131,6 @@ export interface Weekdays {
   sun: boolean;
 }
 
-/** A fixed-time recurring break such as "Lunch 12:30, 45 min, weekdays". */
 export interface ScheduledBreak {
   id: string;
   label: string;
@@ -156,9 +148,7 @@ export interface BreakSettings {
   breakMinutes: number;
   /** What the reminder's snooze button snoozes for; 5, 10 or 15. */
   snoozeMinutes: number;
-  /** An extra line on the reminder. Empty shows nothing. */
   message: string;
-  /** Pause running stopwatches for a break and resume them after. */
   pauseStopwatches: boolean;
   chime: boolean;
   schedules: ScheduledBreak[];
@@ -221,10 +211,8 @@ export interface Settings {
   /** Activity history older than this many days. 0 = keep forever. */
   retentionDays: number;
   aiSuggest: AiSuggest;
-  /** Approve entries whose every suggested field clears the threshold. */
   autoAccept: boolean;
   autoAcceptPercent: number;
-  /** Appended to the on-device model's instructions. */
   aiCustomPrompt: string;
   /** Expected work hours per week; a day's target is a fifth of it. */
   weeklyTargetHours: number;
@@ -253,7 +241,6 @@ export const DEFAULT_SETTINGS: Settings = {
   notificationPlacement: "bottomRight",
 };
 
-/** A working day's share of the weekly target, in milliseconds. */
 export function dailyTargetMs(settings: Settings): number {
   return (settings.weeklyTargetHours / 5) * 3_600_000;
 }
@@ -263,8 +250,8 @@ export function weeklyTargetMs(settings: Settings): number {
 }
 
 /**
- * Expected work time for a Calendar-style range: a day's or a week's share of
- * the weekly target, or for a month the weekly target prorated by its days.
+ * Expected work time for a day, week, or month (the weekly target prorated by
+ * days).
  */
 export function targetMsFor(
   settings: Settings,
@@ -276,7 +263,6 @@ export function targetMsFor(
   return weeklyTargetMs(settings) * (days / 7);
 }
 
-/** A target in hours: "7.5h" for a short one, whole hours ("171h") above 10. */
 export function formatTargetHours(ms: number): string {
   const hours = ms / 3_600_000;
   return `${hours >= 10 ? Math.round(hours) : Math.round(hours * 10) / 10}h`;
@@ -284,15 +270,11 @@ export function formatTargetHours(ms: number): string {
 
 export interface AccentPalette {
   label: string;
-  /** Solid accent used for highlights, fills, and the active glyph. */
   base: string;
-  /** Darker stop for the gradient buttons. */
   dim: string;
-  /** Translucent accent for selected rows and soft fills. */
   soft: string;
   /** `r, g, b` - fed to rgba() for glows that need an alpha channel. */
   rgb: string;
-  /** Readable text on top of `base`. */
   onAccent: string;
 }
 
@@ -333,7 +315,6 @@ export const ACCENTS: Record<Accent, AccentPalette> = {
 
 export const ACCENT_ORDER = Object.keys(ACCENTS) as Accent[];
 
-/** Mirror of `LoginItemState` in src-tauri/src/login_item.rs. */
 export type LoginItemState =
   | "enabled"
   | "disabled"
@@ -343,21 +324,16 @@ export type LoginItemState =
 export interface StoragePaths {
   configFile: string;
   dataDir: string;
-  /** Trackers and activity share this one SQLite file (decision A8). */
   databaseFile: string;
 }
 
 /**
- * Where the saved theme and shape are mirrored for index.html's pre-paint
- * script, so a Light, System, or Sharper user does not see the defaults flash
- * before settings load. Rust seeds a missing copy before the page runs
- * (`appearance_init_script` in src-tauri/src/settings.rs), so keep the key
- * names in sync with it.
+ * Mirrors theme and shape for index.html's pre-paint script; keep key names in
+ * sync with `appearance_init_script` in src-tauri/src/settings.rs.
  */
 const THEME_HINT_KEY = "openrize.theme";
 const SHAPE_HINT_KEY = "openrize.shape";
 
-/** Which concrete palette a preference means right now. */
 export function resolveTheme(theme: Theme): "light" | "dark" {
   if (theme !== "system") return theme;
   return window.matchMedia("(prefers-color-scheme: light)").matches
@@ -369,11 +345,8 @@ export function resolveTheme(theme: Theme): "light" | "dark" {
 let windowTheme: Theme | null = null;
 
 /**
- * Makes what the OS draws for the window (a native caption where there is one,
- * system menus, the webview's context menu) follow the app's theme rather than
- * the system's, and back to the system's for "system". Only the main window
- * needs it (the panels draw none of the OS's), and macOS has none to follow.
- * It is cosmetic, so a failure is dropped and retried on the next change.
+ * Makes OS-drawn window chrome follow the app theme; main window only,
+ * cosmetic, so a failure is dropped and retried.
  */
 function syncWindowTheme(theme: Theme): void {
   if (!SYNCS_WINDOW_THEME || windowTheme === theme) return;
@@ -397,9 +370,8 @@ function syncWindowTheme(theme: Theme): void {
 }
 
 /**
- * Paints the current preference onto the document. Theme is an attribute
- * (`[data-theme]`) so the CSS variable overrides in app.css apply; accent is
- * set inline on `:root`, which wins over the `@theme` defaults.
+ * Theme is an attribute so app.css variable overrides apply; accent is inline
+ * on `:root`, beating the `@theme` defaults.
  */
 export function applyAppearance(settings: Settings): void {
   const root = document.documentElement;
@@ -412,8 +384,7 @@ export function applyAppearance(settings: Settings): void {
     // Storage can be unavailable; the hint only avoids a startup flash.
   }
   root.dataset.theme = theme;
-  // Tells the browser to render native widgets (scrollbars, form controls)
-  // for the active scheme.
+  // Renders native widgets for the active scheme.
   root.style.colorScheme = theme;
   root.dataset.shape = settings.shape;
   root.dataset.sizeMode = settings.sizeMode;

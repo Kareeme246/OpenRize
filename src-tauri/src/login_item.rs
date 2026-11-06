@@ -1,17 +1,9 @@
-//! Launch at login. The OS is the source of truth, not `settings.json`: the
-//! user can switch it off behind the app's back, so every read asks the OS
-//! instead of trusting a stored flag.
-//!
-//! - macOS: `SMAppService.mainAppService` (macOS 13+) registers the running
-//!   app itself, so there is no helper bundle or LaunchAgent plist to ship.
-//!   The user can switch it off under System Settings > General > Login Items.
-//! - Windows: a value under the per-user `Run` key. The user can switch it
-//!   off in Task Manager > Startup apps, which records an override under
-//!   `StartupApproved\Run` rather than deleting our value.
+//! Launch at login. The OS is the source of truth, not `settings.json` (the user can switch it off
+//! behind our back), so every read asks the OS. macOS: `SMAppService.mainAppService`. Windows: a
+//! per-user `Run` value; Task Manager's switch records an override in `StartupApproved\Run`.
 
 use serde::Serialize;
 
-/// What Settings shows for the login item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
@@ -21,7 +13,6 @@ pub enum LoginItemState {
     /// Registered, but the user has to allow it in System Settings first.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     RequiresApproval,
-    /// macOS older than 13, or a platform without an implementation.
     #[cfg_attr(windows, allow(dead_code))]
     Unsupported,
 }
@@ -38,15 +29,15 @@ pub fn state() -> LoginItemState {
     imp::state()
 }
 
-/// Windows: rewrites a Run value an earlier version wrote without
-/// `--background`, run at startup so users who never open Settings are
-/// migrated too. A no-op when nothing is registered, and on other platforms.
+/// Windows: rewrites a Run value an earlier version wrote without `--background`, run at startup so
+/// users who never open Settings are migrated too. A no-op when nothing is registered and
+/// elsewhere.
 pub fn refresh() {
     imp::refresh();
 }
 
-/// Registers or unregisters the app, then reports what the OS now says: on
-/// macOS a successful register can still land on `RequiresApproval`.
+/// Registers or unregisters, then reports what the OS says: on macOS a successful register can
+/// still land on `RequiresApproval`.
 pub fn set(enabled: bool) -> Result<LoginItemState, String> {
     // Unregistering an app that is not registered is an error in macOS but
     // not in intent, so asking for the state it already has is a no-op.

@@ -1,10 +1,6 @@
-//! AI effectiveness (Settings → Categories & AI): how often suggestions are
-//! accepted, auto-approved, or changed; which tier decided them; whether the
-//! displayed confidence kept its promise; and what a given auto-accept
-//! threshold would have done over the same period.
-//!
-//! Everything is computed from the latest suggestion per entry and field, so
-//! a re-run replaces the suggestion it superseded instead of counting twice.
+//! AI effectiveness: how often suggestions are accepted, auto-approved or changed, which
+//! tier decided them, whether displayed confidence kept its promise, and what an auto-accept
+//! threshold would have done. Computed from the latest suggestion per entry and field.
 
 use std::collections::BTreeMap;
 
@@ -30,15 +26,11 @@ pub struct TierSplit {
     pub model: u32,
 }
 
-/// "At 95%, 38% of last month's entries would have auto-approved, and 1 of
-/// them would have been wrong".
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThresholdPreview {
     pub percent: u8,
-    /// Entries whose every suggestion clears the threshold today.
     pub auto_approved: u32,
-    /// Of those, entries where the user changed or rejected a suggestion.
     pub wrong: u32,
 }
 
@@ -51,21 +43,17 @@ pub struct CalibrationReport {
     pub samples: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected_error: Option<f64>,
-    /// The active curve, as (raw, displayed) knots.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub curve: Option<Vec<(f64, f64)>>,
-    /// Newest first.
     pub history: Vec<ArtifactVersion>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelReport {
-    /// Versions of the category and project personal models, newest first.
     pub category: Vec<ArtifactVersion>,
     pub project: Vec<ArtifactVersion>,
-    /// Labels approved since the category model last trained, toward the
-    /// `retrain_after` that triggers the next retrain.
+    /// Labels approved since the category model last trained, toward `retrain_after`.
     pub new_labels: u32,
     pub retrain_after: u32,
 }
@@ -74,28 +62,21 @@ pub struct ModelReport {
 #[serde(rename_all = "camelCase")]
 pub struct AiMetrics {
     pub days: u32,
-    /// Entries that got a suggestion in the period.
     pub entries: u32,
-    /// Of those, entries approved or rejected so far.
     pub decided: u32,
-    /// Of the decided, entries approved without review.
     pub auto_approved: u32,
-    /// Per-field suggestions a person ruled on, and how.
     pub reviewed: u32,
     pub accepted: u32,
     pub changed: u32,
     pub rejected: u32,
     pub tiers: TierSplit,
     pub calibration: CalibrationReport,
-    /// One row per whole percent the threshold allows.
     pub thresholds: Vec<ThresholdPreview>,
     pub models: ModelReport,
-    /// When "Reset learned data" last ran.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub learning_since: Option<u64>,
 }
 
-/// The latest suggestion for one entry and field.
 #[derive(Debug, Clone)]
 struct Row {
     entry_id: String,
@@ -141,7 +122,6 @@ impl Row {
         }
     }
 
-    /// What this suggestion would show today, under the current calibration.
     fn confidence_now(&self, calibrator: Option<&Calibrator>) -> f64 {
         if self.is_rule() {
             return self.confidence;

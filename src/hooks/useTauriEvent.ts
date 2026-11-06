@@ -5,10 +5,9 @@ const RELEASE_ATTEMPTS = 20;
 const RELEASE_RETRY_MS = 50;
 
 /**
- * Unlistens, retrying while Tauri is still wiring the listener up. The
- * webview side of a listener is registered by an eval that can land after
- * `listen()` resolves; unlistening before then throws before the backend is
- * told, which would leave the listener registered for good.
+ * Unlistens, retrying while Tauri wires the listener up: unlistening before the
+ * webview-side eval lands throws before the backend is told, leaving it
+ * registered for good.
  */
 function release(unlisten: () => void, attempt = 0): void {
   Promise.resolve()
@@ -24,10 +23,8 @@ function release(unlisten: () => void, attempt = 0): void {
 }
 
 /**
- * Subscribes to a Rust event once for the component's lifetime and calls the
- * latest `handler`. Re-subscribing whenever a handler's dependencies change
- * leaves a window where a stale listener (say, for yesterday's range) still
- * fires and overwrites fresher state; a ref avoids that entirely.
+ * Subscribes to a Rust event for the component's lifetime and calls the latest
+ * `handler`; a ref avoids stale listeners overwriting fresher state.
  */
 export function useTauriEvent<T>(
   event: string,

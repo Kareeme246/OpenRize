@@ -17,7 +17,6 @@ export interface TimerList {
   ids: string[];
 }
 
-/** Where a dragged card would land: a list, and a slot in its reading order. */
 export type TimerDropTarget =
   | ({ list: string | null; empty: false } & TimerInsertion)
   | { list: string | null; empty: true; slot: 0 };
@@ -32,7 +31,6 @@ const keyOf = (list: string | null): string => list ?? LOOSE;
 export function useTimerReorder(api: TimersApi, lists: TimerList[]) {
   const scrollRef = useRef<HTMLElement>(null);
   const cardElements = useRef(new Map<string, HTMLElement>());
-  /** Each list's grid (or its empty drop box), which an indicator is drawn in. */
   const listElements = useRef(new Map<string, HTMLElement>());
   /** Each list's whole area, heading included, that the pointer picks it by. */
   const zoneElements = useRef(new Map<string, HTMLElement>());
@@ -132,14 +130,12 @@ export function useTimerReorder(api: TimersApi, lists: TimerList[]) {
   const listOf = (id: string): TimerList | undefined =>
     lists.find((list) => list.ids.includes(id));
 
-  /** Every id in page order once `list` reads `ids`, for `api.reorder`. */
   const pageOrder = (list: TimerList, ids: string[]): string[] =>
     lists.flatMap((each) => (each.key === list.key ? ids : each.ids));
 
   const where = (list: TimerList, position: number, of: number): string =>
     `${list.name === null ? "no section" : list.name}, position ${position} of ${of}`;
 
-  /** Moves a card within its own list, by the menu or the arrow keys. */
   const move = (id: string, delta: number) => {
     const list = listOf(id);
     if (!list) return;
@@ -162,7 +158,6 @@ export function useTimerReorder(api: TimersApi, lists: TimerList[]) {
     setAnnouncement(`${label} moved to ${where(list, to + 1, ids.length)}`);
   };
 
-  /** The list whose area holds `y`, else the nearest one. */
   const listAt = (y: number): TimerList | null => {
     let best: { list: TimerList; distance: number } | null = null;
     for (const list of lists) {
@@ -318,7 +313,6 @@ export function useTimerReorder(api: TimersApi, lists: TimerList[]) {
     setAnnouncement(`${label} moved to ${where(from, to + 1, ids.length)}`);
   };
 
-  /** Registers a list's grid and its area under the list's key. */
   const listRef =
     (list: string | null, kind: "list" | "zone") =>
     (element: HTMLElement | null): void => {
@@ -332,7 +326,6 @@ export function useTimerReorder(api: TimersApi, lists: TimerList[]) {
     cardElements,
     listRef,
     draggingId,
-    /** The list the dragged card started in, if a drag is on. */
     draggingFrom: draggingId === null ? undefined : listOf(draggingId)?.key,
     target,
     announcement,

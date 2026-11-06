@@ -1,24 +1,6 @@
-//! Local accounts. An account is a name and a data folder: no password, no
-//! encryption, no sync. Anyone using the Mac can open any account, so this is
-//! a convenience for keeping separate sets of time, not a security boundary.
-//!
-//! The data directory itself is **No account**, exactly where the app has
-//! always kept its files. Accounts sit beside it:
-//!
-//! ```text
-//! <data dir>/activity.db, ml/, app.lock   No account
-//! <data dir>/accounts.json                the registry (created with the first account)
-//! <data dir>/switch.json                  the restart handoff, see `Handoff`
-//! <data dir>/accounts/<id>/               one account: activity.db, ml/, app.lock
-//! ```
-//!
-//! Nothing here exists until the first account is added, so an install that
-//! never makes one runs on the same path, byte for byte, as before accounts.
-//!
-//! Switching accounts restarts the app (every store, sampler and worker is
-//! opened once at launch), so this module is only paths and files: it never
-//! holds a store across accounts. `rize` links it to reach the same folder
-//! the app has open.
+//! Local accounts: a name and a data folder (not a security boundary: no password or sync). The
+//! data dir itself is "No account"; others live in `accounts/<id>/` beside `accounts.json` and
+//! `switch.json`. Switching restarts the app, so this module is only paths and files.
 
 use std::fs::{self, File};
 use std::io;
@@ -33,40 +15,30 @@ use crate::paths::{ACCOUNTS_DIR, ACCOUNTS_FILE, DATABASE_FILE, SWITCH_FILE};
 use crate::state::lock_stores;
 use crate::timers::{now_epoch_ms, TimerStore};
 
-/// The registry format this build reads and writes.
 pub const REGISTRY_VERSION: u32 = 1;
 
-/// Longest account name, in characters.
 pub const MAX_NAME_CHARS: usize = 40;
 
-/// The name an account found only on disk is given.
 const RECOVERED_NAME: &str = "Recovered account";
 
-/// AI training sets and personal models, beside the database.
 const ML_DIR: &str = "ml";
 
-/// Serializes read-modify-write of the registry inside one process; two
-/// commands editing it at once must not lose each other's change.
+/// Serializes registry read-modify-write within one process so concurrent edits don't lose changes.
 static REGISTRY_EDIT: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Account {
-    /// A uuid v7 without dashes. It names the folder, so a rename never
-    /// touches the disk and any Unicode name is safe.
+    /// A uuid v7 without dashes; it names the folder, so renames never touch the disk.
     pub id: String,
     pub name: String,
     pub created_at: u64,
 }
 
-/// `accounts.json`: which accounts exist and which one the app opens at
-/// launch. It carries no secrets, no paths and no state about an account's
-/// work.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Registry {
     pub version: u32,
-    /// The account to open, or `None` for No account.
     pub current: Option<String>,
     pub accounts: Vec<Account>,
     /// Written by a newer release: shown as it is and never rewritten.
@@ -92,9 +64,7 @@ enum Read {
 }
 
 impl Registry {
-    /// Reads the registry without touching the disk: a missing, unreadable or
-    /// too-new file is No account. `rize` and anything else that only looks
-    /// uses this.
+    /// Reads without touching the disk: a missing, unreadable or too-new file is No account.
     pub fn peek(root: &Path) -> Self {
         match read_file(root) {
             Read::Found(registry) => registry,
@@ -140,7 +110,6 @@ impl Registry {
         registry
     }
 
-    /// Writes the registry atomically (temp file, then rename).
     pub fn save(&self, root: &Path) -> Result<(), String> {
         if self.newer {
             return Err(
@@ -158,7 +127,6 @@ impl Registry {
         fs::rename(&temp, &path).map_err(|error| format!("could not replace accounts: {error}"))
     }
 
-    /// Whether a newer release wrote the file, so it is read-only here.
     pub fn is_read_only(&self) -> bool {
         self.newer
     }
@@ -167,7 +135,6 @@ impl Registry {
         self.accounts.iter().find(|account| account.id == id)
     }
 
-    /// Adds an account with a fresh id; the folder is the caller's to make.
     fn add(&mut self, name: &str) -> Result<Account, String> {
         let name = validate_name(name, &self.accounts, None)?;
         let account = Account {
@@ -190,7 +157,6 @@ impl Registry {
         Ok(account.clone())
     }
 
-    /// Forgets the entry. The folder is not touched.
     fn remove(&mut self, id: &str) -> Result<Account, String> {
         let index = self
             .accounts
@@ -218,8 +184,6 @@ fn unknown(id: &str) -> String {
     format!("There is no account {id}.")
 }
 
-/// Whether `id` can name a folder: what `Registry::add` makes, and nothing
-/// that could climb out of `accounts/`.
 pub fn is_valid_id(id: &str) -> bool {
     id.len() == 32
         && id
@@ -261,14 +225,11 @@ fn read_file(root: &Path) -> Read {
     }
     if registry.version > REGISTRY_VERSION {
         registry.newer = true;
-        // Opened as No account, whatever the newer release remembered.
         registry.current = None;
     }
     Read::Found(registry)
 }
 
-/// Accounts whose folder holds a database but that no registry names, under
-/// the name "Recovered account".
 fn recover(root: &Path) -> Vec<Account> {
     let Ok(entries) = fs::read_dir(root.join(ACCOUNTS_DIR)) else {
         return Vec::new();
@@ -306,8 +267,6 @@ fn recover(root: &Path) -> Vec<Account> {
     accounts
 }
 
-/// A name as stored: trimmed, 1 to 40 characters, no control characters, and
-/// not already taken (ignoring case) by another account.
 pub fn validate_name(
     name: &str,
     accounts: &[Account],
@@ -334,13 +293,12 @@ pub fn validate_name(
     Ok(name.to_string())
 }
 
-/// `<root>/accounts`.
 pub fn accounts_dir(root: &Path) -> PathBuf {
     root.join(ACCOUNTS_DIR)
 }
 
-/// The folder an account keeps its files in, or `root` itself for No account.
-/// An id that could not have been made by `Registry::add` is No account too.
+/// The folder an account keeps its files in, or `root` for No account (also for an id
+/// `Registry::add` could not have made).
 pub fn data_dir(root: &Path, current: Option<&str>) -> PathBuf {
     match current {
         Some(id) if is_valid_id(id) => accounts_dir(root).join(id),
@@ -348,7 +306,6 @@ pub fn data_dir(root: &Path, current: Option<&str>) -> PathBuf {
     }
 }
 
-/// The account whose folder is `data_dir`, if it is one.
 pub fn account_for_dir(data_dir: &Path) -> Option<Account> {
     let id = data_dir.file_name()?.to_str()?;
     let accounts = data_dir.parent()?;
@@ -358,18 +315,14 @@ pub fn account_for_dir(data_dir: &Path) -> Option<Account> {
     Registry::peek(accounts.parent()?).get(id).cloned()
 }
 
-/// Where a launch should open.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolved {
     pub dir: PathBuf,
-    /// The account opened, or `None` for No account.
     pub account: Option<Account>,
-    /// The account the registry named but whose data is gone, so No account
-    /// opened instead. Never replaced by an empty stand-in.
+    /// The registry named an account whose data is gone, so No account opened instead.
     pub missing: Option<Account>,
 }
 
-/// Which folder `root`'s registry says to open. Only reads.
 pub fn resolve(root: &Path) -> Resolved {
     resolve_in(root, &Registry::peek(root))
 }
@@ -394,13 +347,10 @@ fn resolve_in(root: &Path, registry: &Registry) -> Resolved {
     }
 }
 
-/// An account is healthy when its database exists. Creating an account always
-/// makes the database first, so a folder without one means the data is gone.
 pub fn is_healthy(root: &Path, id: &str) -> bool {
     is_valid_id(id) && data_dir(root, Some(id)).join(DATABASE_FILE).is_file()
 }
 
-/// Reads the registry, applies `change` and saves it, one editor at a time.
 fn edit<T>(
     root: &Path,
     change: impl FnOnce(&mut Registry) -> Result<T, String>,
@@ -414,21 +364,16 @@ fn edit<T>(
     Ok(result)
 }
 
-/// Adds an account with its own empty database, which a healthy account
-/// always has. Does not open it.
 pub fn create(root: &Path, name: &str) -> Result<Account, String> {
     edit(root, |registry| {
         let account = registry.add(name)?;
         let dir = data_dir(root, Some(&account.id));
-        // Loading both stores is what creates and migrates the database.
         ActivityStore::load(&dir)?;
         TimerStore::load(&dir)?;
         Ok(account)
     })
 }
 
-/// Adds an account that has no folder yet, for `adopt` to fill from the data
-/// No account has now.
 pub fn register(root: &Path, name: &str) -> Result<Account, String> {
     edit(root, |registry| registry.add(name))
 }
@@ -437,20 +382,14 @@ pub fn rename(root: &Path, id: &str, name: &str) -> Result<Account, String> {
     edit(root, |registry| registry.rename(id, name))
 }
 
-/// Forgets an account. Its folder is left alone: moving that to the Trash is
-/// the caller's job, and a missing folder has nothing to move.
 pub fn remove_entry(root: &Path, id: &str) -> Result<Account, String> {
     edit(root, |registry| registry.remove(id))
 }
 
-/// Chooses the account the next launch opens, or No account for `None`.
 pub fn set_current(root: &Path, id: Option<&str>) -> Result<(), String> {
     edit(root, |registry| registry.set_current(id))
 }
 
-// --- The restart handoff -----------------------------------------------
-
-/// Where the main window was, so it comes back in place.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WindowBounds {
     pub x: i32,
@@ -459,14 +398,10 @@ pub struct WindowBounds {
     pub height: u32,
 }
 
-/// What the old process leaves for the new one in `switch.json`. The new
-/// process reads it before it opens any store.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Handoff {
-    /// The account being opened, or `None` for No account.
     pub to: Option<String>,
-    /// Move No account's data into `to` before opening it (see `adopt`).
     pub adopt: bool,
     /// Open the window even if this process was started with `--background`:
     /// the restart repeats the original arguments.
@@ -502,19 +437,16 @@ impl Handoff {
     }
 }
 
-/// What a launch found and did before any store opened.
 #[derive(Debug)]
 pub struct Launch {
     pub resolved: Resolved,
     pub handoff: Option<Handoff>,
-    /// How a requested move went, when one was asked for.
     pub adopted: Option<Adopted>,
 }
 
-/// Runs first at every launch, with the data directory (`root`) and before any
-/// store opens: repairs the registry, finishes a requested move, and says
-/// which folder to open. A plain switch's handoff is consumed here; a move's
-/// stays until `adopt` has finished, so a crash resumes it at the next launch.
+/// Runs first at every launch, before any store opens: repairs the registry, finishes a requested
+/// move, and says which folder to open. A move's handoff stays until `adopt` finishes, so a crash
+/// resumes it.
 pub fn launch(root: &Path) -> Launch {
     let registry = Registry::load(root);
     let handoff = Handoff::read(root);
@@ -530,15 +462,12 @@ pub fn launch(root: &Path) -> Launch {
             {
                 Some(id) => match adopt(root, id) {
                     Ok(outcome) => adopted = Some(outcome),
-                    // The handoff stays, so the next launch tries again.
                     Err(error) => eprintln!("could not move the data into the account: {error}"),
                 },
-                // Nothing to move into: don't ask again at every launch.
                 None => Handoff::clear(root),
             }
         }
     }
-    // Moving changed the registry on disk.
     let registry = if adopted.is_some() {
         Registry::peek(root)
     } else {
@@ -546,7 +475,6 @@ pub fn launch(root: &Path) -> Launch {
     };
     let resolved = resolve_in(root, &registry);
     if resolved.missing.is_some() {
-        // Listed, but opened as No account; the next launch does not ask again.
         if let Err(error) = set_current(root, None) {
             eprintln!("could not forget the missing account: {error}");
         }
@@ -558,27 +486,16 @@ pub fn launch(root: &Path) -> Launch {
     }
 }
 
-// --- Moving No account's data into an account -----------------------------
-
-/// How `adopt` ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Adopted {
-    /// The data now lives in the account.
     Moved,
-    /// Nothing was left to move: an earlier run already did.
     Nothing,
-    /// The account already holds data, so No account was left alone.
     Kept,
 }
 
-/// Moves No account's database and `ml/` into account `id` and makes it the
-/// one to open. Both are renames inside one volume, so nothing is copied and
-/// nothing is deleted. It is safe to run again after a crash at any step
-/// (`switch.json` stays until the last one), and it never leaves a database
-/// split from its write-ahead log.
-///
-/// The old process must have exited; the lock waits for it. The account must
-/// already be in the registry (`register`).
+/// Moves No account's database and `ml/` into account `id` to open next. Renames only, so safe to
+/// re-run after a crash (`switch.json` stays until the last step); never splits a database from its
+/// WAL. The old process must have exited and `id` must be registered.
 pub fn adopt(root: &Path, id: &str) -> Result<Adopted, String> {
     if !is_valid_id(id) || Registry::peek(root).get(id).is_none() {
         return Err(unknown(id));
@@ -610,7 +527,6 @@ fn move_data(root: &Path, target: &Path) -> Result<Adopted, String> {
     let mut moved = false;
 
     if source_db.is_file() {
-        // One file, no write-ahead log to leave behind.
         checkpoint(&source_db)?;
         let wal = wal_path(&source_db);
         let shm = sibling(&source_db, "-shm");
@@ -621,7 +537,6 @@ fn move_data(root: &Path, target: &Path) -> Result<Adopted, String> {
             if holds_data(&target_db) {
                 return Ok(Adopted::Kept);
             }
-            // The empty database account creation made; its sidecars go too.
             fs::remove_file(&target_db).map_err(|e| fail("replace the empty database", e))?;
         }
         for stale in [wal_path(&target_db), sibling(&target_db, "-shm")] {
@@ -637,7 +552,6 @@ fn move_data(root: &Path, target: &Path) -> Result<Adopted, String> {
     let target_ml = target.join(ML_DIR);
     if source_ml.is_dir() {
         if target_ml.is_dir() {
-            // Only an empty one: remove_dir refuses anything with files in it.
             let _ = fs::remove_dir(&target_ml);
         }
         if !target_ml.exists() {
@@ -652,18 +566,12 @@ fn move_data(root: &Path, target: &Path) -> Result<Adopted, String> {
     })
 }
 
-/// How long a rename waits for a file another program has open.
 const RENAME_ATTEMPTS: u32 = 20;
 const RENAME_PAUSE: std::time::Duration = std::time::Duration::from_millis(100);
 
-/// `fs::rename`, retried for a couple of seconds when Windows refuses because
-/// something has the file open. The lock held across a move keeps every
-/// OpenRize process out, so what is left is brief: the previous process still
-/// tearing down (the OS can release `app.lock` before it closes the database)
-/// or a virus scanner or indexer reading the file. Other platforms rename an
-/// open file without complaint, so they never retry. A failure leaves
-/// everything where it was and `switch.json` in place, so the next launch
-/// tries again.
+/// `fs::rename`, retried for a couple of seconds when Windows refuses because something has the
+/// file open (a dying previous process or a scanner); other platforms never retry. A failure leaves
+/// everything in place.
 fn rename_when_free(from: &Path, to: &Path) -> io::Result<()> {
     rename_retrying(from, to, RENAME_ATTEMPTS, RENAME_PAUSE)
 }
@@ -699,7 +607,6 @@ fn wal_path(db: &Path) -> PathBuf {
     sibling(db, "-wal")
 }
 
-/// Folds the write-ahead log into the database file and truncates it.
 fn checkpoint(db: &Path) -> Result<(), String> {
     let conn = Connection::open(db).map_err(|error| error.to_string())?;
     let busy: i64 = conn
@@ -711,18 +618,12 @@ fn checkpoint(db: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Whether the database at `path` holds anything of the user's, or cannot be
-/// told apart from something that does.
 fn holds_data(path: &Path) -> bool {
     Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map(|conn| !summarize(&conn).is_empty())
         .unwrap_or(true)
 }
 
-// --- What is in a data folder ---------------------------------------------
-
-/// What an existing database holds, for the question of moving it into a new
-/// account. Counts leave out what was deleted.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DataSummary {
@@ -731,9 +632,7 @@ pub struct DataSummary {
     pub clients: u64,
     pub invoices: u64,
     pub stopwatches: u64,
-    /// Tracked activity, kept even when it has not become entries yet.
     pub segments: u64,
-    /// The earliest tracked or entered time, epoch milliseconds.
     pub since: Option<u64>,
 }
 
@@ -749,7 +648,6 @@ impl DataSummary {
     }
 }
 
-/// Counts what `conn`'s database holds; a table it lacks counts as none.
 pub fn summarize(conn: &Connection) -> DataSummary {
     let count = |sql: &str| -> u64 {
         conn.query_row(sql, [], |row| row.get::<_, i64>(0))
@@ -779,7 +677,6 @@ pub fn summarize(conn: &Connection) -> DataSummary {
     }
 }
 
-/// Bytes in `dir` and everything under it, for the list in Settings.
 pub fn folder_size(dir: &Path) -> u64 {
     let Ok(entries) = fs::read_dir(dir) else {
         return 0;
@@ -806,7 +703,6 @@ mod tests {
         dir
     }
 
-    /// A database at `dir` holding one client, as No account's would.
     fn with_data(dir: &Path) {
         fs::create_dir_all(dir).unwrap();
         ActivityStore::load(dir).unwrap();
@@ -854,7 +750,6 @@ mod tests {
                 .starts_with("accounts.corrupt-")
         });
         assert!(quarantined);
-        // The recovered list is saved, so it reads back.
         assert_eq!(Registry::peek(&root).accounts.len(), 1);
         let _ = fs::remove_dir_all(&root);
     }
@@ -889,7 +784,6 @@ mod tests {
         assert!(validate_name("bad\nname", &existing, None).is_err());
         let error = validate_name("kAREEM", &existing, None).unwrap_err();
         assert_eq!(error, "There is already an account called kAREEM.");
-        // Renaming an account to its own name in another case is fine.
         assert!(validate_name("kareem", &existing, Some(&"a".repeat(32))).is_ok());
     }
 
@@ -948,10 +842,8 @@ mod tests {
         assert_eq!(gone.dir, root);
         assert_eq!(gone.account, None);
         assert_eq!(gone.missing.as_ref(), Some(&account));
-        // Nothing stood in for it.
         assert!(!open.dir.exists());
 
-        // A launch opens No account and does not ask again.
         let launched = launch(&root);
         assert_eq!(launched.resolved.missing.as_ref(), Some(&account));
         assert_eq!(Registry::peek(&root).current, None);
@@ -981,7 +873,6 @@ mod tests {
             Registry::peek(&root).current.as_deref(),
             Some(account.id.as_str())
         );
-        // No account starts empty, as a fresh install would.
         assert_eq!(resolve(&root).dir, dir);
         let _ = fs::remove_dir_all(&root);
     }
@@ -1005,7 +896,6 @@ mod tests {
             .write(&root)
             .unwrap();
 
-            // Stop partway, as a crash would.
             checkpoint(&root.join(DATABASE_FILE)).unwrap();
             if crash_after != "checkpoint" {
                 fs::rename(root.join(DATABASE_FILE), dir.join(DATABASE_FILE)).unwrap();
@@ -1024,7 +914,6 @@ mod tests {
             assert!(!root.join(DATABASE_FILE).exists(), "{crash_after}");
             assert!(!root.join(SWITCH_FILE).exists(), "{crash_after}");
 
-            // Running it again after success finds nothing to do.
             assert_eq!(adopt(&root, &account.id).unwrap(), Adopted::Nothing);
             assert_eq!(clients(&dir.join(DATABASE_FILE)), 1, "{crash_after}");
             let _ = fs::remove_dir_all(&root);
@@ -1065,11 +954,9 @@ mod tests {
         let root = root("wal");
         let live = root.join("live");
         with_data(&live);
-        // Keep a writer open with auto-checkpointing off, so its rows are only
-        // in the log. Closing the last connection would checkpoint them, so
-        // copy the files while it is open: that is what a process that died
-        // leaves behind, and it needs no open handle during the move (Windows
-        // cannot rename an open database).
+        // Keep a writer open with auto-checkpointing off so its rows are only in the log, then copy
+        // the files while it is open: that is what a crashed process leaves behind, and Windows
+        // cannot rename an open database.
         let writer = Connection::open(live.join(DATABASE_FILE)).unwrap();
         writer
             .execute_batch(
@@ -1165,7 +1052,6 @@ mod tests {
         let registry = Registry::peek(&root);
         assert_eq!(registry.current, None);
         assert_eq!(registry.accounts, [other]);
-        // The folder is the caller's to deal with.
         assert!(data_dir(&root, Some(&account.id))
             .join(DATABASE_FILE)
             .is_file());

@@ -1,17 +1,6 @@
-//! The break state machine: a pure function of time, settings and what the
-//! activity sampler sees. It performs no I/O; `step` and the command methods
-//! change its state and return `Effect`s for the driver in `mod.rs` to apply.
-//!
-//! Vocabulary:
-//! - The *work clock* (`streak_ms`) counts continuous work. It grows while the
-//!   user is tracked and active, and resets when a qualifying rest ends: any
-//!   taken break, an idle stretch at least `break_minutes` long, or a gap (sleep,
-//!   time outside tracking hours) at least that long.
-//! - A *reminder* is a break the engine wants the user to take. It is either an
-//!   interval reminder (the work clock reached `work_minutes`) or a scheduled
-//!   break (the clock reached its time). Only one is pending at a time.
-//! - A *break* is a taken reminder or a manual break. It owns a `break`
-//!   activity segment; this module never touches segments, it asks for them.
+//! The break state machine: a pure function of time, settings and what the sampler
+//! sees. No I/O; `step` and the commands return `Effect`s for the driver in `mod.rs`.
+//! The work clock (`streak_ms`) resets after a qualifying rest.
 
 use std::collections::HashSet;
 
@@ -22,7 +11,6 @@ use crate::settings::{BreakSettings, ScheduledBreak};
 
 /// A visible reminder that gets no answer collapses to the corner capsule.
 pub const NUDGE_AFTER_MS: u64 = 20_000;
-/// How long the "welcome back" card stays after a break ends.
 pub const WELCOME_MS: u64 = 5_000;
 /// After this many snoozes in a row the reminder offers only Start and Skip.
 pub const MAX_SNOOZES_IN_ROW: u32 = 3;
@@ -60,7 +48,6 @@ impl Source {
         }
     }
 
-    /// The inverse of `as_str`, for a break kept across a restart.
     pub fn parse(text: &str) -> Option<Self> {
         [
             Source::Interval,
@@ -83,7 +70,6 @@ pub enum Phase {
     Over,
 }
 
-/// One row of the `breaks` table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BreakRecord {
     pub id: String,
@@ -131,7 +117,6 @@ pub enum Effect {
         id: String,
         label: String,
     },
-    /// Store a decision that involves no segment of its own.
     Record(BreakRecord),
     Extend {
         id: String,
@@ -154,7 +139,6 @@ impl SegmentNow {
     }
 }
 
-/// Everything one tick reads from the outside world.
 pub struct Input<'a> {
     pub now: u64,
     pub settings: &'a BreakSettings,
@@ -169,7 +153,6 @@ pub struct Input<'a> {
     pub local: LocalTime,
 }
 
-/// Where `now` falls on the local calendar.
 #[derive(Debug, Clone, Copy)]
 pub struct LocalTime {
     /// Local calendar day, as days from the common era.
@@ -185,7 +168,6 @@ struct Reminder {
     label: String,
     planned_ms: u64,
     due_at: u64,
-    /// Time worked when it came due (interval reminders).
     worked_ms: u64,
     snoozes: u32,
     snoozed_until: Option<u64>,
@@ -203,7 +185,6 @@ struct ActiveBreak {
     planned_ms: u64,
     started_at: u64,
     segment_id: Option<i64>,
-    /// Labels of the stopwatches this break paused.
     paused: Vec<(String, String)>,
 }
 
@@ -227,7 +208,6 @@ pub struct SwitchedBreak {
     pub source: Source,
     pub schedule_id: Option<String>,
     pub remaining_ms: u64,
-    /// The stopwatches (id, label) the break had paused.
     pub paused: Vec<(String, String)>,
 }
 
@@ -237,9 +217,7 @@ pub enum Command {
     Snooze(u16),
     Skip,
     EndBreak,
-    /// +N minutes on the running break.
     Extend(u16),
-    /// Re-expand a collapsed reminder.
     Expand,
 }
 
@@ -253,11 +231,8 @@ pub struct ReminderView {
     pub due_at: u64,
     pub worked_ms: u64,
     pub snoozes: u32,
-    /// The snooze button's default length.
     pub snooze_minutes: u16,
-    /// Absent unless the user wrote one.
     pub message: Option<String>,
-    /// Snooze is no longer offered after too many in a row.
     pub can_snooze: bool,
 }
 
@@ -269,11 +244,8 @@ pub struct BreakView {
     pub label: String,
     pub planned_ms: u64,
     pub started_at: u64,
-    /// Set once the break is over (the welcome-back card).
     pub ended_at: Option<u64>,
-    /// Labels of the stopwatches this break paused.
     pub paused_timers: Vec<String>,
-    /// Labels of the stopwatches resumed when it ended.
     pub resumed_timers: Vec<String>,
     /// Why the engine ended it, e.g. "The break was cut short".
     pub note: Option<String>,
@@ -287,7 +259,6 @@ pub struct NextBreak {
     pub label: String,
 }
 
-/// The whole picture the surface and every window render.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BreakState {
@@ -348,14 +319,12 @@ impl Engine {
         self.paused_until = until;
     }
 
-    /// The driver opened the break's segment; remember it.
     pub fn attach_segment(&mut self, segment_id: Option<i64>) {
         if let Some(active) = &mut self.active {
             active.segment_id = segment_id;
         }
     }
 
-    /// The driver paused these stopwatches (id, label) for the break.
     pub fn attach_paused_timers(&mut self, paused: Vec<(String, String)>) {
         if let Some(active) = &mut self.active {
             active.paused = paused;
@@ -366,8 +335,6 @@ impl Engine {
     pub fn abort_begin(&mut self) {
         self.active = None;
     }
-
-    // --- tick -----------------------------------------------------------
 
     pub fn step(&mut self, input: &Input<'_>) -> Vec<Effect> {
         // A sampler tick can race the suspend callback. Only the real resume
@@ -420,7 +387,6 @@ impl Engine {
 
         self.track_idle_segment(input, break_ms, &mut effects);
 
-        // Grow the work clock.
         let working = input.tracking_active
             && !input.away
             && input.idle_ms < input.idle_threshold_ms
@@ -442,7 +408,6 @@ impl Engine {
         }
 
         self.advance_reminder(input, &mut effects);
-        // A scheduled break takes the place of a pending interval reminder.
         let outranked = self
             .reminder
             .as_ref()
@@ -757,7 +722,6 @@ impl Engine {
         input.local.minutes_of_day >= at && input.local.minutes_of_day < at + window
     }
 
-    /// An interval reminder gives way to a scheduled break that is close.
     fn interval_suppressed(&self, settings: &BreakSettings, local: LocalTime) -> bool {
         let lead = (SCHEDULE_LEAD_MS / MINUTE_MS) as u32;
         settings.schedules.iter().any(|schedule| {
@@ -787,8 +751,6 @@ impl Engine {
             None
         }
     }
-
-    // --- commands -------------------------------------------------------
 
     pub fn command(&mut self, command: Command, now: u64, settings: &BreakSettings) -> Vec<Effect> {
         match command {
@@ -970,7 +932,6 @@ impl Engine {
         effects
     }
 
-    /// The running break as a switch would record it, or `None`.
     pub fn switched_break(&self, now: u64) -> Option<SwitchedBreak> {
         let active = self.active.as_ref()?;
         Some(SwitchedBreak {
@@ -1059,8 +1020,6 @@ impl Engine {
         });
     }
 
-    // --- view -----------------------------------------------------------
-
     pub fn view(&self, now: u64, settings: &BreakSettings, local: LocalTime) -> BreakState {
         let mut phase = Phase::Idle;
         let mut reminder_view = None;
@@ -1132,8 +1091,6 @@ impl Engine {
         }
     }
 
-    /// The soonest thing that will interrupt the user: the work clock's
-    /// interval reminder or today's next scheduled break.
     fn next_break(
         &self,
         now: u64,
@@ -1183,7 +1140,6 @@ pub(super) enum Quiet {
     DisplayAwake,
 }
 
-/// Epoch milliseconds of the schedule's time today.
 fn schedule_epoch(schedule: &ScheduledBreak, now: u64, local: LocalTime) -> u64 {
     let delta = i64::from(schedule.at_minutes()) - i64::from(local.minutes_of_day);
     (now as i64 + delta * MINUTE_MS as i64) as u64
@@ -1300,7 +1256,6 @@ mod tests {
             effects
         }
 
-        /// Advances by whole seconds, ticking each one.
         fn run(&mut self, ms: u64) -> Vec<Effect> {
             let mut all = Vec::new();
             for _ in 0..(ms / 1000) {
@@ -1410,7 +1365,6 @@ mod tests {
         assert_eq!(record.source, Source::Interval);
         assert_eq!(sim.engine.streak_ms(), 0);
         assert_eq!(sim.state().phase, Phase::Idle);
-        // A full interval away, not immediately again.
         sim.run(10 * MIN);
         assert_eq!(sim.state().phase, Phase::Idle);
     }
@@ -1487,7 +1441,6 @@ mod tests {
         assert_eq!(*ended_at, sim.now);
         assert!(resume_timers.is_empty(), "the stopwatches stay paused");
         assert_ne!(sim.state().phase, Phase::OnBreak);
-        // Nothing is left to end a second time.
         assert_eq!(sim.engine.end_for_switch(sim.now), (Vec::new(), None));
     }
 
@@ -1518,7 +1471,6 @@ mod tests {
         let current = sim.state().current.unwrap();
         assert_eq!(current.planned_ms, 8 * MIN);
         assert_eq!(current.paused_timers, ["Acme site"]);
-        // Only one break at a time.
         assert!(sim.engine.resume_break(sim.now, &ended).is_empty());
 
         let finish = sim.command(Command::EndBreak);
@@ -1558,7 +1510,6 @@ mod tests {
         sim.begin(&effects);
         sim.idle_ms = 0;
         sim.run(30_000);
-        // The user walked away.
         sim.idle_ms = 60_000;
         for _ in 0..(5 * MIN / 1000) {
             sim.idle_ms += 1000;
@@ -1566,7 +1517,6 @@ mod tests {
         }
         assert_eq!(sim.state().phase, Phase::Over);
         assert!(sim.state().current.unwrap().ended_at.is_none());
-        // First input after the planned end.
         sim.idle_ms = 200;
         let effects = sim.run(1000);
         assert!(effects.iter().any(|effect| matches!(
@@ -1584,7 +1534,6 @@ mod tests {
         let effects = sim.command(Command::StartBreak);
         sim.begin(&effects);
         sim.command(Command::Extend(55));
-        // The user never left: half an hour of steady input.
         sim.idle_ms = 500;
         let effects = sim.run(30 * MIN);
         assert!(effects.is_empty());
@@ -1593,7 +1542,6 @@ mod tests {
         let current = state.current.unwrap();
         assert_eq!(current.ended_at, None);
         assert_eq!(current.note, None);
-        // End break still ends it, right now.
         let finish = sim.command(Command::EndBreak);
         assert!(matches!(finish.as_slice(),
             [Effect::Finish { ended_at, close_segment: true, .. }] if *ended_at == sim.now));
@@ -1672,7 +1620,6 @@ mod tests {
         let state = sim.state();
         assert_eq!(state.phase, Phase::OnBreak);
         assert_eq!(state.current.unwrap().ended_at, None);
-        // The driver opened a new segment; ticks leave the break alone.
         sim.engine.attach_segment(Some(3));
         sim.segment = Some(SegmentNow {
             id: 3,
@@ -1871,7 +1818,6 @@ mod tests {
             _ => None,
         });
         assert!(missed.is_some());
-        // Only the last few minutes since the drop have counted.
         assert!(sim.engine.streak_ms() <= 5 * MIN);
     }
 
@@ -1879,7 +1825,6 @@ mod tests {
     fn an_idle_stretch_as_long_as_a_break_is_credited_without_a_reminder() {
         let mut sim = Sim::new();
         sim.run(49 * MIN);
-        // Goes idle: the sampler opens an Idle segment.
         sim.idle_ms = 5 * MIN;
         sim.segment = Some(SegmentNow {
             id: 9,
@@ -1889,7 +1834,6 @@ mod tests {
         sim.run(1000);
         sim.idle_ms = 6 * MIN;
         sim.run(MIN);
-        // Back at the keyboard: the Idle segment closes, activity resumes.
         sim.idle_ms = 0;
         sim.segment = Some(SegmentNow {
             id: 10,
@@ -1995,7 +1939,6 @@ mod tests {
             sim.state().reminder.as_ref().unwrap().source,
             Source::Interval
         );
-        // Snoozed past lunch, it merges into the scheduled break.
         sim.command(Command::Snooze(15));
         sim.run(41 * MIN);
         let reminder = sim.state().reminder.unwrap();
@@ -2020,7 +1963,6 @@ mod tests {
         assert_eq!(record.source, Source::Scheduled);
         assert_eq!(record.schedule_id.as_deref(), Some("lunch"));
         assert_eq!(sim.engine.streak_ms(), before);
-        // It does not come back today.
         sim.run(60_000);
         assert_eq!(sim.state().phase, Phase::Idle);
     }
@@ -2046,7 +1988,6 @@ mod tests {
         let mut sim = Sim::new();
         sim.settings.schedules = vec![lunch()];
         sim.minutes_of_day = 12 * 60 + 25;
-        // Idle from 12:25 to 13:15, straight through lunch.
         sim.idle_ms = 5 * MIN;
         sim.segment = Some(SegmentNow {
             id: 9,
@@ -2092,7 +2033,6 @@ mod tests {
         let mut sim = Sim::new();
         sim.run(30 * MIN);
         assert!(sim.engine.streak_ms() > 29 * MIN);
-        // The Mac slept for ten minutes.
         sim.now += 10 * MIN;
         sim.tick();
         assert_eq!(sim.engine.streak_ms(), 0);
@@ -2109,7 +2049,6 @@ mod tests {
                     .collect()
             };
         let now = 200 * MIN;
-        // 40 minutes of work, a 6-minute Idle stretch, then 20 more minutes.
         let rows = segments(&[
             ("activity", None, 100 * MIN, 140 * MIN),
             ("break", Some("Idle"), 140 * MIN, 146 * MIN),
@@ -2119,14 +2058,12 @@ mod tests {
         // ended long ago (34 minutes), so the clock is 0 either way.
         assert_eq!(streak_from_segments(&rows, now, 5 * MIN), 0);
         assert_eq!(streak_from_segments(&rows, 168 * MIN, 5 * MIN), 20 * MIN);
-        // A short idle stretch is not a rest.
         let short = segments(&[
             ("activity", None, 100 * MIN, 140 * MIN),
             ("break", Some("Idle"), 140 * MIN, 142 * MIN),
             ("activity", None, 142 * MIN, 160 * MIN),
         ]);
         assert_eq!(streak_from_segments(&short, 161 * MIN, 5 * MIN), 58 * MIN);
-        // A manual break of any length resets it.
         let manual = segments(&[
             ("activity", None, 100 * MIN, 140 * MIN),
             ("break", Some("Break"), 140 * MIN, 141 * MIN),

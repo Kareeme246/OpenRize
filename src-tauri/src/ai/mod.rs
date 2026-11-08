@@ -33,21 +33,75 @@ pub const EVENT_SUGGESTION_READY: &str = "suggestion-ready";
 /// Emitted whenever the engine status changes. Payload: `AiStatus`.
 pub const EVENT_AI_STATUS_CHANGED: &str = "ai-status-changed";
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum StatusProvider {
+    Apple,
+    /// No model provider is installed (Windows, or a build without the sidecar).
+    None,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum LlmState {
+    Ready,
+    Unavailable,
+}
+
+/// Why the language model cannot run; the UI maps each to a sentence.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum LlmReason {
+    AppleIntelligenceNotEnabled,
+    ModelNotReady,
+    DeviceNotEligible,
+    #[serde(rename = "unsupportedOS")]
+    UnsupportedOs,
+    Unknown,
+}
+
+impl LlmReason {
+    fn from_code(code: &str) -> Self {
+        match code {
+            "appleIntelligenceNotEnabled" => Self::AppleIntelligenceNotEnabled,
+            "modelNotReady" => Self::ModelNotReady,
+            "deviceNotEligible" => Self::DeviceNotEligible,
+            "unsupportedOS" => Self::UnsupportedOs,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum EmbedState {
+    Ready,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RuntimeState {
+    Running,
+    /// Idle-killed; restarts on demand.
+    Stopped,
+    Unavailable,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AiStatus {
-    /// `full` (T0+T1+T2), `fallback` (T0+T1), `rules` (sidecar missing, T0
+    /// `full` (T0+T1+T2), `fallback` (T0+T1), `rules` (no provider, T0
     /// only), or `starting` before the first probe.
     pub engine: String,
-    /// Foundation Model availability as the sidecar reports it: `available`,
-    /// `appleIntelligenceNotEnabled`, `modelNotReady`, `deviceNotEligible`,
-    /// `unsupportedOS`, or `unknown`.
-    pub llm: String,
-    pub embed: bool,
-    pub personal_model: bool,
-    /// `running`, `stopped` (idle-killed, restarts on demand), or
-    /// `unavailable`.
-    pub sidecar: String,
+    pub provider: StatusProvider,
+    pub llm: LlmState,
+    /// Present only while `llm` is unavailable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub llm_reason: Option<LlmReason>,
+    pub embed: EmbedState,
+    pub personal: bool,
+    pub runtime: RuntimeState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub os: Option<String>,
     pub queued: u32,
@@ -63,14 +117,50 @@ pub struct AiStatus {
     pub last_error: Option<String>,
 }
 
+impl AiStatus {
+    /// Sets the provider, LLM and embedder fields from what the provider reports; `None` is no
+    /// provider at all.
+    pub fn set_capabilities(&mut self, caps: Option<&provider::Capabilities>) {
+        let Some(caps) = caps else {
+            self.provider = StatusProvider::None;
+            self.llm = LlmState::Unavailable;
+            self.llm_reason = Some(LlmReason::UnsupportedOs);
+            self.embed = EmbedState::None;
+            return;
+        };
+        self.provider = StatusProvider::Apple;
+        match &caps.llm {
+            provider::Availability::Ready => {
+                self.llm = LlmState::Ready;
+                self.llm_reason = None;
+            }
+            provider::Availability::Unavailable(code) => {
+                self.llm = LlmState::Unavailable;
+                self.llm_reason = Some(LlmReason::from_code(code));
+            }
+        }
+        self.embed = if caps.embed.is_some() {
+            EmbedState::Ready
+        } else {
+            EmbedState::None
+        };
+    }
+}
+
 impl Default for AiStatus {
     fn default() -> Self {
         Self {
             engine: "starting".to_string(),
-            llm: "unknown".to_string(),
-            embed: false,
-            personal_model: false,
-            sidecar: "stopped".to_string(),
+            provider: if cfg!(target_os = "macos") {
+                StatusProvider::Apple
+            } else {
+                StatusProvider::None
+            },
+            llm: LlmState::Unavailable,
+            llm_reason: Some(LlmReason::Unknown),
+            embed: EmbedState::None,
+            personal: false,
+            runtime: RuntimeState::Stopped,
             os: None,
             queued: 0,
             outcomes: 0,
@@ -171,5 +261,83 @@ pub fn update_status(app: &AppHandle, change: impl FnOnce(&mut AiStatus)) {
 pub fn nudge(app: &AppHandle) {
     if let Some(runtime) = app.try_state::<AiRuntime>() {
         runtime.nudge();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::provider::{Availability, Capabilities, Egress, EmbedModel};
+    use super::*;
+
+    fn caps(llm: Availability, embed: bool) -> Capabilities {
+        Capabilities {
+            llm,
+            embed: embed.then(|| EmbedModel {
+                dimension: 512,
+                model: "nlembedding-en-r2".to_string(),
+            }),
+            personal: true,
+            egress: Egress::OnDevice,
+        }
+    }
+
+    fn status_of(caps: Option<&Capabilities>) -> AiStatus {
+        let mut status = AiStatus::default();
+        status.set_capabilities(caps);
+        status
+    }
+
+    #[test]
+    fn a_ready_provider_has_no_reason() {
+        let status = status_of(Some(&caps(Availability::Ready, true)));
+        assert_eq!(status.provider, StatusProvider::Apple);
+        assert_eq!(status.llm, LlmState::Ready);
+        assert_eq!(status.llm_reason, None);
+        assert_eq!(status.embed, EmbedState::Ready);
+    }
+
+    #[test]
+    fn each_unavailable_code_maps_to_its_reason() {
+        for (code, reason) in [
+            (
+                "appleIntelligenceNotEnabled",
+                LlmReason::AppleIntelligenceNotEnabled,
+            ),
+            ("modelNotReady", LlmReason::ModelNotReady),
+            ("deviceNotEligible", LlmReason::DeviceNotEligible),
+            ("unsupportedOS", LlmReason::UnsupportedOs),
+            ("somethingNew", LlmReason::Unknown),
+        ] {
+            let status = status_of(Some(&caps(
+                Availability::Unavailable(code.to_string()),
+                true,
+            )));
+            assert_eq!(status.llm, LlmState::Unavailable);
+            assert_eq!(status.llm_reason, Some(reason), "{code}");
+        }
+    }
+
+    #[test]
+    fn no_embed_model_reports_no_embedder() {
+        let status = status_of(Some(&caps(Availability::Ready, false)));
+        assert_eq!(status.embed, EmbedState::None);
+    }
+
+    #[test]
+    fn no_provider_reports_none_and_unsupported() {
+        let status = status_of(None);
+        assert_eq!(status.provider, StatusProvider::None);
+        assert_eq!(status.llm_reason, Some(LlmReason::UnsupportedOs));
+        assert_eq!(status.embed, EmbedState::None);
+    }
+
+    #[test]
+    fn the_wire_shape_is_camel_case() {
+        let json = serde_json::to_value(status_of(None)).unwrap();
+        assert_eq!(json["provider"], "none");
+        assert_eq!(json["llm"], "unavailable");
+        assert_eq!(json["llmReason"], "unsupportedOS");
+        assert_eq!(json["embed"], "none");
+        assert_eq!(json["runtime"], "stopped");
     }
 }

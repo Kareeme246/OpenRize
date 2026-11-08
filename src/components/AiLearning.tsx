@@ -530,7 +530,7 @@ export function PersonalModels({
 }) {
   const busy = status?.retrain === "queued" || status?.retrain === "running";
   const { newLabels, retrainAfter } = metrics.models;
-  const unavailable = status?.sidecar === "unavailable";
+  const unavailable = status?.runtime === "unavailable";
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-col gap-0.5 text-[11.5px] text-fg-muted">

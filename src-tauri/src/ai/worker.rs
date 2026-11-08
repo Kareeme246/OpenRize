@@ -24,7 +24,9 @@ use super::provider::{EmbedModel, Provider, ProviderId};
 use super::rules;
 use super::sidecar::{self, Capabilities};
 use super::store::{self, Job, JOB_CLASSIFY};
-use super::{update_status, AiRuntime, Field, EVENT_SUGGESTION_READY, PREFILL_THRESHOLD};
+use super::{
+    update_status, AiRuntime, Field, RuntimeState, EVENT_SUGGESTION_READY, PREFILL_THRESHOLD,
+};
 use crate::activity::{self, ActivitySegment};
 use crate::models::TimeEntry;
 use crate::settings::{AiSuggest, Settings};
@@ -123,7 +125,7 @@ impl Worker {
                 }
             }
             if self.apple.stop_if_idle() {
-                update_status(&self.app, |s| s.sidecar = "stopped".to_string());
+                update_status(&self.app, |s| s.runtime = RuntimeState::Stopped);
             }
             self.reprobe_if_due();
             self.retrain_if_due();
@@ -180,10 +182,11 @@ impl Worker {
     fn probe(&mut self) {
         self.last_probe = Some(Instant::now());
         if !self.apple.is_installed() {
+            self.note_embedder(None);
             update_status(&self.app, |s| {
                 s.engine = "rules".to_string();
-                s.llm = "unsupportedOS".to_string();
-                s.sidecar = "unavailable".to_string();
+                s.set_capabilities(None);
+                s.runtime = RuntimeState::Unavailable;
             });
             return;
         }
@@ -191,7 +194,7 @@ impl Worker {
             Ok(_) => self.apply_capabilities(),
             Err(error) => update_status(&self.app, |s| {
                 s.engine = "rules".to_string();
-                s.sidecar = "unavailable".to_string();
+                s.runtime = RuntimeState::Unavailable;
                 s.last_error = Some(error);
             }),
         }
@@ -218,6 +221,8 @@ impl Worker {
         };
         let was_ready = self.applied.as_ref().map(|c| c.llm == "available");
         let running = self.apple.is_running();
+        let provider_caps = apple::capabilities_of(&caps);
+        self.note_embedder(provider_caps.embed.as_ref().map(|e| e.model.as_str()));
         update_status(&self.app, |s| {
             s.engine = if caps.llm == "available" {
                 "full"
@@ -227,10 +232,13 @@ impl Worker {
                 "rules"
             }
             .to_string();
-            s.llm = caps.llm.clone();
-            s.embed = caps.embed;
+            s.set_capabilities(Some(&provider_caps));
             s.os = Some(caps.os.clone());
-            s.sidecar = if running { "running" } else { "stopped" }.to_string();
+            s.runtime = if running {
+                RuntimeState::Running
+            } else {
+                RuntimeState::Stopped
+            };
         });
         if was_ready == Some(false) && caps.llm == "available" {
             let now = now_epoch_ms();
@@ -241,6 +249,13 @@ impl Worker {
             }
         }
         self.applied = Some(caps);
+    }
+
+    /// Tells the core which embedder exists so it stops queueing embed jobs when there is none.
+    fn note_embedder(&self, model: Option<&str>) {
+        if let Err(error) = self.write(|conn| store::set_embedder(conn, model)) {
+            eprintln!("ai worker: recording the embedder: {error}");
+        }
     }
 
     fn refresh_counts(&self) {
@@ -260,15 +275,14 @@ impl Worker {
             s.queued = queued;
             s.outcomes = outcomes;
             s.calibrated = calibrated;
-            s.personal_model = personal;
-            s.sidecar = if !installed {
-                "unavailable"
+            s.personal = personal;
+            s.runtime = if !installed {
+                RuntimeState::Unavailable
             } else if running {
-                "running"
+                RuntimeState::Running
             } else {
-                "stopped"
-            }
-            .to_string();
+                RuntimeState::Stopped
+            };
         });
     }
 
@@ -282,14 +296,14 @@ impl Worker {
                 if self.applied.as_ref() != Some(&caps) || !self.apple.is_running() {
                     self.apply_capabilities();
                 } else {
-                    update_status(&self.app, |s| s.sidecar = "running".to_string());
+                    update_status(&self.app, |s| s.runtime = RuntimeState::Running);
                 }
                 Some(caps)
             }
             Err(error) => {
                 update_status(&self.app, |s| {
                     s.engine = "rules".to_string();
-                    s.sidecar = "unavailable".to_string();
+                    s.runtime = RuntimeState::Unavailable;
                     s.last_error = Some(error);
                 });
                 None
@@ -496,11 +510,17 @@ impl Worker {
             // is all there is to embed.
             features.content = entry.description.clone();
         }
-        let caps = self.capabilities();
-        if caps.as_ref().is_none_or(|c| !c.embed) {
-            return Err("no embedding model available".to_string());
+        if !self.apple.is_installed() {
+            return Ok(());
         }
-        self.vector_for(&entry.id, &features, embed_model(caps.as_ref()).as_ref())
+        // A failed probe is retried; a provider without an embedder has nothing to do.
+        let caps = self
+            .capabilities()
+            .ok_or("the model provider is not running")?;
+        let Some(model) = embed_model(Some(&caps)) else {
+            return Ok(());
+        };
+        self.vector_for(&entry.id, &features, Some(&model))
             .map(|_| ())
     }
 

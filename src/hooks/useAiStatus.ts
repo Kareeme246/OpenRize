@@ -35,20 +35,19 @@ export function useAiStatus(): AiStatus | null {
 }
 
 /**
- * Whether the on-device ML sidecar is in this build; the platform's expectation
+ * Whether this build has no model provider; the platform's expectation
  * stands in until the status settles, so controls don't flash.
  */
-export function onDeviceMlUnavailable(status: AiStatus | null): boolean {
+export function noLlm(status: AiStatus | null): boolean {
   if (status === null || status.engine === "starting") {
     return !EXPECTS_ON_DEVICE_ML;
   }
-  return status.sidecar === "unavailable";
+  return status.provider === "none";
 }
 
 export function llmUnavailableReason(status: AiStatus): string | null {
-  switch (status.llm) {
-    case "available":
-      return null;
+  if (status.llm === "ready") return null;
+  switch (status.llmReason) {
     case "appleIntelligenceNotEnabled":
       return "Apple Intelligence is off";
     case "modelNotReady":

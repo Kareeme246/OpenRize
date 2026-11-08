@@ -16,11 +16,7 @@ import {
 import { Tooltip } from "../components/Tooltip";
 import { useAccounts } from "../hooks/useAccounts";
 import { useAiMetrics } from "../hooks/useAiMetrics";
-import {
-  llmUnavailableReason,
-  onDeviceMlUnavailable,
-  useAiStatus,
-} from "../hooks/useAiStatus";
+import { llmUnavailableReason, noLlm, useAiStatus } from "../hooks/useAiStatus";
 import { useEnergy } from "../hooks/useEnergy";
 import { useSettings } from "../hooks/useSettings";
 import { useTauriEvent } from "../hooks/useTauriEvent";
@@ -311,19 +307,20 @@ function AppleIntelligenceRow({
   status: AiStatus | null;
   onError: (message: string | null) => void;
 }) {
-  const isAvailable = status?.llm === "available";
-  const isOff = status?.llm === "appleIntelligenceNotEnabled";
-  const isModelDownloading = status?.llm === "modelNotReady";
+  const reason = status?.llmReason;
+  const isAvailable = status?.llm === "ready";
+  const isOff = reason === "appleIntelligenceNotEnabled";
+  const isModelDownloading = reason === "modelNotReady";
   const isUnsupported =
-    status?.llm === "unsupportedOS" || status?.llm === "deviceNotEligible";
+    reason === "unsupportedOS" || reason === "deviceNotEligible";
 
   const handleOpenSettings = (): void => {
     onError(null);
-    if (status?.llm === "unsupportedOS") {
+    if (reason === "unsupportedOS") {
       onError("The on-device model needs macOS 26 or later.");
       return;
     }
-    if (status?.llm === "deviceNotEligible") {
+    if (reason === "deviceNotEligible") {
       onError("This Mac does not support Apple Intelligence.");
       return;
     }
@@ -1132,7 +1129,7 @@ export function Settings({
   };
 
   const aiStatus = useAiStatus();
-  const mlUnavailable = onDeviceMlUnavailable(aiStatus);
+  const mlUnavailable = noLlm(aiStatus);
   const [metricDays, setMetricDays] = useState(30);
   const { metrics, error: metricsError, adopt } = useAiMetrics(metricDays);
   const [confirmReset, setConfirmReset] = useState(false);

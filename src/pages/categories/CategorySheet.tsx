@@ -3,7 +3,7 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { FIELD, TEXTAREA_FIELD } from "../../components/Page";
 import { Toggle } from "../../components/SegmentedControl";
 import { Field, Sheet } from "../../components/Sheet";
-import { onDeviceMlUnavailable, useAiStatus } from "../../hooks/useAiStatus";
+import { noLlm, useAiStatus } from "../../hooks/useAiStatus";
 import { useToast } from "../../hooks/useToast";
 import * as api from "../../lib/api";
 import { describeError } from "../../lib/api";
@@ -61,7 +61,7 @@ export function CategorySheet({
   onRemoved,
 }: CategorySheetProps) {
   const showToast = useToast();
-  const mlUnavailable = onDeviceMlUnavailable(useAiStatus());
+  const mlUnavailable = noLlm(useAiStatus());
   const [name, setName] = useState(category?.name ?? "");
   const [color, setColor] = useState(() =>
     category ? category.color : leastUsedSwatch(categories),

@@ -995,7 +995,7 @@ pub fn ai_reset_learned(app: AppHandle, days: u32) -> Result<AiMetrics, String> 
     ai::update_status(&app, |s| {
         s.outcomes = 0;
         s.calibrated = false;
-        s.personal_model = false;
+        s.personal = false;
         s.retrain_note = None;
     });
     ai::nudge(&app);

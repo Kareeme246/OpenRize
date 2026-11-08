@@ -334,18 +334,23 @@ export interface ClassifyJob {
   lastError?: string;
 }
 
+export type AiLlmReason =
+  | "appleIntelligenceNotEnabled"
+  | "modelNotReady"
+  | "deviceNotEligible"
+  | "unsupportedOS"
+  | "unknown";
+
 export interface AiStatus {
   engine: "full" | "fallback" | "rules" | "starting";
-  llm:
-    | "available"
-    | "appleIntelligenceNotEnabled"
-    | "modelNotReady"
-    | "deviceNotEligible"
-    | "unsupportedOS"
-    | "unknown";
-  embed: boolean;
-  personalModel: boolean;
-  sidecar: "running" | "stopped" | "unavailable";
+  /** `none` when no model provider is installed (Windows, or a build without the sidecar). */
+  provider: "apple" | "none";
+  llm: "ready" | "unavailable";
+  /** Present only while `llm` is unavailable. */
+  llmReason?: AiLlmReason;
+  embed: "ready" | "none";
+  personal: boolean;
+  runtime: "running" | "stopped" | "unavailable";
   os?: string;
   queued: number;
   /** Verdicts calibration has learned from; the curve starts at 50. */

@@ -25,15 +25,15 @@ export function AiEngineBanner({ status }: { status: AiStatus | null }) {
   const [dismissed, setDismissed] = useState<string | null>(readDismissed);
 
   if (status === null || status.engine !== "fallback") return null;
+  const reason = status.llmReason;
   const fixable =
-    status.llm === "appleIntelligenceNotEnabled" ||
-    status.llm === "modelNotReady";
-  if (!fixable || dismissed === status.llm) return null;
+    reason === "appleIntelligenceNotEnabled" || reason === "modelNotReady";
+  if (!fixable || dismissed === reason) return null;
 
   const dismiss = (): void => {
-    setDismissed(status.llm);
+    setDismissed(reason);
     try {
-      window.localStorage.setItem(DISMISS_KEY, status.llm);
+      window.localStorage.setItem(DISMISS_KEY, reason);
     } catch {
       // Private storage: the banner simply returns next launch.
     }
@@ -52,7 +52,7 @@ export function AiEngineBanner({ status }: { status: AiStatus | null }) {
         Suggestions use your rules and personal model until it's ready; entries
         are re-checked when it is.
       </span>
-      {status.llm === "appleIntelligenceNotEnabled" && (
+      {reason === "appleIntelligenceNotEnabled" && (
         <button
           type="button"
           onClick={() =>

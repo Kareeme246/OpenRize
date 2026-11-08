@@ -26,6 +26,9 @@ const CALIBRATION_WINDOW: u32 = 2_000;
 pub const AUTO_TRUSTED_AFTER_MS: u64 = 24 * 60 * 60 * 1000;
 const ARTIFACT_HISTORY: u32 = 20;
 const LEARNING_RESET_KEY: &str = "ai_learning_reset_at";
+/// The embed model the worker last saw, or `NO_EMBEDDER`. Describes this machine, so a learned-data reset keeps it.
+const EMBEDDER_KEY: &str = "ai_embedder";
+pub const NO_EMBEDDER: &str = "none";
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -42,7 +45,12 @@ pub struct Job {
 }
 
 /// Queues (or re-queues) a job. A classify job also moves a pending entry to `processing`.
+/// An embed job is skipped once the worker recorded that there is no embedder (unknown still
+/// queues); it is read from the database because the CLI enqueues with the app closed.
 pub fn enqueue(conn: &Connection, entry_id: &str, kind: &str, now: u64) -> Result<()> {
+    if kind == JOB_EMBED && embedder(conn)?.as_deref() == Some(NO_EMBEDDER) {
+        return Ok(());
+    }
     conn.execute(
         "INSERT INTO classify_jobs (id, entry_id, kind, state, attempts, next_at, created_at, updated_at)
          VALUES (?1, ?2, ?3, 'queued', 0, ?4, ?4, ?4)
@@ -481,6 +489,39 @@ pub fn learning_since(conn: &Connection) -> Result<u64> {
     .optional()
     .map(|value| value.and_then(|v| v.parse().ok()).unwrap_or(0))
     .map_err(err)
+}
+
+pub fn embedder(conn: &Connection) -> Result<Option<String>> {
+    conn.query_row(
+        "SELECT value FROM settings WHERE key = ?1;",
+        params![EMBEDDER_KEY],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(err)
+}
+
+/// Records the embed model (`None` for no embedder). Returns whether it changed; becoming
+/// `none` also drops the embed jobs that would only fail.
+pub fn set_embedder(conn: &Connection, model: Option<&str>) -> Result<bool> {
+    let value = model.unwrap_or(NO_EMBEDDER);
+    if embedder(conn)?.as_deref() == Some(value) {
+        return Ok(false);
+    }
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
+        params![EMBEDDER_KEY, value],
+    )
+    .map_err(err)?;
+    if model.is_none() {
+        conn.execute(
+            "DELETE FROM classify_jobs WHERE kind = ?1 AND state IN ('queued', 'failed');",
+            params![JOB_EMBED],
+        )
+        .map_err(err)?;
+    }
+    Ok(true)
 }
 
 /// The suggestions calibration learns from: model (non-rule) suggestions
@@ -999,4 +1040,78 @@ pub fn labeled_since(conn: &Connection, since: u64) -> Result<u32> {
 
 pub fn label_from_model(label: &str) -> Label {
     (label != "none").then(|| label.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        crate::migrations::run_migrations(&mut conn).expect("migrations");
+        conn
+    }
+
+    fn kinds(conn: &Connection) -> Vec<(String, String, String)> {
+        let mut stmt = conn
+            .prepare("SELECT entry_id, kind, state FROM classify_jobs ORDER BY entry_id, kind;")
+            .unwrap();
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap();
+        rows.map(|r| r.unwrap()).collect()
+    }
+
+    #[test]
+    fn embed_jobs_queue_unless_there_is_no_embedder() {
+        let conn = db();
+        enqueue(&conn, "a", JOB_EMBED, 1).unwrap();
+        set_embedder(&conn, Some("nlembedding-en-r2")).unwrap();
+        enqueue(&conn, "b", JOB_EMBED, 1).unwrap();
+        set_embedder(&conn, None).unwrap();
+        enqueue(&conn, "c", JOB_EMBED, 1).unwrap();
+        enqueue(&conn, "c", JOB_CLASSIFY, 1).unwrap();
+        let rows = kinds(&conn);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            (rows[0].0.as_str(), rows[0].1.as_str()),
+            ("c", JOB_CLASSIFY)
+        );
+    }
+
+    #[test]
+    fn going_without_an_embedder_drops_only_pending_embed_jobs() {
+        let conn = db();
+        for (entry, kind, state) in [
+            ("a", JOB_EMBED, "queued"),
+            ("b", JOB_EMBED, "failed"),
+            ("c", JOB_EMBED, "done"),
+            ("d", JOB_EMBED, "running"),
+            ("e", JOB_CLASSIFY, "queued"),
+        ] {
+            enqueue(&conn, entry, kind, 1).unwrap();
+            set_job_state(&conn, &conn_job_id(&conn, entry, kind), state, 1).unwrap();
+        }
+        assert!(set_embedder(&conn, None).unwrap());
+        assert!(!set_embedder(&conn, None).unwrap());
+        let left: Vec<_> = kinds(&conn).into_iter().map(|r| r.0).collect();
+        assert_eq!(left, ["c", "d", "e"]);
+    }
+
+    #[test]
+    fn the_embedder_survives_a_learned_data_reset() {
+        let conn = db();
+        set_embedder(&conn, None).unwrap();
+        reset_learned(&conn, 5).unwrap();
+        assert_eq!(embedder(&conn).unwrap().as_deref(), Some(NO_EMBEDDER));
+    }
+
+    fn conn_job_id(conn: &Connection, entry: &str, kind: &str) -> String {
+        conn.query_row(
+            "SELECT id FROM classify_jobs WHERE entry_id = ?1 AND kind = ?2;",
+            params![entry, kind],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
 }

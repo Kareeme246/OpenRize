@@ -24,7 +24,13 @@ function readDismissed(): string | null {
 export function AiEngineBanner({ status }: { status: AiStatus | null }) {
   const [dismissed, setDismissed] = useState<string | null>(readDismissed);
 
-  if (status === null || status.engine !== "fallback") return null;
+  if (
+    status === null ||
+    status.provider !== "apple" ||
+    status.engine !== "fallback"
+  ) {
+    return null;
+  }
   const reason = status.llmReason;
   const fixable =
     reason === "appleIntelligenceNotEnabled" || reason === "modelNotReady";

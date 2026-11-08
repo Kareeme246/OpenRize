@@ -9,6 +9,8 @@ use openrize_core::ai::prompt::{LlmRequest, PROMPT_VERSION};
 pub enum ProviderKind {
     Apple,
     Local,
+    /// No language model is active (rules and the personal model only).
+    None,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +26,7 @@ impl ProviderId {
         match self.kind {
             ProviderKind::Apple => format!("fm:{}", self.model),
             ProviderKind::Local => format!("local:{} p{PROMPT_VERSION}", self.model),
+            ProviderKind::None => "none".to_string(),
         }
     }
 }
@@ -88,6 +91,12 @@ pub trait Provider: Send {
     ) -> Result<Classified, String>;
 
     fn embed(&mut self, texts: &[String]) -> Result<Vec<Option<Vec<f32>>>, String>;
+
+    /// Brings the backing process up ahead of a request so the caller can show it loading.
+    /// Providers that start on their first call have nothing to do.
+    fn start(&mut self) -> Result<(), String> {
+        Ok(())
+    }
 
     fn pid(&self) -> Option<u32>;
 

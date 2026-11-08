@@ -1166,6 +1166,10 @@ pub(crate) fn apply_settings_change(app: &AppHandle, previous: &Settings, next: 
         let _ = sweep_retention(app);
     }
 
+    if next.ai_llm != previous.ai_llm || next.local_model != previous.local_model {
+        ai::nudge(app);
+    }
+
     if next.tracking_hours != previous.tracking_hours {
         let state = app.state::<AppState>();
         if let Ok(mut store) = state.activity.lock() {

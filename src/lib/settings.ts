@@ -4,7 +4,7 @@
  */
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { SYNCS_WINDOW_THEME } from "./platform";
+import { EXPECTS_ON_DEVICE_ML, SYNCS_WINDOW_THEME } from "./platform";
 
 export type Theme = "system" | "light" | "dark";
 export type Accent = "green" | "blue" | "purple" | "orange";
@@ -12,6 +12,8 @@ export type Shape = "rounded" | "sharper";
 export type SizeMode = "compact" | "normal" | "relaxed" | "veryRelaxed";
 export type CloseBehavior = "quit" | "hide";
 export type AiSuggest = "category" | "categoryProject";
+/** Which language model suggests; a local model is a file in the models folder. */
+export type AiLlm = "apple" | "local" | "none";
 
 export interface DaySchedule {
   enabled: boolean;
@@ -211,6 +213,9 @@ export interface Settings {
   /** Activity history older than this many days. 0 = keep forever. */
   retentionDays: number;
   aiSuggest: AiSuggest;
+  aiLlm: AiLlm;
+  /** File name of a GGUF in the models folder, used when `aiLlm` is `local`. */
+  localModel: string | null;
   autoAccept: boolean;
   autoAcceptPercent: number;
   aiCustomPrompt: string;
@@ -231,6 +236,8 @@ export const DEFAULT_SETTINGS: Settings = {
   trayEnabled: true,
   retentionDays: 0,
   aiSuggest: "categoryProject",
+  aiLlm: EXPECTS_ON_DEVICE_ML ? "apple" : "none",
+  localModel: null,
   autoAccept: true,
   autoAcceptPercent: 95,
   aiCustomPrompt: "",

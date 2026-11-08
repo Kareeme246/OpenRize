@@ -530,7 +530,12 @@ export function PersonalModels({
 }) {
   const busy = status?.retrain === "queued" || status?.retrain === "running";
   const { newLabels, retrainAfter } = metrics.models;
-  const unavailable = status?.runtime === "unavailable";
+  // `runtime` is the Apple sidecar only while Apple's model is active; retraining always uses it.
+  const unavailable =
+    status !== null &&
+    (status.provider === "apple"
+      ? status.runtime === "unavailable"
+      : status.embed !== "ready");
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-col gap-0.5 text-[11.5px] text-fg-muted">

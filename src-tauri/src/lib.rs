@@ -21,7 +21,7 @@ mod rpc;
 mod tray;
 mod updater;
 
-use openrize_core::{categories, models, projects, reports, settings, timers};
+use openrize_core::{categories, models, paths, projects, reports, settings, timers};
 
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -61,6 +61,12 @@ pub use openrize_core::state::AppState;
 
 /// Run in the menu bar with no window until one is asked for.
 const BACKGROUND_ARG: &str = "--background";
+
+/// When this process was started as the macOS watchdog for a model server (`ai/guard.rs`), runs
+/// it and returns the exit code. `main` calls this before anything else so none of the app starts.
+pub fn run_llama_watchdog() -> Option<i32> {
+    ai::guard::run_if_requested(std::env::args())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -131,6 +137,7 @@ pub fn run() {
                 app.handle().clone(),
                 dir.join(activity::DB_FILE),
                 dir.join("ml"),
+                app.path().app_local_data_dir()?.join(paths::MODELS_DIR),
             );
             energy::spawn_sampler(app.handle().clone(), dir.join(activity::DB_FILE));
             capture::register_sleep_listeners(app.handle().clone());
@@ -363,6 +370,10 @@ pub fn run() {
 /// the next launch can only close it at its own start. Shared with the Windows
 /// updater, which exits without a `RunEvent::Exit`.
 pub(crate) fn flush_on_exit(app: &tauri::AppHandle) {
+    // Ends the local model server now; the process guards only cover a crash.
+    if let Some(runtime) = app.try_state::<ai::AiRuntime>() {
+        runtime.shutdown(ai::worker::SHUTDOWN_WAIT);
+    }
     breaks::on_exit(app);
     if let Ok(mut store) = app.state::<AppState>().activity.lock() {
         let _ = store.close_active_segment(timers::now_epoch_ms());

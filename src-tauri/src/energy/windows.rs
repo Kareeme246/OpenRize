@@ -3,6 +3,8 @@
 use super::*;
 use windows::Win32::Foundation::{CloseHandle, FILETIME};
 use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+#[cfg(test)]
+use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
 use windows::Win32::System::Threading::{
     GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
 };
@@ -32,6 +34,31 @@ pub fn read_proc_rusage(pid: i32) -> Option<ProcessRusage> {
         cpu_time_ns: (ticks(kernel) + ticks(user)).saturating_mul(100),
         billed_energy_nj: 0,
     })
+}
+
+#[cfg(test)]
+pub fn peak_memory_bytes(pid: i32) -> Option<u64> {
+    memory_counters(pid).map(|counters| counters.PeakWorkingSetSize as u64)
+}
+
+#[cfg(test)]
+pub fn resident_bytes(pid: i32) -> Option<u64> {
+    memory_counters(pid).map(|counters| counters.WorkingSetSize as u64)
+}
+
+#[cfg(test)]
+fn memory_counters(pid: i32) -> Option<PROCESS_MEMORY_COUNTERS> {
+    let mut counters = PROCESS_MEMORY_COUNTERS::default();
+    let size = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+    // SAFETY: the handle is closed before returning, and the counters are
+    // a plain struct on this stack.
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid as u32).ok()?;
+        let read = GetProcessMemoryInfo(process, &mut counters, size);
+        let _ = CloseHandle(process);
+        read.ok()?;
+    }
+    Some(counters)
 }
 
 pub fn read_battery_info() -> BatteryInfo {

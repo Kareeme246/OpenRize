@@ -477,9 +477,9 @@ version; the first one is the 0.10.0 minor bump.
 
 | PR | Version | Contents |
 | --- | --- | --- |
-| 1 | 0.10.0 | `Provider` trait; `AppleProvider` wrapping today's sidecar unchanged; prompt (`PROMPT_VERSION`), schema and validator ported to `openrize-core`; generalized `AiStatus` + frontend; stop queueing `embed` jobs with no embedder |
-| 2 | 0.10.1 | `RuntimeManager` and the bundled `llama-server` (Windows Vulkan + CPU, macOS Metal): loopback port + per-launch key, Job Object / watchdog lifetime, priority and threads, idle unload, GPU/CPU fallback; `OpenAiProvider` against it |
-| 3 | - | Golden-set harness (`#[ignore]`d cargo test) with Apple's model as baseline; the run picks the catalog and the embedder |
+| 1 | - | `Provider` trait; `AppleProvider` wrapping today's sidecar unchanged; prompt (`PROMPT_VERSION`), schema and validator ported to `openrize-core`; `OpenAiProvider` and a minimal `llama-server` process handle; golden-set harness (`#[ignore]`d cargo test, `ai/bench.rs`) with Apple's model as baseline. No user-facing change |
+| 2 | 0.10.0 | Generalized `AiStatus` + frontend; stop queueing `embed` jobs with no embedder |
+| 3 | 0.10.1 | `RuntimeManager` and the bundled `llama-server` (Windows Vulkan + CPU, macOS Metal): Job Object / watchdog lifetime, priority, idle unload, GPU/CPU fallback; `OpenAiProvider` wired into the worker. The golden-set run on the real set picks the catalog and the embedder |
 | 4 | 0.10.2 | Bundled embedder, embeddings through it, background re-embed on change, kNN on Windows |
 | 5 | 0.10.3 | `ModelStore`: benchmarked catalog, resumable SHA-256-verified downloads, free-space check, progress events, delete, `.partial` cleanup; memory preflight; power gate |
 | 6 | 0.10.4 | LLM picker in Settings > AI with honest rows, self-test, onboarding model step, one-time banner for existing Windows users. Local models usable end to end from here |

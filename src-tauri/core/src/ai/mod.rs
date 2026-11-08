@@ -1,6 +1,7 @@
 pub mod arbiter;
 pub mod calibration;
 pub mod knn;
+pub mod prompt;
 pub mod rules;
 pub mod store;
 

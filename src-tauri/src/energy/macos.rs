@@ -55,7 +55,7 @@ extern "C" {
     ) -> libc::c_int;
 }
 
-pub fn read_proc_rusage(pid: i32) -> Option<ProcessRusage> {
+fn read_rusage_v4(pid: i32) -> Option<RusageInfoV4> {
     let mut info = RusageInfoV4::default();
     let ret = unsafe {
         proc_pid_rusage(
@@ -64,17 +64,28 @@ pub fn read_proc_rusage(pid: i32) -> Option<ProcessRusage> {
             &mut info as *mut RusageInfoV4 as *mut libc::c_void,
         )
     };
-    if ret == 0 {
-        Some(ProcessRusage {
-            cpu_time_ns: info.ri_user_time
-                + info.ri_system_time
-                + info.ri_child_user_time
-                + info.ri_child_system_time,
-            billed_energy_nj: info.ri_billed_energy,
-        })
-    } else {
-        None
-    }
+    (ret == 0).then_some(info)
+}
+
+pub fn read_proc_rusage(pid: i32) -> Option<ProcessRusage> {
+    read_rusage_v4(pid).map(|info| ProcessRusage {
+        cpu_time_ns: info.ri_user_time
+            + info.ri_system_time
+            + info.ri_child_user_time
+            + info.ri_child_system_time,
+        billed_energy_nj: info.ri_billed_energy,
+    })
+}
+
+/// Includes mmap'd model weights.
+#[cfg(test)]
+pub fn resident_bytes(pid: i32) -> Option<u64> {
+    read_rusage_v4(pid).map(|info| info.ri_resident_size)
+}
+
+#[cfg(test)]
+pub fn peak_memory_bytes(pid: i32) -> Option<u64> {
+    read_rusage_v4(pid).map(|info| info.ri_lifetime_max_phys_footprint)
 }
 
 mod iokit {

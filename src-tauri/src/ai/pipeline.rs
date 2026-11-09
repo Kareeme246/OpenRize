@@ -205,7 +205,7 @@ pub fn label(inputs: Inputs<'_>, llm: Option<&mut dyn Provider>) -> Labeled {
                 });
             }
             Err(error) => {
-                eprintln!("ai worker: foundation model failed: {error}");
+                eprintln!("ai worker: language model failed: {error}");
                 trace = Some(LlmTrace {
                     category: None,
                     project: None,

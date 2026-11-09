@@ -20,7 +20,7 @@ use super::features::{self, EntryFeatures};
 use super::openai::{Endpoint, LocalModel, OpenAiProvider};
 use super::pipeline::{self, Inputs, Labeled};
 use super::provider::Provider;
-use super::runtime::{LaunchSpec, LlamaServer};
+use super::runtime::RuntimeManager;
 use crate::activity::{ActivitySegment, KIND_ACTIVITY};
 
 const BUNDLED_GOLDEN_SET: &str =
@@ -564,14 +564,17 @@ fn start(spec: &Spec, sidecar: Option<&Path>) -> Result<Started, String> {
         Spec::Local { path, thinking } => {
             let binary = env("OPENRIZE_LLAMA_SERVER").unwrap_or_else(|| "llama-server".to_string());
             let stem = strip_split_suffix(&file_name(path));
-            let server = LlamaServer::start(&LaunchSpec::new(&binary, path))?;
+            let runtime = RuntimeManager::new(Some(PathBuf::from(&binary)), path.to_path_buf());
             let model = LocalModel {
                 identity: stem.clone(),
                 model: stem.clone(),
                 disable_thinking: !thinking,
             };
+            let mut provider = OpenAiProvider::new(Endpoint::Local(Box::new(runtime)), model)?;
+            // Load the model before any entry is timed.
+            provider.start()?;
             Ok(Started {
-                provider: Box::new(OpenAiProvider::new(Endpoint::Local(server), model)?),
+                provider: Box::new(provider),
                 label: format!("local:{stem}"),
                 llama_server: Some(llama_version(&binary)),
             })

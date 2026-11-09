@@ -2,8 +2,23 @@
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
     "targets": ["dmg", "app"],
-    "externalBin": ["binaries/openrize-ml", "binaries/rize"],
+    "externalBin": ["binaries/openrize-ml", "binaries/rize", "binaries/llama-server"],
+    "resources": {
+      "binaries/llama-runtime-macos/llama.cpp-LICENSE": "llama.cpp-LICENSE"
+    },
     "macOS": {
+      "frameworks": [
+        "binaries/llama-runtime-macos/libllama-server-impl.dylib",
+        "binaries/llama-runtime-macos/libllama-common.0.dylib",
+        "binaries/llama-runtime-macos/libmtmd.0.dylib",
+        "binaries/llama-runtime-macos/libllama.0.dylib",
+        "binaries/llama-runtime-macos/libggml.0.dylib",
+        "binaries/llama-runtime-macos/libggml-cpu.0.dylib",
+        "binaries/llama-runtime-macos/libggml-blas.0.dylib",
+        "binaries/llama-runtime-macos/libggml-metal.0.dylib",
+        "binaries/llama-runtime-macos/libggml-rpc.0.dylib",
+        "binaries/llama-runtime-macos/libggml-base.0.dylib"
+      ],
       "entitlements": "./Entitlements.plist",
       "hardenedRuntime": true
     }

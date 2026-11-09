@@ -103,6 +103,27 @@ pub enum AiSuggest {
     CategoryProject,
 }
 
+/// Which language model suggests categories; one is active at a time and none is ever swapped in
+/// for another on the user's behalf. Apple's model exists only on a Mac.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AiLlm {
+    Apple,
+    /// A GGUF model from the models folder, run by the bundled `llama-server`.
+    Local,
+    None,
+}
+
+impl Default for AiLlm {
+    fn default() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::Apple
+        } else {
+            Self::None
+        }
+    }
+}
+
 /// Auto-accept thresholds below this would approve too many wrong entries to
 /// be useful; the UI offers 85-99.
 pub const MIN_AUTO_ACCEPT_PERCENT: u8 = 50;
@@ -456,6 +477,9 @@ pub struct Settings {
     /// Activity history older than this many days is deleted. 0 = forever.
     pub retention_days: u32,
     pub ai_suggest: AiSuggest,
+    pub ai_llm: AiLlm,
+    /// File name of a GGUF in the models folder (`paths::MODELS_DIR`), used when `ai_llm` is `local`.
+    pub local_model: Option<String>,
     /// Approve an entry without review when every suggested field clears
     /// `auto_accept_percent`.
     pub auto_accept: bool,
@@ -480,6 +504,8 @@ impl Default for Settings {
             tray_enabled: true,
             retention_days: 0,
             ai_suggest: AiSuggest::CategoryProject,
+            ai_llm: AiLlm::default(),
+            local_model: None,
             auto_accept: true,
             auto_accept_percent: 95,
             ai_custom_prompt: String::new(),
@@ -508,6 +534,11 @@ impl Settings {
                 .take(MAX_CUSTOM_PROMPT_CHARS)
                 .collect();
         }
+        self.local_model = self
+            .local_model
+            .take()
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty());
         self.tracking_hours = self.tracking_hours.normalized();
         self.breaks = self.breaks.normalized();
         self.stopwatch_reminder.after_minutes =
@@ -908,6 +939,42 @@ mod tests {
     }
 
     #[test]
+    fn the_language_model_defaults_to_apple_on_a_mac_and_none_elsewhere() {
+        let settings = Settings::default();
+        assert_eq!(
+            settings.ai_llm,
+            if cfg!(target_os = "macos") {
+                AiLlm::Apple
+            } else {
+                AiLlm::None
+            }
+        );
+        assert_eq!(settings.local_model, None);
+        let dir = temp_dir("ai-llm-old-file");
+        fs::write(dir.join(FILE_NAME), r#"{"aiSuggest":"category"}"#).unwrap();
+        let loaded = SettingsStore::load(&dir).unwrap().snapshot();
+        assert_eq!(loaded.ai_llm, AiLlm::default());
+        assert_eq!(loaded.local_model, None);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_language_model_can_be_patched_and_the_model_cleared() {
+        let dir = temp_dir("ai-llm-patch");
+        let mut store = SettingsStore::load(&dir).unwrap();
+        store.patch("aiLlm", serde_json::json!("local")).unwrap();
+        let next = store
+            .patch("localModel", serde_json::json!("  tiny.gguf "))
+            .unwrap();
+        assert_eq!(next.ai_llm, AiLlm::Local);
+        assert_eq!(next.local_model.as_deref(), Some("tiny.gguf"));
+        let cleared = store.patch("localModel", serde_json::Value::Null).unwrap();
+        assert_eq!(cleared.local_model, None);
+        assert!(store.patch("aiLlm", serde_json::json!("remote")).is_err());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn values_survive_a_reload() {
         let dir = temp_dir("reload");
         {
@@ -922,6 +989,8 @@ mod tests {
                     tray_enabled: false,
                     retention_days: 30,
                     ai_suggest: AiSuggest::Category,
+                    ai_llm: AiLlm::Local,
+                    local_model: Some("Qwen3.5-0.8B-Q4_K_M.gguf".to_string()),
                     auto_accept: false,
                     auto_accept_percent: 90,
                     ai_custom_prompt: "OpenRize is Coding".to_string(),
@@ -962,6 +1031,11 @@ mod tests {
         assert!(!reloaded.tray_enabled);
         assert_eq!(reloaded.retention_days, 30);
         assert_eq!(reloaded.ai_suggest, AiSuggest::Category);
+        assert_eq!(reloaded.ai_llm, AiLlm::Local);
+        assert_eq!(
+            reloaded.local_model.as_deref(),
+            Some("Qwen3.5-0.8B-Q4_K_M.gguf")
+        );
         assert!(!reloaded.auto_accept);
         assert_eq!(reloaded.auto_accept_percent, 90);
         assert_eq!(reloaded.ai_custom_prompt, "OpenRize is Coding");

@@ -16,7 +16,14 @@ import {
 import { Tooltip } from "../components/Tooltip";
 import { useAccounts } from "../hooks/useAccounts";
 import { useAiMetrics } from "../hooks/useAiMetrics";
-import { llmUnavailableReason, noLlm, useAiStatus } from "../hooks/useAiStatus";
+import {
+  hasPersonalModel,
+  llmName,
+  llmUnavailableReason,
+  noLlm,
+  noOnDeviceMl,
+  useAiStatus,
+} from "../hooks/useAiStatus";
 import { useEnergy } from "../hooks/useEnergy";
 import { useSettings } from "../hooks/useSettings";
 import { useTauriEvent } from "../hooks/useTauriEvent";
@@ -182,10 +189,24 @@ function engineSummary(status: AiStatus | null): string {
     return "Starting the on-device models…";
   }
   if (status.engine === "full") {
-    return "Rules, your personal model, and Apple's on-device model";
+    const model =
+      status.device === "cpu" && status.deviceReason === "gpuFailed"
+        ? `${llmName(status)}, running on the CPU because the GPU failed`
+        : status.device === "cpu"
+          ? `${llmName(status)}, running on the CPU`
+          : llmName(status);
+    const tiers = hasPersonalModel(status)
+      ? ["Rules", "your personal model", model]
+      : ["Rules", model];
+    return tiers.length === 2
+      ? `${tiers[0]} and ${tiers[1]}`
+      : `${tiers[0]}, ${tiers[1]}, and ${tiers[2]}`;
   }
   if (status.engine === "fallback") {
     return `Using rules and your personal model only. ${llmUnavailableReason(status) ?? ""}.`;
+  }
+  if (status.provider === "local") {
+    return `Using your rules only. ${llmUnavailableReason(status) ?? ""}.`;
   }
   return "Using your rules only: on-device ML isn't available in this build";
 }
@@ -398,6 +419,12 @@ function AppleIntelligenceRow({
       </div>
     </SettingRow>
   );
+}
+
+/** The Apple Intelligence row belongs to Apple's model: hidden once another choice is active. */
+function showsAppleRow(status: AiStatus | null): boolean {
+  if (status === null || status.engine === "starting") return true;
+  return status.provider === "apple";
 }
 
 function reviewedLabel(status: AiStatus | null): string {
@@ -1129,7 +1156,11 @@ export function Settings({
   };
 
   const aiStatus = useAiStatus();
-  const mlUnavailable = noLlm(aiStatus);
+  // Whether the build has any on-device ML, whether an LLM is active, and whether the personal
+  // model exists: they differ on a Mac with the language model off, or Windows with a local one.
+  const mlUnavailable = noOnDeviceMl(aiStatus);
+  const llmOff = noLlm(aiStatus);
+  const personalModel = hasPersonalModel(aiStatus);
   const [metricDays, setMetricDays] = useState(30);
   const { metrics, error: metricsError, adopt } = useAiMetrics(metricDays);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -1627,7 +1658,7 @@ export function Settings({
                   onChange={saveThreshold}
                 />
               </SettingBlock>
-              {!mlUnavailable && (
+              {!llmOff && (
                 <CustomInstructions
                   value={settings.aiCustomPrompt}
                   onSave={(aiCustomPrompt) => update({ aiCustomPrompt })}
@@ -1783,7 +1814,9 @@ export function Settings({
               description={
                 mlUnavailable
                   ? "How well suggestions are doing, and what OpenRize has learned from your reviews."
-                  : "On-device models, Apple Intelligence integration, personal model maintenance, and prediction effectiveness."
+                  : HAS_APPLE_INTELLIGENCE
+                    ? "On-device models, Apple Intelligence integration, personal model maintenance, and prediction effectiveness."
+                    : "On-device models and prediction effectiveness."
               }
             />
             <SettingGroup
@@ -1801,7 +1834,7 @@ export function Settings({
                       {reviewedLabel(aiStatus)}
                     </span>
                   </SettingRow>
-                  {HAS_APPLE_INTELLIGENCE && (
+                  {HAS_APPLE_INTELLIGENCE && showsAppleRow(aiStatus) && (
                     <AppleIntelligenceRow
                       status={aiStatus}
                       onError={setAiError}
@@ -1835,7 +1868,7 @@ export function Settings({
                   <AiEffectiveness metrics={metrics} status={aiStatus} />
                 )}
               </div>
-              {!mlUnavailable && (
+              {personalModel && (
                 <SettingBlock
                   title="Personal model"
                   description="Classifiers trained on your approved entries"
@@ -1917,7 +1950,7 @@ export function Settings({
               body={
                 mlUnavailable
                   ? "OpenRize forgets its calibration and what it has learned from your reviews. Your entries, categories, projects, and rules are kept. Confidence is capped at 90% again until you review 50 more."
-                  : "OpenRize forgets its personal models, calibration, and the index of similar entries. Your entries, categories, projects, and rules are kept. Suggestions start over from Apple's on-device model and rules, and confidence is capped at 90% again until you review 50 more."
+                  : `OpenRize forgets its personal models, calibration, and the index of similar entries. Your entries, categories, projects, and rules are kept. Suggestions start over from ${llmOff ? "your rules" : `${llmName(aiStatus)} and rules`}, and confidence is capped at 90% again until you review 50 more.`
               }
               confirmLabel="Reset learned data"
               onConfirm={resetLearned}

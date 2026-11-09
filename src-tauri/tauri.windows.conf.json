@@ -3,7 +3,8 @@
   "productName": "OpenRize",
   "bundle": {
     "targets": ["nsis"],
-    "externalBin": ["binaries/rize"],
+    "externalBin": ["binaries/rize", "binaries/llama-server"],
+    "resources": { "binaries/llama-runtime-windows": "" },
     "createUpdaterArtifacts": true,
     "shortDescription": "Automatic, private, local-first time tracking",
     "windows": {

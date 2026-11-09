@@ -17,19 +17,23 @@ use super::arbiter::{Decision, Label};
 use super::calibration::Calibrator;
 use super::features::{self, EntryFeatures, PreviousEntry};
 use super::knn;
+use super::openai::{Endpoint, LocalModel, OpenAiProvider};
 use super::pipeline;
 use super::power::Conditions;
 use super::prompt::Choice;
-use super::provider::{EmbedModel, Provider, ProviderId};
+use super::provider::{EmbedModel, Provider, ProviderId, ProviderKind};
 use super::rules;
+use super::runtime::{self, RuntimeCheck, RuntimeManager};
 use super::sidecar::{self, Capabilities};
 use super::store::{self, Job, JOB_CLASSIFY};
 use super::{
-    update_status, AiRuntime, Field, RuntimeState, EVENT_SUGGESTION_READY, PREFILL_THRESHOLD,
+    engine_for, local_runtime_state, update_status, AiRuntime, EmbedState, Field, LlmState,
+    LlmView, RuntimeState, EVENT_SUGGESTION_READY, PREFILL_THRESHOLD,
 };
 use crate::activity::{self, ActivitySegment};
 use crate::models::TimeEntry;
-use crate::settings::{AiSuggest, Settings};
+use crate::paths;
+use crate::settings::{AiLlm, AiSuggest, Settings};
 use crate::timers::now_epoch_ms;
 use crate::AppState;
 
@@ -50,16 +54,18 @@ const RETRAIN_AT_LEAST_EVERY_MS: u64 = 24 * 60 * 60 * 1000;
 const HOLDOUT_ONE_IN: u64 = 5;
 const CALIBRATION_CHECK_EVERY: Duration = Duration::from_secs(60);
 const CALIBRATION_REFIT_AFTER: u32 = 10;
+/// How long quitting waits for the worker to stop its model processes.
+pub const SHUTDOWN_WAIT: Duration = Duration::from_secs(2);
 const CONTEXT_GAP_MS: u64 = 15 * 60 * 1000;
 const BACKFILL_WINDOW_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 
-pub fn spawn(app: AppHandle, db_path: PathBuf, ml_dir: PathBuf) {
+pub fn spawn(app: AppHandle, db_path: PathBuf, ml_dir: PathBuf, models_dir: PathBuf) {
     std::thread::Builder::new()
         .name("ai-worker".to_string())
         .spawn(move || match Connection::open(&db_path) {
             Ok(conn) => {
                 let _ = conn.busy_timeout(Duration::from_secs(5));
-                Worker::new(app, conn, ml_dir).run();
+                Worker::new(app, conn, ml_dir, models_dir).run();
             }
             Err(error) => eprintln!("ai worker could not open the database: {error}"),
         })
@@ -69,8 +75,19 @@ pub fn spawn(app: AppHandle, db_path: PathBuf, ml_dir: PathBuf) {
 struct Worker {
     app: AppHandle,
     conn: Connection,
+    /// Always the embedder and personal model; also the language model when `ai_llm` is `apple`.
     apple: AppleProvider,
     ml_dir: PathBuf,
+    models_dir: PathBuf,
+    /// What the settings asked for when `choice` and `local` were last built.
+    wanted: Option<(AiLlm, Option<String>)>,
+    choice: AiLlm,
+    /// The local model, if one is selected and its name is a plain file name.
+    local: Option<OpenAiProvider>,
+    /// The runtime is starting or the model is loading.
+    loading: bool,
+    /// Whether the active language model was last ready, to re-queue fallback entries on recovery.
+    llm_was_ready: Option<bool>,
     last_rebuild: Option<Instant>,
     last_probe: Option<Instant>,
     last_retrain_check: Option<Instant>,
@@ -85,12 +102,18 @@ enum Retrained {
 }
 
 impl Worker {
-    fn new(app: AppHandle, conn: Connection, ml_dir: PathBuf) -> Self {
+    fn new(app: AppHandle, conn: Connection, ml_dir: PathBuf, models_dir: PathBuf) -> Self {
         Self {
             app,
             conn,
             apple: AppleProvider::new(),
             ml_dir,
+            models_dir,
+            wanted: None,
+            choice: AiLlm::default(),
+            local: None,
+            loading: false,
+            llm_was_ready: None,
             last_rebuild: None,
             last_probe: None,
             last_retrain_check: None,
@@ -103,8 +126,13 @@ impl Worker {
         if let Err(error) = self.write(store::requeue_interrupted) {
             eprintln!("ai worker: {error}");
         }
+        self.sync_choice();
         self.probe();
         loop {
+            if self.stop_if_shutting_down() {
+                return;
+            }
+            self.sync_choice();
             self.rebuild_if_due();
             let now = now_epoch_ms();
             match self.write(|conn| store::enqueue_live_due(conn, now)) {
@@ -115,6 +143,9 @@ impl Worker {
             // Drain what's due, but come back to rebuild between jobs so a
             // long backlog never delays a block that just closed.
             for _ in 0..10 {
+                if self.app.state::<AiRuntime>().shutting_down() {
+                    break;
+                }
                 match store::next_due(&self.conn, now_epoch_ms()) {
                     Ok(Some(job)) => self.run_job(job),
                     Ok(None) => break,
@@ -124,8 +155,14 @@ impl Worker {
                     }
                 }
             }
-            if self.apple.stop_if_idle() {
-                update_status(&self.app, |s| s.runtime = RuntimeState::Stopped);
+            let apple_idle = self.apple.stop_if_idle();
+            let local_idle = self
+                .local
+                .as_mut()
+                .is_some_and(|local| local.stop_if_idle());
+            if apple_idle || local_idle {
+                self.report_pids();
+                self.publish();
             }
             self.reprobe_if_due();
             self.retrain_if_due();
@@ -182,27 +219,35 @@ impl Worker {
     fn probe(&mut self) {
         self.last_probe = Some(Instant::now());
         if !self.apple.is_installed() {
+            self.applied = None;
             self.note_embedder(None);
-            update_status(&self.app, |s| {
-                s.engine = "rules".to_string();
-                s.set_capabilities(None);
-                s.runtime = RuntimeState::Unavailable;
-            });
+            self.publish();
             return;
         }
         match self.apple.sidecar_mut().probe() {
             Ok(_) => self.apply_capabilities(),
-            Err(error) => update_status(&self.app, |s| {
+            Err(error) => self.probe_failed(error),
+        }
+    }
+
+    /// Without the sidecar there is no Apple model, embedder or personal model; a local language
+    /// model, if chosen, is unaffected.
+    fn probe_failed(&mut self, error: String) {
+        if self.choice == AiLlm::Apple {
+            update_status(&self.app, |s| {
                 s.engine = "rules".to_string();
                 s.runtime = RuntimeState::Unavailable;
                 s.last_error = Some(error);
-            }),
+            });
+        } else {
+            update_status(&self.app, |s| s.last_error = Some(error));
+            self.publish();
         }
     }
 
     fn reprobe_if_due(&mut self) {
         let llm_ready = self.applied.as_ref().is_some_and(|c| c.llm == "available");
-        if llm_ready || !self.apple.is_installed() {
+        if self.choice != AiLlm::Apple || llm_ready || !self.apple.is_installed() {
             return;
         }
         if self
@@ -213,34 +258,74 @@ impl Worker {
         }
     }
 
-    /// Mirrors the sidecar's capabilities into `AiStatus`; when the Foundation
-    /// Model just became available, re-queues entries the fallback engine handled.
+    /// Mirrors the sidecar's capabilities into `AiStatus`.
     fn apply_capabilities(&mut self) {
         let Some(caps) = self.apple.sidecar_capabilities().cloned() else {
             return;
         };
-        let was_ready = self.applied.as_ref().map(|c| c.llm == "available");
-        let running = self.apple.is_running();
         let provider_caps = apple::capabilities_of(&caps);
         self.note_embedder(provider_caps.embed.as_ref().map(|e| e.model.as_str()));
-        update_status(&self.app, |s| {
-            s.engine = if caps.llm == "available" {
-                "full"
-            } else if caps.embed {
-                "fallback"
-            } else {
-                "rules"
+        self.applied = Some(caps);
+        self.publish();
+    }
+
+    /// The one place the engine, language model, embedder, runtime and device fields are written.
+    /// When the active language model just became ready, re-queues entries the fallback engine
+    /// handled.
+    fn publish(&mut self) {
+        let apple_caps = self.applied.as_ref().map(apple::capabilities_of);
+        let apple_runtime = if !self.apple.is_installed() {
+            RuntimeState::Unavailable
+        } else if self.apple.is_running() {
+            RuntimeState::Running
+        } else {
+            RuntimeState::Stopped
+        };
+        let (view, runtime, device) = match self.choice {
+            AiLlm::Apple => {
+                let view = match (&apple_caps, self.apple.is_installed()) {
+                    (Some(caps), _) => LlmView::apple(caps),
+                    // The sidecar is there but has not answered yet: leave the status alone.
+                    (None, true) => return,
+                    (None, false) => LlmView::unsupported(),
+                };
+                (view, apple_runtime, None)
             }
-            .to_string();
-            s.set_capabilities(Some(&provider_caps));
-            s.os = Some(caps.os.clone());
-            s.runtime = if running {
-                RuntimeState::Running
-            } else {
-                RuntimeState::Stopped
-            };
+            AiLlm::Local => {
+                let check = self.local.as_mut().map(|local| local.check());
+                let device = self.local.as_ref().and_then(|local| local.device());
+                (
+                    LlmView::local(check, self.loading),
+                    local_runtime_state(check),
+                    device,
+                )
+            }
+            AiLlm::None => (LlmView::chosen_none(), apple_runtime, None),
+        };
+        let embed = if apple_caps.as_ref().is_some_and(|caps| caps.embed.is_some()) {
+            EmbedState::Ready
+        } else {
+            EmbedState::None
+        };
+        let os = self.applied.as_ref().map(|caps| caps.os.clone());
+        update_status(&self.app, |s| {
+            s.engine = engine_for(view.state, embed).to_string();
+            s.set_llm(view);
+            s.embed = embed;
+            s.runtime = runtime;
+            s.set_device(device);
+            if os.is_some() {
+                s.os = os;
+            }
         });
-        if was_ready == Some(false) && caps.llm == "available" {
+        // Loading is neither: a start that is under way changes nothing yet.
+        if view.state == LlmState::Loading {
+            return;
+        }
+        let ready = view.state == LlmState::Ready;
+        let recovered = self.llm_was_ready == Some(false) && ready;
+        self.llm_was_ready = Some(ready);
+        if recovered {
             let now = now_epoch_ms();
             let requeued =
                 self.write(|conn| store::requeue_fallback(conn, now - BACKFILL_WINDOW_MS, now));
@@ -248,7 +333,67 @@ impl Worker {
                 self.emit_entries_changed();
             }
         }
-        self.applied = Some(caps);
+    }
+
+    /// Applies a change of `ai_llm` or `local_model`: the old local server stops and the new
+    /// choice takes effect with the next job.
+    fn sync_choice(&mut self) {
+        let settings = self.settings();
+        let wanted = (settings.ai_llm, settings.local_model);
+        if self.wanted.as_ref() == Some(&wanted) {
+            return;
+        }
+        let first = self.wanted.is_none();
+        let (choice, model) = wanted.clone();
+        self.wanted = Some(wanted);
+        self.local = None;
+        self.loading = false;
+        self.choice = choice;
+        if choice == AiLlm::Local {
+            self.local = model.and_then(|name| self.open_local(&name));
+        }
+        // A newly chosen model that works is a better tier coming back.
+        self.llm_was_ready = self.llm_was_ready.map(|_| false);
+        self.report_pids();
+        if !first {
+            self.publish();
+        }
+    }
+
+    fn open_local(&self, name: &str) -> Option<OpenAiProvider> {
+        let path = paths::model_file(&self.models_dir, name)?;
+        let stem = path.file_stem()?.to_string_lossy().to_string();
+        let model = LocalModel {
+            identity: stem.clone(),
+            model: stem,
+            disable_thinking: true,
+        };
+        let runtime = RuntimeManager::new(runtime::locate(), path);
+        match OpenAiProvider::new(Endpoint::Local(Box::new(runtime)), model) {
+            Ok(provider) => Some(provider),
+            Err(error) => {
+                eprintln!("ai worker: local model client: {error}");
+                None
+            }
+        }
+    }
+
+    fn report_pids(&self) {
+        let runtime = self.app.state::<AiRuntime>();
+        runtime.set_sidecar_pid(self.apple.pid());
+        runtime.set_local_pid(self.local.as_ref().and_then(|local| local.pid()));
+    }
+
+    /// On quit: kills the model processes and tells `AiRuntime::shutdown`.
+    fn stop_if_shutting_down(&mut self) -> bool {
+        let runtime = self.app.state::<AiRuntime>();
+        if !runtime.shutting_down() {
+            return false;
+        }
+        self.local = None;
+        self.apple.sidecar_mut().stop();
+        runtime.mark_worker_stopped();
+        true
     }
 
     /// Tells the core which embedder exists so it stops queueing embed jobs when there is none.
@@ -258,7 +403,7 @@ impl Worker {
         }
     }
 
-    fn refresh_counts(&self) {
+    fn refresh_counts(&mut self) {
         let queued = store::queued_count(&self.conn).unwrap_or(0);
         let outcomes = store::outcome_count(&self.conn, now_epoch_ms()).unwrap_or(0);
         let calibrated = store::active_calibration(&self.conn)
@@ -269,54 +414,40 @@ impl Worker {
             .ok()
             .flatten()
             .is_some();
-        let running = self.apple.is_running();
-        let installed = self.apple.is_installed();
         update_status(&self.app, |s| {
             s.queued = queued;
             s.outcomes = outcomes;
             s.calibrated = calibrated;
             s.personal = personal;
-            s.runtime = if !installed {
-                RuntimeState::Unavailable
-            } else if running {
-                RuntimeState::Running
-            } else {
-                RuntimeState::Stopped
-            };
         });
+        self.publish();
     }
 
-    /// `None` means only T0.
+    /// The sidecar's capabilities, for the embedder and personal model. `None` means only T0
+    /// (and a local language model, if chosen).
     fn capabilities(&mut self) -> Option<Capabilities> {
         if !self.apple.is_installed() {
             return None;
         }
         match self.apple.sidecar_mut().probe() {
             Ok(caps) => {
-                if self.applied.as_ref() != Some(&caps) || !self.apple.is_running() {
+                if self.applied.as_ref() != Some(&caps) {
                     self.apply_capabilities();
                 } else {
-                    update_status(&self.app, |s| s.runtime = RuntimeState::Running);
+                    self.publish();
                 }
                 Some(caps)
             }
             Err(error) => {
-                update_status(&self.app, |s| {
-                    s.engine = "rules".to_string();
-                    s.runtime = RuntimeState::Unavailable;
-                    s.last_error = Some(error);
-                });
+                self.probe_failed(error);
                 None
             }
         }
     }
 
     fn run_job(&mut self, job: Job) {
-        {
-            let runtime = self.app.state::<AiRuntime>();
-            runtime.set_busy(true);
-            runtime.set_sidecar_pid(self.apple.pid());
-        }
+        self.app.state::<AiRuntime>().set_busy(true);
+        self.report_pids();
 
         let now = now_epoch_ms();
         if let Err(error) = self.write(|conn| store::set_job_state(conn, &job.id, "running", now)) {
@@ -329,11 +460,8 @@ impl Worker {
         } else {
             self.embed_only(&job)
         };
-        {
-            let runtime = self.app.state::<AiRuntime>();
-            runtime.set_busy(false);
-            runtime.set_sidecar_pid(self.apple.pid());
-        }
+        self.app.state::<AiRuntime>().set_busy(false);
+        self.report_pids();
         let now = now_epoch_ms();
         match result {
             Ok(()) => {
@@ -590,7 +718,7 @@ impl Worker {
         let labeled_count = store::labeled_count(&self.conn)?;
         let calibrator = store::active_calibration(&self.conn)?;
 
-        let llm = if caps.is_some() { self.llm() } else { None };
+        let llm = self.llm();
         let labeled = pipeline::label(
             pipeline::Inputs {
                 features: &features,
@@ -613,7 +741,8 @@ impl Worker {
         if let Some(error) = labeled.llm.as_ref().and_then(|t| t.error.clone()) {
             update_status(&self.app, |s| s.last_error = Some(error));
         }
-        let model_version = model_version(caps.as_ref(), &self.apple.id(), &self.conn);
+        let llm_used = labeled.llm.as_ref().is_some_and(|t| t.error.is_none());
+        let model_version = model_version(caps.as_ref(), &self.llm_id(llm_used), &self.conn);
         let outcome = Outcome {
             category: labeled.category,
             project: labeled.project,
@@ -641,11 +770,73 @@ impl Worker {
         Ok(())
     }
 
-    /// The single active-LLM slot: Apple's model when ready. A picker for local models or
-    /// none comes later (`docs/design/local-models.md`).
+    /// The single active-LLM slot, chosen by `ai_llm`. Whatever it names is the only model that
+    /// is ever asked: when it is not ready the job runs on rules and the personal model.
     fn llm(&mut self) -> Option<&mut dyn Provider> {
-        let ready = self.apple.capabilities().is_ok_and(|c| c.llm.is_ready());
-        ready.then_some(&mut self.apple as &mut dyn Provider)
+        self.sync_choice();
+        match self.choice {
+            AiLlm::None => None,
+            AiLlm::Apple => {
+                if !self.apple.is_installed() {
+                    return None;
+                }
+                let ready = self.apple.capabilities().is_ok_and(|c| c.llm.is_ready());
+                ready.then_some(&mut self.apple as &mut dyn Provider)
+            }
+            AiLlm::Local => {
+                if !self.prepare_local() {
+                    return None;
+                }
+                self.local.as_mut().map(|local| local as &mut dyn Provider)
+            }
+        }
+    }
+
+    /// Starts the local server if it is stopped, showing the status as loading meanwhile.
+    /// Whether the model is ready to answer.
+    fn prepare_local(&mut self) -> bool {
+        let Some(check) = self.local.as_mut().map(|local| local.check()) else {
+            self.publish();
+            return false;
+        };
+        let startable = matches!(
+            check,
+            RuntimeCheck::Stopped
+                | RuntimeCheck::Running
+                | RuntimeCheck::Failed { retry_due: true }
+        );
+        if !startable {
+            self.publish();
+            return false;
+        }
+        if check != RuntimeCheck::Running {
+            self.loading = true;
+            self.publish();
+            let started = self.local.as_mut().map(|local| local.start());
+            self.loading = false;
+            if let Some(Err(error)) = started {
+                eprintln!("ai worker: the local model did not start: {error}");
+                update_status(&self.app, |s| s.last_error = Some(error));
+                self.report_pids();
+                self.publish();
+                return false;
+            }
+        }
+        self.report_pids();
+        self.publish();
+        true
+    }
+
+    /// Who produced the suggestion: only a language model that answered is named.
+    fn llm_id(&self, answered: bool) -> ProviderId {
+        match (self.choice, &self.local) {
+            (AiLlm::Apple, _) => self.apple.id(),
+            (AiLlm::Local, Some(local)) if answered => local.id(),
+            _ => ProviderId {
+                kind: ProviderKind::None,
+                model: String::new(),
+            },
+        }
     }
 
     /// Retrains on "Retrain now", or when due (20+ new labels, or any new one a day
@@ -689,11 +880,8 @@ impl Worker {
         }
 
         update_status(&self.app, |s| s.retrain = "running".to_string());
-        {
-            let runtime = self.app.state::<AiRuntime>();
-            runtime.set_busy(true);
-            runtime.set_sidecar_pid(self.apple.pid());
-        }
+        self.app.state::<AiRuntime>().set_busy(true);
+        self.report_pids();
         let mut notes = Vec::new();
         for field in due {
             let what = format!("{} model", field.as_str());
@@ -727,11 +915,8 @@ impl Worker {
             s.retrain = "idle".to_string();
             s.retrain_note = note;
         });
-        {
-            let runtime = self.app.state::<AiRuntime>();
-            runtime.set_busy(false);
-            runtime.set_sidecar_pid(self.apple.pid());
-        }
+        self.app.state::<AiRuntime>().set_busy(false);
+        self.report_pids();
         self.refresh_counts();
     }
 
@@ -1061,6 +1246,8 @@ fn embed_model(caps: Option<&Capabilities>) -> Option<EmbedModel> {
     caps.and_then(|c| apple::capabilities_of(c).embed)
 }
 
+/// `<llm> emb:<embedder> pm:<artifact> cal:<artifact>`; Apple's form is stored on every old
+/// suggestion and must not change. With neither a language model nor the sidecar, `rules-only`.
 fn model_version(caps: Option<&Capabilities>, llm: &ProviderId, conn: &Connection) -> String {
     let artifact = |kind: &str| {
         store::active_artifact(conn, kind)
@@ -1070,15 +1257,15 @@ fn model_version(caps: Option<&Capabilities>, llm: &ProviderId, conn: &Connectio
             .unwrap_or_else(|| "none".to_string())
     };
     let calibration = artifact(store::KIND_CALIBRATION);
-    match caps {
-        Some(caps) => format!(
-            "{} emb:r{} pm:{} cal:{calibration}",
-            llm.tag(),
-            caps.embed_revision,
-            artifact(Field::Category.as_str())
-        ),
-        None => format!("rules-only cal:{calibration}"),
+    if caps.is_none() && llm.kind != ProviderKind::Local {
+        return format!("rules-only cal:{calibration}");
     }
+    let embedder = caps.map_or_else(|| "none".to_string(), |c| format!("r{}", c.embed_revision));
+    format!(
+        "{} emb:{embedder} pm:{} cal:{calibration}",
+        llm.tag(),
+        artifact(Field::Category.as_str())
+    )
 }
 
 /// Whether an entry belongs to the 20% holdout. Keyed on the entry id, so an
@@ -1264,6 +1451,45 @@ mod tests {
             model_version(None, &apple::id_for(None), &conn),
             "rules-only cal:none"
         );
+    }
+
+    #[test]
+    fn a_local_model_names_itself_and_the_embedder_that_exists() {
+        let conn = db();
+        let local = ProviderId {
+            kind: ProviderKind::Local,
+            model: "Qwen3.5-0.8B-Q4_K_M".to_string(),
+        };
+        let tag = format!(
+            "local:Qwen3.5-0.8B-Q4_K_M p{}",
+            crate::ai::prompt::PROMPT_VERSION
+        );
+        assert_eq!(
+            model_version(None, &local, &conn),
+            format!("{tag} emb:none pm:none cal:none")
+        );
+        let caps = Capabilities {
+            llm: "available".to_string(),
+            embed: true,
+            embed_dimension: 512,
+            embed_revision: 2,
+            personal: true,
+            os: "26.1".to_string(),
+            version: "1".to_string(),
+        };
+        assert_eq!(
+            model_version(Some(&caps), &local, &conn),
+            format!("{tag} emb:r2 pm:none cal:none")
+        );
+        let none = ProviderId {
+            kind: ProviderKind::None,
+            model: String::new(),
+        };
+        assert_eq!(
+            model_version(Some(&caps), &none, &conn),
+            "none emb:r2 pm:none cal:none"
+        );
+        assert_eq!(model_version(None, &none, &conn), "rules-only cal:none");
     }
 
     #[test]

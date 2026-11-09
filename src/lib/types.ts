@@ -339,18 +339,29 @@ export type AiLlmReason =
   | "modelNotReady"
   | "deviceNotEligible"
   | "unsupportedOS"
+  | "modelMissing"
+  | "runtimeMissing"
+  | "runtimeFailed"
   | "unknown";
 
 export interface AiStatus {
   engine: "full" | "fallback" | "rules" | "starting";
-  /** `none` when no model provider is installed (Windows, or a build without the sidecar). */
-  provider: "apple" | "none";
-  llm: "ready" | "unavailable";
+  /**
+   * `local` is a GGUF model run by the bundled server. `none` when no language model is chosen or
+   * no provider is installed (Windows, or a build without the sidecar).
+   */
+  provider: "apple" | "local" | "none";
+  /** `loading` while the local runtime starts or its model loads. */
+  llm: "ready" | "loading" | "unavailable";
   /** Present only while `llm` is unavailable. */
   llmReason?: AiLlmReason;
   embed: "ready" | "none";
   personal: boolean;
   runtime: "running" | "stopped" | "unavailable";
+  /** Where the local model runs; absent while no local runtime runs. */
+  device?: "gpu" | "cpu";
+  /** Present when `device` is the CPU only because the GPU failed. */
+  deviceReason?: "gpuFailed";
   os?: string;
   queued: number;
   /** Verdicts calibration has learned from; the curve starts at 50. */

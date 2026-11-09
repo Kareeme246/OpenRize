@@ -61,7 +61,8 @@ export function CategorySheet({
   onRemoved,
 }: CategorySheetProps) {
   const showToast = useToast();
-  const mlUnavailable = noLlm(useAiStatus());
+  const aiStatus = useAiStatus();
+  const mlUnavailable = noLlm(aiStatus);
   const [name, setName] = useState(category?.name ?? "");
   const [color, setColor] = useState(() =>
     category ? category.color : leastUsedSwatch(categories),
@@ -218,7 +219,7 @@ export function CategorySheet({
           hint={
             mlUnavailable
               ? "One line describing the kind of work."
-              : "One line describing the kind of work. Apple Intelligence uses this to suggest this category."
+              : `One line describing the kind of work. ${aiStatus?.provider === "local" ? "The local model" : "Apple Intelligence"} uses this to suggest this category.`
           }
         >
           <textarea

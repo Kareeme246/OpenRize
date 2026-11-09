@@ -218,26 +218,28 @@ fn run_sampler_loop(app: AppHandle, conn: Connection, running: Arc<AtomicBool>) 
     }
 }
 
+/// The Swift sidecar and the local model server are charged to the app.
+fn helper_rusage(app: &AppHandle) -> impl Iterator<Item = ProcessRusage> {
+    let pids: Vec<u32> = app
+        .try_state::<AiRuntime>()
+        .map(|rt| rt.helper_pids().collect())
+        .unwrap_or_default();
+    pids.into_iter()
+        .filter_map(|pid| read_process_rusage(pid as i32))
+}
+
 fn read_total_cpu_ns(app: &AppHandle, main_pid: i32) -> u64 {
     let main_rusage = read_process_rusage(main_pid).unwrap_or_default();
-    let sidecar_pid = app.try_state::<AiRuntime>().and_then(|rt| rt.sidecar_pid());
-
-    let sidecar_rusage = sidecar_pid
-        .and_then(|pid| read_process_rusage(pid as i32))
-        .unwrap_or_default();
-
-    main_rusage.cpu_time_ns + sidecar_rusage.cpu_time_ns
+    let helpers_ns: u64 = helper_rusage(app).map(|rusage| rusage.cpu_time_ns).sum();
+    main_rusage.cpu_time_ns + helpers_ns
 }
 
 fn read_total_energy_nj(app: &AppHandle, main_pid: i32) -> u64 {
     let main_rusage = read_process_rusage(main_pid).unwrap_or_default();
-    let sidecar_pid = app.try_state::<AiRuntime>().and_then(|rt| rt.sidecar_pid());
-
-    let sidecar_rusage = sidecar_pid
-        .and_then(|pid| read_process_rusage(pid as i32))
-        .unwrap_or_default();
-
-    main_rusage.billed_energy_nj + sidecar_rusage.billed_energy_nj
+    let helpers_nj: u64 = helper_rusage(app)
+        .map(|rusage| rusage.billed_energy_nj)
+        .sum();
+    main_rusage.billed_energy_nj + helpers_nj
 }
 
 pub fn get_summary(

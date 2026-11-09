@@ -14,7 +14,7 @@ verified: never
 
 # AI categorization
 
-Closed time entries are queued and drained one at a time by a background worker. Each runs through three tiers and an arbiter blends them into a calibrated confidence per field (category and project): T0 your rules (a hit is certain), T1 your personal model (nearest approved entries plus a text classifier trained on them), and T2 Apple's on-device foundation model through a Swift sidecar. Corrections feed back at once; three consistent corrections for an app or site offer a rule; the personal models retrain in the background and the confidence curve is refit from accept and reject history. Nothing makes a network call. The engine is `full` (all three tiers), `fallback` (rules and personal model, because Apple Intelligence is off, still downloading, unsupported or the OS is older than macOS 26) or `rules` (the sidecar is missing or failed, as on Windows). The window shows it in Settings (Suggestions and AI sections), as a dismissible banner on the Calendar when Apple Intelligence could be turned on, and as suggestions in the review panel (see [review.md](review.md), [calendar.md](calendar.md)). Rules come from project and category hints (see [projects.md](projects.md), [categories.md](categories.md)).
+Closed time entries are queued and drained one at a time by a background worker. Each runs through three tiers and an arbiter blends them into a calibrated confidence per field (category and project): T0 your rules (a hit is certain), T1 your personal model (nearest approved entries plus a text classifier trained on them), and T2 a language model: Apple's on-device foundation model through a Swift sidecar, or a local GGUF model run by the bundled `llama-server` (the `ai-llm` setting picks one; Windows defaults to none). Corrections feed back at once; three consistent corrections for an app or site offer a rule; the personal models retrain in the background and the confidence curve is refit from accept and reject history. Nothing makes a network call except to the loopback model server. The engine is `full` (the language model is ready), `fallback` (rules and personal model, because Apple Intelligence is off, still downloading, unsupported, the OS is older than macOS 26, or the language model is set to none or its local model is missing, loading or failed) or `rules` (no personal model either, as on Windows without a language model). The window shows it in Settings (Suggestions and AI sections), as a dismissible banner on the Calendar when Apple Intelligence could be turned on, and as suggestions in the review panel (see [review.md](review.md), [calendar.md](calendar.md)). Rules come from project and category hints (see [projects.md](projects.md), [categories.md](categories.md)).
 
 ## Sub-features
 
@@ -78,12 +78,23 @@ scripts/app-drive.sh rize -- --json entries show 3f9a1c2e
 
 Replace `3f9a1c2e` with the last characters of an entry id from the list. The `entries show` JSON has `data.detail.suggestions` (one per field, with `engine`, `confidence`, `valueId`, `signals`, `alternatives`, `outcome`) and `data.detail.job` (`state`).
 
+To point a driven session at a local model instead of Apple's: there is no picker yet (it is a later delivery row), so use the two settings and the models folder. The models folder is `models` inside the session's app data directory (`~/Library/Application Support/<identifier>` on macOS, printed by `start` as `app-data`; shown as `<app-data>` below); it is not data and no account owns it. `stop` deletes that directory, so symlink a GGUF in each time rather than copying it.
+
+```bash
+mkdir -p "<app-data>/models" && ln -s /path/to/Qwen3.5-0.8B-Q4_K_M.gguf "<app-data>/models/"
+scripts/app-drive.sh rize -- settings set local-model Qwen3.5-0.8B-Q4_K_M.gguf
+scripts/app-drive.sh rize -- settings set ai-llm local
+```
+
+A running app applies both on its next job. The server must be staged next to the app binary (`src-tauri/target/debug/llama-server`); without it the status says the runtime is missing. Read the result in the "Suggestion engine" row ("Rules, your personal model, and a local model on this device", with ", running on the CPU" when the GPU failed) or from the `ai-status-changed` payload (`provider` `local`, `llm` `ready`/`loading`/`unavailable` with `llmReason` `modelMissing`, `runtimeMissing` or `runtimeFailed`, and `device` `gpu` or `cpu`). The server starts on the first classification and stops after ten idle minutes. `ai-llm none` shows "Using rules and your personal model only. No language model is selected." on a Mac.
+
 ## What proves it works
 
 - Engine status in the window is read from the live status; the summary text must match what the machine can do:
   - Apple Intelligence on macOS 26 or later: "Rules, your personal model, and Apple's on-device model" and the Apple Intelligence row says Enabled.
   - macOS with the sidecar but no Apple Intelligence (off, downloading, ineligible or older than macOS 26): "Using rules and your personal model only." followed by the reason, and the row shows the reason (or "Not enabled" / "Downloading..."). The Calendar shows the banner only for the fixable reasons (off or downloading), not for an ineligible Mac or an old OS.
-  - Windows or a build without the sidecar: heading "AI & suggestions", the row "Suggestions use your rules", no "Suggestion engine", no "Custom instructions", no "Personal model", and "Reset learned data" still present.
+  - Local model selected: "Rules, your personal model, and a local model on this device" on a Mac, "Rules and a local model on this device" on Windows; the Apple Intelligence row and the Calendar banner are hidden because they belong to Apple's model.
+  - Windows or a build without the sidecar and with no language model: heading "AI & suggestions", the row "Suggestions use your rules", no "Suggestion engine", no "Custom instructions", no "Personal model", and "Reset learned data" still present.
 - A dev instance on a machine without Apple Intelligence can still show and prove: the engine summary and reason, the fallback banner, every preference control (`rize settings get` read-back after each click), the empty effectiveness state, the cold-start text and the reset flow. This is the normal case for a driven run.
 - Empty effectiveness: with no reviews, the cards show `-`, "Who decided" says "No decisions in this period yet." and the calibration area says "No reviewed model suggestions in the last 30 days yet. Rule matches are certain, so they aren't charted.". The calibration line reads "Learning: 0 of 50 reviews before calibration starts. Until then, confidence is capped at 90%." The preview line under the threshold says "No suggested entries in the last 30 days to preview against yet."
 - Preference round trip: after each click, `rize --json settings get KEY` (`ai-suggest` `"category"` or `"categoryProject"`, `auto-accept` true or false, `auto-accept-percent`) must equal what was chosen, and the radio or switch state in `tree` must agree. Both are required for a PASS.
@@ -106,6 +117,6 @@ Replace `3f9a1c2e` with the last characters of an entry id from the list. The `e
 
 ## Not reachable
 
-- Apple's on-device model and the Swift sidecar cannot be forced on or off from here; their availability depends on the host Mac (macOS 26 or later with Apple Intelligence enabled). The `full` tier and the Enabled state cannot be proven on a machine without it, and the "Turn on in System Settings" and "Apple intelligence settings" buttons open System Settings (native).
+- Apple's on-device model and the Swift sidecar cannot be forced on or off from here (set `ai-llm` to `none` or `local` to leave Apple's model out); their availability depends on the host Mac (macOS 26 or later with Apple Intelligence enabled). The `full` tier and the Enabled state cannot be proven on a machine without it, and the "Turn on in System Settings" and "Apple intelligence settings" buttons open System Settings (native).
 - Retraining and calibration refits happen on a schedule under idle and power conditions that a driven run does not control, and training artifacts live in the session's `ml` folder (read it from disk if needed); no tool here triggers them deterministically.
 - Real suggestions need real captured activity; no `rize` command classifies or retrains yet (those are M2 in COMMANDS.md).

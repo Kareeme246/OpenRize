@@ -1,6 +1,6 @@
 [package]
 name = "openrize"
-version = "0.10.0"
+version = "0.10.1"
 description = "Automatic, private, local-first time tracking for your Mac"
 authors = ["Kareem Elgohry <kareemdev52@gmail.com>"]
 edition = "2021"
@@ -19,6 +19,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+sha2 = "0.10"
+flate2 = "1"
+tar = { version = "0.4", default-features = false }
+zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
 
 [dependencies]
 openrize-core = { path = "core" }
@@ -69,6 +73,7 @@ windows = { version = "0.61", features = [
   "Win32_Graphics_Gdi",
   "Win32_Media_Audio",
   "Win32_Media_Audio_Endpoints",
+  "Win32_Security",
   "Win32_Storage_EnhancedStorage",
   "Win32_Storage_FileSystem",
   "Win32_Storage_Packaging_Appx",
@@ -76,6 +81,7 @@ windows = { version = "0.61", features = [
   "Win32_System_Com_StructuredStorage",
   "Win32_System_Diagnostics_Debug",
   "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_JobObjects",
   "Win32_System_LibraryLoader",
   "Win32_System_Power",
   "Win32_System_ProcessStatus",

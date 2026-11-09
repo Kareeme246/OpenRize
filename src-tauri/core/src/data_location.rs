@@ -8,7 +8,7 @@ use std::hash::Hasher;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
-use crate::paths::{ACCOUNTS_FILE, CONFIG_DIR, DATABASE_FILE, LOCK_FILE};
+use crate::paths::{ACCOUNTS_FILE, CONFIG_DIR, DATABASE_FILE, LOCK_FILE, MODELS_DIR};
 use crate::state::lock_stores;
 
 const STAGING_PREFIX: &str = ".migrating-";
@@ -213,8 +213,10 @@ fn move_entries(legacy: &Path, local: &Path, io: &Io, resuming: bool) -> Result<
         .map_err(|error| MoveError::clean(format!("could not list the old folder: {error}")))?
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.file_name())
-        // The lock is only a lock, settings are not data, and the marker is ours.
-        .filter(|name| name != LOCK_FILE && name != CONFIG_DIR && name != MARKER_FILE)
+        // The lock is only a lock, settings and model files are not data, and the marker is ours.
+        .filter(|name| {
+            name != LOCK_FILE && name != CONFIG_DIR && name != MODELS_DIR && name != MARKER_FILE
+        })
         .collect();
     names.sort_by(|a, b| rank(a).cmp(&rank(b)).then_with(|| a.cmp(b)));
     // Nothing already in the new folder is replaced: refuse before moving any, except when
@@ -739,6 +741,27 @@ mod tests {
         assert_eq!(contents(&local, "config/settings.json"), "mine");
         assert_eq!(contents(&legacy, "config/settings.json"), "theirs");
         assert!(!legacy.join("activity.db").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn the_models_folder_is_not_data_and_is_never_moved() {
+        let root = temp_dir("models");
+        let (legacy, local) = (root.join("roaming"), root.join("local"));
+        fs::create_dir_all(local.join(MODELS_DIR)).unwrap();
+        fs::write(local.join("models/small.gguf"), "mine").unwrap();
+        // Models alone are not data, so the old folder still wins.
+        assert!(!has_data(&local));
+        legacy_install(&legacy);
+        assert_eq!(choose(&legacy, &local), legacy);
+        fs::create_dir_all(legacy.join(MODELS_DIR)).unwrap();
+        fs::write(legacy.join("models/theirs.gguf"), "theirs").unwrap();
+
+        assert_eq!(adopt(&legacy, &local), local);
+        assert_eq!(contents(&local, "activity.db"), "db");
+        assert_eq!(contents(&local, "models/small.gguf"), "mine");
+        assert_eq!(contents(&legacy, "models/theirs.gguf"), "theirs");
+        assert!(!local.join("models/theirs.gguf").exists());
         let _ = fs::remove_dir_all(root);
     }
 

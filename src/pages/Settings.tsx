@@ -76,7 +76,7 @@ import type {
 } from "../lib/types";
 import { AccountsSetting } from "./settings/AccountsSetting";
 import { BreakSettingsGroups } from "./settings/BreakSettings";
-import { DevToolsSetting } from "./settings/DevToolsSetting";
+import { DeveloperSection } from "./settings/DeveloperSection";
 import {
   Select,
   SettingBlock,
@@ -138,7 +138,7 @@ type SettingsSection =
   | "advanced"
   | "developer";
 
-const HAS_DEV_TOOLS = DEV_TOOLS && HAS_PERMISSIONS;
+const HAS_DEV_TOOLS = DEV_TOOLS;
 
 const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   "overview",
@@ -1939,9 +1939,9 @@ export function Settings({
             >
               <SettingsSectionHeading
                 title="Developer"
-                description="Dev build only. Tools for testing permissions and onboarding by hand; never shipped in a release."
+                description="Dev build only. Turn on Advanced Developer Mode to reveal tools for testing by hand; never shipped in a release."
               />
-              <DevToolsSetting />
+              <DeveloperSection />
             </section>
           )}
           {confirmReset && (

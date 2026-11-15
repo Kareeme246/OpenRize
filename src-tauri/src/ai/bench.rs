@@ -458,8 +458,24 @@ struct Prepared<'a> {
     cases: Vec<(Built, Option<Vec<f32>>)>,
 }
 
+/// The harness embeds with whichever embedder the run names, so the same golden set can judge
+/// Apple's NLEmbedding against the bundled GGUF.
+enum BenchEmbedder {
+    Apple(AppleProvider),
+    Local(super::embedder::Embedder),
+}
+
+impl BenchEmbedder {
+    fn embed(&mut self, texts: &[String]) -> Result<Vec<Option<Vec<f32>>>, String> {
+        match self {
+            Self::Apple(apple) => Provider::embed(apple, texts),
+            Self::Local(local) => local.embed(texts),
+        }
+    }
+}
+
 fn embed_all(
-    embedder: Option<&mut AppleProvider>,
+    embedder: Option<&mut BenchEmbedder>,
     texts: &[String],
 ) -> Result<Vec<Option<Vec<f32>>>, String> {
     match embedder {
@@ -470,7 +486,7 @@ fn embed_all(
 
 fn prepare<'a>(
     set: &'a GoldenSet,
-    mut embedder: Option<&mut AppleProvider>,
+    mut embedder: Option<&mut BenchEmbedder>,
 ) -> Result<Vec<Prepared<'a>>, String> {
     let mut prepared = Vec::new();
     for workspace in &set.workspaces {
@@ -790,13 +806,25 @@ fn run() -> Result<(), String> {
             if embedder.capabilities()?.embed.is_none() {
                 return Err("the sidecar reports no embedding model".to_string());
             }
-            Some(embedder)
+            Some(BenchEmbedder::Apple(embedder))
         }
         "none" => None,
         other => {
-            return Err(format!(
-                "OPENRIZE_BENCH_EMBEDDER must be apple or none, not {other:?}"
-            ))
+            let path = other.strip_prefix("local=").ok_or_else(|| {
+                format!("OPENRIZE_BENCH_EMBEDDER must be apple, none or local=<path.gguf>, not {other:?}")
+            })?;
+            let binary = env("OPENRIZE_LLAMA_SERVER").unwrap_or_else(|| "llama-server".to_string());
+            let mut embedder =
+                super::embedder::Embedder::new(Some(PathBuf::from(&binary)), PathBuf::from(path))?;
+            if embedder.model().is_none() {
+                return Err(format!("the embedder at {path} is not usable"));
+            }
+            embedder.start()?;
+            eprintln!(
+                "[embedder] {other} via llama-server {}",
+                llama_version(&binary)
+            );
+            Some(BenchEmbedder::Local(embedder))
         }
     };
     let prepared = prepare(&set, embedder.as_mut())?;

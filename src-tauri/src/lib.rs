@@ -26,9 +26,9 @@ use openrize_core::{categories, models, paths, projects, reports, settings, time
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use tauri::{Manager, RunEvent, WindowEvent};
-
 use settings::CloseBehavior;
+use tauri::path::BaseDirectory;
+use tauri::{Manager, RunEvent, WindowEvent};
 
 /// The tray can change timer state without the window asking.
 pub const EVENT_TIMERS_CHANGED: &str = "timers-changed";
@@ -134,6 +134,11 @@ pub fn run() {
                 dir.join(activity::DB_FILE),
                 dir.join("ml"),
                 app.path().app_local_data_dir()?.join(paths::MODELS_DIR),
+                // The bundled embedder is a resource beside the app, not a download; a build
+                // without it simply has no embedder of its own.
+                app.path()
+                    .resolve(ai::embedder::RESOURCE, BaseDirectory::Resource)
+                    .ok(),
             );
             energy::spawn_sampler(app.handle().clone(), dir.join(activity::DB_FILE));
             capture::register_sleep_listeners(app.handle().clone());

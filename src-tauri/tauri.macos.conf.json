@@ -4,7 +4,9 @@
     "targets": ["dmg", "app"],
     "externalBin": ["binaries/openrize-ml", "binaries/rize", "binaries/llama-server"],
     "resources": {
-      "binaries/llama-runtime-macos/llama.cpp-LICENSE": "llama.cpp-LICENSE"
+      "binaries/llama-runtime-macos/llama.cpp-LICENSE": "llama.cpp-LICENSE",
+      "binaries/models": "models",
+      "embedder-LICENSE": "models/embedder-LICENSE"
     },
     "macOS": {
       "frameworks": [

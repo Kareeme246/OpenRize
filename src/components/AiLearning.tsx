@@ -1,7 +1,11 @@
 import { useEffect, useId, useState } from "react";
 import { percent } from "../lib/confidence";
 import { plural } from "../lib/format";
-import { POWER_SAVING_MODE, THIS_COMPUTER } from "../lib/platform";
+import {
+  HAS_APPLE_INTELLIGENCE,
+  POWER_SAVING_MODE,
+  THIS_COMPUTER,
+} from "../lib/platform";
 import type {
   AiMetrics,
   AiStatus,
@@ -521,12 +525,14 @@ export function PersonalModels({
 }) {
   const busy = status?.retrain === "queued" || status?.retrain === "running";
   const { newLabels, retrainAfter } = metrics.models;
-  // `runtime` is the Apple sidecar only while Apple's model is active; retraining always uses it.
+  // `runtime` is the Apple sidecar only while Apple's model is active; retraining always uses it,
+  // so an embedder that now lives in the bundled runtime does not make training possible.
   const unavailable =
     status !== null &&
-    (status.provider === "apple"
-      ? status.runtime === "unavailable"
-      : status.embed !== "ready");
+    (!HAS_APPLE_INTELLIGENCE ||
+      (status.provider === "apple"
+        ? status.runtime === "unavailable"
+        : status.embed !== "ready"));
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-col gap-0.5 text-[11.5px] text-fg-muted">

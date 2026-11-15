@@ -656,14 +656,16 @@ pub fn upsert_embedding(
     .map_err(err)
 }
 
+/// A vector cached for reuse only stands in for the same text embedded by the same model.
 pub fn embedding_for(
     conn: &Connection,
     entry_id: &str,
     text_hash: &str,
+    model: &str,
 ) -> Result<Option<Vec<f32>>> {
     conn.query_row(
-        "SELECT vec FROM entry_embeddings WHERE entry_id = ?1 AND text_hash = ?2;",
-        params![entry_id, text_hash],
+        "SELECT vec FROM entry_embeddings WHERE entry_id = ?1 AND text_hash = ?2 AND model = ?3;",
+        params![entry_id, text_hash, model],
         |row| row.get::<_, Vec<u8>>(0),
     )
     .optional()
@@ -671,18 +673,68 @@ pub fn embedding_for(
     .map_err(err)
 }
 
-pub fn labeled_pool(conn: &Connection, since: u64, exclude: &str) -> Result<Vec<Labeled>> {
+/// One entry whose vector an older embedder produced. `features` is the text it was embedded from,
+/// so re-embedding it again needs no segments.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StaleEmbedding {
+    pub entry_id: String,
+    pub features: String,
+    pub text_hash: String,
+}
+
+/// Vectors that do not belong to `model`, oldest entry first: what the background re-embed works
+/// through after the embedder changes.
+pub fn stale_embeddings(conn: &Connection, model: &str, limit: u32) -> Result<Vec<StaleEmbedding>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT v.entry_id, v.features, v.text_hash
+             FROM entry_embeddings v JOIN time_entries e ON e.id = v.entry_id
+             WHERE v.model != ?1 AND e.deleted_at IS NULL
+             ORDER BY e.started_at ASC LIMIT ?2;",
+        )
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(params![model, limit], |row| {
+            Ok(StaleEmbedding {
+                entry_id: row.get(0)?,
+                features: row.get(1)?,
+                text_hash: row.get(2)?,
+            })
+        })
+        .map_err(err)?;
+    rows.collect::<rusqlite::Result<_>>().map_err(err)
+}
+
+/// How much re-embedding is left before every vector came from `model`.
+pub fn stale_embedding_count(conn: &Connection, model: &str) -> Result<u32> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM entry_embeddings v JOIN time_entries e ON e.id = v.entry_id
+         WHERE v.model != ?1 AND e.deleted_at IS NULL;",
+        params![model],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|n| n as u32)
+    .map_err(err)
+}
+
+pub fn labeled_pool(
+    conn: &Connection,
+    since: u64,
+    exclude: &str,
+    model: &str,
+) -> Result<Vec<Labeled>> {
     let mut stmt = conn
         .prepare(
             "SELECT v.vec, e.category_id, e.project_id, v.features,
                EXISTS (SELECT 1 FROM suggestions s WHERE s.entry_id = e.id
                          AND s.outcome IN ('changed', 'rejected'))
              FROM entry_embeddings v JOIN time_entries e ON e.id = v.entry_id
-             WHERE e.deleted_at IS NULL AND e.status = 'approved' AND e.started_at >= ?1 AND e.id != ?2;",
+             WHERE e.deleted_at IS NULL AND e.status = 'approved' AND e.started_at >= ?1
+               AND e.id != ?2 AND v.model = ?3;",
         )
         .map_err(err)?;
     let rows = stmt
-        .query_map(params![since as i64, exclude], |row| {
+        .query_map(params![since as i64, exclude, model], |row| {
             Ok(Labeled {
                 vector: knn::decode(&row.get::<_, Vec<u8>>(0)?),
                 category_id: row.get(1)?,
@@ -1096,6 +1148,95 @@ mod tests {
         set_embedder(&conn, None).unwrap();
         reset_learned(&conn, 5).unwrap();
         assert_eq!(embedder(&conn).unwrap().as_deref(), Some(NO_EMBEDDER));
+    }
+
+    fn entry(conn: &Connection, id: &str, started_at: u64, status: &str) {
+        conn.execute(
+            "INSERT INTO time_entries (id, started_at, ended_at, description, status, source, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'Xcode', ?4, 'auto', 0, 0);",
+            params![id, started_at as i64, started_at as i64 + 1000, status],
+        )
+        .unwrap();
+    }
+
+    fn vector(conn: &Connection, id: &str, text: &str, model: &str) {
+        upsert_embedding(
+            conn,
+            id,
+            &[1.0, 0.0],
+            &format!("hash-{text}"),
+            text,
+            model,
+            0,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_vector_only_stands_in_for_its_own_embedder() {
+        let conn = db();
+        entry(&conn, "e1", 1, "approved");
+        vector(&conn, "e1", "a", "old@r1-00000000");
+        assert_eq!(
+            embedding_for(&conn, "e1", "hash-a", "old@r1-00000000").unwrap(),
+            Some(vec![1.0, 0.0])
+        );
+        // The other model's vector is not the same text's vector: it must be asked for again.
+        assert_eq!(
+            embedding_for(&conn, "e1", "hash-a", "new@r1-11111111").unwrap(),
+            None
+        );
+        assert!(
+            labeled_pool(&conn, 0, "x", "old@r1-00000000")
+                .unwrap()
+                .len()
+                == 1
+        );
+        assert!(labeled_pool(&conn, 0, "x", "new@r1-11111111")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn re_embedding_works_through_the_oldest_vectors_first() {
+        let conn = db();
+        for (id, started_at) in [("late", 300), ("early", 100), ("mid", 200)] {
+            entry(&conn, id, started_at, "approved");
+            vector(&conn, id, id, "old@r1-00000000");
+        }
+        entry(&conn, "gone", 50, "approved");
+        vector(&conn, "gone", "gone", "old@r1-00000000");
+        conn.execute(
+            "UPDATE time_entries SET deleted_at = 1 WHERE id = 'gone';",
+            [],
+        )
+        .unwrap();
+
+        assert_eq!(stale_embedding_count(&conn, "new@r1-11111111").unwrap(), 3);
+        assert_eq!(stale_embedding_count(&conn, "old@r1-00000000").unwrap(), 0);
+
+        let first = stale_embeddings(&conn, "new@r1-11111111", 2).unwrap();
+        let ids: Vec<&str> = first.iter().map(|row| row.entry_id.as_str()).collect();
+        assert_eq!(ids, ["early", "mid"]);
+        assert_eq!(first[0].features, "early");
+        assert_eq!(first[0].text_hash, "hash-early");
+
+        for row in &first {
+            upsert_embedding(
+                &conn,
+                &row.entry_id,
+                &[1.0, 0.0],
+                &row.text_hash,
+                &row.features,
+                "new@r1-11111111",
+                0,
+            )
+            .unwrap();
+        }
+        assert_eq!(stale_embedding_count(&conn, "new@r1-11111111").unwrap(), 1);
+        let rest = stale_embeddings(&conn, "new@r1-11111111", 64).unwrap();
+        assert_eq!(rest.len(), 1);
+        assert_eq!(rest[0].entry_id, "late");
     }
 
     fn conn_job_id(conn: &Connection, entry: &str, kind: &str) -> String {

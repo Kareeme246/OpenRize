@@ -8,6 +8,12 @@ use std::process::Command;
 use sha2::{Digest, Sha256};
 
 fn main() {
+    // The app reads the embedder's file name and identity from these, so the shipped file and the
+    // tag stored on every vector cannot drift apart. Set for every target: the consts are compiled
+    // even where nothing is staged.
+    println!("cargo:rustc-env=OPENRIZE_EMBEDDER_FILE={}", EMBEDDER.file);
+    println!("cargo:rustc-env=OPENRIZE_EMBEDDER_TAG={}", EMBEDDER.tag());
+
     // The Swift ML sidecar is macOS-only. Each externalBin must exist before
     // `tauri_build::build()`, which copies it next to the app binary and fails if one is missing.
     let os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
@@ -17,6 +23,7 @@ fn main() {
     if os == "macos" || os == "windows" {
         build_cli_sidecar();
         stage_llama_server();
+        stage_embedder();
     }
     tauri_build::build()
 }
@@ -242,34 +249,83 @@ fn copy_if_changed(from: &Path, to: &Path) {
     }
 }
 
-fn fetch_llama_archive(cache: &Path, asset: &LlamaAsset) -> PathBuf {
-    let path = cache.join(asset.file);
-    if sha256_hex(&path).as_deref() == Some(asset.sha256) {
-        return path;
+/// The embedder that ships for T1 (docs/design/local-models.md, "Bundled fallback models"):
+/// bge-small-en-v1.5 as Q8_0 GGUF, which the runtime pools with CLS and normalises, so cosine
+/// similarity is meaningful. MIT, pinned to a Hugging Face commit and verified like the runtime.
+struct EmbedderAsset {
+    /// The catalog id its identity starts with.
+    id: &'static str,
+    revision: u32,
+    file: &'static str,
+    url: &'static str,
+    sha256: &'static str,
+}
+
+const EMBEDDER: EmbedderAsset = EmbedderAsset {
+    id: "bge-small-en-v1.5",
+    revision: 1,
+    file: "bge-small-en-v1.5-q8_0.gguf",
+    url: "https://huggingface.co/ggml-org/bge-small-en-v1.5-Q8_0-GGUF/resolve/\
+          f2068edd9b54f2a369549ccc71f70ed273a2a801/bge-small-en-v1.5-q8_0.gguf",
+    sha256: "f046db1dc724cf4f6f0a0c5917e922823b73eb1d27b8f9a9c2797f7866974804",
+};
+
+impl EmbedderAsset {
+    /// `<catalog id>@r<revision>-<sha8>`, the form every vector is tagged with.
+    fn tag(&self) -> String {
+        format!("{}@r{}-{}", self.id, self.revision, &self.sha256[..8])
     }
-    fs::create_dir_all(cache).expect("could not create binaries/llama-cache");
-    let part = cache.join(format!("{}.part", asset.file));
+}
+
+/// Stages the embedder GGUF as `binaries/models/<file>`; the platform configs ship that folder as
+/// the bundle's `models/`, beside `llama-server`.
+fn stage_embedder() {
+    let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let models = manifest.join("binaries/models");
+    let staged = models.join(EMBEDDER.file);
+    println!("cargo:rerun-if-changed={}", staged.display());
+    if sha256_hex(&staged).as_deref() == Some(EMBEDDER.sha256) {
+        return;
+    }
+    let verified = fetch_verified(
+        &manifest.join("binaries/llama-cache"),
+        EMBEDDER.file,
+        EMBEDDER.url,
+        EMBEDDER.sha256,
+    );
+    fs::create_dir_all(&models).expect("could not create binaries/models");
+    copy_if_changed(&verified, &staged);
+}
+
+fn fetch_llama_archive(cache: &Path, asset: &LlamaAsset) -> PathBuf {
     let url = format!(
         "https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_BUILD}/{}",
         asset.file
     );
+    fetch_verified(cache, asset.file, &url, asset.sha256)
+}
+
+fn fetch_verified(cache: &Path, file: &str, url: &str, sha256: &str) -> PathBuf {
+    let path = cache.join(file);
+    if sha256_hex(&path).as_deref() == Some(sha256) {
+        return path;
+    }
+    fs::create_dir_all(cache).expect("could not create binaries/llama-cache");
+    let part = cache.join(format!("{file}.part"));
     let status = Command::new("curl")
         .args(["--fail", "--silent", "--show-error", "--location"])
         .args(["--retry", "3", "--output"])
         .arg(&part)
-        .arg(&url)
+        .arg(url)
         .status()
         .unwrap_or_else(|error| panic!("could not run curl to fetch {url}: {error}"));
     assert!(status.success(), "downloading {url} failed: {status}");
     let actual = sha256_hex(&part);
-    if actual.as_deref() != Some(asset.sha256) {
+    if actual.as_deref() != Some(sha256) {
         let _ = fs::remove_file(&part);
-        panic!(
-            "{url} has SHA-256 {actual:?}, expected {}; refusing to bundle it",
-            asset.sha256
-        );
+        panic!("{url} has SHA-256 {actual:?}, expected {sha256}; refusing to bundle it");
     }
-    fs::rename(&part, &path).expect("could not cache the llama.cpp archive");
+    fs::rename(&part, &path).expect("could not cache the download");
     path
 }
 

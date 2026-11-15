@@ -203,7 +203,11 @@ function engineSummary(status: AiStatus | null): string {
       : `${tiers[0]}, ${tiers[1]}, and ${tiers[2]}`;
   }
   if (status.engine === "fallback") {
-    return `Using rules and your personal model only. ${llmUnavailableReason(status) ?? ""}.`;
+    // Without Apple's model there is no classifier, only the embedder behind kNN.
+    const tiers = HAS_APPLE_INTELLIGENCE
+      ? "Using rules and your personal model only."
+      : "Using your rules and similar past entries only.";
+    return `${tiers} ${llmUnavailableReason(status) ?? ""}.`;
   }
   if (status.provider === "local") {
     return `Using your rules only. ${llmUnavailableReason(status) ?? ""}.`;

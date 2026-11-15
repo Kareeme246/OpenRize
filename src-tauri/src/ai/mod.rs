@@ -1,10 +1,12 @@
 //! On-device AI categorization: the worker runs each closed entry through T0 rules, T1 personal
-//! (kNN + Create ML via the sidecar) and the one T2 language model `Settings::ai_llm` picks (Apple's
-//! via the sidecar, or a GGUF on our loopback `llama-server`); an arbiter blends them.
+//! (kNN over vectors from Apple's NLEmbedding or the bundled embedder, plus Create ML via the
+//! sidecar) and the one T2 language model `Settings::ai_llm` picks (Apple's via the sidecar, or a
+//! GGUF on our loopback `llama-server`); an arbiter blends them.
 
 pub mod apple;
 #[cfg(test)]
 mod bench;
+pub mod embedder;
 pub mod features;
 pub mod guard;
 pub mod metrics;
@@ -263,6 +265,7 @@ pub struct AiRuntime {
     is_busy: AtomicBool,
     sidecar_pid: std::sync::atomic::AtomicU32,
     local_pid: std::sync::atomic::AtomicU32,
+    embedder_pid: std::sync::atomic::AtomicU32,
     shutdown: AtomicBool,
     worker_stopped: Mutex<bool>,
     worker_stopped_signal: Condvar,
@@ -306,8 +309,19 @@ impl AiRuntime {
         self.local_pid.store(pid.unwrap_or(0), Ordering::Relaxed);
     }
 
+    pub fn embedder_pid(&self) -> Option<u32> {
+        let pid = self.embedder_pid.load(Ordering::Relaxed);
+        (pid > 0).then_some(pid)
+    }
+
+    pub fn set_embedder_pid(&self, pid: Option<u32>) {
+        self.embedder_pid.store(pid.unwrap_or(0), Ordering::Relaxed);
+    }
+
     pub fn helper_pids(&self) -> impl Iterator<Item = u32> {
-        [self.sidecar_pid(), self.local_pid()].into_iter().flatten()
+        [self.sidecar_pid(), self.local_pid(), self.embedder_pid()]
+            .into_iter()
+            .flatten()
     }
 
     pub fn shutting_down(&self) -> bool {

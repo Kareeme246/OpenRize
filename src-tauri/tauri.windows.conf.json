@@ -4,7 +4,11 @@
   "bundle": {
     "targets": ["nsis"],
     "externalBin": ["binaries/rize", "binaries/llama-server"],
-    "resources": { "binaries/llama-runtime-windows": "" },
+    "resources": {
+      "binaries/llama-runtime-windows": "",
+      "binaries/models": "models",
+      "embedder-LICENSE": "models/embedder-LICENSE"
+    },
     "createUpdaterArtifacts": true,
     "shortDescription": "Automatic, private, local-first time tracking",
     "windows": {

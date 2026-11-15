@@ -1420,12 +1420,17 @@ pub fn record_client_crash(
 
 // --- Bug reporting ------------------------------------------------------
 
+// These three answer only the main window, which holds the form
+// (`bug_report::ensure_main_window`).
+
 /// What the form can offer to attach. Read-only; nothing is sent.
 #[tauri::command]
 pub fn get_bug_report_diagnostics(
     app: AppHandle,
+    window: tauri::WebviewWindow,
     locale: Option<String>,
 ) -> Result<crate::bug_report::BugDiagnostics, String> {
+    crate::bug_report::ensure_main_window(window.label())?;
     crate::bug_report::collect_diagnostics(&app, locale)
 }
 
@@ -1433,17 +1438,22 @@ pub fn get_bug_report_diagnostics(
 #[tauri::command]
 pub fn preview_bug_report(
     app: AppHandle,
+    window: tauri::WebviewWindow,
     draft: crate::bug_report::BugReportDraft,
 ) -> Result<crate::bug_report::BugReportPayload, String> {
+    crate::bug_report::ensure_main_window(window.label())?;
     crate::bug_report::build_payload(&app, &draft)
 }
 
-/// Sends the draft to the bug report endpoint. Only the Send button calls this.
+/// Sends the draft to the bug report endpoint. The Send button calls this;
+/// `bug_report::send` limits how many times a run of the app may.
 #[tauri::command]
 pub async fn submit_bug_report(
     app: AppHandle,
+    window: tauri::WebviewWindow,
     draft: crate::bug_report::BugReportDraft,
 ) -> Result<crate::bug_report::BugReportResponse, String> {
+    crate::bug_report::ensure_main_window(window.label())?;
     let payload = crate::bug_report::build_payload(&app, &draft)?;
     crate::bug_report::send(&payload).await
 }

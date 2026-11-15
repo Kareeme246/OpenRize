@@ -36,10 +36,13 @@ export function describeError(
 export function installCrashHandlers(): void {
   window.addEventListener("error", (event) => {
     if (BENIGN_MESSAGE.test(event.message)) return;
+    // The error's own message wins over the event's, which Chromium prefixes
+    // with "Uncaught " so that it no longer matches the top of the stack. The
+    // event's is only used when what was thrown is not an `Error`.
     reportClientCrash({
       source: "frontend_error",
-      ...describeError(event.error),
       message: event.message,
+      ...describeError(event.error),
     });
   });
 

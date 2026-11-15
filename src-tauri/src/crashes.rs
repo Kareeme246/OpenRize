@@ -29,7 +29,13 @@
 //! report goes. The request has timeouts, follows no redirects, and carries
 //! only the report, which holds no user content. Turning sending on also
 //! sends reports already saved on this machine; they were scrubbed when they
-//! were written.
+//! were written and are held to the same rules again when they are read back
+//! (`openrize_core::crashes`), so a file put in the folder by something else
+//! is not sent as written.
+//!
+//! A report the endpoint refuses for good ([`Outcome::Rejected`]) is taken out
+//! of the queue like one it accepted: sending it again would get the same
+//! answer, and it must not hold back the reports behind it.
 
 use std::panic::PanicHookInfo;
 use std::path::{Path, PathBuf};
@@ -210,24 +216,56 @@ fn sending_enabled(app: &AppHandle) -> bool {
     app.state::<AppState>().settings_snapshot().crash_reporting
 }
 
-/// Sends one report, if sending is on, and marks it sent.
+/// What became of one attempt to send a report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Outcome {
+    /// The endpoint has it.
+    Sent,
+    /// Not delivered, and a later attempt may be: the report stays queued.
+    Retry,
+    /// The endpoint will never take this report: it leaves the queue.
+    Rejected,
+}
+
+/// The outcome for the endpoint's answer, `None` when there was none (no
+/// network, a timeout). The endpoint answers 503 when it is rate limiting or
+/// its storage fails and 4xx for a report it finds malformed, so only a 4xx
+/// that is not about timing (408, 429) is final.
+fn outcome(status: Option<reqwest::StatusCode>) -> Outcome {
+    match status {
+        Some(status) if status.is_success() => Outcome::Sent,
+        Some(reqwest::StatusCode::REQUEST_TIMEOUT | reqwest::StatusCode::TOO_MANY_REQUESTS) => {
+            Outcome::Retry
+        }
+        Some(status) if status.is_client_error() => Outcome::Rejected,
+        _ => Outcome::Retry,
+    }
+}
+
+/// Sends one report and, unless it is to be tried again, takes it out of the
+/// queue. Returns whether the next report is worth trying now.
+async fn dispatch_and_settle(root: &Path, report: &CrashReport) -> bool {
+    let outcome = dispatch(report).await;
+    if outcome != Outcome::Retry {
+        let _ = crashes::mark_report_sent(root, &report.id);
+    }
+    outcome != Outcome::Retry
+}
+
+/// Sends one report, if sending is on.
 fn spawn_dispatch(app: &AppHandle, root: PathBuf, report: CrashReport) {
     if !sending_enabled(app) {
         return;
     }
     tauri::async_runtime::spawn(async move {
-        match dispatch(&report).await {
-            Ok(()) => {
-                let _ = crashes::mark_report_sent(&root, &report.id);
-            }
-            Err(error) => eprintln!("crash report not sent: {error}"),
-        }
+        dispatch_and_settle(&root, &report).await;
     });
 }
 
 /// Sends every report not yet sent, oldest first, if sending is on. Run at
 /// startup and when the user turns sending on. It stops as soon as sending is
-/// turned off again or a send fails (the rest wait for the next launch).
+/// turned off again or a report has to be tried again later (the rest wait for
+/// the next launch); a report the endpoint refuses for good does not stop it.
 pub fn dispatch_pending_reports(app: AppHandle) {
     let Some(root) = crash_root() else {
         return;
@@ -241,11 +279,9 @@ pub fn dispatch_pending_reports(app: AppHandle) {
                 if !sending_enabled(&app) {
                     break;
                 }
-                if let Err(error) = dispatch(&report).await {
-                    eprintln!("crash report not sent: {error}");
+                if !dispatch_and_settle(&root, &report).await {
                     break;
                 }
-                let _ = crashes::mark_report_sent(&root, &report.id);
             }
         }
         SWEEPING.store(false, Ordering::SeqCst);
@@ -253,7 +289,7 @@ pub fn dispatch_pending_reports(app: AppHandle) {
 }
 
 /// Posts one report to [`CRASH_ENDPOINT`].
-async fn dispatch(report: &CrashReport) -> Result<(), String> {
+async fn dispatch(report: &CrashReport) -> Outcome {
     // reqwest is built without a bundled crypto provider, like the updater's.
     if rustls::crypto::CryptoProvider::get_default().is_none() {
         let _ = rustls::crypto::ring::default_provider().install_default();
@@ -264,16 +300,23 @@ async fn dispatch(report: &CrashReport) -> Result<(), String> {
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|error| error.to_string())?;
-    client
-        .post(CRASH_ENDPOINT)
-        .json(report)
-        .send()
-        .await
-        .and_then(reqwest::Response::error_for_status)
-        .map(|_| ())
-        .map_err(|error| error.without_url().to_string())
+        .build();
+    let response = match client {
+        Ok(client) => client.post(CRASH_ENDPOINT).json(report).send().await,
+        Err(error) => Err(error),
+    };
+    let status = match response {
+        Ok(response) => Some(response.status()),
+        Err(error) => {
+            eprintln!("crash report not sent: {}", error.without_url());
+            None
+        }
+    };
+    let outcome = outcome(status);
+    if let (Outcome::Retry | Outcome::Rejected, Some(status)) = (outcome, status) {
+        eprintln!("crash report not sent: HTTP {status}");
+    }
+    outcome
 }
 
 #[cfg(test)]
@@ -305,6 +348,22 @@ mod tests {
             assert!(!saved.contains(leaked), "{leaked} in {saved}");
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn only_a_final_refusal_takes_an_undelivered_report_out_of_the_queue() {
+        let of = |code: u16| outcome(Some(reqwest::StatusCode::from_u16(code).unwrap()));
+        for code in [200, 201, 204] {
+            assert_eq!(of(code), Outcome::Sent, "{code}");
+        }
+        for code in [400, 403, 404, 413, 415, 422] {
+            assert_eq!(of(code), Outcome::Rejected, "{code}");
+        }
+        // No redirect is followed, so a 3xx delivered nothing either.
+        for code in [301, 408, 429, 500, 502, 503, 504] {
+            assert_eq!(of(code), Outcome::Retry, "{code}");
+        }
+        assert_eq!(outcome(None), Outcome::Retry);
     }
 
     #[test]

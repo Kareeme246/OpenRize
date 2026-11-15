@@ -14,15 +14,27 @@
 //! - crash summaries, each chosen individually. A panic message can quote data
 //!   it was handling, so they start unticked and the user reads the text first.
 //!
+//! Every report also carries a random id for this install ([`install_id`]),
+//! which the endpoint uses to limit abuse and does not publish. The form says
+//! so.
+//!
 //! Never read here: window titles, URLs, domains, entries, projects, clients,
 //! the database or its path. The text the user types is sent as written; the
 //! form says the report becomes a public GitHub issue.
 //!
 //! The only destination is [`ENDPOINT`], a constant fixed at build time, over
-//! HTTPS, without following redirects.
+//! HTTPS, without following redirects. Its answer is not trusted either: it is
+//! read up to a small cap, and the issue link it returns must be the issue of
+//! that number in this project's repository ([`checked_response`]).
+//!
+//! The form lives in the main window, so the commands answer only that window
+//! ([`ensure_main_window`]), and one run of the app sends at most
+//! [`MAX_SENDS_PER_RUN`] reports, so a script in a webview cannot post in a
+//! loop.
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -39,6 +51,28 @@ pub const ENDPOINT: &str = match option_env!("OPENRIZE_BUG_ENDPOINT") {
 
 /// Same cap as the worker's, so a report is refused here rather than there.
 pub const MAX_PAYLOAD_BYTES: usize = 64 * 1024;
+
+/// The worker's cap on each text box. It counts as JavaScript's `length`
+/// does, in UTF-16 code units, so [`validate`] counts those too: counting
+/// `char`s would let through text with emoji that the worker then refuses.
+pub const MAX_FIELD_CHARS: usize = 8000;
+
+/// The most of the endpoint's answer that is read. A real one is under 200
+/// bytes.
+const MAX_RESPONSE_BYTES: usize = 4 * 1024;
+
+/// An error message from the endpoint is cut here before it is shown.
+const MAX_ERROR_MESSAGE_CHARS: usize = 200;
+
+/// Reports one run of the app will send. The endpoint has its own limit (5 an
+/// hour); this one holds whatever the endpoint does.
+pub const MAX_SENDS_PER_RUN: u32 = 5;
+
+/// Sends attempted in this run.
+static SENDS: AtomicU32 = AtomicU32::new(0);
+
+/// The window that holds the form.
+const MAIN_WINDOW: &str = "main";
 
 /// Crash summaries offered for attaching, newest first.
 const OFFERED_CRASHES: usize = 5;
@@ -244,18 +278,27 @@ fn enum_name<T: std::fmt::Debug>(value: &T) -> String {
     format!("{value:?}").to_lowercase()
 }
 
-/// A random id for this install, kept in the config folder. It exists so the
-/// endpoint can limit reports per install; it names no one and is created the
-/// first time a report is previewed or sent.
+/// `text` when it is a version 4 uuid: random bits and nothing else. Earlier
+/// builds wrote a version 7 one, which starts with the time it was made.
+fn random_id(text: &str) -> Option<uuid::Uuid> {
+    uuid::Uuid::parse_str(text)
+        .ok()
+        .filter(|id| id.get_version() == Some(uuid::Version::Random))
+}
+
+/// A random id for this install (a version 4 uuid), kept in the config
+/// folder. It exists so the endpoint can limit reports per install, which
+/// does not publish it; it names no one, says nothing about when it was made,
+/// and is created the first time a report is previewed or sent. An id of any
+/// other kind found on disk is replaced, never sent.
 fn install_id() -> Result<String, String> {
     let path = openrize_core::settings::config_dir().join(INSTALL_ID_FILE);
     if let Ok(existing) = fs::read_to_string(&path) {
-        let existing = existing.trim();
-        if uuid::Uuid::parse_str(existing).is_ok() {
-            return Ok(existing.to_string());
+        if let Some(id) = random_id(existing.trim()) {
+            return Ok(id.to_string());
         }
     }
-    let id = uuid::Uuid::now_v7().to_string();
+    let id = uuid::Uuid::new_v4().to_string();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("could not save the install id: {e}"))?;
     }
@@ -371,7 +414,8 @@ pub fn build_payload(app: &AppHandle, draft: &BugReportDraft) -> Result<BugRepor
     Ok(payload)
 }
 
-/// Required text present and the serialized report within the cap.
+/// Required text present, each box within the worker's cap and the
+/// serialized report within the size cap.
 pub fn validate(payload: &BugReportPayload) -> Result<(), String> {
     if payload.what_happened.is_empty() {
         return Err("Please describe what happened.".to_string());
@@ -381,6 +425,23 @@ pub fn validate(payload: &BugReportPayload) -> Result<(), String> {
     }
     if payload.steps_to_reproduce.is_empty() {
         return Err("Please provide steps to reproduce the issue.".to_string());
+    }
+    let boxes = [
+        ("What happened", payload.what_happened.as_str()),
+        ("What you expected", &payload.what_expected),
+        ("Steps to reproduce", &payload.steps_to_reproduce),
+        (
+            "Additional context",
+            payload.additional_notes.as_deref().unwrap_or(""),
+        ),
+    ];
+    for (label, text) in boxes {
+        let length = text.encode_utf16().count();
+        if length > MAX_FIELD_CHARS {
+            return Err(format!(
+                "\"{label}\" is {length} characters, over the {MAX_FIELD_CHARS} character limit. Shorten it."
+            ));
+        }
     }
     let size = serde_json::to_vec(payload)
         .map_err(|e| format!("Failed to serialize bug report: {e}"))?
@@ -405,7 +466,85 @@ fn endpoint() -> Result<url::Url, String> {
     Ok(url)
 }
 
-/// Sends the report to [`ENDPOINT`]: the one outbound request this module makes.
+/// Refuses a caller that is not the main window. Commands are open to every
+/// webview of the app, and the small panels (menu-bar pulse, break reminder)
+/// have no business reading diagnostics or posting a report.
+pub fn ensure_main_window(label: &str) -> Result<(), String> {
+    if label == MAIN_WINDOW {
+        Ok(())
+    } else {
+        Err("Bug reports can only be sent from the main window.".to_string())
+    }
+}
+
+/// Counts one send against `limit`, or returns `false` when it is spent.
+fn charge(sends: &AtomicU32, limit: u32) -> bool {
+    sends
+        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |sent| {
+            (sent < limit).then_some(sent + 1)
+        })
+        .is_ok()
+}
+
+/// The address of issue `number` in this project's repository.
+fn issue_url(number: u64) -> String {
+    format!(
+        "https://github.com/{}/issues/{number}",
+        crate::updater::REPOSITORY
+    )
+}
+
+/// The endpoint's answer, if its link is exactly the issue it names. The form
+/// opens that link in the browser, so a link to anywhere else is an error, not
+/// something to show.
+fn checked_response(response: BugReportResponse) -> Result<BugReportResponse, String> {
+    if response.issue_url == issue_url(response.issue_number) {
+        Ok(response)
+    } else {
+        Err("The bug report endpoint returned an unexpected issue link.".to_string())
+    }
+}
+
+/// What to tell the user when the endpoint answers `status` with `body`.
+fn error_message(status: reqwest::StatusCode, body: &[u8]) -> String {
+    match status {
+        reqwest::StatusCode::TOO_MANY_REQUESTS => {
+            "Too many reports were sent from this computer or network in the last hour.".to_string()
+        }
+        reqwest::StatusCode::SERVICE_UNAVAILABLE => {
+            "The bug report service is unavailable right now.".to_string()
+        }
+        _ => serde_json::from_slice::<serde_json::Value>(body)
+            .ok()
+            .and_then(|json| {
+                json.get("error")?
+                    .as_str()
+                    .map(str::trim)
+                    .map(str::to_string)
+            })
+            .filter(|message| !message.is_empty())
+            .map_or_else(
+                || format!("Endpoint returned HTTP {status}"),
+                |message| message.chars().take(MAX_ERROR_MESSAGE_CHARS).collect(),
+            ),
+    }
+}
+
+/// The response body, or `None` when it is longer than `cap` (the rest is not
+/// read) or cannot be read.
+async fn read_capped(mut response: reqwest::Response, cap: usize) -> Option<Vec<u8>> {
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.ok()? {
+        if body.len() + chunk.len() > cap {
+            return None;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Some(body)
+}
+
+/// Sends the report to [`ENDPOINT`]: the one outbound request this module
+/// makes, counted against [`MAX_SENDS_PER_RUN`] whatever comes of it.
 pub async fn send(payload: &BugReportPayload) -> Result<BugReportResponse, String> {
     validate(payload)?;
     let body = serde_json::to_vec(payload).map_err(|e| e.to_string())?;
@@ -424,6 +563,13 @@ pub async fn send(payload: &BugReportPayload) -> Result<BugReportResponse, Strin
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
 
+    if !charge(&SENDS, MAX_SENDS_PER_RUN) {
+        return Err(format!(
+            "OpenRize sends at most {MAX_SENDS_PER_RUN} bug reports each time it runs. Restart it to send another."
+        ));
+    }
+    // reqwest adds no `Origin` header, which the worker takes as the mark of a
+    // web page and refuses.
     let response = client
         .post(url)
         .header("Content-Type", "application/json")
@@ -433,19 +579,14 @@ pub async fn send(payload: &BugReportPayload) -> Result<BugReportResponse, Strin
         .map_err(|e| format!("Network error submitting report: {e}"))?;
 
     let status = response.status();
-    if status.is_success() {
-        return response
-            .json()
-            .await
-            .map_err(|e| format!("Invalid response from the bug report endpoint: {e}"));
+    let body = read_capped(response, MAX_RESPONSE_BYTES).await;
+    if !status.is_success() {
+        return Err(error_message(status, body.as_deref().unwrap_or_default()));
     }
-    let error_body = response.text().await.unwrap_or_default();
-    let message = serde_json::from_str::<serde_json::Value>(&error_body)
-        .ok()
-        .and_then(|json| json.get("error")?.as_str().map(str::to_string))
-        .filter(|message| !message.trim().is_empty())
-        .unwrap_or_else(|| format!("Endpoint returned HTTP {status}"));
-    Err(message)
+    let body = body.ok_or("The bug report endpoint returned an unreadable response.")?;
+    serde_json::from_slice(&body)
+        .map_err(|e| format!("Invalid response from the bug report endpoint: {e}"))
+        .and_then(checked_response)
 }
 
 #[cfg(test)]
@@ -486,6 +627,111 @@ mod tests {
         let mut p = payload();
         p.additional_notes = Some("x".repeat(70 * 1024));
         assert!(validate(&p).unwrap_err().contains("limit"));
+    }
+
+    #[test]
+    fn each_text_box_is_capped_as_the_worker_counts_it() {
+        let set: [fn(&mut BugReportPayload, String); 4] = [
+            |p, text| p.what_happened = text,
+            |p, text| p.what_expected = text,
+            |p, text| p.steps_to_reproduce = text,
+            |p, text| p.additional_notes = Some(text),
+        ];
+        for set in set {
+            let mut p = payload();
+            set(&mut p, "x".repeat(MAX_FIELD_CHARS));
+            assert!(validate(&p).is_ok());
+            set(&mut p, "x".repeat(MAX_FIELD_CHARS + 1));
+            assert!(validate(&p).unwrap_err().contains("character limit"));
+            // One emoji is one `char` and two UTF-16 code units, which is how
+            // the worker counts: 4001 of them are 8002.
+            set(&mut p, "\u{1F600}".repeat(MAX_FIELD_CHARS / 2));
+            assert!(validate(&p).is_ok());
+            set(&mut p, "\u{1F600}".repeat(MAX_FIELD_CHARS / 2 + 1));
+            assert!(validate(&p).unwrap_err().contains("character limit"));
+        }
+    }
+
+    #[test]
+    fn only_the_main_window_may_use_the_form() {
+        assert!(ensure_main_window("main").is_ok());
+        for label in ["pulse", "reminder", "", "Main", "main2"] {
+            assert!(ensure_main_window(label).is_err(), "{label}");
+        }
+    }
+
+    #[test]
+    fn a_run_sends_only_so_many_reports() {
+        let sends = AtomicU32::new(0);
+        for _ in 0..MAX_SENDS_PER_RUN {
+            assert!(charge(&sends, MAX_SENDS_PER_RUN));
+        }
+        assert!(!charge(&sends, MAX_SENDS_PER_RUN));
+        assert!(!charge(&sends, MAX_SENDS_PER_RUN));
+        assert_eq!(sends.load(Ordering::SeqCst), MAX_SENDS_PER_RUN);
+    }
+
+    #[test]
+    fn the_install_id_is_random_and_an_older_timestamped_one_is_not_kept() {
+        let random = uuid::Uuid::new_v4().to_string();
+        assert_eq!(random_id(&random).unwrap().to_string(), random);
+        assert!(random_id(&uuid::Uuid::now_v7().to_string()).is_none());
+        assert!(random_id("not an id").is_none());
+        assert!(random_id("").is_none());
+    }
+
+    fn response(issue_number: u64, issue_url: &str) -> BugReportResponse {
+        BugReportResponse {
+            status: "created".to_string(),
+            issue_number,
+            issue_url: issue_url.to_string(),
+        }
+    }
+
+    #[test]
+    fn the_issue_link_must_be_that_issue_in_this_repository() {
+        let ok = "https://github.com/Kareeme246/OpenRize/issues/42";
+        assert_eq!(checked_response(response(42, ok)).unwrap().issue_url, ok);
+        for url in [
+            "https://github.com/Kareeme246/OpenRize/issues/43",
+            "https://github.com/Kareeme246/OpenRize/issues/42/",
+            "https://github.com/Kareeme246/OpenRize/issues/42?x=1",
+            "https://github.com/Kareeme246/OpenRize/issues/42#frag",
+            "https://github.com/Kareeme246/OpenRize/issues/042",
+            "https://github.com/someone/else/issues/42",
+            "https://github.com/Kareeme246/OpenRize/releases/download/v1/x.dmg",
+            "https://github.com.evil.example/Kareeme246/OpenRize/issues/42",
+            "http://github.com/Kareeme246/OpenRize/issues/42",
+            " https://github.com/Kareeme246/OpenRize/issues/42",
+            "",
+        ] {
+            assert!(checked_response(response(42, url)).is_err(), "{url}");
+        }
+    }
+
+    #[test]
+    fn an_endpoint_error_becomes_a_short_message() {
+        use reqwest::StatusCode;
+        let quoted = br#"{"error":"  Missing required fields.  "}"#;
+        assert_eq!(
+            error_message(StatusCode::BAD_REQUEST, quoted),
+            "Missing required fields."
+        );
+        assert!(error_message(StatusCode::TOO_MANY_REQUESTS, quoted).contains("Too many reports"));
+        assert!(error_message(StatusCode::SERVICE_UNAVAILABLE, b"").contains("unavailable"));
+        for body in [&b""[..], b"<html>", br#"{"error":" "}"#, br#"{"error":5}"#] {
+            assert_eq!(
+                error_message(StatusCode::BAD_GATEWAY, body),
+                "Endpoint returned HTTP 502 Bad Gateway"
+            );
+        }
+        let long = format!(r#"{{"error":"{}"}}"#, "y".repeat(1000));
+        assert_eq!(
+            error_message(StatusCode::BAD_REQUEST, long.as_bytes())
+                .chars()
+                .count(),
+            MAX_ERROR_MESSAGE_CHARS
+        );
     }
 
     #[test]

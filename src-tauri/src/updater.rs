@@ -11,7 +11,7 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 
 pub const EVENT_UPDATE_STATUS: &str = "update-status";
 
-const REPOSITORY: &str = "Kareeme246/OpenRize";
+pub(crate) const REPOSITORY: &str = "Kareeme246/OpenRize";
 const FIRST_CHECK_DELAY: Duration = Duration::from_secs(10);
 const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const FOCUS_CHECK_MIN_GAP: Duration = Duration::from_secs(5 * 60);

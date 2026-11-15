@@ -170,6 +170,13 @@ export class ErrorBoundary extends Component<Props, State> {
               )}
             </div>
 
+            {!compact && (
+              <p className="text-[12px] leading-relaxed text-fg-muted">
+                The copied details may include text from your data - read them
+                before posting publicly.
+              </p>
+            )}
+
             {!compact && showDetails && (
               <div className="max-h-52 w-full overflow-y-auto rounded-xl border border-line bg-bg p-3 text-left font-mono text-[11px] text-fg-muted">
                 <pre className="whitespace-pre-wrap break-all">

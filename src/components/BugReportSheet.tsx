@@ -32,8 +32,8 @@ const DATA_FOLDER_LABEL: Record<DataFolder, string> = {
   other: "custom data folder",
 };
 
-/** Issue links are only opened when they point at GitHub. */
-const GITHUB_ISSUE_PREFIX = "https://github.com/";
+/** The worker's cap on each text box; Rust enforces it (`MAX_FIELD_CHARS`). */
+const MAX_FIELD_CHARS = 8000;
 
 /**
  * The report as Markdown, for pasting into a GitHub issue by hand when sending
@@ -221,9 +221,6 @@ export function BugReportSheet({ onClose }: BugReportSheetProps) {
     }
   };
 
-  const issueUrl = successResponse?.issueUrl ?? "";
-  const canOpenIssue = issueUrl.startsWith(GITHUB_ISSUE_PREFIX);
-
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: backdrop click-to-cancel; native onCancel (Escape) already provides the keyboard equivalent
     <dialog
@@ -274,22 +271,22 @@ export function BugReportSheet({ onClose }: BugReportSheetProps) {
               </p>
             </div>
             <div className="mt-2 flex items-center gap-3">
-              {canOpenIssue && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    openUrl(issueUrl).catch((cause: unknown) =>
-                      showToast({
-                        tone: "error",
-                        message: describeError(cause),
-                      }),
-                    );
-                  }}
-                  className={BUTTON_PRIMARY}
-                >
-                  View on GitHub
-                </button>
-              )}
+              {/* Rust only returns a link it checked to be this issue in
+                  the project's repository (`checked_response`). */}
+              <button
+                type="button"
+                onClick={() => {
+                  openUrl(successResponse.issueUrl).catch((cause: unknown) =>
+                    showToast({
+                      tone: "error",
+                      message: describeError(cause),
+                    }),
+                  );
+                }}
+                className={BUTTON_PRIMARY}
+              >
+                View on GitHub
+              </button>
               <button
                 type="button"
                 onClick={onClose}
@@ -324,6 +321,7 @@ export function BugReportSheet({ onClose }: BugReportSheetProps) {
                   id="bug-what-happened"
                   required
                   rows={2}
+                  maxLength={MAX_FIELD_CHARS}
                   value={whatHappened}
                   onChange={(e) => setWhatHappened(e.target.value)}
                   placeholder="e.g. The timer stopped updating after my computer woke from sleep"
@@ -340,6 +338,7 @@ export function BugReportSheet({ onClose }: BugReportSheetProps) {
                   id="bug-what-expected"
                   required
                   rows={2}
+                  maxLength={MAX_FIELD_CHARS}
                   value={whatExpected}
                   onChange={(e) => setWhatExpected(e.target.value)}
                   placeholder="e.g. The timer should keep counting and keep the time so far"
@@ -356,6 +355,7 @@ export function BugReportSheet({ onClose }: BugReportSheetProps) {
                   id="bug-steps"
                   required
                   rows={3}
+                  maxLength={MAX_FIELD_CHARS}
                   value={steps}
                   onChange={(e) => setSteps(e.target.value)}
                   placeholder={
@@ -373,6 +373,7 @@ export function BugReportSheet({ onClose }: BugReportSheetProps) {
                 <textarea
                   id="bug-notes"
                   rows={2}
+                  maxLength={MAX_FIELD_CHARS}
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   placeholder={`e.g. It started right after I updated ${OS_NAME}`}
@@ -449,7 +450,9 @@ export function BugReportSheet({ onClose }: BugReportSheetProps) {
                   <div className="flex items-center justify-between gap-3 text-[11px]">
                     <span className="text-fg-muted">
                       A report never includes window titles, web addresses, time
-                      entries, projects, clients or your database.
+                      entries, projects, clients or your database. A random id
+                      for this install is sent to limit abuse and is not
+                      published.
                     </span>
                     <button
                       type="button"

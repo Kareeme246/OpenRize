@@ -1,0 +1,18 @@
+// Deploy with: wrangler deploy --config scripts/wrangler.crash-worker.jsonc
+// Optional secret: WEBHOOK_URL (see scripts/cloudflare-crash-worker.js).
+{
+  "name": "openrize-crashes",
+  "main": "cloudflare-crash-worker.js",
+  "compatibility_date": "2026-11-01",
+  // The rate limiter. The Worker refuses every report without it.
+  "durable_objects": {
+    "bindings": [{ "name": "LIMITER", "class_name": "RateLimiter" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RateLimiter"] }],
+  // Where reports are kept. Fill in the placeholders, or remove a store that
+  // is not used; set a lifecycle rule (for example 90 days) on the bucket.
+  "kv_namespaces": [{ "binding": "CRASHES_KV", "id": "<KV_NAMESPACE_ID>" }],
+  "r2_buckets": [
+    { "binding": "CRASHES_BUCKET", "bucket_name": "<R2_BUCKET_NAME>" }
+  ]
+}

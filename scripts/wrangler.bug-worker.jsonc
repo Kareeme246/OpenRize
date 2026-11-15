@@ -1,0 +1,12 @@
+// Deploy with: wrangler deploy --config scripts/wrangler.bug-worker.jsonc
+// Secret to set first: GITHUB_TOKEN (see scripts/cloudflare-bug-worker.js).
+{
+  "name": "openrize-bug-report",
+  "main": "cloudflare-bug-worker.js",
+  "compatibility_date": "2026-11-01",
+  // The rate limiter. The Worker refuses every report without it.
+  "durable_objects": {
+    "bindings": [{ "name": "LIMITER", "class_name": "RateLimiter" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RateLimiter"] }]
+}

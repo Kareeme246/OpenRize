@@ -1,7 +1,7 @@
 {
   "name": "openrize",
   "private": true,
-  "version": "0.10.2",
+  "version": "0.10.3",
   "description": "Automatic, private, local-first time tracking for your Mac",
   "license": "AGPL-3.0",
   "packageManager": "pnpm@12.5.1",
@@ -23,7 +23,7 @@
     "dev:drive:win": "node scripts/app-drive-windows.mjs",
     "publish-r2": "node scripts/publish-r2/cli.ts",
     "test:lib": "node --test \"tests/*.test.ts\"",
-    "test:worker": "node --test \"scripts/cloudflare-bug-worker.test.mjs\"",
+    "test:worker": "node --test \"scripts/cloudflare-bug-worker.test.mjs\" \"scripts/cloudflare-crash-worker.test.mjs\"",
     "test:publisher": "node --test \"scripts/publish-r2/*.test.ts\"",
     "lint:skills": "node scripts/lint-skills/cli.ts",
     "test:skills": "node --test \"scripts/lint-skills/*.test.ts\""

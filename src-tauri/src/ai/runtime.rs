@@ -46,6 +46,8 @@ pub struct LaunchSpec {
     pub model: PathBuf,
     pub ctx_size: u32,
     pub device: Device,
+    /// Model-specific server flags, e.g. `--embeddings` for the bundled embedder.
+    pub extra: Vec<String>,
 }
 
 impl LaunchSpec {
@@ -55,6 +57,7 @@ impl LaunchSpec {
             model: model.into(),
             ctx_size: 4096,
             device: Device::Gpu,
+            extra: Vec::new(),
         }
     }
 }
@@ -115,6 +118,7 @@ impl LlamaServer {
             Device::Gpu => command.args(["--n-gpu-layers", "all"]),
             Device::Cpu => command.args(["--device", "none", "--n-gpu-layers", "0"]),
         };
+        command.args(&spec.extra);
         command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -304,6 +308,9 @@ pub struct Connection {
 pub struct RuntimeManager {
     binary: Option<PathBuf>,
     model: PathBuf,
+    ctx_size: u32,
+    /// Model-specific server flags, e.g. `--embeddings` for the bundled embedder.
+    extra: Vec<String>,
     server: Option<LlamaServer>,
     device: Option<DeviceInfo>,
     /// After the GPU failed once for this model, later starts go straight to the CPU.
@@ -315,10 +322,27 @@ pub struct RuntimeManager {
 }
 
 impl RuntimeManager {
+    /// A chat model: the runtime's default window, no extra flags.
     pub fn new(binary: Option<PathBuf>, model: PathBuf) -> Self {
+        Self::with_launch(binary, model, 4096, Vec::new())
+    }
+
+    /// The bundled embedder: its own window (`bert.context_length`) and embedding-only mode.
+    pub fn embedder(binary: Option<PathBuf>, model: PathBuf, ctx_size: u32) -> Self {
+        Self::with_launch(binary, model, ctx_size, vec!["--embeddings".to_string()])
+    }
+
+    fn with_launch(
+        binary: Option<PathBuf>,
+        model: PathBuf,
+        ctx_size: u32,
+        extra: Vec<String>,
+    ) -> Self {
         Self {
             binary,
             model,
+            ctx_size,
+            extra,
             server: None,
             device: None,
             prefer_cpu: false,
@@ -353,7 +377,11 @@ impl RuntimeManager {
                 return Err("the local model is restarting after a failure".to_string());
             }
             let binary = self.binary.clone().ok_or("llama-server is not bundled")?;
-            let spec = LaunchSpec::new(binary, &self.model);
+            let spec = LaunchSpec {
+                ctx_size: self.ctx_size,
+                extra: self.extra.clone(),
+                ..LaunchSpec::new(binary, &self.model)
+            };
             match start_with_fallback(self.prefer_cpu, |device| {
                 LlamaServer::start(&LaunchSpec {
                     device,

@@ -15,6 +15,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use super::apple::{self, AppleProvider};
 use super::arbiter::{Decision, Label};
 use super::calibration::Calibrator;
+use super::embedder::Embedder;
 use super::features::{self, EntryFeatures, PreviousEntry};
 use super::knn;
 use super::openai::{Endpoint, LocalModel, OpenAiProvider};
@@ -49,14 +50,22 @@ const CALIBRATION_REFIT_AFTER: u32 = 10;
 pub const SHUTDOWN_WAIT: Duration = Duration::from_secs(2);
 const CONTEXT_GAP_MS: u64 = 15 * 60 * 1000;
 const BACKFILL_WINDOW_MS: u64 = 7 * 24 * 60 * 60 * 1000;
+/// Vectors re-embedded per pass after the embedder changes: one request, then back to the poll.
+const REEMBED_BATCH: u32 = 64;
 
-pub fn spawn(app: AppHandle, db_path: PathBuf, ml_dir: PathBuf, models_dir: PathBuf) {
+pub fn spawn(
+    app: AppHandle,
+    db_path: PathBuf,
+    ml_dir: PathBuf,
+    models_dir: PathBuf,
+    embedder_model: Option<PathBuf>,
+) {
     std::thread::Builder::new()
         .name("ai-worker".to_string())
         .spawn(move || match Connection::open(&db_path) {
             Ok(conn) => {
                 let _ = conn.busy_timeout(Duration::from_secs(5));
-                Worker::new(app, conn, ml_dir, models_dir).run();
+                Worker::new(app, conn, ml_dir, models_dir, embedder_model).run();
             }
             Err(error) => eprintln!("ai worker could not open the database: {error}"),
         })
@@ -67,6 +76,10 @@ struct Worker {
     app: AppHandle,
     conn: Connection,
     apple: AppleProvider,
+    /// The bundled embedder, when this build shipped it; T1 uses it where Apple's is absent.
+    bundled_embedder: Option<Embedder>,
+    /// The embedder T1 uses, with the tag and width its vectors carry.
+    embed: Option<ActiveEmbedder>,
     ml_dir: PathBuf,
     models_dir: PathBuf,
     wanted: Option<(AiLlm, Option<String>)>,
@@ -88,12 +101,49 @@ enum Retrained {
     Kept { new: f64, old: f64 },
 }
 
+/// Where the vectors came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmbedSource {
+    /// Apple's NLEmbedding, through the sidecar.
+    Apple,
+    /// The GGUF that ships with the app, through its own `llama-server`.
+    Bundled,
+}
+
+/// The embedder behind kNN (docs/design/local-models.md, "Embeddings and kNN"): Apple's
+/// NLEmbedding where the sidecar offers one, else the bundled GGUF. Bundled models are not a user
+/// choice, so this is decided here, never by a setting.
+#[derive(Debug, Clone)]
+struct ActiveEmbedder {
+    source: EmbedSource,
+    model: EmbedModel,
+    /// What `model_version` records after `emb:`. Apple keeps the `r<revision>` form every older
+    /// suggestion carries; the bundled embedder names its pinned identity.
+    version: String,
+}
+
 impl Worker {
-    fn new(app: AppHandle, conn: Connection, ml_dir: PathBuf, models_dir: PathBuf) -> Self {
+    fn new(
+        app: AppHandle,
+        conn: Connection,
+        ml_dir: PathBuf,
+        models_dir: PathBuf,
+        embedder_model: Option<PathBuf>,
+    ) -> Self {
+        let bundled_embedder =
+            embedder_model.and_then(|model| match Embedder::new(runtime::locate(), model) {
+                Ok(embedder) => Some(embedder),
+                Err(error) => {
+                    eprintln!("ai worker: the bundled embedder: {error}");
+                    None
+                }
+            });
         Self {
             app,
             conn,
             apple: AppleProvider::new(),
+            bundled_embedder,
+            embed: None,
             ml_dir,
             models_dir,
             wanted: None,
@@ -147,12 +197,17 @@ impl Worker {
                 .local
                 .as_mut()
                 .is_some_and(|local| local.stop_if_idle());
-            if apple_idle || local_idle {
+            let embedder_idle = self
+                .bundled_embedder
+                .as_mut()
+                .is_some_and(|embedder| embedder.stop_if_idle());
+            if apple_idle || local_idle || embedder_idle {
                 self.report_pids();
                 self.publish();
             }
             self.reprobe_if_due();
             self.retrain_if_due();
+            self.reembed_if_due();
             self.refit_calibration_if_due(false);
             self.refresh_counts();
 
@@ -207,7 +262,6 @@ impl Worker {
         self.last_probe = Some(Instant::now());
         if !self.apple.is_installed() {
             self.applied = None;
-            self.note_embedder(None);
             self.publish();
             return;
         }
@@ -249,10 +303,41 @@ impl Worker {
         let Some(caps) = self.apple.sidecar_capabilities().cloned() else {
             return;
         };
-        let provider_caps = apple::capabilities_of(&caps);
-        self.note_embedder(provider_caps.embed.as_ref().map(|e| e.model.as_str()));
         self.applied = Some(caps);
         self.publish();
+    }
+
+    /// Picks the embedder T1 uses, from Apple's capabilities and the bundled model on disk. `apple`
+    /// is the sidecar's embedder and the revision `model_version` records for it.
+    fn resolve_embed(&mut self, apple: Option<(EmbedModel, String)>) -> Option<ActiveEmbedder> {
+        let apple = apple.map(|(model, version)| ActiveEmbedder {
+            source: EmbedSource::Apple,
+            model,
+            version,
+        });
+        self.embed = apple.or_else(|| {
+            let model = self.bundled_embedder.as_mut()?.model()?;
+            Some(ActiveEmbedder {
+                source: EmbedSource::Bundled,
+                version: model.model.clone(),
+                model,
+            })
+        });
+        self.embed.clone()
+    }
+
+    /// Embeds every text with the active embedder; with none, they all come back empty.
+    fn embed_texts(&mut self, texts: &[String]) -> Result<Vec<Option<Vec<f32>>>, String> {
+        let Some(active) = self.embed.clone() else {
+            return Ok(vec![None; texts.len()]);
+        };
+        match active.source {
+            EmbedSource::Apple => self.apple.embed(texts),
+            EmbedSource::Bundled => match self.bundled_embedder.as_mut() {
+                Some(embedder) => embedder.embed(texts),
+                None => Ok(vec![None; texts.len()]),
+            },
+        }
     }
 
     /// The one place the engine, language model, embedder, runtime and device fields are written.
@@ -288,22 +373,29 @@ impl Worker {
             }
             AiLlm::None => (LlmView::chosen_none(), apple_runtime, None),
         };
-        let embed = if apple_caps.as_ref().is_some_and(|caps| caps.embed.is_some()) {
+        let apple_embed = self.applied.as_ref().and_then(|caps| {
+            let model = apple::capabilities_of(caps).embed?;
+            Some((model, format!("r{}", caps.embed_revision)))
+        });
+        let embed = self.resolve_embed(apple_embed);
+        let embed_state = if embed.is_some() {
             EmbedState::Ready
         } else {
             EmbedState::None
         };
         let os = self.applied.as_ref().map(|caps| caps.os.clone());
         update_status(&self.app, |s| {
-            s.engine = engine_for(view.state, embed).to_string();
+            s.engine = engine_for(view.state, embed_state).to_string();
             s.set_llm(view);
-            s.embed = embed;
+            s.embed = embed_state;
             s.runtime = runtime;
             s.set_device(device);
             if os.is_some() {
                 s.os = os;
             }
         });
+        // One place records the embedder the store queues jobs for: it changes with the model.
+        self.note_embedder(embed.as_ref().map(|active| active.model.model.as_str()));
         // Loading is neither: a start that is under way changes nothing yet.
         if view.state == LlmState::Loading {
             return;
@@ -365,6 +457,7 @@ impl Worker {
         let runtime = self.app.state::<AiRuntime>();
         runtime.set_sidecar_pid(self.apple.pid());
         runtime.set_local_pid(self.local.as_ref().and_then(|local| local.pid()));
+        runtime.set_embedder_pid(self.bundled_embedder.as_ref().and_then(Embedder::pid));
     }
 
     fn stop_if_shutting_down(&mut self) -> bool {
@@ -373,9 +466,64 @@ impl Worker {
             return false;
         }
         self.local = None;
+        self.bundled_embedder = None;
         self.apple.sidecar_mut().stop();
         runtime.mark_worker_stopped();
         true
+    }
+
+    /// After the embedder changes, stored vectors carry the old model's tag: re-embed them in the
+    /// background, oldest first, one batch per pass, only while idle on power
+    /// (docs/design/local-models.md, "Embeddings and kNN").
+    fn reembed_if_due(&mut self) {
+        let Some(active) = self.embed.clone() else {
+            return;
+        };
+        let model = active.model.model.as_str();
+        if !store::stale_embedding_count(&self.conn, model).is_ok_and(|pending| pending > 0) {
+            return;
+        }
+        if Conditions::read().blocker().is_some() {
+            return;
+        }
+        let batch = match store::stale_embeddings(&self.conn, model, REEMBED_BATCH) {
+            Ok(batch) => batch,
+            Err(error) => {
+                eprintln!("ai worker: re-embedding: {error}");
+                return;
+            }
+        };
+        let texts: Vec<String> = batch.iter().map(|row| row.features.clone()).collect();
+        let vectors = match self.embed_texts(&texts) {
+            Ok(vectors) => vectors,
+            Err(error) => {
+                eprintln!("ai worker: re-embedding: {error}");
+                return;
+            }
+        };
+        let now = now_epoch_ms();
+        let written = self.write(|conn| {
+            let mut written = 0;
+            for (row, vector) in batch.iter().zip(vectors) {
+                let Some(vector) = vector else { continue };
+                store::upsert_embedding(
+                    conn,
+                    &row.entry_id,
+                    &vector,
+                    &row.text_hash,
+                    &row.features,
+                    model,
+                    now,
+                )?;
+                written += 1;
+            }
+            Ok(written)
+        });
+        match written {
+            Ok(count) if count > 0 => self.report_pids(),
+            Ok(_) => {}
+            Err(error) => eprintln!("ai worker: re-embedding: {error}"),
+        }
     }
 
     fn note_embedder(&self, model: Option<&str>) {
@@ -549,20 +697,23 @@ impl Worker {
         &mut self,
         entry_id: &str,
         features: &EntryFeatures,
-        embed: Option<&EmbedModel>,
     ) -> Result<Option<Vec<f32>>, String> {
+        let Some(active) = self.embed.clone() else {
+            return Ok(None);
+        };
+        let model = active.model.model.as_str();
         let hash = text_hash(&features.content);
-        if let Some(vector) = store::embedding_for(&self.conn, entry_id, &hash)? {
+        if let Some(vector) = store::embedding_for(&self.conn, entry_id, &hash, model)? {
             return Ok(Some(vector));
         }
-        let Some(embed) = embed else {
+        let Some(vector) = self
+            .embed_texts(std::slice::from_ref(&features.content))?
+            .into_iter()
+            .next()
+            .flatten()
+        else {
             return Ok(None);
         };
-        let vectors = self.apple.embed(std::slice::from_ref(&features.content))?;
-        let Some(vector) = vectors.into_iter().next().flatten() else {
-            return Ok(None);
-        };
-        let model = embed.model.clone();
         let now = now_epoch_ms();
         self.write(|conn| {
             store::upsert_embedding(
@@ -571,7 +722,7 @@ impl Worker {
                 &vector,
                 &hash,
                 &features.content,
-                &model,
+                model,
                 now,
             )
         })?;
@@ -614,18 +765,12 @@ impl Worker {
         if features.active_ms == 0 {
             features.content = entry.description.clone();
         }
-        if !self.apple.is_installed() {
+        if self.embed.is_none() {
+            // No embedder at all (no Apple NLEmbedding, no bundled GGUF): the store stops queueing
+            // these jobs, and an old one left over has nothing to do.
             return Ok(());
         }
-        // A failed probe is retried; a provider without an embedder has nothing to do.
-        let caps = self
-            .capabilities()
-            .ok_or("the model provider is not running")?;
-        let Some(model) = embed_model(Some(&caps)) else {
-            return Ok(());
-        };
-        self.vector_for(&entry.id, &features, Some(&model))
-            .map(|_| ())
+        self.vector_for(&entry.id, &features).map(|_| ())
     }
 
     fn classify(&mut self, job: &Job) -> Result<(), String> {
@@ -674,16 +819,22 @@ impl Worker {
             .flatten();
 
         let caps = self.capabilities();
-        let vector =
-            match self.vector_for(&entry.id, &features, embed_model(caps.as_ref()).as_ref()) {
-                Ok(vector) => vector,
-                Err(error) => {
-                    eprintln!("ai worker: embedding failed: {error}");
-                    None
-                }
-            };
-        let pool =
-            store::labeled_pool(&self.conn, now.saturating_sub(knn::LOOKBACK_MS), &entry.id)?;
+        let vector = match self.vector_for(&entry.id, &features) {
+            Ok(vector) => vector,
+            Err(error) => {
+                eprintln!("ai worker: embedding failed: {error}");
+                None
+            }
+        };
+        let embedder = self.embed.clone();
+        let pool = store::labeled_pool(
+            &self.conn,
+            now.saturating_sub(knn::LOOKBACK_MS),
+            &entry.id,
+            embedder
+                .as_ref()
+                .map_or(store::NO_EMBEDDER, |active| active.model.model.as_str()),
+        )?;
         let personal_category = caps
             .is_some()
             .then(|| self.personal_predict(Field::Category, &features.content))
@@ -718,7 +869,7 @@ impl Worker {
             update_status(&self.app, |s| s.last_error = Some(error));
         }
         let llm_used = labeled.llm.as_ref().is_some_and(|t| t.error.is_none());
-        let model_version = model_version(caps.as_ref(), &self.llm_id(llm_used), &self.conn);
+        let model_version = model_version(embedder.as_ref(), &self.llm_id(llm_used), &self.conn);
         let outcome = Outcome {
             category: labeled.category,
             project: labeled.project,
@@ -1214,13 +1365,9 @@ fn persist(
     tx.commit().map_err(|e| e.to_string())
 }
 
-fn embed_model(caps: Option<&Capabilities>) -> Option<EmbedModel> {
-    caps.and_then(|c| apple::capabilities_of(c).embed)
-}
-
 /// `<llm> emb:<embedder> pm:<artifact> cal:<artifact>`; Apple's form is stored on every old
-/// suggestion and must not change. With neither a language model nor the sidecar, `rules-only`.
-fn model_version(caps: Option<&Capabilities>, llm: &ProviderId, conn: &Connection) -> String {
+/// suggestion and must not change. With neither a language model nor an embedder, `rules-only`.
+fn model_version(embed: Option<&ActiveEmbedder>, llm: &ProviderId, conn: &Connection) -> String {
     let artifact = |kind: &str| {
         store::active_artifact(conn, kind)
             .ok()
@@ -1229,10 +1376,10 @@ fn model_version(caps: Option<&Capabilities>, llm: &ProviderId, conn: &Connectio
             .unwrap_or_else(|| "none".to_string())
     };
     let calibration = artifact(store::KIND_CALIBRATION);
-    if caps.is_none() && llm.kind != ProviderKind::Local {
+    if embed.is_none() && llm.kind != ProviderKind::Local {
         return format!("rules-only cal:{calibration}");
     }
-    let embedder = caps.map_or_else(|| "none".to_string(), |c| format!("r{}", c.embed_revision));
+    let embedder = embed.map_or_else(|| "none".to_string(), |active| active.version.clone());
     format!(
         "{} emb:{embedder} pm:{} cal:{calibration}",
         llm.tag(),
@@ -1403,6 +1550,28 @@ mod tests {
         assert_eq!(description, "Xcode: main.rs");
     }
 
+    fn apple_embedder() -> ActiveEmbedder {
+        ActiveEmbedder {
+            source: EmbedSource::Apple,
+            model: EmbedModel {
+                dimension: 512,
+                model: "nlembedding-en-r2".to_string(),
+            },
+            version: "r2".to_string(),
+        }
+    }
+
+    fn bundled_embedder() -> ActiveEmbedder {
+        ActiveEmbedder {
+            source: EmbedSource::Bundled,
+            model: EmbedModel {
+                dimension: crate::ai::embedder::DIMENSION,
+                model: crate::ai::embedder::IDENTITY.to_string(),
+            },
+            version: crate::ai::embedder::IDENTITY.to_string(),
+        }
+    }
+
     #[test]
     fn model_version_keeps_its_format() {
         let conn = db();
@@ -1416,7 +1585,7 @@ mod tests {
             version: "1".to_string(),
         };
         assert_eq!(
-            model_version(Some(&caps), &apple::id_for(Some(&caps)), &conn),
+            model_version(Some(&apple_embedder()), &apple::id_for(Some(&caps)), &conn),
             "fm:26.1:available emb:r2 pm:none cal:none"
         );
         assert_eq!(
@@ -1440,17 +1609,8 @@ mod tests {
             model_version(None, &local, &conn),
             format!("{tag} emb:none pm:none cal:none")
         );
-        let caps = Capabilities {
-            llm: "available".to_string(),
-            embed: true,
-            embed_dimension: 512,
-            embed_revision: 2,
-            personal: true,
-            os: "26.1".to_string(),
-            version: "1".to_string(),
-        };
         assert_eq!(
-            model_version(Some(&caps), &local, &conn),
+            model_version(Some(&apple_embedder()), &local, &conn),
             format!("{tag} emb:r2 pm:none cal:none")
         );
         let none = ProviderId {
@@ -1458,10 +1618,28 @@ mod tests {
             model: String::new(),
         };
         assert_eq!(
-            model_version(Some(&caps), &none, &conn),
+            model_version(Some(&apple_embedder()), &none, &conn),
             "none emb:r2 pm:none cal:none"
         );
         assert_eq!(model_version(None, &none, &conn), "rules-only cal:none");
+    }
+
+    /// Without a sidecar the bundled embedder still makes T1 real, so the tag names it instead of
+    /// saying `rules-only`.
+    #[test]
+    fn the_bundled_embedder_names_its_identity() {
+        let conn = db();
+        let none = ProviderId {
+            kind: ProviderKind::None,
+            model: String::new(),
+        };
+        assert_eq!(
+            model_version(Some(&bundled_embedder()), &none, &conn),
+            format!(
+                "none emb:{} pm:none cal:none",
+                crate::ai::embedder::IDENTITY
+            )
+        );
     }
 
     #[test]

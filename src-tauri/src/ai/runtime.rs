@@ -5,7 +5,8 @@
 use std::io::Read;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -13,9 +14,13 @@ use serde::Serialize;
 
 use super::guard::{self, LifetimeGuard};
 use super::sidecar::IDLE_STOP_AFTER;
+use super::spawn;
 
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(120);
 const HEALTH_POLL: Duration = Duration::from_millis(200);
+/// What the pinned `llama-server` logs once it has bound its port; one that finds the port taken
+/// logs an error and exits instead.
+const LISTENING: &[u8] = b"listening on";
 const STDERR_TAIL: usize = 2000;
 const MAX_BACKOFF: Duration = Duration::from_secs(10 * 60);
 const SERVER_NAME: &str = "llama-server";
@@ -76,18 +81,25 @@ pub struct LlamaServer {
     base_url: String,
     api_key: String,
     stderr: Arc<Mutex<Vec<u8>>>,
+    /// Set once the child's own log says it bound the port.
+    listening: Arc<AtomicBool>,
     /// Dropped after the child is killed.
     _guard: LifetimeGuard,
 }
 
 impl LlamaServer {
     pub fn start(spec: &LaunchSpec) -> Result<LlamaServer, String> {
-        // Another process could grab the port between release and the child's bind; the
-        // early-exit check then reports it.
+        // Another process could grab the port between release and the child's bind: the child
+        // then never says it is listening, so `wait_healthy` never trusts that port.
         let port = TcpListener::bind(("127.0.0.1", 0))
             .and_then(|listener| listener.local_addr())
             .map_err(|error| format!("could not find a free port: {error}"))?
             .port();
+        Self::start_on(spec, port)
+    }
+
+    fn start_on(spec: &LaunchSpec, port: u16) -> Result<LlamaServer, String> {
+        check_gguf(&spec.model)?;
         let api_key = format!(
             "{}{}",
             uuid::Uuid::new_v4().simple(),
@@ -102,7 +114,7 @@ impl LlamaServer {
             .map(|n| n.get() / 2)
             .unwrap_or(1)
             .max(1);
-        let mut command = Command::new(&spec.binary);
+        let mut command = spawn::command(&spec.binary);
         command
             .arg("--model")
             .arg(&spec.model)
@@ -113,7 +125,10 @@ impl LlamaServer {
             .args(["--parallel", "1", "--ctx-size"])
             .arg(spec.ctx_size.to_string())
             .args(["--threads", &threads.to_string()])
-            .arg("--no-webui");
+            // No web UI, no slot inspection, no prompts kept in memory after their request, and
+            // no page in a browser allowed to read a reply (no origin is ever "none").
+            .args(["--no-webui", "--no-slots", "--cache-ram", "0"])
+            .args(["--cors-origins", "none"]);
         match spec.device {
             Device::Gpu => command.args(["--n-gpu-layers", "all"]),
             Device::Cpu => command.args(["--device", "none", "--n-gpu-layers", "0"]),
@@ -146,8 +161,10 @@ impl LlamaServer {
 
         // Drain on a thread so the pipe never fills.
         let stderr = Arc::new(Mutex::new(Vec::new()));
+        let listening = Arc::new(AtomicBool::new(false));
         if let Some(mut pipe) = child.stderr.take() {
             let sink = Arc::clone(&stderr);
+            let listening = Arc::clone(&listening);
             std::thread::spawn(move || {
                 let mut chunk = [0u8; 4096];
                 while let Ok(n) = pipe.read(&mut chunk) {
@@ -156,6 +173,13 @@ impl LlamaServer {
                     }
                     let mut tail = sink.lock().unwrap_or_else(|e| e.into_inner());
                     tail.extend_from_slice(&chunk[..n]);
+                    // Before trimming, so a line split across two reads is still found.
+                    if tail
+                        .windows(LISTENING.len())
+                        .any(|bytes| bytes == LISTENING)
+                    {
+                        listening.store(true, Ordering::Relaxed);
+                    }
                     let excess = tail.len().saturating_sub(STDERR_TAIL);
                     tail.drain(..excess);
                 }
@@ -168,6 +192,7 @@ impl LlamaServer {
             base_url: format!("http://127.0.0.1:{port}"),
             api_key,
             stderr,
+            listening,
             _guard: lifetime,
         };
         let healthy = server.wait_healthy();
@@ -180,6 +205,7 @@ impl LlamaServer {
         crate::net::ensure_crypto_provider();
         let client = reqwest::blocking::Client::builder()
             .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(2))
             .build()
             .map_err(|error| error.to_string())?;
@@ -192,11 +218,14 @@ impl LlamaServer {
                     self.stderr_tail()
                 ));
             }
+            // No key: `/health` needs none, and the answer alone does not show who gave it.
+            // Another process holding the port can answer while our server fails to bind it, so
+            // the key and the prompts go nowhere until our own child reports the port as its own.
             let up = client
                 .get(format!("{}/health", self.base_url))
-                .bearer_auth(&self.api_key)
                 .send()
-                .is_ok_and(|response| response.status().is_success());
+                .is_ok_and(|response| response.status().is_success())
+                && self.listening.load(Ordering::Relaxed);
             if up {
                 return Ok(());
             }
@@ -248,6 +277,22 @@ impl LlamaServer {
 impl Drop for LlamaServer {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+/// Keeps a file that is plainly not a model away from the native parser. It is no integrity
+/// check: a model file is trusted like any other program the user chose to run.
+fn check_gguf(model: &Path) -> Result<(), String> {
+    let mut magic = [0u8; 4];
+    let is_gguf = std::fs::metadata(model).is_ok_and(|meta| meta.is_file())
+        && std::fs::File::open(model)
+            .and_then(|mut file| file.read_exact(&mut magic))
+            .is_ok()
+        && &magic == b"GGUF";
+    if is_gguf {
+        Ok(())
+    } else {
+        Err(format!("{} is not a GGUF model file", model.display()))
     }
 }
 
@@ -577,7 +622,7 @@ mod tests {
 
         let mut manager = RuntimeManager::new(Some(binary.clone()), model.clone());
         assert_eq!(manager.check(), RuntimeCheck::ModelMissing);
-        std::fs::write(&model, "gguf").unwrap();
+        std::fs::write(&model, "GGUF").unwrap();
         assert_eq!(manager.check(), RuntimeCheck::RuntimeMissing);
         std::fs::write(&binary, "").unwrap();
         assert_eq!(manager.check(), RuntimeCheck::Stopped);
@@ -587,6 +632,84 @@ mod tests {
         assert!(manager.ensure_running().is_err());
         assert_eq!(manager.check(), RuntimeCheck::Failed { retry_due: false });
         assert!(manager.ensure_running().unwrap_err().contains("restarting"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn only_a_regular_file_with_the_gguf_magic_is_handed_to_the_server() {
+        let dir = std::env::temp_dir().join(format!("openrize-gguf-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join("folder.gguf")).unwrap();
+        let model = dir.join("model.gguf");
+        std::fs::write(&model, b"GGUF\x03\0\0\0").unwrap();
+        assert_eq!(check_gguf(&model), Ok(()));
+        for (name, bytes) in [
+            ("script.gguf", &b"#!/bin/sh\n"[..]),
+            ("old.gguf", b"ggml"),
+            ("short.gguf", b"GG"),
+        ] {
+            let path = dir.join(name);
+            std::fs::write(&path, bytes).unwrap();
+            let error = check_gguf(&path).unwrap_err();
+            assert!(error.contains("is not a GGUF model file"), "{error}");
+        }
+        assert!(check_gguf(&dir.join("folder.gguf")).is_err());
+        assert!(check_gguf(&dir.join("missing.gguf")).is_err());
+
+        // Refused before anything is spawned: the server binary here does not even exist.
+        let spec = LaunchSpec::new(dir.join("llama-server"), dir.join("script.gguf"));
+        let error = LlamaServer::start(&spec).err().unwrap();
+        assert!(error.contains("is not a GGUF model file"), "{error}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A listener that took the port answers `/health` while the real server fails to bind.
+    #[cfg(unix)]
+    #[test]
+    fn a_stranger_on_the_port_gets_no_key_and_is_not_trusted() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("openrize-port-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let model = dir.join("model.gguf");
+        std::fs::write(&model, b"GGUF").unwrap();
+        let binary = dir.join("llama-server");
+        std::fs::write(
+            &binary,
+            "#!/bin/sh\n/bin/sleep 1\necho port taken >&2\nexit 1\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let stranger = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = stranger.local_addr().unwrap().port();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let log = Arc::clone(&seen);
+        std::thread::spawn(move || {
+            for mut stream in stranger.incoming().flatten() {
+                let mut chunk = [0u8; 4096];
+                let n = stream.read(&mut chunk).unwrap_or(0);
+                log.lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(&chunk[..n]).to_lowercase());
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                );
+            }
+        });
+
+        let error = LlamaServer::start_on(&LaunchSpec::new(binary, model), port)
+            .err()
+            .expect("a stranger's answer was taken for the server's");
+        assert!(error.contains("llama-server exited"), "{error}");
+        assert!(error.contains("port taken"), "{error}");
+        let seen = seen.lock().unwrap();
+        assert!(seen
+            .iter()
+            .any(|request| request.starts_with("get /health")));
+        for request in seen.iter() {
+            assert!(!request.contains("authorization"), "{request}");
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 

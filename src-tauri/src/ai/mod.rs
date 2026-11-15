@@ -16,6 +16,7 @@ pub mod power;
 pub mod provider;
 pub mod runtime;
 pub mod sidecar;
+mod spawn;
 pub mod worker;
 
 pub use openrize_core::ai::*;

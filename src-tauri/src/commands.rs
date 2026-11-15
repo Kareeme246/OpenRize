@@ -975,12 +975,14 @@ pub fn ai_reset_learned(app: AppHandle, days: u32) -> Result<AiMetrics, String> 
     let metrics = {
         let state = app.state::<AppState>();
         let store = state.activity.lock().map_err(|e| e.to_string())?;
-        let paths = ai::store::reset_learned(store.conn(), now)?;
-        for path in paths {
+        let stored = ai::store::reset_learned(store.conn(), now)?;
+        let ml_dir = crate::accounts::data_dir(&app).join(crate::paths::ML_DIR);
+        for path in stored {
+            let Some(path) = crate::paths::model_artifact(&ml_dir, &path) else {
+                continue;
+            };
             if let Err(error) = std::fs::remove_dir_all(&path) {
-                if error.kind() != std::io::ErrorKind::NotFound {
-                    eprintln!("could not delete model {path}: {error}");
-                }
+                eprintln!("could not delete model {path:?}: {error}");
             }
         }
         ai::metrics::metrics(store.conn(), days, now)?

@@ -132,7 +132,7 @@ pub fn run() {
             ai::worker::spawn(
                 app.handle().clone(),
                 dir.join(activity::DB_FILE),
-                dir.join("ml"),
+                dir.join(paths::ML_DIR),
                 app.path().app_local_data_dir()?.join(paths::MODELS_DIR),
                 // The bundled embedder is a resource beside the app, not a download; a build
                 // without it simply has no embedder of its own.

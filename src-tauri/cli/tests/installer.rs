@@ -285,16 +285,29 @@ fn existing_executable_and_symlink_are_never_replaced() {
 fn pinned_version_custom_destination_and_invalid_inputs() {
     let fixture = Fixture::new();
     let destination = fixture.root.join("custom bin");
+    // A pin is only honoured when the release holds that version of the CLI.
     let mut command = fixture.command();
     command
         .arg("--dir")
         .arg(&destination)
         .args(["--version", "0.8.10"]);
+    assert_eq!(fixture.run(command).status.code(), Some(1));
+    assert!(!destination.join("rize").exists());
+    assert!(fs::read_to_string(fixture.root.join("downloads"))
+        .unwrap()
+        .contains("/download/v0.8.10/openrize.app.tar.gz"));
+
+    let version = env!("CARGO_PKG_VERSION");
+    let mut command = fixture.command();
+    command
+        .arg("--dir")
+        .arg(&destination)
+        .args(["--version", version]);
     assert_success(&fixture.run(command));
     assert!(destination.join("rize").is_file());
     assert!(fs::read_to_string(fixture.root.join("downloads"))
         .unwrap()
-        .contains("/download/v0.8.10/openrize.app.tar.gz"));
+        .contains(&format!("/download/v{version}/openrize.app.tar.gz")));
     for args in [
         vec!["--unknown"],
         vec!["--version", "../main"],

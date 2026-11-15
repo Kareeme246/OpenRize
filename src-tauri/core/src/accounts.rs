@@ -11,7 +11,7 @@ use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 
 use crate::activity::ActivityStore;
-use crate::paths::{ACCOUNTS_DIR, ACCOUNTS_FILE, DATABASE_FILE, SWITCH_FILE};
+use crate::paths::{ACCOUNTS_DIR, ACCOUNTS_FILE, DATABASE_FILE, ML_DIR, SWITCH_FILE};
 use crate::state::lock_stores;
 use crate::timers::{now_epoch_ms, TimerStore};
 
@@ -20,8 +20,6 @@ pub const REGISTRY_VERSION: u32 = 1;
 pub const MAX_NAME_CHARS: usize = 40;
 
 const RECOVERED_NAME: &str = "Recovered account";
-
-const ML_DIR: &str = "ml";
 
 /// Serializes registry read-modify-write within one process so concurrent edits don't lose changes.
 static REGISTRY_EDIT: Mutex<()> = Mutex::new(());

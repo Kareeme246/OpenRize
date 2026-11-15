@@ -16,6 +16,8 @@ use super::sidecar::TIMEOUT_CLASSIFY;
 /// The first request after a start also pays for the model load.
 const TIMEOUT_FIRST: Duration = Duration::from_secs(120);
 const MAX_TOKENS: u32 = 200;
+/// Enough of a 400's body to say what was wrong with the request, and no more of it in the status.
+const MAX_REJECTION_CHARS: usize = 200;
 
 /// Owning the runtime here means dropping the provider stops the server.
 pub enum Endpoint {
@@ -140,6 +142,8 @@ impl OpenAiProvider {
             "stream": false,
             "temperature": temperature,
             "max_tokens": MAX_TOKENS,
+            // A prompt can carry a private window's title, so the server keeps none for reuse.
+            "cache_prompt": false,
             "messages": [
                 { "role": "system", "content": built.system },
                 { "role": "user", "content": user },
@@ -185,6 +189,7 @@ impl OpenAiProvider {
         let status = response.status();
         if status == reqwest::StatusCode::BAD_REQUEST {
             let detail = response.text().unwrap_or_default();
+            let detail = detail.trim().chars().take(MAX_REJECTION_CHARS).collect();
             return Err(CallError::BadRequest(detail));
         }
         if !status.is_success() {
@@ -223,11 +228,9 @@ impl OpenAiProvider {
             Ok(text) => Ok(text),
             Err(CallError::Failed(message)) => Err(message.into()),
             Err(CallError::Unreachable(message)) => Err(unreachable(message)),
-            Err(CallError::BadRequest(detail)) => Err(format!(
-                "the local model rejected the request (HTTP 400): {}",
-                detail.trim()
-            )
-            .into()),
+            Err(CallError::BadRequest(detail)) => {
+                Err(format!("the local model rejected the request (HTTP 400): {detail}").into())
+            }
         }
     }
 
@@ -487,6 +490,7 @@ mod tests {
         let body = body_of(&raw);
         assert_eq!(body["stream"], false);
         assert_eq!(body["max_tokens"], 200);
+        assert_eq!(body["cache_prompt"], false);
         assert_eq!(body["temperature"], 0.9);
         assert_eq!(body["response_format"]["type"], "json_schema");
         assert_eq!(
@@ -526,6 +530,17 @@ mod tests {
         let user = retry["messages"][1]["content"].as_str().unwrap();
         assert!(user.ends_with(&prompt::json_object_hint(&request())));
         assert_eq!(body_of(&seen[2])["response_format"]["type"], "json_object");
+    }
+
+    #[test]
+    fn a_rejection_reaches_the_status_cut_short() {
+        let long = format!("{{\"error\":\"{}\"}}", "x".repeat(5_000));
+        let (url, _) = fake_server(vec![(400, long.clone()), (400, long)]);
+        let error = provider(url, false)
+            .classify(&request(), 1, None)
+            .unwrap_err();
+        assert!(error.contains("HTTP 400"), "{error}");
+        assert!(error.chars().count() < 300, "{}", error.len());
     }
 
     #[test]
@@ -593,7 +608,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("openrize-openai-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let model = dir.join("tiny.gguf");
-        std::fs::write(&model, "gguf").unwrap();
+        std::fs::write(&model, "GGUF").unwrap();
         let binary = dir.join("llama-server");
         let mut p = OpenAiProvider::new(
             Endpoint::Local(Box::new(RuntimeManager::new(Some(binary.clone()), model))),

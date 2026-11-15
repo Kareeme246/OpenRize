@@ -1,8 +1,4 @@
-/**
- * Timeline geometry shared by Day and Week. Day places time by elapsed hours
- * since 5 AM (a DST day is 23 or 25 hours); Week shares one gutter across
- * columns, so it uses wall-clock hours.
- */
+/** Shared by Day and Week. Day uses elapsed hours since 5 AM (a DST day is 23 or 25 hours); Week shares one gutter across columns, so it uses wall-clock hours. */
 
 export type Placement = "elapsed" | "wall";
 
@@ -77,7 +73,6 @@ export function place(
   );
   const to = Math.min(timeline.endHour, hourOffset(end, dayStart, placement));
   const top = (from - timeline.startHour) * timeline.hourHeight;
-  // Less a hairline so neighbours don't touch.
   const height = Math.max(minHeight, (to - from) * timeline.hourHeight - 2);
   return { top, height };
 }

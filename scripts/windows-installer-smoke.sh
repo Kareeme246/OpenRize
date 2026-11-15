@@ -30,7 +30,6 @@ MSYS_NT* | MINGW*) ;;
 *) fail "this smoke test installs a Windows installer; run it on Windows" ;;
 esac
 
-# run_bounded <windows exe> <arguments> <label> [limit]
 # Leaves stdout in RESPONSE_OUT, status in RESPONSE_STATUS. On timeout prints the process tree,
 # kills it, returns 124.
 run_bounded() {
@@ -136,7 +135,6 @@ step "checking the user PATH again"
 [[ $(path_entries "$dir_win") == 1 ]] ||
   fail "$dir_win is not on the user PATH exactly once after an update"
 
-# Stand-in for the login item the app writes, to prove uninstall clears it.
 step "registering the login item stand-in"
 MSYS_NO_PATHCONV=1 reg add "$run_key" /v OpenRize /t REG_SZ \
   /d "\"$dir_win\openrize.exe\" --background" /f >/dev/null

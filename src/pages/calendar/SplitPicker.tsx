@@ -23,10 +23,6 @@ interface SplitPickerProps {
   onPick: (at: number) => void;
 }
 
-/**
- * Split mode: a cut line following the pointer, snapped to the minute; click or
- * Enter takes it on.
- */
 export function SplitPicker({
   top,
   height,

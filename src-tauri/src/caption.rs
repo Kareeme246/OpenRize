@@ -39,7 +39,6 @@ pub struct ButtonRect {
     pub height: i32,
 }
 
-/// Gives the window its final frame; called once, before it is first shown.
 pub fn prepare(window: &WebviewWindow) {
     platform::prepare(window);
 }
@@ -51,7 +50,6 @@ pub fn set_maximize_button(window: WebviewWindow, rect: Option<ButtonRect>) {
     platform::place_maximize_button(&window, rect);
 }
 
-/// Opens the system window menu at the pointer, as a right click on a native caption does.
 #[tauri::command]
 pub fn show_system_menu(window: WebviewWindow) {
     platform::show_system_menu(&window);

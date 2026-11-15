@@ -149,7 +149,6 @@ fn strip_scheme(url: &str) -> &str {
     rest.strip_prefix("www.").unwrap_or(rest)
 }
 
-/// The user's home folder, which `~` in a path rule means (`%USERPROFILE%` on Windows).
 fn home_dir() -> Option<String> {
     if cfg!(windows) {
         static PROFILE: LazyLock<Option<String>> =

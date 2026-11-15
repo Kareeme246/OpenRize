@@ -60,7 +60,6 @@ export function parseRateCents(text: string): number | null {
   return cents <= 1_000_000_000 ? cents : null;
 }
 
-/** Net terms offered on an invoice; 0 is "Due on receipt". */
 export const TERMS_OPTIONS = [
   { value: 0, label: "Due on receipt" },
   { value: 15, label: "Net 15" },
@@ -87,7 +86,6 @@ export function formatDate(date?: string | null): string {
   });
 }
 
-/** The status a list shows: an open invoice past its due date is overdue. */
 export type DisplayStatus = "draft" | "open" | "overdue" | "paid" | "void";
 
 export function displayStatus(
@@ -140,7 +138,6 @@ export interface DraftLine {
   quantity: string;
   unit: string;
   rate: string;
-  /** For time lines: `Project · Sep 12, 2026`, shown under the description. */
   detail?: string;
   trackedHundredths?: number;
 }
@@ -180,7 +177,6 @@ export interface LineProblems {
   description?: string;
 }
 
-/** What is wrong with a line as typed; empty when it can be sent. */
 export function lineProblems(line: DraftLine): LineProblems {
   const problems: LineProblems = {};
   if (line.kind !== "time" && line.description.trim() === "") {
@@ -214,10 +210,7 @@ export function toLineInput(line: DraftLine): InvoiceLineInput {
   };
 }
 
-/**
- * The form as a draft for Rust, or null while any line is unfinished (the
- * preview keeps the last good document).
- */
+/** The form as a draft for Rust, or null while any line is unfinished (the preview keeps the last good document). */
 export function toDraftInput(form: DraftForm): InvoiceDraftInput | null {
   if (form.lines.some((line) => Object.keys(lineProblems(line)).length > 0)) {
     return null;

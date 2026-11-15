@@ -59,7 +59,6 @@ pub fn prepare(window: &WebviewWindow) {
     };
 }
 
-/// Puts the native window over the maximize button, hiding it when the button is off screen.
 pub fn place_maximize_button(window: &WebviewWindow, rect: Option<ButtonRect>) {
     let Ok(parent) = window.hwnd() else {
         return;
@@ -301,8 +300,6 @@ unsafe extern "system" fn overlay_proc(
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }
 
-/// Maximizes or restores the main window like its caption button; posted so it runs after this
-/// message.
 fn toggle_maximized(overlay: HWND) {
     // SAFETY: `overlay` is the window currently handling a message; its parent
     // is the main window.

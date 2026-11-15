@@ -219,7 +219,6 @@ fn day(store: &Store) -> Vec<(String, String, String, String)> {
     rows
 }
 
-/// One owner per minute from the command line: the same claim the app makes.
 #[test]
 fn entries_claim_their_minutes_and_never_take_approved_ones() {
     let store = Store::new();

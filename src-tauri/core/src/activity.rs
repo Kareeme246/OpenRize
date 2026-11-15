@@ -1,6 +1,3 @@
-//! The activity store: folds foreground-window samples into segments (a run of one app + title +
-//! url) and owns the entries, catalog and queries built on them.
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -74,10 +71,8 @@ pub fn merge_gap(entry: &TimeEntry, other: &TimeEntry) -> Option<u64> {
     (gap <= MERGE_GAP_MS && same_local_day(near, far)).then_some(gap)
 }
 
-/// Why every change to an approved entry is refused (unapprove is the only way back).
 pub const LOCKED: &str = "Approved entries are locked. Unapprove to change them.";
 
-/// Why a change that would take minutes from approved entries is refused.
 pub const APPROVED_OVERLAP: &str = "This time range overlaps approved entries. Unapprove those entries first, or choose a time that avoids them.";
 
 fn ensure_no_approved_overlap(
@@ -445,8 +440,6 @@ impl ActivityStore {
             .as_ref()
             .is_some_and(|cur| cur.kind == KIND_ACTIVITY);
 
-        // Outside tracking hours with no active work session and no manual override:
-        // suppress new capture. Close any idle break that was open.
         if !in_window && !self.manual_tracking && !is_active_work {
             self.pending_switch = None;
             if self.current.is_some() {
@@ -908,8 +901,6 @@ impl ActivityStore {
         Ok(true)
     }
 
-    /// Every non-deleted category, archived included (past entries still show them), in the user's
-    /// order.
     pub fn list_categories(&self) -> Result<Vec<Category>, String> {
         let mut stmt = self
             .conn
@@ -1041,8 +1032,6 @@ impl ActivityStore {
         }
     }
 
-    /// What `remove_category` would do, changing nothing; the inner `Err` is the message the real
-    /// deletion would fail with.
     pub fn preview_category_removal(
         &mut self,
         id: &str,
@@ -1092,8 +1081,6 @@ impl ActivityStore {
         tx.commit().map_err(|e| e.to_string())
     }
 
-    /// A trimmed, unique (case-insensitive, among non-deleted) name, or why it can't be one.
-    /// `except` is the category being renamed.
     fn category_name(&self, name: &str, except: Option<&str>) -> Result<String, String> {
         let name = name.trim().to_string();
         if name.is_empty() {
@@ -1320,7 +1307,6 @@ impl ActivityStore {
         Ok(proj)
     }
 
-    /// Soft-deletes a project and unlinks its time entries and rules.
     pub fn delete_project(&mut self, id: &str, now: u64) -> Result<(), String> {
         self.delete_undoable(&[], None, Some(id), now)
     }
@@ -1353,7 +1339,6 @@ impl ActivityStore {
         ).map_err(|e| e.to_string())
     }
 
-    /// Every non-deleted client, archived included.
     pub fn list_clients(&self) -> Result<Vec<Client>, String> {
         let mut stmt = self
             .conn
@@ -1475,7 +1460,6 @@ impl ActivityStore {
         tx.commit().map_err(|e| e.to_string())
     }
 
-    /// What `delete_client` would do, changing nothing, including the refusal if any.
     pub fn preview_delete_client(&self, id: &str) -> Result<ClientDeletionPreview, String> {
         let client = self.get_client(id)?;
         let refused = Self::ensure_client_deletable(&self.conn, &client).err();
@@ -1864,8 +1848,6 @@ impl ActivityStore {
                 self.describe_closed(id)?;
             }
 
-            // Feedback loop: the outcome feeds calibration and rule suggestions; the entry joins
-            // the kNN store once it has a vector.
             crate::ai::store::record_approval(
                 &self.conn,
                 id,
@@ -1890,8 +1872,6 @@ impl ActivityStore {
         Ok(())
     }
 
-    /// Clears the suggestion (and an AI-prefilled project), leaving the entry pending, and records
-    /// negative feedback.
     pub fn reject_time_entry(&mut self, id: &str, now: u64) -> Result<(), String> {
         self.edit("Reject", &[id.to_string()], |store| store.reject(id, now))
     }
@@ -1922,8 +1902,6 @@ impl ActivityStore {
         Ok(())
     }
 
-    /// Returns approved entries to pending, keeping category and project. Invoiced time stays
-    /// frozen; no re-classification.
     pub fn unapprove_time_entries(&mut self, ids: &[String], now: u64) -> Result<(), String> {
         self.edit("Unapprove", ids, |store| store.unapprove(ids, now))
     }
@@ -1956,8 +1934,6 @@ impl ActivityStore {
         crate::ai::store::enqueue(&self.conn, id, crate::ai::store::JOB_CLASSIFY, now)
     }
 
-    /// Accepts (creates a `suggested` rule) or dismisses (stores a disabled one so it never
-    /// returns) a rule suggestion.
     pub fn resolve_rule_suggestion(
         &mut self,
         suggestion: &crate::models::RuleSuggestion,
@@ -2466,7 +2442,6 @@ pub fn segment_from_row(row: &Row<'_>) -> rusqlite::Result<ActivitySegment> {
     })
 }
 
-/// The `categories c` columns `category_from_row` reads, in its order (last: hint rules).
 const CATEGORY_COLUMNS: &str = "c.id, c.name, c.color, c.description, c.ai_prompt, c.billable_default, c.counts_as_work, c.archived, c.sort, c.created_at, c.updated_at, c.deleted_at,
      (SELECT group_concat(r.pattern, ', ' ORDER BY r.created_at, r.rowid) FROM rules r
       WHERE r.category_id = c.id AND r.origin = 'hint' AND r.deleted_at IS NULL)";
@@ -2781,8 +2756,6 @@ mod tests {
         assert_eq!(current.started_at, 20_000);
     }
 
-    /// Ticks once a second through `[from, to)` with Zen in front; `inputs` are user input moments,
-    /// `watching` says when Zen keeps the display awake.
     fn watch_zen(
         store: &mut ActivityStore,
         (from, to): (u64, u64),
@@ -3526,8 +3499,6 @@ mod tests {
             .unwrap();
         store.rebuild_range(0, now + 40 * MIN, now).unwrap();
 
-        // The live session closed where the new entry begins; nothing is
-        // tracked twice, and no captured activity is left unowned.
         let entries = live_entries(&store);
         assert_eq!(entries.len(), 2);
         let closed = entries.iter().find(|e| e.id == live[0].id).unwrap();

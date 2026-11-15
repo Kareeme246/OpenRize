@@ -25,7 +25,6 @@ MARGIN_Y=38
 command -v magick >/dev/null || { echo "ImageMagick (magick) is required" >&2; exit 1; }
 cd "$CHECKOUT"
 
-# Freeze the app's clock at 4:41 PM on the seeded day (see freeze-time.js).
 cp index.html "$CONFIG_HOME/index.html.orig"
 restore() {
   cp "$CONFIG_HOME/index.html.orig" "$CHECKOUT/index.html"
@@ -54,7 +53,6 @@ stop_app() {
   pkill -f "vite --port $PORT" 2>/dev/null || true
 }
 
-# launch <theme>: starts the app with that theme, waits until its window exists, sets BIN_PID.
 launch() {
   mkdir -p "$CONFIG_HOME/openrize"
   printf '{"theme":"%s"}\n' "$1" >"$CONFIG_HOME/openrize/settings.json"
@@ -73,7 +71,6 @@ launch() {
   done
 }
 
-# 1. First launch only creates and migrates the database; then the seed goes in.
 if [[ ! -f "$DATA_DIR/activity.db" ]]; then
   launch dark
   for _ in $(seq 1 60); do [[ -f "$DATA_DIR/activity.db" ]] && break; sleep 1; done
@@ -84,7 +81,7 @@ node "$HERE/seed.mjs" "$DATA_DIR/activity.db"
 
 for THEME in dark light; do
   launch "$THEME"
-  sleep 8 # let the webview paint and the Calendar load
+  sleep 8
   osascript -e "tell application \"System Events\"
     set proc to first process whose unix id is $BIN_PID
     set frontmost of proc to true

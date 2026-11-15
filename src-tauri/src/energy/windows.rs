@@ -29,7 +29,6 @@ pub fn read_proc_rusage(pid: i32) -> Option<ProcessRusage> {
         let _ = CloseHandle(process);
         read.ok()?;
     }
-    // FILETIME counts 100 ns intervals.
     Some(ProcessRusage {
         cpu_time_ns: (ticks(kernel) + ticks(user)).saturating_mul(100),
         billed_energy_nj: 0,

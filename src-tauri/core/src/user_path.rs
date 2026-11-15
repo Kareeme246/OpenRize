@@ -1,8 +1,6 @@
 //! The Windows user PATH (`HKCU\Environment`), edited by `rize install-path` and `uninstall-path`
 //! and checked by the app at every launch.
 
-/// The user PATH as a list of folders, compared the way Windows does:
-/// ignoring case and a trailing backslash.
 mod path_list {
     fn same(entry: &str, folder: &str) -> bool {
         entry
@@ -15,7 +13,6 @@ mod path_list {
         path.split(';').any(|entry| same(entry, folder))
     }
 
-    /// `path` with `folder` last, unchanged if it is already listed.
     pub fn with(path: &str, folder: &str) -> String {
         match path.trim_end_matches(';') {
             _ if contains(path, folder) => path.to_owned(),
@@ -24,7 +21,6 @@ mod path_list {
         }
     }
 
-    /// `path` without any entry for `folder`, other entries untouched.
     pub fn without(path: &str, folder: &str) -> String {
         path.split(';')
             .filter(|entry| !same(entry, folder))
@@ -72,9 +68,6 @@ mod path_list {
     }
 }
 
-/// Writes the user PATH and tells running programs. `change` gets the current
-/// PATH and returns the new one, or `None` to leave it alone. Returns whether
-/// the PATH was written.
 fn edit(change: impl FnOnce(&str) -> Option<String>) -> Result<bool, String> {
     use windows::core::w;
     use windows::Win32::Foundation::{LPARAM, WPARAM};
@@ -109,12 +102,10 @@ fn edit(change: impl FnOnce(&str) -> Option<String>) -> Result<bool, String> {
     Ok(true)
 }
 
-/// Adds `folder` to the user PATH unless already there. Returns whether the PATH was written.
 pub fn ensure_folder(folder: &str) -> Result<bool, String> {
     edit(|path| (!path_list::contains(path, folder)).then(|| path_list::with(path, folder)))
 }
 
-/// Removes every entry for `folder` from the user PATH. Returns whether the PATH was written.
 pub fn remove_folder(folder: &str) -> Result<bool, String> {
     edit(|path| path_list::contains(path, folder).then(|| path_list::without(path, folder)))
 }

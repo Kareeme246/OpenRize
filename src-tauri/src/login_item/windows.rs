@@ -1,5 +1,3 @@
-//! The per-user `Run` key, honouring Task Manager's Startup apps switch.
-
 use std::path::Path;
 
 use windows_registry::CURRENT_USER;
@@ -16,8 +14,6 @@ fn quoted(exe: &Path) -> String {
     format!("\"{}\"", exe.display())
 }
 
-/// The sign-in command: this executable started in the background like `rize app start`, so signing
-/// in does not open the window.
 fn command_for(exe: &Path) -> String {
     format!("{} {}", quoted(exe), crate::BACKGROUND_ARG)
 }

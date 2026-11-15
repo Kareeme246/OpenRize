@@ -22,10 +22,7 @@ const GLYPHS: Record<CaptionIcon, string> = {
 
 const ICON_FONT = '"Segoe Fluent Icons", "Segoe MDL2 Assets"';
 
-/**
- * A stripped-down Windows image can lack the icon fonts, and a glyph measures
- * differently in the fallback font.
- */
+/** A stripped-down Windows image can lack the icon fonts, and a glyph measures differently in the fallback. */
 const hasIconFont = (() => {
   let known: boolean | undefined;
   return (): boolean => {
@@ -58,11 +55,7 @@ function reportMaximizeButton(rect: ButtonRect | null): Promise<void> {
   return invoke("set_maximize_button", { rect });
 }
 
-/**
- * Opens the system window menu on a right click on the bar's empty space. Rust
- * draws it because WebView2's own caption menu shows stale Maximize/Restore
- * states for a window it did not maximize.
- */
+/** Rust draws the system menu on right click: WebView2's own caption menu shows stale Maximize/Restore states. */
 export function useWindowMenu(bar: RefObject<HTMLElement | null>): void {
   useEffect(() => {
     const element = bar.current;
@@ -85,11 +78,7 @@ export function useWindowMenu(bar: RefObject<HTMLElement | null>): void {
   }, [bar]);
 }
 
-/**
- * Windows 11 window buttons. Snap Layouts only appears for a window that
- * answers a hit test, so a native window sits over Maximize and reports the
- * pointer back as an event (src-tauri/src/caption.rs).
- */
+/** Snap Layouts only appears for a window that answers a hit test, so a native window sits over Maximize (src-tauri/src/caption.rs). */
 export function CaptionButtons() {
   const [maximized, setMaximized] = useState(false);
   const [active, setActive] = useState(() => document.hasFocus());

@@ -94,7 +94,6 @@ export function WeekView({
   const today = currentCalendarDay(new Date(now));
   const weekStartMs = weekStart.getTime();
 
-  // The current week opens with today's now line in the middle of the view.
   const { viewport, onScroll } = useRememberedScroll(viewportKey);
   const nowTopRef = useRef(0);
   nowTopRef.current =

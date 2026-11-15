@@ -49,7 +49,6 @@ pub enum SizeMode {
     VeryRelaxed,
 }
 
-/// How panels are drawn: spaced rounded cards, or edge-to-edge sections split by dividers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum Shape {
@@ -109,7 +108,6 @@ pub enum AiSuggest {
 #[serde(rename_all = "camelCase")]
 pub enum AiLlm {
     Apple,
-    /// A GGUF model from the models folder, run by the bundled `llama-server`.
     Local,
     None,
 }
@@ -266,7 +264,6 @@ impl TrackingHours {
         self
     }
 
-    /// Whether the timestamp (epoch ms) is inside the tracking window, in local time and DST.
     pub fn is_inside_window(&self, now_ms: u64) -> bool {
         use chrono::{DateTime, Datelike, Local, Timelike, Weekday};
 
@@ -304,7 +301,6 @@ impl TrackingHours {
 pub const DEFAULT_WORK_MINUTES: u16 = 50;
 pub const DEFAULT_BREAK_MINUTES: u16 = 5;
 pub const DEFAULT_SNOOZE_MINUTES: u16 = 5;
-/// The snooze lengths the reminder's chevron offers; the default is one of them.
 pub const SNOOZE_CHOICES: [u16; 3] = [5, 10, 15];
 pub const MAX_BREAK_MESSAGE_CHARS: usize = 120;
 pub const MAX_SCHEDULED_BREAKS: usize = 12;
@@ -353,7 +349,6 @@ impl Weekdays {
     }
 }
 
-/// A fixed-time, recurring break such as "Lunch 12:30, 45 min, weekdays".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ScheduledBreak {
@@ -379,7 +374,6 @@ impl Default for ScheduledBreak {
 }
 
 impl ScheduledBreak {
-    /// Minutes after local midnight the break is due.
     pub fn at_minutes(&self) -> u32 {
         parse_time_minutes(&self.at).unwrap_or(0)
     }
@@ -405,8 +399,6 @@ impl ScheduledBreak {
     }
 }
 
-/// Break reminders (Settings > Notifications). Interval reminders fire after
-/// `work_minutes` of continuous work; scheduled breaks fire at fixed times.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct BreakSettings {
@@ -474,7 +466,6 @@ pub struct Settings {
     pub size_mode: SizeMode,
     pub close_behavior: CloseBehavior,
     pub tray_enabled: bool,
-    /// Activity history older than this many days is deleted. 0 = forever.
     pub retention_days: u32,
     pub ai_suggest: AiSuggest,
     pub ai_llm: AiLlm,
@@ -562,7 +553,6 @@ pub fn config_dir() -> PathBuf {
     dir
 }
 
-/// The environment `config_dir` reads, separated so tests can supply it.
 #[derive(Default)]
 struct ConfigEnv {
     xdg: Option<OsString>,
@@ -572,7 +562,6 @@ struct ConfigEnv {
     /// folder inside it, per-user and never synced. Its `openrize` folder is
     /// the installed app, so a settings file there is only ever a legacy one.
     local: Option<PathBuf>,
-    /// Windows roaming AppData, where builds before Local AppData kept them.
     roaming: Option<PathBuf>,
 }
 
@@ -910,7 +899,6 @@ mod tests {
                 .enabled,
             breaks
         );
-        // Clamped like any other write.
         assert_eq!(
             store
                 .patch("weeklyTargetHours", serde_json::json!(1_000))
@@ -1092,7 +1080,6 @@ mod tests {
         let script = appearance_init_script(&dir);
         assert!(script.contains("seed(\"openrize.theme\", \"light\")"));
         assert!(script.contains("seed(\"openrize.shape\", \"sharper\")"));
-        // Only fills a missing copy; an existing one is current.
         assert!(script.contains("localStorage.getItem(key) === null"));
 
         let system = temp_dir("init-script-system");
@@ -1334,7 +1321,6 @@ mod tests {
             env.resolve(true),
             PathBuf::from("/local/com.offlinestudios.openrize/config")
         );
-        // The other platforms ignore the Windows slots entirely.
         assert_eq!(env.resolve(false), PathBuf::from("/h/.config/openrize"));
 
         let env = ConfigEnv { home: None, ..env };
@@ -1407,7 +1393,6 @@ mod tests {
             roaming: Some(root.join("roaming")),
             ..ConfigEnv::default()
         };
-        // The profile copy is .../profile/openrize, one of the legacy dirs.
         migrate_legacy(&local, &env.legacy_dirs());
         assert_eq!(
             SettingsStore::load(&local).unwrap().snapshot().accent,
@@ -1416,7 +1401,6 @@ mod tests {
         assert!(!roaming.exists(), "the emptied roaming folder is removed");
         assert!(profile.join(FILE_NAME).is_file(), "older copies stay");
 
-        // Already there (and local data present): roaming is not consulted again.
         fs::create_dir_all(&roaming).unwrap();
         fs::write(roaming.join(FILE_NAME), r#"{"accent":"orange"}"#).unwrap();
         migrate_legacy(&local, &env.legacy_dirs());

@@ -4,8 +4,6 @@ import Foundation
 import FoundationModels
 #endif
 
-/// Label used for the "not part of any listed project" answer. It is a real
-/// answer with its own votes, not a missing value.
 let noProjectLabel = "No project"
 
 /// T2: Apple's on-device Foundation Model with guided generation. A

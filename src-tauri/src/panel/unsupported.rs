@@ -1,5 +1,3 @@
-//! No panel conversion on this platform.
-
 use tauri::WebviewWindow;
 
 use super::Kind;

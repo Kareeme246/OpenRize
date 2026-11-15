@@ -1,6 +1,5 @@
 use rusqlite::{params, Connection, Result};
 
-/// The `user_version` `run_migrations` leaves a database at.
 pub const SCHEMA_VERSION: i32 = 15;
 
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
@@ -639,8 +638,6 @@ CREATE TABLE IF NOT EXISTS timer_saved_states (
 );
 ";
 
-/// Break reminders: one row per break decision (taken, skipped, missed or credited from idle),
-/// linked to its `break` segment. Purely additive.
 const BREAKS_V8: &str = "
 CREATE TABLE breaks (
   id          TEXT PRIMARY KEY,
@@ -660,8 +657,6 @@ CREATE INDEX breaks_started_at ON breaks (started_at);
 CREATE INDEX breaks_due_at ON breaks (due_at);
 ";
 
-/// The Clients page: a client can be archived (hidden from the active list and pickers) and carries
-/// notes. Both columns are additive.
 const CLIENT_ARCHIVE_V7: &str = "
 ALTER TABLE clients ADD COLUMN archived_at INTEGER;
 ALTER TABLE clients ADD COLUMN notes TEXT;
@@ -1010,7 +1005,6 @@ mod tests {
         assert_eq!(schema_snapshot(&fresh), schema_snapshot(&legacy));
     }
 
-    /// The invoice tables and time-protection trigger as main's v2 and v3 steps leave them.
     const SHIPPED_V4_INVOICES: &str = "
         CREATE TABLE invoices (
           id TEXT PRIMARY KEY, client_id TEXT NOT NULL, client_name TEXT NOT NULL,
@@ -1034,8 +1028,6 @@ mod tests {
           NEW.status IS NOT OLD.status OR NEW.billable IS NOT OLD.billable OR NEW.deleted_at IS NOT OLD.deleted_at
         ) BEGIN SELECT RAISE(ABORT, 'Invoiced time cannot be edited; delete its draft invoice first'); END;";
 
-    /// A database as main ships it at user_version 4: the pre-invoice schema, the old invoice
-    /// tables and tracked data of every kind.
     fn shipped_v4_database() -> Connection {
         let mut conn = Connection::open_in_memory().unwrap();
         legacy_v1_through_v7::run(&mut conn).unwrap();
@@ -1063,8 +1055,6 @@ mod tests {
         conn
     }
 
-    /// What the upgrade must leave as it found it: only the USD draft survives, holding its time;
-    /// the deleted invoices release theirs.
     fn assert_upgraded_in_place(conn: &Connection) {
         let mut fresh = Connection::open_in_memory().unwrap();
         run_migrations(&mut fresh).unwrap();
@@ -1128,8 +1118,6 @@ mod tests {
             .is_err());
     }
 
-    /// A shipped install at user_version 4 upgrades in place to a new install's schema, losing
-    /// nothing.
     #[test]
     fn a_shipped_v4_database_upgrades_in_place_to_the_current_schema() {
         let mut conn = shipped_v4_database();
@@ -1137,7 +1125,6 @@ mod tests {
         assert_upgraded_in_place(&conn);
     }
 
-    /// The same for a database that already ran the v5 step (legacy rows kept, no From columns).
     #[test]
     fn a_v5_database_upgrades_in_place_to_the_current_schema() {
         let mut conn = shipped_v4_database();
@@ -1210,9 +1197,6 @@ mod tests {
         .unwrap();
         run_migrations(&mut conn).unwrap();
 
-        // Only the USD draft survives; it stays editable and its amount now
-        // satisfies quantity x rate: 0.28 h (16m40s) x $100.00 = $28.00
-        // rather than the old exact $27.78.
         let ids: Vec<String> = conn
             .prepare("SELECT id FROM invoices ORDER BY id")
             .unwrap()
@@ -1279,8 +1263,6 @@ mod tests {
         assert_eq!(v, SCHEMA_VERSION);
     }
 
-    /// A database the v5 migration already ran on (with `legacy` rows kept) loses
-    /// them on the next launch; drafts and finalized invoices keep their From.
     #[test]
     fn v6_deletes_legacy_invoices_from_an_already_upgraded_database() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -1376,8 +1358,6 @@ mod tests {
             )
             .unwrap()
         };
-        // A draft starts from the current settings; a finalized invoice keeps
-        // the issuer it was issued under.
         assert_eq!(
             from("draft"),
             (
@@ -1402,7 +1382,6 @@ mod tests {
         assert_eq!(v, SCHEMA_VERSION);
     }
 
-    /// A database as v6 shipped it: no client archive and notes columns.
     #[test]
     fn a_v6_database_upgrades_in_place_keeping_clients_projects_and_time() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -1502,7 +1481,6 @@ mod tests {
         assert_eq!(linked, ("c1".into(), "p1".into(), 3_600_000));
     }
 
-    /// A database as v7 shipped it: no `breaks` table.
     #[test]
     fn a_v7_database_upgrades_in_place_keeping_clients_projects_time_and_invoices() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -1570,8 +1548,6 @@ mod tests {
             .is_err());
     }
 
-    /// A database as v9 shipped it, with agent time on an unbilled entry, on
-    /// a draft invoice and on an issued one, next to the person's own time.
     #[test]
     fn a_v9_database_drops_agent_data_and_keeps_everything_else() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -1664,7 +1640,6 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         run_migrations(&mut conn).unwrap();
 
-        // Reset to v10 shape: drop timer tables and recreate them without ordinal
         conn.execute_batch(
             "DROP TABLE timer_saved_states;
              DROP TABLE timer_segments;
@@ -2114,8 +2089,6 @@ mod tests {
 mod private_segments_tests {
     use super::*;
 
-    /// A database as v13 left it: no `private` column, and the original
-    /// search-index triggers that mirror every title.
     fn v13_database() -> Connection {
         let mut conn = Connection::open_in_memory().unwrap();
         run_migrations(&mut conn).unwrap();
@@ -2197,7 +2170,6 @@ mod private_segments_tests {
         .unwrap();
         assert_eq!(indexed(&conn, "confidential"), 0);
 
-        // Erasing its title, and deleting it, leave the index consistent.
         conn.execute(
             "UPDATE segments SET title = 'Private window' WHERE private = 1",
             [],

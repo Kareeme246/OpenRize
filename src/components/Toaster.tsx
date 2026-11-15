@@ -65,7 +65,6 @@ const SLIDE_MS = 450;
 const MORPH_MS = 600;
 const FADE_MS = 220;
 const LEAVE_MS = 280;
-/** Long enough for any of the exits above to finish. */
 const EXIT_MS = 400;
 
 interface ToasterProps {

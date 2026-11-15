@@ -40,7 +40,6 @@ pub(super) struct Deletion {
     segments: Vec<ActivitySegment>,
 }
 
-/// What a deletion would change, as `rize --dry-run` reports it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeletionPreview {

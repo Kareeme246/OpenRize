@@ -36,7 +36,6 @@ pub const EVENT_AI_STATUS_CHANGED: &str = "ai-status-changed";
 #[serde(rename_all = "camelCase")]
 pub enum StatusProvider {
     Apple,
-    /// A GGUF model run by the bundled `llama-server`.
     Local,
     /// No language model: none chosen, or no provider is installed (Windows, or a build without the sidecar).
     None,
@@ -46,7 +45,6 @@ pub enum StatusProvider {
 #[serde(rename_all = "camelCase")]
 pub enum LlmState {
     Ready,
-    /// The runtime is starting or the model is loading.
     Loading,
     Unavailable,
 }
@@ -60,11 +58,8 @@ pub enum LlmReason {
     DeviceNotEligible,
     #[serde(rename = "unsupportedOS")]
     UnsupportedOs,
-    /// No local model is selected, or its file is not in the models folder.
     ModelMissing,
-    /// The bundled `llama-server` is not next to the app.
     RuntimeMissing,
-    /// The server failed to start on the GPU and on the CPU.
     RuntimeFailed,
     Unknown,
 }
@@ -100,7 +95,6 @@ pub enum RuntimeState {
     Unavailable,
 }
 
-/// The language model half of the status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LlmView {
     pub provider: StatusProvider,
@@ -169,7 +163,6 @@ impl LlmView {
     }
 }
 
-/// What the local runtime row of the status says.
 pub fn local_runtime_state(check: Option<RuntimeCheck>) -> RuntimeState {
     match check {
         Some(RuntimeCheck::Running) => RuntimeState::Running,
@@ -195,18 +188,14 @@ pub fn engine_for(llm: LlmState, embed: EmbedState) -> &'static str {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AiStatus {
-    /// `full` (T0+T1+T2), `fallback` (T0+T1), `rules` (no provider, T0
-    /// only), or `starting` before the first probe.
     pub engine: String,
     pub provider: StatusProvider,
     pub llm: LlmState,
-    /// Present only while `llm` is unavailable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub llm_reason: Option<LlmReason>,
     pub embed: EmbedState,
     pub personal: bool,
     pub runtime: RuntimeState,
-    /// Where the local model runs; absent while no local runtime runs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device: Option<Device>,
     /// Present when `device` is the CPU only because the GPU failed.
@@ -218,8 +207,6 @@ pub struct AiStatus {
     /// Verdicts calibration can learn from so far; see `COLD_START_OUTCOMES`.
     pub outcomes: u32,
     pub calibrated: bool,
-    /// Personal-model retraining: `idle`, `queued` (Retrain now pressed), or
-    /// `running`.
     pub retrain: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retrain_note: Option<String>,
@@ -319,7 +306,6 @@ impl AiRuntime {
         self.local_pid.store(pid.unwrap_or(0), Ordering::Relaxed);
     }
 
-    /// Processes the AI engine runs, for energy attribution.
     pub fn helper_pids(&self) -> impl Iterator<Item = u32> {
         [self.sidecar_pid(), self.local_pid()].into_iter().flatten()
     }
@@ -328,7 +314,6 @@ impl AiRuntime {
         self.shutdown.load(Ordering::SeqCst)
     }
 
-    /// The worker stops its model processes and confirms.
     pub fn mark_worker_stopped(&self) {
         if let Ok(mut stopped) = self.worker_stopped.lock() {
             *stopped = true;
@@ -418,7 +403,6 @@ mod tests {
         }
     }
 
-    /// What the worker publishes for Apple's model: the sidecar's view of both halves.
     fn status_of(caps: Option<&Capabilities>) -> AiStatus {
         let mut status = AiStatus::default();
         match caps {

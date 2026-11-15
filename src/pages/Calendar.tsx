@@ -182,7 +182,6 @@ export function Calendar({ route, navigate }: CalendarProps) {
         setEntries(list);
         setError(null);
       }
-      // The snapshot runs to now; keep only this day's segments.
       setSegments(
         snapshot?.segments.filter(
           (segment) =>

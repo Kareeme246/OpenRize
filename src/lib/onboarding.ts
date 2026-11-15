@@ -4,7 +4,6 @@ import type { AccessibilityState } from "./types";
 export type OnboardingStep =
   | "hidden"
   | "asking"
-  /** Allowed; waiting to hear whether it works in this running copy. */
   | "waiting"
   | "granted"
   | "notWorking"
@@ -12,7 +11,6 @@ export type OnboardingStep =
   | "relaunch";
 
 export interface OnboardingInput {
-  /** The user has not skipped or finished it before; `null` until known. */
   needed: boolean | null;
   shown: boolean;
   accessibility: AccessibilityState | null;
@@ -48,7 +46,6 @@ export type OnboardingAction =
   | {
       kind: "continue";
       label: "Continue";
-      /** A grant is being checked: it may turn out to need a restart, so leaving waits for the answer. */
       disabled: boolean;
     }
   | {
@@ -58,10 +55,6 @@ export type OnboardingAction =
       note: string;
     };
 
-/**
- * Continue, except once a grant needs a restart: then it is the restart. Waits
- * while a grant is checked.
- */
 export function onboardingAction(
   step: Exclude<OnboardingStep, "hidden">,
 ): OnboardingAction {
@@ -76,10 +69,6 @@ export function onboardingAction(
   return { kind: "continue", label: "Continue", disabled: step === "waiting" };
 }
 
-/**
- * Whether the relaunch screen is up; onboarding owns the relaunch while it
- * shows.
- */
 export function relaunchModalOpen(
   accessibility: AccessibilityState | null,
   step: OnboardingStep,
@@ -106,7 +95,6 @@ export function accessibilityCard(
   return cardFor(states[step]);
 }
 
-/** Automation is a yes or no; `undefined` is not known yet, so the card says nothing. */
 export function automationCard(
   granted: boolean | undefined,
 ): PermissionCardView | null {
@@ -116,7 +104,6 @@ export function automationCard(
 
 function cardFor(state: AccessibilityState): PermissionCardView {
   return {
-    // The button on this screen says Restart, so the card does too.
     status: state === "relaunchRequired" ? "Restart needed" : stateLabel(state),
     tone: stateTone(state),
     showGrant: state === "notGranted",

@@ -20,11 +20,8 @@ use crate::state::{AppState, StoragePaths};
 use crate::timers::{check_span, now_epoch_ms, Timer};
 use crate::{EntryFilter, NONE};
 
-/// What only the running app can do, and how it shows a change at once.
 pub trait Live {
     fn open_window(&self, review: bool);
-    /// Quits after the answer is sent, with the same shutdown as the tray's
-    /// Quit.
     fn quit(&self);
     fn start_focus(&self, label: Option<String>) -> Result<(), String>;
     fn stop_focus(&self) -> Result<(), String>;
@@ -40,8 +37,6 @@ const MAX_BUCKETS: usize = 400;
 
 type Outcome = Result<Value, ApiError>;
 
-/// Answers one request. `live` is the running app, or `None` when `rize`
-/// answers from the stores alone.
 pub fn answer(
     state: &AppState,
     live: Option<&dyn Live>,
@@ -65,7 +60,6 @@ pub fn answer(
     };
     match context.dispatch(&request.operation) {
         Ok(data) => {
-            // A preview changed nothing, so there is nothing for a window to show.
             if let Some(live) =
                 live.filter(|_| !matches!(request.operation, Operation::Preview { .. }))
             {
@@ -508,8 +502,6 @@ impl Context<'_> {
         }
     }
 
-    /// What a delete, reset or rebuild would change, through the real command's resolution; a
-    /// refusal is carried as `refused`.
     fn preview(&self, operation: &Operation) -> Outcome {
         use Operation as O;
         let now = now_epoch_ms();
@@ -689,8 +681,6 @@ impl Context<'_> {
         read(&*lock(&self.state.activity_reader)?).map_err(fail)
     }
 
-    /// Every category, project and client id with its name, so a client can
-    /// show names without a second request.
     fn names(&self) -> Result<BTreeMap<String, String>, ApiError> {
         let store = lock(&self.state.activity)?;
         let mut names = BTreeMap::new();
@@ -711,8 +701,6 @@ impl Context<'_> {
         pick(&timers, reference, "timer", |t| &t.id, |t| &t.label)
     }
 
-    /// The tag a reference names, as its timers spell it. Tags are matched
-    /// by name or a unique prefix, as timers are by label.
     fn tag(&self, reference: &str) -> Result<String, ApiError> {
         let mut names: Vec<String> = self
             .timers()?
@@ -902,8 +890,6 @@ fn pick<T>(
     }
 }
 
-/// A staged deletion as the answer carries it: the refusal, if the real
-/// command would fail, and the deletion it would have made otherwise.
 fn staged_deletion(
     staged: Result<DeletionPreview, String>,
 ) -> (Option<String>, Option<DeletionPreview>) {
@@ -913,8 +899,6 @@ fn staged_deletion(
     }
 }
 
-/// Local midnight at or before `now`, in epoch milliseconds: the start of the
-/// day `rize` calls today.
 fn day_start(now: u64) -> u64 {
     use chrono::{DateTime, Local, TimeZone};
     let local = DateTime::from_timestamp_millis(now as i64)

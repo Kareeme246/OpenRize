@@ -78,10 +78,6 @@ function snapshot(form: DraftForm): string {
 
 const tomorrow = (): number => addDays(startOfDay(new Date()), 1).getTime();
 
-/**
- * Edit a draft: sections on the left, the real invoice PDF re-rendered by Rust
- * beside it.
- */
 export function InvoiceEditor({
   invoiceId,
   compose,

@@ -12,12 +12,10 @@ pub struct CategoryStats {
     pub entries: u32,
     pub approved: u32,
     pub total_ms: u64,
-    /// Time in the page's selected range (the Time column).
     pub range_ms: u64,
     pub last_activity: Option<u64>,
 }
 
-/// Totals for every category with at least one entry.
 pub fn category_stats(
     conn: &Connection,
     range_start: u64,

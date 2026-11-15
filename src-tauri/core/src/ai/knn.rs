@@ -7,7 +7,6 @@ pub struct Labeled {
     pub vector: Vec<f32>,
     pub category_id: Option<String>,
     pub project_id: Option<String>,
-    /// Content the vector was computed from, reused as a few-shot example.
     pub features: String,
     pub corrected: bool,
 }

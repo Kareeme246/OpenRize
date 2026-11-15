@@ -105,7 +105,6 @@ export function BatteryEnergyMonitor({
 
   return (
     <div className="flex flex-col">
-      {/* Current Impact Row */}
       <div className="settings-battery-row flex items-center justify-between gap-4 border-b border-line px-4 py-3">
         <div className="min-w-0">
           <div className="text-[13px] font-medium text-fg">
@@ -128,7 +127,6 @@ export function BatteryEnergyMonitor({
         </div>
       </div>
 
-      {/* Battery Used Row */}
       <div className="settings-battery-row flex items-center justify-between gap-4 border-b border-line px-4 py-3">
         <div className="min-w-0">
           <div className="text-[13px] font-medium text-fg">
@@ -152,7 +150,6 @@ export function BatteryEnergyMonitor({
         </div>
       </div>
 
-      {/* Benchmarking & Telemetry Block */}
       <div className="px-4 py-3">
         <div className="flex items-center justify-between gap-4 pb-3">
           <div>
@@ -172,7 +169,6 @@ export function BatteryEnergyMonitor({
           />
         </div>
 
-        {/* Energy Share Stacked Bar */}
         <div className="my-2">
           <div className="flex h-2 overflow-hidden rounded-[3px] bg-inset-soft">
             <Tooltip
@@ -208,7 +204,6 @@ export function BatteryEnergyMonitor({
           </div>
         </div>
 
-        {/* Stats Grid */}
         <div className="mt-3.5 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
           <StatCard
             label="Baseline"
@@ -232,7 +227,6 @@ export function BatteryEnergyMonitor({
           />
         </div>
 
-        {/* Benchmarking Actions */}
         <div className="settings-energy-actions mt-3 flex items-center justify-between gap-3 pt-2">
           <span className="text-[11.5px] text-fg-muted">
             Telemetry persists in SQLite across restarts for repeatable

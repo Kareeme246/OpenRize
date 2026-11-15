@@ -109,7 +109,6 @@ struct Rows {
 }
 
 impl Stash {
-    /// Removes an entry and its dependent rows, returning them; relink its segments first.
     pub(super) fn take(conn: &Connection, id: &str) -> Result<Self, String> {
         let mut tables = Vec::new();
         for (table, key) in std::iter::once(("time_entries", "id"))
@@ -346,8 +345,6 @@ fn settle_live(conn: &Connection, id: &str, now: u64) -> Result<bool, String> {
 
 impl Edit {
     fn apply(&mut self, conn: &Connection, undo: bool, now: u64) -> Result<(), String> {
-        // Entries come back first, so everything below finds them; the ones
-        // that go wait until their segments have been handed on.
         for change in &mut self.entries {
             let (from, to) = Self::direction(change, undo);
             if from.is_none() && to.is_some() {
@@ -368,7 +365,6 @@ impl Edit {
             } else {
                 (&handover.before, &handover.after)
             };
-            // A segment capture has since linked elsewhere stays where it is.
             conn.execute(
                 "UPDATE segments SET entry_id = ?1 WHERE id = ?2 AND entry_id IS ?3;",
                 params![to, handover.segment, from],
@@ -390,11 +386,9 @@ impl Edit {
                 return Err(LOCKED.to_string());
             }
             for &column in &touched {
-                // The builder owns a live entry's times and template text.
                 let live = matches!(column, STARTED | ENDED | DESCRIPTION)
                     && current.building()
                     && from.building();
-                // Queued for classification since: still the same pending entry.
                 let classifying = column == STATUS
                     && from.text(STATUS) == "pending"
                     && current.text(STATUS) == "processing";
@@ -640,7 +634,6 @@ impl ActivityStore {
         Ok(())
     }
 
-    /// Undoes the last change; one that conflicts with later edits stays put.
     pub fn undo(&mut self, now: u64) -> Result<Option<&'static str>, String> {
         self.step(true, now)
     }
@@ -846,7 +839,6 @@ impl ActivityStore {
                 (true, false) => a,
                 (false, true) => b,
                 (true, true) => continue,
-                // Neither came back: the one that is recording yields.
                 (false, false) if first.status == "building" => b,
                 (false, false) => a,
             };
@@ -1338,8 +1330,6 @@ impl ActivityStore {
             )
             .map_err(|e| e.to_string())?;
         let piece = self.conn.last_insert_rowid();
-        // Until the change says otherwise, the later piece belongs where the
-        // segment did.
         self.note_segment(piece, entry_id);
         if let Some(current) = self.current.as_mut().filter(|c| c.id == segment.id) {
             current.id = piece;

@@ -38,23 +38,14 @@ use crate::timers::now_epoch_ms;
 use crate::AppState;
 
 const POLL: Duration = Duration::from_secs(30);
-/// A burst of window switches rebuilds at most this often.
 const REBUILD_DEBOUNCE: Duration = Duration::from_secs(3);
-/// While the Foundation Model is missing, check again this often (it may
-/// finish downloading, or the user may turn Apple Intelligence on).
 const REPROBE_EVERY: Duration = Duration::from_secs(30 * 60);
 const RETRAIN_CHECK_EVERY: Duration = Duration::from_secs(10 * 60);
-/// New labeled entries that trigger retraining the personal models, and the
-/// fewest a model is trained on.
 pub const RETRAIN_AFTER_LABELS: u32 = 20;
-/// With fewer new labels, the models still retrain once this long after the
-/// last attempt ("nightly").
 const RETRAIN_AT_LEAST_EVERY_MS: u64 = 24 * 60 * 60 * 1000;
-/// One entry in `HOLDOUT_ONE_IN` is held out to judge a retrained model.
 const HOLDOUT_ONE_IN: u64 = 5;
 const CALIBRATION_CHECK_EVERY: Duration = Duration::from_secs(60);
 const CALIBRATION_REFIT_AFTER: u32 = 10;
-/// How long quitting waits for the worker to stop its model processes.
 pub const SHUTDOWN_WAIT: Duration = Duration::from_secs(2);
 const CONTEXT_GAP_MS: u64 = 15 * 60 * 1000;
 const BACKFILL_WINDOW_MS: u64 = 7 * 24 * 60 * 60 * 1000;
@@ -75,16 +66,12 @@ pub fn spawn(app: AppHandle, db_path: PathBuf, ml_dir: PathBuf, models_dir: Path
 struct Worker {
     app: AppHandle,
     conn: Connection,
-    /// Always the embedder and personal model; also the language model when `ai_llm` is `apple`.
     apple: AppleProvider,
     ml_dir: PathBuf,
     models_dir: PathBuf,
-    /// What the settings asked for when `choice` and `local` were last built.
     wanted: Option<(AiLlm, Option<String>)>,
     choice: AiLlm,
-    /// The local model, if one is selected and its name is a plain file name.
     local: Option<OpenAiProvider>,
-    /// The runtime is starting or the model is loading.
     loading: bool,
     /// Whether the active language model was last ready, to re-queue fallback entries on recovery.
     llm_was_ready: Option<bool>,
@@ -258,7 +245,6 @@ impl Worker {
         }
     }
 
-    /// Mirrors the sidecar's capabilities into `AiStatus`.
     fn apply_capabilities(&mut self) {
         let Some(caps) = self.apple.sidecar_capabilities().cloned() else {
             return;
@@ -335,8 +321,6 @@ impl Worker {
         }
     }
 
-    /// Applies a change of `ai_llm` or `local_model`: the old local server stops and the new
-    /// choice takes effect with the next job.
     fn sync_choice(&mut self) {
         let settings = self.settings();
         let wanted = (settings.ai_llm, settings.local_model);
@@ -352,7 +336,6 @@ impl Worker {
         if choice == AiLlm::Local {
             self.local = model.and_then(|name| self.open_local(&name));
         }
-        // A newly chosen model that works is a better tier coming back.
         self.llm_was_ready = self.llm_was_ready.map(|_| false);
         self.report_pids();
         if !first {
@@ -384,7 +367,6 @@ impl Worker {
         runtime.set_local_pid(self.local.as_ref().and_then(|local| local.pid()));
     }
 
-    /// On quit: kills the model processes and tells `AiRuntime::shutdown`.
     fn stop_if_shutting_down(&mut self) -> bool {
         let runtime = self.app.state::<AiRuntime>();
         if !runtime.shutting_down() {
@@ -396,7 +378,6 @@ impl Worker {
         true
     }
 
-    /// Tells the core which embedder exists so it stops queueing embed jobs when there is none.
     fn note_embedder(&self, model: Option<&str>) {
         if let Err(error) = self.write(|conn| store::set_embedder(conn, model)) {
             eprintln!("ai worker: recording the embedder: {error}");
@@ -423,8 +404,6 @@ impl Worker {
         self.publish();
     }
 
-    /// The sidecar's capabilities, for the embedder and personal model. `None` means only T0
-    /// (and a local language model, if chosen).
     fn capabilities(&mut self) -> Option<Capabilities> {
         if !self.apple.is_installed() {
             return None;
@@ -566,7 +545,6 @@ impl Worker {
             .ok()
     }
 
-    /// Reuses a stored vector for identical text.
     fn vector_for(
         &mut self,
         entry_id: &str,
@@ -634,8 +612,6 @@ impl Worker {
         let segments = self.load_segments(&entry)?;
         let mut features = features::extract(entry.started_at, entry.ended_at, &segments, None);
         if features.active_ms == 0 {
-            // A hand-made entry with no captured activity: its description
-            // is all there is to embed.
             features.content = entry.description.clone();
         }
         if !self.apple.is_installed() {
@@ -792,8 +768,6 @@ impl Worker {
         }
     }
 
-    /// Starts the local server if it is stopped, showing the status as loading meanwhile.
-    /// Whether the model is ready to answer.
     fn prepare_local(&mut self) -> bool {
         let Some(check) = self.local.as_mut().map(|local| local.check()) else {
             self.publish();
@@ -827,7 +801,6 @@ impl Worker {
         true
     }
 
-    /// Who produced the suggestion: only a language model that answered is named.
     fn llm_id(&self, answered: bool) -> ProviderId {
         match (self.choice, &self.local) {
             (AiLlm::Apple, _) => self.apple.id(),
@@ -841,7 +814,6 @@ impl Worker {
 
     /// Retrains on "Retrain now", or when due (20+ new labels, or any new one a day
     /// after the last attempt) and the Mac is idle, on AC and not in Low Power Mode.
-    /// Calibration is refit right after, since the raw scores just changed.
     fn retrain_if_due(&mut self) {
         let requested = self.app.state::<AiRuntime>().take_retrain_request();
         if !requested

@@ -1,7 +1,7 @@
 /**
- * R2 layout: openrize/releases/<version>/<installer>, .../manifest.json,
- * openrize/current.json. Import-free so Node can run it; the website has its
- * own strict `parseManifest` copy, so keep the format byte-identical.
+ * R2 layout: openrize/releases/<version>/<installer>, .../manifest.json, openrize/current.json.
+ * Import-free so Node can run it; the website has its own `parseManifest` copy, so keep the
+ * format byte-identical.
  */
 export type OpenRizeTarget = "macos-arm64" | "windows";
 

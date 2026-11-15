@@ -98,7 +98,6 @@ pub fn enqueue_unclassified(conn: &Connection, start: u64, end: u64, now: u64) -
     Ok(ids.len())
 }
 
-/// Only freshly rebuilt open entries qualify; old/closed sessions never poll.
 pub fn enqueue_live_due(conn: &Connection, now: u64) -> Result<usize> {
     const MINUTE: u64 = 60_000;
     let ids: Vec<String> = {
@@ -132,8 +131,6 @@ pub fn enqueue_live_due(conn: &Connection, now: u64) -> Result<usize> {
     Ok(ids.len())
 }
 
-/// The next job to run. Newest first, so a block that just closed is
-/// categorized before any backlog.
 pub fn next_due(conn: &Connection, now: u64) -> Result<Option<Job>> {
     conn.query_row(
         "SELECT id, entry_id, kind, attempts FROM classify_jobs
@@ -399,8 +396,6 @@ pub fn summaries(conn: &Connection, start: u64, end: u64) -> Result<HashMap<Stri
     Ok(out)
 }
 
-/// On approval, each undecided suggestion is `accepted` when the entry kept
-/// its value and `changed` otherwise.
 pub fn record_approval(
     conn: &Connection,
     entry_id: &str,
@@ -609,8 +604,6 @@ pub fn labeled_count(conn: &Connection) -> Result<u32> {
     .map_err(err)
 }
 
-/// "Reset learned data": forgets personal models, calibration, the kNN store and verdict history.
-/// Returns the model files to delete.
 pub fn reset_learned(conn: &Connection, now: u64) -> Result<Vec<String>> {
     let paths: Vec<String> = {
         let mut stmt = conn
@@ -982,7 +975,6 @@ pub fn artifact_history(conn: &Connection, kind: &str, limit: u32) -> Result<Vec
     rows.collect::<rusqlite::Result<_>>().map_err(err)
 }
 
-/// Project rows use `none` for "No project".
 pub fn training_rows(conn: &Connection, field: Field) -> Result<Vec<(String, String, String)>> {
     let column = match field {
         Field::Category => "e.category_id",

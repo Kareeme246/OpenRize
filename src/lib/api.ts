@@ -74,13 +74,11 @@ export const OPEN_REVIEW = "open-review";
 /** Payload: `UpdateStatus`. */
 export const UPDATE_STATUS = "update-status";
 export const PERMISSIONS_CHANGED = "permissions-changed";
-/** The first-run permissions screen was re-armed or reset (developer tools). No payload. */
 export const ONBOARDING_CHANGED = "onboarding-changed";
 /** Main window only: the reminder asked for Settings > Notifications. */
 export const OPEN_BREAK_SETTINGS = "open-break-settings";
 /** Payload: `BreakState`. */
 export const BREAK_STATE_CHANGED = "break-state-changed";
-/** The accounts list changed without a restart (a rename or a delete). */
 export const ACCOUNTS_CHANGED = "accounts-changed";
 
 /** Tauri rejects with a string; React errors are Error objects. Handle both. */
@@ -102,7 +100,6 @@ export async function storagePaths(): Promise<StoragePaths> {
   return await invoke<StoragePaths>("storage_paths");
 }
 
-/** What macOS says about launching at login; it can change behind the app. */
 export async function launchAtLogin(): Promise<LoginItemState> {
   return await invoke<LoginItemState>("launch_at_login");
 }
@@ -181,9 +178,7 @@ export async function switchAccount(to: string | null): Promise<void> {
   await invoke("switch_account", { to });
 }
 
-/**
- * `moveExisting` moves the data that belongs to No account into the new one.
- */
+/** `moveExisting` moves the data that belongs to No account into the new one. */
 export async function createAccount(
   name: string,
   moveExisting: boolean,
@@ -279,7 +274,6 @@ export async function extendBreak(): Promise<BreakState> {
   return await invoke<BreakState>("extend_break");
 }
 
-/** Silences reminders until `until` (epoch ms); null turns them back on. */
 export async function pauseBreakReminders(
   until: number | null,
 ): Promise<BreakState> {
@@ -658,7 +652,6 @@ export async function aiMetrics(days: number): Promise<AiMetrics> {
   return await invoke<AiMetrics>("ai_metrics", { days });
 }
 
-/** Queues a retrain that skips the idle/power gate; returns the new status. */
 export async function aiRetrain(): Promise<AiStatus> {
   return await invoke<AiStatus>("ai_retrain");
 }
@@ -721,7 +714,6 @@ export function pauseTimerTag(tag: string): Promise<Timer[]> {
   return invoke<Timer[]>("pause_timer_tag", { tag });
 }
 
-/** `index` is the place among the section's timers; left out, the end. */
 export function moveTimerToSection(
   id: string,
   sectionId: string | null,

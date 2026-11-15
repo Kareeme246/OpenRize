@@ -39,8 +39,6 @@ tauri-plugin-updater = "2"
 reqwest = { version = "0.13", default-features = false, features = ["json", "blocking", "rustls-no-provider", "system-proxy"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 semver = "1"
-# Invoice PDFs are composed in Rust (src/invoices/pdf.rs); the same bytes are previewed, saved and
-# archived.
 printpdf = { version = "=0.8.2", default-features = false, features = ["png", "jpeg"] }
 tauri-plugin-dialog = "2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

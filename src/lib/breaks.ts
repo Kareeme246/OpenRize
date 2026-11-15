@@ -28,7 +28,6 @@ export interface BreakView {
   endedAt: number | null;
   pausedTimers: string[];
   resumedTimers: string[];
-  /** Why the app ended the break, e.g. "The break was cut short". */
   note: string | null;
 }
 
@@ -83,7 +82,6 @@ export const SNOOZE_CHOICES = [5, 10, 15] as const;
 
 const MINUTE_MS = 60_000;
 
-/** `4:05` - a countdown or elapsed readout. */
 export function formatCountdown(ms: number): string {
   const total = Math.max(0, Math.ceil(ms / 1000));
   const minutes = Math.floor(total / 60);
@@ -100,7 +98,6 @@ export function formatPlanned(ms: number): string {
   return rest === 0 ? `${hours}-hour` : `${hours}h ${rest}m`;
 }
 
-/** `50 min`, `1h 05m`: time worked. */
 export function formatWorked(ms: number): string {
   const minutes = Math.max(1, Math.round(ms / MINUTE_MS));
   if (minutes < 60) return `${minutes} min`;
@@ -108,7 +105,6 @@ export function formatWorked(ms: number): string {
   return `${Math.floor(minutes / 60)}h${rest === 0 ? "" : ` ${String(rest).padStart(2, "0")}m`}`;
 }
 
-/** `in 18m`, `in 1h 5m`, `now`. */
 export function formatUntil(ms: number): string {
   const minutes = Math.ceil(ms / MINUTE_MS);
   if (minutes <= 0) return "now";

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Installs the notarized `rize` CLI from the matching OpenRize app release.
 set -euo pipefail
 umask 077
 

@@ -58,7 +58,6 @@ if [[ -z "$BIN_PID" ]]; then
   exit 1
 fi
 
-# Give the webview a moment to actually paint after the process exists.
 sleep 2
 
 # A raw wry/AppKit window has no AppleScript dictionary, so System Events' accessibility proxy

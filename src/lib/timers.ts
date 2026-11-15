@@ -14,7 +14,6 @@ export interface SegmentEdit {
   endedAt?: number;
 }
 
-/** A snapshot taken on demand; `savedAt` is epoch milliseconds. */
 export interface TimerSavedState {
   id: number;
   timerId: string;
@@ -31,12 +30,7 @@ export interface Timer {
   startedAt: number | null;
   createdAt: number;
   ordinal: number;
-  /**
-   * The tag this timer carries; timers sharing one start and pause together
-   * (Rust links them).
-   */
   tag: string | null;
-  /** The section it sits under, or null for the trackers above every section. */
   sectionId: string | null;
 }
 
@@ -54,10 +48,6 @@ export interface TimerTag {
   totalMs: number;
 }
 
-/**
- * The tags among `timers` in first-appearance order, compared
- * case-insensitively as Rust does.
- */
 export function timerTags(timers: Timer[], now: number): TimerTag[] {
   const tags = new Map<string, TimerTag>();
   for (const timer of timers) {
@@ -77,7 +67,6 @@ export function timerTags(timers: Timer[], now: number): TimerTag[] {
   return [...tags.values()];
 }
 
-/** Lists in reading order: unsectioned trackers first, then each section's. */
 export function timerLists(
   timers: Timer[],
   sections: TimerSection[],

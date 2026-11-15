@@ -17,10 +17,7 @@ use crate::activity::DB_FILE;
 pub struct Timer {
     pub id: String,
     pub label: String,
-    /// Sum of `segments`; the segments are the only stored time.
     pub accumulated_ms: u64,
-    /// Completed stretches of time, oldest first. Pausing records one, and
-    /// they can be added, edited and deleted by hand.
     pub segments: Vec<TimerSegment>,
     pub started_at: Option<u64>,
     pub created_at: u64,
@@ -29,13 +26,9 @@ pub struct Timer {
     /// (compared without regard to case) are linked: starting or pausing one
     /// starts or pauses them all.
     pub tag: Option<String>,
-    /// The section this timer sits under, or `None` for the trackers above
-    /// every section. Sections only arrange the page; they never link timers.
     pub section_id: Option<String>,
 }
 
-/// A subheading on the Stopwatches page. It holds no time and links nothing: its timers are the
-/// ones whose `section_id` names it, in their own `ordinal` order.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TimerSection {
@@ -45,8 +38,6 @@ pub struct TimerSection {
     pub created_at: u64,
 }
 
-/// A stretch of time on a timer, defined as a time entry is: a start and an
-/// end in epoch milliseconds. Its length is the difference, never stored.
 #[derive(Debug, Clone)]
 pub struct TimerSegment {
     pub id: i64,
@@ -73,8 +64,6 @@ impl Serialize for TimerSegment {
     }
 }
 
-/// A snapshot of a timer taken on demand: what it read, under which name, and
-/// when. Saves only ever accumulate; they are removed with their timer.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TimerSavedState {
@@ -96,8 +85,6 @@ impl Timer {
         self.started_at.is_some()
     }
 
-    /// The run in progress as a start and an end (`started_at` and `now`), or `None` while paused;
-    /// behind the live reading, the pause and the save.
     pub fn run_span_at(&self, now: u64) -> Option<(u64, u64)> {
         self.started_at.map(|started| run_span(started, now))
     }
@@ -155,9 +142,6 @@ impl TimerStore {
         Ok(timers)
     }
 
-    // The `_at` variants take an explicit `now` and are what the tests drive;
-    // the public ones stamp the real clock.
-
     pub fn create(&mut self, label: &str) -> Result<Vec<Timer>, String> {
         let now = now_epoch_ms();
         self.create_at(label, now)
@@ -210,8 +194,6 @@ impl TimerStore {
         self.pause_all_at(&linked, now)
     }
 
-    /// The ids `start` and `pause` act on for `id`: the timer itself and,
-    /// when it has a tag, every other timer with that tag.
     pub fn linked_ids(&self, id: &str) -> Result<Vec<String>, String> {
         Ok(self.linked(id)?.into_iter().map(|timer| timer.id).collect())
     }
@@ -323,7 +305,6 @@ impl TimerStore {
         self.pause_all_at(&tagged, now)
     }
 
-    /// The timers with `tag`, oldest ordinal first; an error if there are none.
     fn tagged(&self, tag: &str) -> Result<Vec<Timer>, String> {
         let tag = tag.trim();
         let tagged: Vec<Timer> = self
@@ -342,7 +323,6 @@ impl TimerStore {
         Ok(tagged)
     }
 
-    /// The spelling an existing tag already uses for `name`, else `name`.
     fn canonical_tag(&self, name: &str) -> Result<String, String> {
         Ok(self
             .snapshot()?
@@ -365,8 +345,6 @@ impl TimerStore {
         self.snapshot()
     }
 
-    /// Moves a timer up (negative delta) or down (positive delta) among the
-    /// timers in its own section.
     pub fn move_timer(&mut self, id: &str, delta: i32) -> Result<Vec<Timer>, String> {
         let timers = self.snapshot()?;
         let section = timers
@@ -399,8 +377,6 @@ impl TimerStore {
         self.reorder(&ids)
     }
 
-    /// Puts a timer under `section` (`None` for above every section) at `index` among that
-    /// section's other timers (last if `None` or past the end), in one transaction.
     pub fn move_to_section(
         &mut self,
         id: &str,
@@ -501,8 +477,6 @@ impl TimerStore {
         self.sections()
     }
 
-    /// Deletes a section. Its timers stay, with their time, above every
-    /// section; nothing else changes.
     pub fn delete_section(&mut self, id: &str) -> Result<Vec<TimerSection>, String> {
         self.find_section(id)?;
         let tx = self.conn.transaction().map_err(|error| error.to_string())?;
@@ -540,9 +514,6 @@ impl TimerStore {
             .map_err(|_| unknown_section(id))
     }
 
-    /// `name` trimmed, or why it cannot name a section: it is blank, or
-    /// another section (any case) already has it. `own` is the section being
-    /// renamed, which may keep its name.
     fn free_section_name(&self, name: &str, own: Option<&str>) -> Result<String, String> {
         let name = name.trim();
         if name.is_empty() {
@@ -569,8 +540,6 @@ impl TimerStore {
         self.snapshot()
     }
 
-    /// Changes a segment's start and/or end (`None` stays); the resulting pair must be a valid
-    /// span.
     pub fn update_segment(
         &mut self,
         id: &str,
@@ -615,8 +584,6 @@ impl TimerStore {
         self.snapshot()
     }
 
-    /// Records the timer's reading right now. The timer itself is untouched,
-    /// so this works the same whether it is running, paused or at rest.
     pub fn save_state(&mut self, id: &str) -> Result<TimerSavedState, String> {
         let now = now_epoch_ms();
         self.save_state_at(id, now)
@@ -934,7 +901,6 @@ mod tests {
         store.set_tag(&ids[0], Some("Launch")).unwrap();
         store.set_tag(&ids[1], Some("launch")).unwrap();
 
-        // One start instant for the set; C has no tag and stays put.
         let timers = store.start_at(&ids[1], 20_000).unwrap();
         assert_eq!(timers[0].started_at, Some(20_000));
         assert_eq!(timers[1].started_at, Some(20_000));
@@ -979,7 +945,6 @@ mod tests {
         let mut store = store("tag-run");
         let ids = three_timers(&mut store);
         store.set_tag(&ids[0], Some("Launch")).unwrap();
-        // B is already running from its own start, before it joined the tag.
         store.start_at(&ids[1], 10_000).unwrap();
         store.set_tag(&ids[1], Some("Launch")).unwrap();
 
@@ -1021,7 +986,6 @@ mod tests {
         assert!(store.create_section_at("website", 3).is_err());
         assert!(store.create_section_at("   ", 3).is_err());
         assert!(store.rename_section(&calls.id, "WEBSITE").is_err());
-        // A section may keep its own name in another case.
         let sections = store.rename_section(&web.id, "website").unwrap();
         assert_eq!(sections[0].name, "website");
 
@@ -1097,7 +1061,6 @@ mod tests {
         {
             let mut conn = Connection::open(dir.join(DB_FILE)).unwrap();
             crate::migrations::run_migrations(&mut conn).unwrap();
-            // The v14 shape: a `group_name` column and no sections.
             conn.execute_batch(
                 "DROP TABLE timer_sections;
                  ALTER TABLE timers DROP COLUMN section_id;
@@ -1195,8 +1158,6 @@ mod tests {
         assert!(refused.contains("cannot end before it starts"), "{refused}");
         assert_eq!(store.snapshot().unwrap()[0].segments.len(), 1);
 
-        // An edit is checked as the pair it leaves behind, so moving only the
-        // start past the end, or only the end before the start, is refused.
         let segment = timer.segments[0].id;
         assert!(store
             .update_segment(&id, segment, Some(5_001), None)
@@ -1218,7 +1179,6 @@ mod tests {
         let mut store = store("zero-run");
         let id = store.create_at("Blink", 0).unwrap()[0].id.clone();
         store.start_at(&id, 9_000).unwrap();
-        // A clock that stepped back mid-run clamps to zero, not a refusal.
         store.pause_at(&id, 8_000).unwrap();
         let timer = store.snapshot().unwrap().remove(0);
         assert_eq!(timer.accumulated_ms, 0);
@@ -1291,7 +1251,6 @@ mod tests {
             .iter()
             .map(|state| (state.label.as_str(), state.elapsed_ms))
             .collect();
-        // Newest first; the earlier save keeps the name it was saved under.
         assert_eq!(readings, [("Final", 20_000), ("Draft", 10_000)]);
         assert_eq!(second.saved_states(&other).unwrap().len(), 1);
         assert!(second.saved_states("nope").is_err());
@@ -1326,7 +1285,6 @@ mod tests {
     fn the_saved_states_table_is_added_to_an_existing_database() {
         let dir = temp_dir("saved-states-migration");
         {
-            // A database from before saved states: timers and segments only.
             let conn = Connection::open(dir.join(DB_FILE)).unwrap();
             conn.execute_batch(
                 "CREATE TABLE timers (
@@ -1406,7 +1364,6 @@ mod tests {
     fn ordinal_column_is_added_to_an_existing_database_with_stable_default_order() {
         let dir = temp_dir("ordinal-migration");
         {
-            // A database from before the ordinal column:
             let conn = Connection::open(dir.join(DB_FILE)).unwrap();
             conn.execute_batch(
                 "CREATE TABLE timers (
@@ -1500,9 +1457,6 @@ mod tests {
     fn upgrade_from_0_9_19_preserves_every_timer_segment_and_saved_state() {
         let dir = temp_dir("0-9-19-upgrade");
         {
-            // Exactly the 0.9.19 database shape: user_version at 10,
-            // timers table predates ordinal column, timer_segments and
-            // timer_saved_states both present with rows across running and paused timers.
             let mut conn = Connection::open(dir.join(DB_FILE)).unwrap();
             crate::migrations::run_migrations(&mut conn).unwrap();
             conn.execute_batch(
@@ -1589,8 +1543,6 @@ mod tests {
         assert!(!timers[2].is_running());
         assert_eq!(timers[2].segments.len(), 1);
 
-        // Every segment now ends when it was recorded and starts its old
-        // length before that.
         assert_eq!(
             (segment(1).started_at, segment(1).ended_at),
             (1700000010000 - 60000, 1700000010000)
@@ -1607,8 +1559,6 @@ mod tests {
         assert_eq!(version, crate::migrations::SCHEMA_VERSION);
     }
 
-    /// A database in the shape before segments were a start and an end:
-    /// `duration_ms` and `recorded_at`, user_version 11.
     fn seed_length_based_segments(dir: &Path) -> Vec<(String, i64)> {
         let mut conn = Connection::open(dir.join(DB_FILE)).unwrap();
         crate::migrations::run_migrations(&mut conn).unwrap();
@@ -1665,8 +1615,6 @@ mod tests {
         assert_eq!(after, before);
         assert_eq!(timers[2].accumulated_ms, 0);
 
-        // The end is when the stretch was recorded; the start is its old
-        // length before that. Ids and the running timer's start survive.
         let spans: Vec<(i64, u64, u64)> = timers[0]
             .segments
             .iter()
@@ -1692,7 +1640,6 @@ mod tests {
         let dir = temp_dir("start-end-idempotent");
         let before = seed_length_based_segments(&dir);
 
-        // Opening twice runs the migration once, then not at all.
         for _ in 0..2 {
             let store = TimerStore::load(&dir).expect("timer store");
             assert_eq!(store.snapshot().unwrap()[0].accumulated_ms, 4_834_567);
@@ -1741,7 +1688,6 @@ mod tests {
         assert_eq!(timers[0].accumulated_ms, 3600000);
         assert_eq!(timers[0].segments.len(), 1);
         assert_eq!(timers[0].segments[0].duration_ms(), 3600000);
-        // It predates segments, so it ends when the timer was created.
         assert_eq!(timers[0].segments[0].ended_at, 3600000);
     }
 }

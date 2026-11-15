@@ -17,10 +17,6 @@ function readDismissed(): string | null {
   }
 }
 
-/**
- * Dismissible fallback shown when Apple Intelligence could be turned on and
- * suggestions run on rules alone.
- */
 export function AiEngineBanner({ status }: { status: AiStatus | null }) {
   const [dismissed, setDismissed] = useState<string | null>(readDismissed);
 

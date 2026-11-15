@@ -50,16 +50,12 @@ pub struct NewCategory {
     pub color: String,
     pub description: Option<String>,
     pub ai_prompt: Option<String>,
-    /// Keywords, folders, URLs and domains; each becomes a hint rule.
     pub ai_hints: Option<String>,
     pub billable_default: Option<bool>,
     pub counts_as_work: Option<bool>,
-    /// Defaults to after the last category.
     pub sort: Option<i64>,
 }
 
-/// A patch: an absent field is left alone; the optional ones take `null` to
-/// clear. `archived` archives or restores.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateCategory {
@@ -89,8 +85,6 @@ pub struct UpdateCategory {
     pub sort: Option<i64>,
 }
 
-/// What removing a category did: a category with time entries is archived
-/// (its history keeps it), one without is deleted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CategoryRemoval {
@@ -108,8 +102,6 @@ pub struct Client {
     pub default_rate: Option<f64>,
     pub currency: Option<String>,
     pub notes: Option<String>,
-    /// Set while the client is archived: kept, but out of the active list and
-    /// the pickers that assign a client. Its projects are untouched.
     pub archived_at: Option<u64>,
     pub created_at: u64,
     pub updated_at: u64,
@@ -127,8 +119,6 @@ pub struct NewClient {
     pub notes: Option<String>,
 }
 
-/// A patch: an absent field is left alone; the optional ones take `null` to
-/// clear. `archived` archives or restores.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateClient {
@@ -204,8 +194,6 @@ pub struct NewProject {
     pub hourly_rate: Option<f64>,
 }
 
-/// A patch: an absent field is left alone. The optional columns take
-/// `null` to clear (a project can lose its client, due date, or rate).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateProject {
@@ -280,15 +268,11 @@ pub struct TimeEntry {
     pub created_at: u64,
     pub updated_at: u64,
     pub deleted_at: Option<u64>,
-    /// `template` (entry builder), `ai` (Foundation Model sentence), or
-    /// `user`. The builder only ever rewrites template text.
     pub description_origin: String,
     /// Classification state and headline confidences, for list views. Only
     /// `list_time_entries` fills it; single-entry mutations return `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai: Option<EntryAi>,
-    /// The app or site with most of the entry's active time (list views
-    /// only), for grouping by app.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dominant_app: Option<String>,
 }
@@ -296,7 +280,6 @@ pub struct TimeEntry {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct EntryAi {
-    /// The classify job: queued | running | done | failed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -387,8 +370,6 @@ pub struct EntryDetail {
     pub titles: Vec<TitleItem>,
     pub events: Vec<EntryEvent>,
     pub suggestions: Vec<FieldSuggestion>,
-    /// "Always categorize figma.com as Design?", after 3+ consistent
-    /// corrections for the entry's dominant app or domain.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rule_suggestion: Option<RuleSuggestion>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -400,17 +381,13 @@ pub struct EntryDetail {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Signal {
-    /// dominant | rule | knn | personal | llm | mention
     pub kind: String,
     pub text: String,
 }
 
-/// The app or domain that took most of an entry's active time. Rule
-/// suggestions are keyed on it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Dominant {
-    /// `app` or `domain`, matching the rule `match_kind` it would create.
     pub kind: String,
     pub key: String,
     pub label: String,
@@ -440,11 +417,9 @@ pub struct FieldSuggestion {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dominant: Option<Dominant>,
     pub alternatives: Vec<Alternative>,
-    /// rules | full | fallback
     pub engine: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_version: Option<String>,
-    /// accepted | changed | rejected | auto, or `None` while undecided.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<String>,
     pub created_at: u64,

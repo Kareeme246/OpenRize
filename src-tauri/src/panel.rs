@@ -4,7 +4,6 @@
 
 use tauri::WebviewWindow;
 
-/// Which panel is being made; the two differ in whether they may take focus.
 #[derive(Clone, Copy)]
 pub enum Kind {
     /// Never takes focus: clicking a button must not activate OpenRize.

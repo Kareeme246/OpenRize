@@ -118,10 +118,6 @@ export interface TabOption<T extends string> {
   count?: number;
 }
 
-/**
- * Underlined tabs; the baseline is `w-fit` so it never runs to the window's
- * edge.
- */
 export function Tabs<T extends string>({
   tabs,
   value,

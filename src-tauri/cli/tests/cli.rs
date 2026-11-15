@@ -118,7 +118,6 @@ fn destructive_commands_need_yes_outside_a_terminal() {
             .unwrap()
             .contains("--yes"));
     }
-    // With --yes it goes on to the data, which is missing here.
     let (envelope, _) = fixture.json(&["entries", "rm", "abcd1234", "--yes"]);
     assert_eq!(code(&envelope), "NO_DATA");
 }

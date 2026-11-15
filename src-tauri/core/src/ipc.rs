@@ -17,8 +17,7 @@ pub use platform::Service;
 /// Bounds each read and write, so a stalled peer cannot hang either side.
 pub const TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Where the app serving one data directory listens. Every data directory
-/// (the installed app, a dev instance) gets its own endpoint.
+/// Every data directory (the installed app, a dev instance) gets its own endpoint.
 pub struct Endpoint {
     address: platform::Address,
 }
@@ -124,7 +123,6 @@ fn on_disk_form(absolute: &Path) -> PathBuf {
     }
 }
 
-/// `\\?\C:\x` is `C:\x` and `\\?\UNC\server\share` is `\\server\share`.
 fn strip_verbatim(path: &Path) -> PathBuf {
     let Some(text) = path.to_str() else {
         return path.to_path_buf();

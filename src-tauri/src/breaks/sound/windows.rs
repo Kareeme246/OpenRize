@@ -1,5 +1,3 @@
-//! The "SystemNotification" scheme sound, or the default beep without one.
-
 use windows::core::w;
 use windows::Win32::Media::Audio::{PlaySoundW, SND_ALIAS, SND_ASYNC, SND_NODEFAULT};
 use windows::Win32::System::Diagnostics::Debug::MessageBeep;

@@ -1,7 +1,3 @@
-/**
- * Display formats shared by every view; clock times follow the user's locale.
- */
-
 const HOUR_MS = 3_600_000;
 
 /** `5h 02m`, `33m`, `<1m` for a few seconds, or `0m` for none. */

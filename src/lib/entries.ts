@@ -64,7 +64,6 @@ export function isReviewable(entry: TimeEntry): boolean {
   return REVIEWABLE.has(blockState(entry));
 }
 
-/** Still being recorded or categorized; can't be approved yet. */
 export function isInFlight(entry: TimeEntry): boolean {
   const state = blockState(entry);
   return state === "processing" || state === "building";
@@ -76,10 +75,6 @@ export function entryEnd(entry: TimeEntry, now: number = Date.now()): number {
     : entry.endedAt;
 }
 
-/**
- * The session recording right now, if any; the Calendar pins its now line to
- * its live edge.
- */
 export function recordingEntry(
   entries: TimeEntry[],
   now: number = Date.now(),
@@ -108,7 +103,6 @@ export function countsAsWork(
   return categoryById.get(categoryId)?.countsAsWork ?? true;
 }
 
-/** Tracked time that counts toward work hours (breaks excluded). */
 export function workDuration(
   entries: TimeEntry[],
   categoryById: Map<string, Category>,

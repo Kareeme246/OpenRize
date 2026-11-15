@@ -126,7 +126,6 @@ fn same_sid(peer: Option<Vec<u64>>, own: Option<Vec<u64>>) -> bool {
     }
 }
 
-/// The `TOKEN_USER` of a token, in a buffer that also holds its SID. Closes the token.
 unsafe fn token_user(token: HANDLE) -> Option<Vec<u64>> {
     let mut needed = 0;
     let _ = GetTokenInformation(token, TokenUser, None, 0, &mut needed);
@@ -167,7 +166,6 @@ mod tests {
         let service = address.listen().unwrap();
         let server = std::thread::spawn(move || {
             let mut stream = service.accept().unwrap();
-            // Nothing read yet, so Windows cannot say who the client is.
             assert!(!client_allowed(&stream));
             assert!(!impersonating());
             let mut byte = [0_u8; 1];

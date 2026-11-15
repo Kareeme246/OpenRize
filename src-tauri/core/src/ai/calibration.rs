@@ -155,7 +155,6 @@ pub fn reliability(samples: &[(f64, bool)], bins: usize) -> Vec<ReliabilityBin> 
         .collect()
 }
 
-/// Expected calibration error: count-weighted gap between promised and actual accept rate.
 pub fn expected_error(bins: &[ReliabilityBin]) -> Option<f64> {
     let total: u32 = bins.iter().map(|b| b.count).sum();
     (total > 0).then(|| {

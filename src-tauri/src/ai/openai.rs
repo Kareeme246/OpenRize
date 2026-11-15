@@ -248,7 +248,6 @@ impl OpenAiProvider {
         self.endpoint.check()
     }
 
-    /// The device the running local server uses, if one runs.
     pub fn device(&self) -> Option<DeviceInfo> {
         match &self.endpoint {
             Endpoint::Local(runtime) => runtime.device(),

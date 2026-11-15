@@ -23,7 +23,6 @@ pub const DRY_RUN_UNSUPPORTED: &str = "--dry-run only previews commands that del
 pub const MAX_REQUEST: usize = 1024 * 1024;
 pub const MAX_RESPONSE: usize = 64 * 1024 * 1024;
 
-/// Error codes, which also pick the exit code.
 pub mod code {
     pub const INVALID_ARGUMENT: &str = "INVALID_ARGUMENT";
     pub const NOT_FOUND: &str = "NOT_FOUND";
@@ -62,7 +61,6 @@ pub enum Operation {
     Status {
         day_start: u64,
     },
-    /// Shows the main window, on the review queue when `review` is set.
     AppOpen {
         review: bool,
     },
@@ -81,11 +79,9 @@ pub enum Operation {
     TimerCreate {
         label: String,
     },
-    /// Starts the timer and, when it has a tag, every timer with that tag.
     TimerStart {
         timer: String,
     },
-    /// Pauses the timer and, when it has a tag, every timer with that tag.
     TimerPause {
         timer: String,
     },
@@ -99,8 +95,6 @@ pub enum Operation {
     TimerDelete {
         timer: String,
     },
-    /// Tags a timer with `tag`, which links it to every timer with that tag,
-    /// or removes its tag when `tag` is `None`.
     TimerTag {
         timer: String,
         tag: Option<String>,
@@ -121,12 +115,9 @@ pub enum Operation {
         section: String,
         name: String,
     },
-    /// Deletes a section; its timers stay, with their time, in no section.
     TimerSectionDelete {
         section: String,
     },
-    /// Moves a timer to the end of `section`, or out of any section when
-    /// `section` is `None`.
     TimerMove {
         timer: String,
         section: Option<String>,
@@ -134,14 +125,11 @@ pub enum Operation {
     TimerSegments {
         timer: String,
     },
-    /// Adds a segment from `started_at` to `ended_at` (epoch milliseconds,
-    /// `ended_at >= started_at`).
     TimerSegmentAdd {
         timer: String,
         started_at: u64,
         ended_at: u64,
     },
-    /// Changes a segment's start and/or end; the one left out stays.
     TimerSegmentEdit {
         timer: String,
         segment: i64,
@@ -238,7 +226,6 @@ pub enum Operation {
         category: String,
     },
     SettingsGet {},
-    /// One field by its camelCase path, such as `breaks.enabled`.
     SettingsSet {
         key: String,
         value: Value,
@@ -253,7 +240,6 @@ pub enum Operation {
 }
 
 impl Operation {
-    /// Needs the live app: there is nothing to do with only the stored data.
     pub fn needs_app(&self) -> bool {
         matches!(
             self,
@@ -267,7 +253,6 @@ impl Operation {
 pub struct Hello {
     pub app_version: String,
     pub protocol_version: u32,
-    /// The answer came from the running app, not from rize on its own.
     pub running: bool,
     pub data_dir: String,
 }
@@ -288,7 +273,6 @@ pub struct Response {
 pub struct ApiError {
     pub code: String,
     pub message: String,
-    /// What an ambiguous reference could have meant.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub candidates: Vec<String>,
 }

@@ -600,7 +600,6 @@ fn gained_minutes_are_what_the_new_span_adds_to_the_old_ones() {
     assert_eq!(gained(&[(40, 50)], 0, 10), vec![(0, 10)]);
 }
 
-/// Random writes, undos and redos: after every step entry coverage equals the sum of lengths.
 #[test]
 fn the_per_day_union_equals_the_per_day_sum_after_any_run_of_writes() {
     let (mut applied, mut refused) = (0, 0);
@@ -721,7 +720,6 @@ fn fuzz_seeds(default: usize) -> impl Iterator<Item = u64> {
     (1..=count as u64).map(|i| i.wrapping_mul(0x9E37_79B9_7F4A_7C15))
 }
 
-/// The same with capture running: the live session grows and records into time that undo frees.
 #[test]
 fn the_union_equals_the_sum_while_capture_keeps_recording() {
     for start in fuzz_seeds(12) {
@@ -829,7 +827,6 @@ fn an_entry_dragged_out_past_now_fences_the_live_session_until_it_ends() {
         .create_manual_entry(new_entry(100, 140, true), 100 * MIN)
         .unwrap()
         .id;
-    // The live session ends where the entry begins, not inside it.
     work(&mut store, 101, 120);
     let list = entries(&store);
     assert_eq!(list.len(), 2, "{list:?}");

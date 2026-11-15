@@ -33,7 +33,6 @@ pub struct InvoiceProfile {
     pub default_notes: Option<String>,
     pub default_terms_days: i64,
     pub has_logo: bool,
-    /// The year invoices are currently numbered in, and the next number in it.
     pub number_year: i32,
     pub next_number: i64,
 }
@@ -48,11 +47,9 @@ pub struct ProfileInput {
     pub payment_instructions: Option<String>,
     pub default_notes: Option<String>,
     pub default_terms_days: i64,
-    /// Sets the next number for the current year; omitted leaves it alone.
     pub next_number: Option<i64>,
 }
 
-/// What Finalize records of the From block an invoice was issued under.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IssuerSnapshot {
     pub name: String,

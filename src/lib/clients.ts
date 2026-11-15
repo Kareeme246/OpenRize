@@ -2,7 +2,6 @@ import type { Client, InvoiceSummary, Project, ProjectStats } from "./types";
 
 const HOUR_MS = 3_600_000;
 
-/** The clients a project can be assigned to: not archived, plus the one it already has. */
 export function assignableClients(clients: Client[], keep?: string): Client[] {
   return clients.filter((client) => !client.archivedAt || client.id === keep);
 }

@@ -32,7 +32,6 @@ const MAX_WINDOWS: usize = 8;
 
 const READ_DEADLINE: Duration = Duration::from_millis(800);
 const STALL_AFTER: Duration = Duration::from_millis(1500);
-/// How long the sampler waits for the first read, so its first sample carries the URL.
 const FIRST_READ_WAIT: Duration = Duration::from_millis(80);
 const CONNECTION_TIMEOUT_MS: u32 = 500;
 const TRANSACTION_TIMEOUT_MS: u32 = 1000;
@@ -43,12 +42,10 @@ const SEARCH_MAX_NODES: usize = 600;
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Reading {
     Page(Option<String>),
-    /// The bar has focus: its trimmed text is what the user is editing.
     Typing(Option<String>),
     Missing,
 }
 
-/// Smoothed answer per window; times are passed in so tests need no clock.
 #[derive(Debug, Default)]
 struct UrlTracker {
     shown: Option<String>,
@@ -121,7 +118,6 @@ impl UrlTracker {
                 if self.editing(text.as_deref()) {
                     self.pending = None;
                 } else {
-                    // A new tab's empty bar, or text unrelated to the page.
                     self.see(None, now);
                 }
             }
@@ -201,7 +197,6 @@ pub(super) fn is_private_window(window: HWND, executable: &str, title: &str) -> 
             .is_some_and(|shared| shared.is_private(window.0 as isize))
 }
 
-/// Shared by the sampler and the worker, keyed by handle value since `HWND` is not `Send`.
 struct Shared {
     state: Mutex<State>,
     wake: Condvar,
@@ -412,7 +407,6 @@ impl Automation {
                     .or_else(|_| CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER))
                     .ok()?;
             if let Ok(automation) = automation.cast::<IUIAutomation2>() {
-                // Never wait long on one browser, and never move its focus.
                 let _ = automation.SetConnectionTimeout(CONNECTION_TIMEOUT_MS);
                 let _ = automation.SetTransactionTimeout(TRANSACTION_TIMEOUT_MS);
                 let _ = automation.SetAutoSetFocus(false);
@@ -460,7 +454,6 @@ impl Automation {
     unsafe fn read(&self, bar: &IUIAutomationElement) -> Option<Reading> {
         unsafe {
             let bar = bar.BuildUpdatedCache(&self.value).ok()?;
-            // While the user types in the bar it holds their text, not the page.
             let text = bar
                 .GetCachedPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
                 .ok()
@@ -497,7 +490,6 @@ impl Automation {
         found.take().or(plain)
     }
 
-    /// Breadth-first search of `window`'s controls until `visit` finds something or a limit is hit.
     /// # Safety
     /// `window` is only handed to UI Automation, which rejects a stale handle.
     unsafe fn walk(
@@ -578,7 +570,6 @@ impl Control {
 enum Match {
     Address,
     Other,
-    /// A text field of no known kind; the first stands in when none is certain.
     Fallback,
     Not,
 }
@@ -604,7 +595,6 @@ fn classify(kind: UIA_CONTROLTYPE_ID, id: &str, class: &str) -> Match {
     }
 }
 
-/// Address bars hide the scheme; an empty or search-text bar is no page. Only web pages count.
 fn normalize_address(text: &str) -> Option<String> {
     let text = text.trim();
     if text.is_empty() || text.contains(char::is_whitespace) {
@@ -625,7 +615,6 @@ fn normalize_address(text: &str) -> Option<String> {
     (web && named).then_some(url)
 }
 
-/// A URL without scheme, "www." and trailing slash, lower-cased, as the bar shows it while edited.
 fn bare(url: &str) -> String {
     let url = url.to_lowercase();
     let url = url.split_once("://").map_or(url.as_str(), |(_, rest)| rest);

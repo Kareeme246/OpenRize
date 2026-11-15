@@ -1,5 +1,3 @@
-//! The `breaks` table: one row per break decision.
-
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
@@ -83,7 +81,6 @@ pub(super) fn complete_sleep(
     transaction.commit().map_err(|error| error.to_string())
 }
 
-/// The break now runs in this segment (a sleep closed the one it had).
 pub(super) fn set_segment(
     conn: &Connection,
     id: &str,
@@ -126,7 +123,6 @@ pub fn close_orphans(conn: &Connection, now: u64) -> Result<(), String> {
     Ok(())
 }
 
-/// Breaks that started (or, if never taken, came due) in `[since, until)`.
 pub fn list(conn: &Connection, since: u64, until: u64) -> Result<Vec<BreakEntry>, String> {
     let mut statement = conn
         .prepare(
@@ -158,7 +154,6 @@ pub fn list(conn: &Connection, since: u64, until: u64) -> Result<Vec<BreakEntry>
         .map_err(|error| error.to_string())
 }
 
-/// The work clock at launch, from today's segments (see `streak_from_segments`).
 pub fn rebuild_streak(
     conn: &Connection,
     day_start: u64,
@@ -248,7 +243,7 @@ mod tests {
         conn.execute("UPDATE breaks SET segment_id = 7 WHERE id = 'a'", [])
             .unwrap();
         close_orphans(&conn, 400_000).unwrap();
-        close_orphans(&conn, 500_000).unwrap(); // Reconciliation is idempotent.
+        close_orphans(&conn, 500_000).unwrap();
         assert_eq!(list(&conn, 0, 10_000).unwrap()[0].ended_at, Some(302_000));
         assert_eq!(
             conn.query_row("SELECT ended_at FROM segments WHERE id = 7", [], |row| {
@@ -272,7 +267,7 @@ mod tests {
         conn.execute("UPDATE breaks SET segment_id = 7 WHERE id = 'a'", [])
             .unwrap();
         close_orphans(&conn, 100_000).unwrap();
-        close_orphans(&conn, 400_000).unwrap(); // Later launches leave it be.
+        close_orphans(&conn, 400_000).unwrap();
         assert_eq!(list(&conn, 0, 10_000).unwrap()[0].ended_at, Some(100_000));
         assert_eq!(
             conn.query_row("SELECT ended_at FROM segments WHERE id = 7", [], |row| {

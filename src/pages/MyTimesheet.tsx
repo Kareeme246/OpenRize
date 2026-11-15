@@ -1389,8 +1389,6 @@ function RowMenu({
           </button>
         </Tooltip>
         {locked && !invoiced ? (
-          // An approved entry cannot be deleted; unapproving is one tap from
-          // here, after which Delete is offered as for any other entry.
           <Tooltip
             content={`${LOCKED_HINT} Unapprove it to delete.`}
             placement="left"

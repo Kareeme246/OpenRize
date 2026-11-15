@@ -46,7 +46,6 @@ pub struct Choice {
     pub hint: Option<String>,
 }
 
-/// Names, not ids.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Example {
     pub features: String,
@@ -235,7 +234,6 @@ fn strip_think(text: &str) -> Result<String, String> {
                 out.push_str(&rest[..o]);
                 rest = &rest[c + CLOSE.len()..];
             }
-            // An orphan close tag: drop everything up to it.
             (_, Some(c)) => rest = &rest[c + CLOSE.len()..],
             (Some(_), None) => {
                 return Err("the reply ended inside an unterminated <think> block".to_string());
@@ -248,7 +246,6 @@ fn strip_think(text: &str) -> Result<String, String> {
     }
 }
 
-/// Exclusive end of the balanced `{...}` at `start`, aware of strings and escapes.
 fn balanced_end(text: &str, start: usize) -> Option<usize> {
     let mut depth = 0u32;
     let mut in_string = false;
@@ -327,7 +324,6 @@ pub fn parse_reply(text: &str, request: &LlmRequest) -> Result<Sample, String> {
     })
 }
 
-/// Counts votes as the Swift sidecar does.
 pub fn tally(samples: &[Sample], want_project: bool) -> (Votes, Option<Votes>, Option<String>) {
     let total = samples.len() as u32;
     let mut categories = Votes {

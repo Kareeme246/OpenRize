@@ -10,21 +10,12 @@ export const MERGE_GAP_MS = 300_000;
 export interface MergeCandidate {
   prev?: TimeEntry;
   next?: TimeEntry;
-  /**
-   * Untracked time the merge claims as tracked, per side; zero when touching or
-   * overlapping.
-   */
   prevGapMs?: number;
   nextGapMs?: number;
 }
 
-/** Why a merge side is off: no neighbour, or it is approved. */
 export type MergeBlock = "none" | "locked";
 
-/**
- * Which merge buttons are usable: a side is blocked with no neighbour or a
- * locked one.
- */
 export function mergeBlocks(
   candidates: MergeCandidate | undefined,
   isLocked: (entry: TimeEntry) => boolean,
@@ -86,10 +77,6 @@ function gapBetween(
   return sameLocalDay(start, Math.max(start, end - 1)) ? 0 : undefined;
 }
 
-/**
- * The closest neighbour per side; `endMs` is the live edge for a recording
- * session.
- */
 export function mergeCandidates(
   entries: readonly TimeEntry[],
   current: TimeEntry,

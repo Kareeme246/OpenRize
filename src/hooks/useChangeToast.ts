@@ -24,10 +24,6 @@ export function describeUpdate(patch: UpdateTimeEntry, count = 1): string {
   return `Entry updated${what}`;
 }
 
-/**
- * Runs a change and toasts once it succeeds; errors reach the caller untouched
- * and raise no toast.
- */
 export function useChangeToast(): <T>(
   change: () => Promise<T>,
   message: string | ((value: T) => string),

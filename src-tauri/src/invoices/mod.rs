@@ -289,8 +289,6 @@ fn rate_to_cents(rate: f64) -> Option<i64> {
         .then_some(cents as i64)
 }
 
-/// A draft resolved against the database with every derived value computed, shared by
-/// preview, save and (via the stored rows) finalize.
 fn resolve(conn: &Connection, input: &DraftInput) -> Result<Invoice, String> {
     let client_exists: bool = conn
         .query_row(
@@ -512,7 +510,6 @@ pub fn quote(conn: &Connection, input: &DraftInput) -> Result<Invoice, String> {
     resolve(conn, input)
 }
 
-/// Creates or updates a draft, reserving exactly its entries in one transaction.
 pub fn save_draft(conn: &mut Connection, input: &DraftInput, now: u64) -> Result<Invoice, String> {
     let tx = conn.transaction().map_err(err)?;
     if let Some(id) = &input.id {
@@ -712,8 +709,6 @@ pub fn render_draft(conn: &Connection, input: &DraftInput) -> Result<Vec<u8>, St
     pdf::render(&paper(&invoice, profile::logo_bytes(conn)?, None)?)
 }
 
-/// Freezes a draft: allocates the next number for its issue year, renders the official PDF
-/// and stores number, snapshot and bytes, all or nothing.
 pub fn finalize(conn: &mut Connection, id: &str, now: u64) -> Result<Invoice, String> {
     let tx = conn.transaction().map_err(err)?;
     let invoice = get(&tx, id)?;
@@ -795,7 +790,6 @@ pub fn stored_pdf(conn: &Connection, id: &str) -> Result<Vec<u8>, String> {
     .ok_or_else(|| "This invoice has not been finalized, so it has no PDF".into())
 }
 
-/// Suggested file name, e.g. `INV-2026-0001-Acme-Corp.pdf` or `Draft-Acme-Corp.pdf`.
 pub fn file_name(number: Option<&str>, client_name: &str) -> String {
     let client: String = client_name
         .chars()
@@ -834,8 +828,6 @@ pub fn set_paid(conn: &Connection, id: &str, paid: bool, now: u64) -> Result<(),
     Ok(())
 }
 
-/// Cancels an open invoice: its number and PDF stay on record, its time is
-/// released so it can be invoiced again.
 pub fn void(conn: &mut Connection, id: &str, now: u64) -> Result<(), String> {
     let tx = conn.transaction().map_err(err)?;
     let changed = tx

@@ -11,15 +11,10 @@ export interface AiMetricsApi {
   adopt: (metrics: AiMetrics) => void;
 }
 
-/**
- * The AI effectiveness snapshot for the last `days` days, refetched on entry or
- * engine status changes.
- */
 export function useAiMetrics(days: number): AiMetricsApi {
   const [metrics, setMetrics] = useState<AiMetrics | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Bumped (debounced) by the events below; each bump refetches.
   const [version, setVersion] = useState(0);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 

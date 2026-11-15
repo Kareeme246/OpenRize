@@ -9,7 +9,6 @@ use openrize_core::ai::prompt::{LlmRequest, PROMPT_VERSION};
 pub enum ProviderKind {
     Apple,
     Local,
-    /// No language model is active (rules and the personal model only).
     None,
 }
 
@@ -31,7 +30,6 @@ impl ProviderId {
     }
 }
 
-/// Everything runs on this machine; a later remote endpoint adds `Endpoint`, whose prompts are stripped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Egress {
     OnDevice,
@@ -40,7 +38,6 @@ pub enum Egress {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Availability {
     Ready,
-    /// A reason code the UI maps to a sentence, e.g. `appleIntelligenceNotEnabled`.
     Unavailable(String),
 }
 

@@ -23,7 +23,6 @@ fn sample(title: &str) -> Option<WindowSample> {
     })
 }
 
-/// Works from `from` to `to`, rebuilding every minute like the AI worker.
 fn work(store: &mut ActivityStore, from: u64, to: u64, switch_every: Option<u64>) {
     let mut now = from;
     while now <= to {

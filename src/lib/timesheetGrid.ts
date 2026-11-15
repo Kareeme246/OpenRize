@@ -48,7 +48,6 @@ export interface SheetCell {
 }
 
 export interface SheetRow {
-  /** Project or category id; `NONE` for "No project" / "Uncategorized". */
   key: string;
   days: SheetCell[];
   total: SheetCell;
@@ -57,7 +56,6 @@ export interface SheetRow {
 }
 
 export interface SheetGroup {
-  /** Client id or `NONE`; category rows sit in one `all` group. */
   key: string;
   rows: SheetRow[];
   days: SheetCell[];
@@ -120,7 +118,6 @@ const totalOf = (target: Builder): SheetCell => ({
   review: target.reviewIds.size,
 });
 
-/** Largest first; the "none" bucket always last; ids break ties. */
 function byTotal(a: Builder, b: Builder): number {
   if ((a.key === NONE) !== (b.key === NONE)) return a.key === NONE ? 1 : -1;
   return b.ms - a.ms || a.key.localeCompare(b.key);
@@ -205,7 +202,6 @@ export function buildSheet(
   };
 }
 
-/** `4.6`, `14`, or `<0.1`: Rise's bare decimal hours, blank for none. */
 export function decimalHours(ms: number): string {
   if (ms <= 0) return "";
   const hours = ms / 3_600_000;
@@ -219,14 +215,12 @@ export interface SheetTally {
   entries: number;
 }
 
-/** The Day view's cards: time waiting on review, approved, and in all. */
 export interface SheetSummary {
   review: SheetTally;
   approved: SheetTally;
   total: SheetTally;
 }
 
-/** Time inside [start, end) per review state, counting each entry once. */
 export function summarize(
   entries: TimeEntry[],
   start: number,

@@ -38,7 +38,6 @@ pub struct Resolution {
 }
 
 impl Resolution {
-    /// The first error code any source reported, the most useful fact when no title came back.
     pub fn first_error(&self) -> Option<i32> {
         self.attempts.iter().find_map(|(_, attempt)| match attempt {
             Attempt::Failed(code) => Some(*code),
@@ -47,7 +46,6 @@ impl Resolution {
     }
 }
 
-/// An empty or blank title is "no title", not a successful read.
 pub fn is_usable(title: &str) -> bool {
     !title.trim().is_empty()
 }
@@ -64,7 +62,6 @@ pub fn pick_from_windows(windows: impl IntoIterator<Item = Attempt>) -> Attempt 
     first_miss.unwrap_or(Attempt::Empty)
 }
 
-/// Tries each source in order, stopping at the first usable title; `read` is lazy.
 pub fn resolve(mut read: impl FnMut(TitleSource) -> Attempt) -> Resolution {
     let mut attempts = Vec::new();
     for source in TitleSource::IN_ORDER {

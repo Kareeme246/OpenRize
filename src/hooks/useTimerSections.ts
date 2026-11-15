@@ -10,7 +10,6 @@ export interface TimerSectionsApi {
   error: string | null;
   create: (name: string, timerId?: string) => void;
   rename: (id: string, name: string) => void;
-  /** Deletes a section; Rust keeps its stopwatches, in no section. */
   remove: (id: string) => void;
   reorder: (ids: string[]) => void;
 }

@@ -29,7 +29,6 @@ pub struct Inputs<'a> {
     pub rule_project: Option<&'a RuleHit>,
     pub vector: Option<&'a [f32]>,
     pub pool: &'a [knn::Labeled],
-    /// Raw personal-model predictions; dead ids are dropped here.
     pub personal_category: Option<HashMap<Label, f64>>,
     pub personal_project: Option<HashMap<Label, f64>>,
     pub labeled: u32,
@@ -40,7 +39,6 @@ pub struct Inputs<'a> {
 pub struct Labeled {
     pub category: Option<Decision>,
     pub project: Option<Decision>,
-    /// Stored only when the block has titles and no private window.
     pub description: Option<String>,
     pub llm: Option<LlmTrace>,
 }
@@ -313,7 +311,6 @@ fn shortlist<'a>(
     ranked
 }
 
-/// The closest approved entries, as few-shot examples for the model.
 /// Corrections come first: an entry the user had to fix is exactly where the
 /// model needs the hint.
 fn few_shot(

@@ -181,7 +181,6 @@ fn manual_entry_creation_cannot_be_undone_until_unapproved() {
     let before = store.time_entry(&id).unwrap();
     assert_locked(store.undo(NOW));
     assert_eq!(store.time_entry(&id).unwrap(), before);
-    // Another client unapproves without changing this client's history.
     unapprove_behind_its_back(&store, &id);
     assert_eq!(store.undo(NOW).unwrap(), Some("Add"));
     assert!(store.time_entry(&id).is_err());
@@ -327,7 +326,6 @@ fn redoing_manual_creation_checks_new_approved_time_and_keeps_the_history() {
     let mut store = store();
     let id = entry(&mut store, 0, 30, true);
     store.undo(NOW).unwrap();
-    // An approved entry arrives from another client while Add is undone.
     store.conn.execute_batch("INSERT INTO time_entries (id,started_at,ended_at,description,status,source,created_at,updated_at) VALUES ('other',600000,1200000,'Other','approved','manual',1,1);").unwrap();
     assert_eq!(store.redo(NOW).unwrap_err(), APPROVED_OVERLAP);
     assert!(store.time_entry(&id).is_err());
@@ -547,7 +545,6 @@ fn a_pending_entry_deletes_whatever_it_shares_with_approved_entries() {
         )
         .unwrap();
 
-    // The approved entry shares the category and project, and stays locked.
     assert_locked(store.delete_time_entry(&approved, NOW));
     store
         .delete_time_entries(&[categorized, projected, bare], NOW)
@@ -600,7 +597,6 @@ fn deleting_an_entry_removes_exactly_its_time_from_project_totals() {
     };
     let kept = add(&mut store, 0, false);
     let pending = add(&mut store, 30, true);
-    // A hand-added entry bills at once; a pending one waits for approval.
     assert_eq!(totals(&store), vec![(2, 60 * MIN, 30 * MIN)]);
     store.delete_time_entry(&pending, NOW).unwrap();
     assert_eq!(totals(&store), vec![(1, 30 * MIN, 30 * MIN)]);

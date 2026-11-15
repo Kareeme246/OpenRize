@@ -39,7 +39,6 @@ fn power_event(app: &tauri::AppHandle, event: PowerEvent) {
     crate::activity::emit_full(app);
 }
 
-/// The host a browser URL points at, without a leading `www.`.
 #[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
 fn domain_of(url: &str) -> Option<String> {
     url::Url::parse(url)

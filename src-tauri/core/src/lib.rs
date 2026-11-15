@@ -22,7 +22,6 @@ pub mod timers;
 #[cfg(windows)]
 pub mod user_path;
 
-/// Canonical installed app identity, also used by independent clients.
 pub const APP_IDENTIFIER: &str = "com.offlinestudios.openrize";
 
 use models::TimeEntry;
@@ -31,13 +30,10 @@ use serde::{Deserialize, Serialize};
 
 /// The filter value meaning "no category / project / client".
 pub const NONE: &str = "none";
-/// The Log tab's ceiling. Anything bigger is a range to aggregate, not list.
 pub const MAX_QUERY_ROWS: u32 = 5_000;
 /// Search terms past this are ignored rather than growing the query.
 const MAX_SEARCH_TERMS: usize = 8;
 
-/// An app or a website: sites are keyed by domain, apps by name, matching how
-/// the Apps page lists them.
 pub const APP_KEY: &str = "COALESCE(NULLIF(s.domain, ''), s.app)";
 fn err(error: rusqlite::Error) -> String {
     error.to_string()
@@ -50,18 +46,14 @@ pub struct EntryFilter {
     /// at local midnight, so a day range never cuts one in half.
     pub start_ms: u64,
     pub end_ms: u64,
-    /// A category id, or `none` for uncategorized.
     pub category_id: Option<String>,
-    /// A project id, or `none` for "No project".
     pub project_id: Option<String>,
     /// A client id, or `none` for time with no client.
     pub client_id: Option<String>,
-    /// An app name or a website domain.
     pub app: Option<String>,
     /// `pending` (anything not approved yet) or `approved`.
     pub status: Option<String>,
     pub billable: Option<bool>,
-    /// Words that must each appear in the description or a window title.
     pub search: Option<String>,
 }
 

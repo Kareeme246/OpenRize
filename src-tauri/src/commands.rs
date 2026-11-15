@@ -242,7 +242,6 @@ pub fn move_timer(app: AppHandle, id: String, delta: i32) -> Timers {
     Ok(timers)
 }
 
-/// `index` is among the section's timers; omitted means after them.
 #[tauri::command]
 pub fn move_timer_to_section(
     app: AppHandle,
@@ -259,7 +258,6 @@ pub fn move_timer_to_section(
     Ok(timers)
 }
 
-/// Broadcasts the sections so every window adopts a change, `rize` included.
 pub(crate) fn sections_changed(app: &AppHandle, sections: &[TimerSection]) {
     let _ = app.emit(crate::EVENT_TIMER_SECTIONS_CHANGED, sections);
 }
@@ -301,7 +299,6 @@ pub fn rename_timer_section(app: AppHandle, id: String, name: String) -> Section
     Ok(sections)
 }
 
-/// Deletes a section; its timers stay, in no section.
 #[tauri::command]
 pub fn delete_timer_section(app: AppHandle, id: String) -> Sections {
     let (sections, timers) = {
@@ -640,7 +637,6 @@ pub fn delete_void_invoice(app: AppHandle, id: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Returns the saved path, or `None` when the user cancels.
 #[tauri::command]
 pub async fn export_invoice_pdf(
     app: AppHandle,
@@ -861,7 +857,6 @@ pub fn delete_time_entries(app: AppHandle, ids: Vec<String>) -> Result<(), Strin
     Ok(())
 }
 
-/// Returns the undone change's label, or `None` when there was nothing.
 #[tauri::command]
 pub fn undo(app: AppHandle, redo: bool) -> Result<Option<String>, String> {
     let step = {
@@ -964,7 +959,6 @@ pub fn ai_metrics(app: AppHandle, days: u32) -> Result<AiMetrics, String> {
     ai::metrics::metrics(&reader, days, now_epoch_ms())
 }
 
-/// Skips the idle/power gate; the result arrives as `ai-status-changed`.
 #[tauri::command]
 pub fn ai_retrain(app: AppHandle) -> AiStatus {
     ai::update_status(&app, |s| {
@@ -975,7 +969,6 @@ pub fn ai_retrain(app: AppHandle) -> AiStatus {
     app.state::<AiRuntime>().status()
 }
 
-/// Forgets models, calibration and the kNN store; keeps entries, categories, projects, rules.
 #[tauri::command]
 pub fn ai_reset_learned(app: AppHandle, days: u32) -> Result<AiMetrics, String> {
     let now = now_epoch_ms();

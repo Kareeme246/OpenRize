@@ -14,7 +14,6 @@ export interface TimersApi {
   start: (id: string) => void;
   pause: (id: string) => void;
   reset: (id: string) => void;
-  /** Resets without a toast, once the time has been logged elsewhere. */
   clear: (id: string) => void;
   rename: (id: string, label: string) => void;
   setTag: (id: string, tag: string | null) => void;
@@ -45,8 +44,6 @@ export function useTimers(): TimersApi {
     setLoading(false);
   }, []);
 
-  // Adopt whatever Rust already has on disk. Rust owns the state, so there is
-  // no default array to render in the meantime.
   useEffect(() => {
     api
       .listTimers()
@@ -138,7 +135,6 @@ export function useTimers(): TimersApi {
       ),
     [confirm, labelOf],
   );
-  // Like a single Start and Pause, the cards show the result.
   const startTag = useCallback(
     (tag: string) => void send(api.startTimerTag(tag)),
     [send],
@@ -147,7 +143,6 @@ export function useTimers(): TimersApi {
     (tag: string) => void send(api.pauseTimerTag(tag)),
     [send],
   );
-  // The card shows where it went; a toast would only repeat it.
   const moveToSection = useCallback(
     (id: string, sectionId: string | null, index?: number) =>
       void send(api.moveTimerToSection(id, sectionId, index)),
@@ -177,7 +172,6 @@ export function useTimers(): TimersApi {
       ),
     [confirm, labelOf],
   );
-  // A save changes nothing about the timers, so there is no list to adopt.
   const saveState = useCallback(
     (id: string) => {
       api

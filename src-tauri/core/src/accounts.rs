@@ -29,7 +29,6 @@ static REGISTRY_EDIT: Mutex<()> = Mutex::new(());
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Account {
-    /// A uuid v7 without dashes; it names the folder, so renames never touch the disk.
     pub id: String,
     pub name: String,
     pub created_at: u64,
@@ -64,7 +63,6 @@ enum Read {
 }
 
 impl Registry {
-    /// Reads without touching the disk: a missing, unreadable or too-new file is No account.
     pub fn peek(root: &Path) -> Self {
         match read_file(root) {
             Read::Found(registry) => registry,
@@ -319,7 +317,6 @@ pub fn account_for_dir(data_dir: &Path) -> Option<Account> {
 pub struct Resolved {
     pub dir: PathBuf,
     pub account: Option<Account>,
-    /// The registry named an account whose data is gone, so No account opened instead.
     pub missing: Option<Account>,
 }
 

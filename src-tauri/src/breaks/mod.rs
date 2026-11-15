@@ -20,12 +20,9 @@ use engine::{
     BreakRecord, BreakState, Command, Effect, Engine, Input, LocalTime, Phase, SegmentNow,
 };
 
-/// Payload: `BreakState`.
 pub const EVENT_BREAK_STATE: &str = "break-state-changed";
 
-/// Runtime key in the activity DB `settings` table (epoch ms).
 const PAUSED_UNTIL_KEY: &str = "breaks_paused_until";
-/// Runs already reminded, so restarting the app does not repeat a card.
 const STOPWATCH_FIRED_KEY: &str = "stopwatch_reminder_fired";
 
 pub const EXTEND_MINUTES: u16 = 5;
@@ -35,8 +32,6 @@ pub struct BreakRuntime {
     last_published: Mutex<Option<BreakState>>,
 }
 
-/// Builds the engine from what is on disk and registers the managed state.
-/// Call once at setup, after `AppState` is managed.
 pub fn init(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     let settings = state.settings_snapshot().breaks;
@@ -314,7 +309,6 @@ fn apply(app: &AppHandle, engine: &mut Engine, effects: Vec<Effect>, now: u64) {
                 }
                 with_store(app, |conn| store::set_ended(conn, &id, ended_at, now));
                 for timer in resume_timers {
-                    // A stopwatch deleted during the break is simply gone.
                     let _ = crate::commands::start_timer(app.clone(), timer);
                 }
             }

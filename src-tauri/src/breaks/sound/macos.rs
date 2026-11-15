@@ -1,5 +1,3 @@
-//! The system "Glass" sound.
-
 use objc2_app_kit::NSSound;
 use objc2_foundation::NSString;
 

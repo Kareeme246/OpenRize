@@ -10,14 +10,10 @@ interface SegmentedControlProps<T extends string | number> {
   options: SegmentedOption<T>[];
   onChange: (value: T) => void;
   disabled?: boolean;
-  /** Keep each segment at least 44pt tall for the size-mode control. */
   largeTarget?: boolean;
 }
 
-/**
- * A radio group styled as one pill, on real `<input type="radio">` for arrow
- * keys and screen readers.
- */
+/** A radio group styled as one pill, on real radio inputs for arrow keys and screen readers. */
 export function SegmentedControl<T extends string | number>({
   name,
   value,

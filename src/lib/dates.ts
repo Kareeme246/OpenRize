@@ -5,14 +5,12 @@
 
 import type { CalendarScale } from "./types";
 
-/** Local `YYYY-MM-DD` (toISOString would give the UTC date). */
 export function localDateString(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
-/** Local `YYYY-MM-DDTHH:MM:SS`, the value format of `<input type="datetime-local" step="1">`. */
 export function localDateTimeString(epochMs: number): string {
   const date = new Date(epochMs);
   const pad = (n: number): string => String(n).padStart(2, "0");
@@ -81,7 +79,6 @@ export function isoWeek(date: Date): number {
 
 export interface DateRange {
   start: Date;
-  /** Exclusive. */
   end: Date;
 }
 
@@ -141,7 +138,6 @@ export function dayEdges(start: Date, end: Date): number[] {
   return edges;
 }
 
-/** `Wed, Sep 23`, `Week 39 · Sep 21–27`, or `September 2026`. */
 export function rangeLabel(scale: CalendarScale, date: Date): string {
   if (scale === "day") {
     return date.toLocaleDateString(undefined, {
@@ -169,10 +165,6 @@ export function rangeLabel(scale: CalendarScale, date: Date): string {
   return date.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 }
 
-/**
- * Bucket edges for a pivot: each day, Monday week, or month overlapping the
- * range, clipped to it (n + 1 edges for n buckets).
- */
 export function stackEdges(
   range: DateRange,
   stack: "day" | "week" | "month",

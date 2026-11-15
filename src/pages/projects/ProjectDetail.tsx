@@ -76,7 +76,6 @@ interface DetailData {
   rules: ProjectRule[];
 }
 
-/** What a status change did, for its toast. */
 const STATUS_DONE: Record<string, string> = {
   completed: "marked complete",
   active: "reopened",

@@ -25,7 +25,6 @@ function warn(text) {
 
 var MAX_DEPTH = 24;
 
-// Roles a user can act on: what `tree` prints and `click`/`focus` may match.
 var ACTIONABLE = {
   AXButton: 1,
   AXCheckBox: 1,
@@ -138,8 +137,6 @@ function commandTree(window) {
   return 0;
 }
 
-// Tiered so an exact label beats a substring hit: exact, case-insensitive
-// exact, case-insensitive substring.
 function matches(window, role, target) {
   var tiers = [[], [], []];
   var wanted = target.toLowerCase();

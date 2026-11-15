@@ -6,7 +6,6 @@ import { SettingGroup, SettingRow } from "./SettingParts";
 
 const ADVANCED_DEVELOPER_MODE_KEY = "openrize.advancedDeveloperMode";
 
-/** A per-device convenience in localStorage; off until switched on. */
 function readAdvancedDeveloperMode(): boolean {
   try {
     return window.localStorage.getItem(ADVANCED_DEVELOPER_MODE_KEY) === "1";

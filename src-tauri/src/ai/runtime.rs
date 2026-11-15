@@ -43,7 +43,6 @@ pub struct DeviceInfo {
 #[derive(Debug, Clone)]
 pub struct LaunchSpec {
     pub binary: PathBuf,
-    /// For a split model, its first part.
     pub model: PathBuf,
     pub ctx_size: u32,
     pub device: Device,
@@ -60,7 +59,6 @@ impl LaunchSpec {
     }
 }
 
-/// `llama-server` is staged next to the app executable, in `tauri dev` and in the bundle.
 pub fn locate() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let name = format!("{SERVER_NAME}{}", std::env::consts::EXE_SUFFIX);
@@ -282,7 +280,6 @@ fn write_key_file(dir: &Path, key: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// What the status shows about the local runtime before any request is made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeCheck {
     ModelMissing,
@@ -304,7 +301,6 @@ pub struct Connection {
     pub generation: u64,
 }
 
-/// The server the active local model needs: started on the first request, stopped when idle.
 pub struct RuntimeManager {
     binary: Option<PathBuf>,
     model: PathBuf,
@@ -350,7 +346,6 @@ impl RuntimeManager {
         }
     }
 
-    /// Starts the server if it is not up. A start that fails on every device backs off.
     pub fn ensure_running(&mut self) -> Result<Connection, String> {
         self.reap_dead_server();
         if self.server.is_none() {
@@ -395,7 +390,6 @@ impl RuntimeManager {
         self.last_used = Instant::now();
     }
 
-    /// The server stopped answering: stop it so the next request starts a fresh one.
     pub fn crashed(&mut self) {
         self.stop();
         self.record_failure();

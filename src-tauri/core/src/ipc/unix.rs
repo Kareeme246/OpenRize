@@ -59,7 +59,6 @@ impl Address {
         Ok(Self { directory, socket })
     }
 
-    /// Creates the private directory, or rejects one anyone else can reach.
     fn prepare(&self) -> Result<(), String> {
         if !self.directory.exists() {
             fs::DirBuilder::new()

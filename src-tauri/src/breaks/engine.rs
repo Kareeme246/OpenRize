@@ -9,10 +9,8 @@ use serde::Serialize;
 use crate::capture::PowerEvent;
 use crate::settings::{BreakSettings, ScheduledBreak};
 
-/// A visible reminder that gets no answer collapses to the corner capsule.
 pub const NUDGE_AFTER_MS: u64 = 20_000;
 pub const WELCOME_MS: u64 = 5_000;
-/// After this many snoozes in a row the reminder offers only Start and Skip.
 pub const MAX_SNOOZES_IN_ROW: u32 = 3;
 /// An interval reminder due this close before a scheduled break gives way.
 pub const SCHEDULE_LEAD_MS: u64 = 15 * 60_000;
@@ -25,7 +23,6 @@ const START_GRACE_MS: u64 = 15_000;
 const FRESH_INPUT_MS: u64 = 1_500;
 /// The sampler ticks each second; a longer gap means the Mac slept.
 const TICK_GAP_MS: u64 = 10_000;
-/// A scheduled break not shown within this long after its time is missed.
 const SCHEDULE_WINDOW_MIN: u32 = 10;
 const MINUTE_MS: u64 = 60_000;
 
@@ -90,15 +87,11 @@ pub const STATUS_MISSED: &str = "missed";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
-    /// Start a `break` segment and record the taken break. `pause_timers`
-    /// asks the driver to pause running stopwatches.
     Begin {
         record: BreakRecord,
         label: String,
         pause_timers: bool,
     },
-    /// The break ended: close its segment (if still open), stamp the row and
-    /// resume the stopwatches the break paused.
     Finish {
         id: String,
         ended_at: u64,
@@ -171,7 +164,6 @@ struct Reminder {
     worked_ms: u64,
     snoozes: u32,
     snoozed_until: Option<u64>,
-    /// When the card last expanded; it collapses to a capsule after a while.
     shown_at: u64,
     nudged: bool,
 }
@@ -200,8 +192,6 @@ struct Welcome {
     until: u64,
 }
 
-/// A break in progress as an account switch records it, so the account it
-/// belongs to can offer to take it up again.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SwitchedBreak {
     pub label: String,
@@ -282,7 +272,6 @@ pub struct Engine {
     reminder: Option<Reminder>,
     active: Option<ActiveBreak>,
     welcome: Option<Welcome>,
-    /// The Idle segment the user is currently in: (segment id, start).
     idle_seg: Option<(i64, u64)>,
     paused_until: Option<u64>,
     /// (schedule id, day) pairs already shown, credited or skipped.
@@ -494,8 +483,6 @@ impl Engine {
         });
     }
 
-    /// Credits a finished Idle stretch as a break taken, and remembers the
-    /// stretch while it lasts.
     fn track_idle_segment(&mut self, input: &Input<'_>, break_ms: u64, effects: &mut Vec<Effect>) {
         let now = input.now;
         let current_idle = input
@@ -561,7 +548,6 @@ impl Engine {
         self.deferred_since = None;
     }
 
-    /// A scheduled break today that the idle stretch covers at least half of.
     fn scheduled_covered_by<'s>(
         &self,
         input: &'s Input<'_>,
@@ -712,7 +698,6 @@ impl Engine {
         }));
     }
 
-    /// A scheduled break is due from its time until its window closes.
     fn schedule_due(&self, schedule: &ScheduledBreak, input: &Input<'_>) -> bool {
         if !self.schedule_open_today(schedule, input.local) {
             return false;
@@ -1000,7 +985,6 @@ impl Engine {
         }]
     }
 
-    /// A sample interval reminder, for looking at the panel in a dev build.
     #[cfg(debug_assertions)]
     pub fn dev_sample_reminder(&mut self, now: u64, settings: &BreakSettings) {
         if self.active.is_some() {
@@ -1104,7 +1088,6 @@ impl Engine {
         if settings.enabled && !self.interval_suppressed(settings, local) {
             let work_ms = u64::from(settings.work_minutes) * MINUTE_MS;
             let remaining = work_ms.saturating_sub(self.streak_ms);
-            // Half-minute buckets keep the view from changing every tick.
             let at = (now + remaining + 15_000) / 30_000 * 30_000;
             best = Some(NextBreak {
                 at,
@@ -1278,7 +1261,6 @@ mod tests {
             self.engine.command(command, self.now, &self.settings)
         }
 
-        /// Plays the driver: the break's segment opens and replaces the activity one.
         fn begin(&mut self, effects: &[Effect]) {
             assert!(matches!(effects.first(), Some(Effect::Begin { .. })));
             self.segment = Some(SegmentNow {
@@ -1385,7 +1367,6 @@ mod tests {
         assert_eq!(record.status, STATUS_TAKEN);
         assert_eq!(record.planned_ms, 5 * MIN);
         assert_eq!(label, "Break");
-        // Stopwatches keep running unless the user opted in.
         assert!(!*pause_timers);
         sim.begin(&effects);
         assert_eq!(sim.state().phase, Phase::OnBreak);
@@ -1585,7 +1566,6 @@ mod tests {
             .is_empty());
         sim.segment = None;
         sim.now += 20 * MIN;
-        // A tick racing the notification cannot report an interruption.
         assert!(sim.tick().is_empty());
         let effects = sim.engine.power_event(PowerEvent::Resume, sim.now, None);
         assert!(matches!(effects.as_slice(),
@@ -1628,7 +1608,6 @@ mod tests {
         });
         sim.idle_ms = 500;
         assert!(sim.run(MIN).is_empty());
-        // However it ends, it ends no later than the moment it is told to.
         let finish = sim.command(Command::EndBreak);
         let [Effect::Finish {
             ended_at,
@@ -2054,8 +2033,6 @@ mod tests {
             ("break", Some("Idle"), 140 * MIN, 146 * MIN),
             ("activity", None, 146 * MIN, 166 * MIN),
         ]);
-        // The idle stretch was long enough to be a rest, and the last segment
-        // ended long ago (34 minutes), so the clock is 0 either way.
         assert_eq!(streak_from_segments(&rows, now, 5 * MIN), 0);
         assert_eq!(streak_from_segments(&rows, 168 * MIN, 5 * MIN), 20 * MIN);
         let short = segments(&[

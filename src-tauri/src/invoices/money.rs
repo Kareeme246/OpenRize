@@ -10,7 +10,6 @@ const MS_PER_HOUR: i64 = 3_600_000;
 /// accepts; keeps every product and sum far inside `i64`.
 pub const MAX_RATE_CENTS: i64 = 1_000_000_000;
 pub const MAX_QUANTITY_HUNDREDTHS: i64 = 1_000_000_000;
-/// The largest single line amount (USD 999,999,999.99), so paper columns hold.
 pub const MAX_AMOUNT_CENTS: i64 = 99_999_999_999;
 
 /// A tracked duration as billable hundredths of an hour, rounded to nearest
@@ -20,7 +19,6 @@ pub fn hours_hundredths(duration_ms: i64) -> i64 {
     rounded.max(1)
 }
 
-/// `quantity x rate`, rounded half-up to whole cents at the line level.
 pub fn line_amount_cents(quantity_hundredths: i64, rate_cents: i64) -> Result<i64, String> {
     if !(1..=MAX_QUANTITY_HUNDREDTHS).contains(&quantity_hundredths) {
         return Err("Quantity must be greater than zero".into());
@@ -49,7 +47,6 @@ pub fn format_money(cents: i64) -> String {
     format!("{sign}${grouped}.{:02}", cents % 100)
 }
 
-/// `1.50` for hours-like quantities, `3` for whole ones.
 pub fn format_quantity(hundredths: i64) -> String {
     let whole = hundredths / 100;
     let fraction = hundredths % 100;
@@ -96,7 +93,6 @@ pub fn due_date(issue_date: &str, terms_days: i64) -> Result<String, String> {
     Ok(due.format("%Y-%m-%d").to_string())
 }
 
-/// `Net 30`, or `Due on receipt` for zero days.
 pub fn terms_label(terms_days: i64) -> String {
     if terms_days == 0 {
         "Due on receipt".into()

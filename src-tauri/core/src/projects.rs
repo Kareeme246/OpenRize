@@ -1,6 +1,5 @@
-//! The Projects page: AI hints as rules with a match preview, per-project totals, discovery from
-//! captured activity, and CSV import. A project's `ai_hints` free text becomes one `origin =
-//! 'hint'` rule per hint, replaced on save, so most assignments resolve before the model is asked.
+//! A project's `ai_hints` free text becomes one `origin = 'hint'` rule per hint, replaced on
+//! save, so most assignments resolve before the model is asked.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
@@ -17,12 +16,10 @@ use crate::models::{NewClient, NewProject};
 pub const ORIGIN_HINT: &str = "hint";
 /// Keywords shorter than this would match nearly every window title.
 const MIN_KEYWORD_CHARS: usize = 3;
-/// Discovery ignores anything seen for less than this in its window.
 const DISCOVERY_MIN_MS: u64 = 30 * 60 * 1000;
 const DISCOVERY_LIMIT: usize = 5;
 const DISMISSED_KEY: &str = "project_suggestions_dismissed";
 
-/// The muted palette, for projects created without a colour picker: imports and discovery.
 pub const PALETTE: [&str; 10] = [
     "#75a4e5", "#56c2b1", "#52b788", "#df84b5", "#e4817d", "#9aa6b4", "#bfa181", "#707bf0",
     "#66b1df", "#9b87df",
@@ -31,7 +28,6 @@ pub const PALETTE: [&str; 10] = [
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hint {
     pub text: String,
-    /// The rule it becomes, or `None` when it is too short to match on.
     pub rule: Option<(&'static str, String)>,
 }
 
@@ -39,13 +35,9 @@ static DOMAIN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$").expect("domain regex")
 });
 
-/// `~\Code\OpenRize`, `C:\Code\OpenRize`, `C:/Code/OpenRize`, `\\server\share`.
 static WINDOWS_PATH: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(?:~\\|[A-Za-z]:[\\/]|\\\\)").expect("windows path regex"));
 
-/// Classifies one hint: `~/Code/OpenRize` is a path, `github.com/a/b` a URL
-/// prefix, `figma.com` a domain, and anything else a title keyword. Windows
-/// paths (`C:\Code\OpenRize`) are paths too.
 fn classify(text: &str) -> Option<(&'static str, String)> {
     if text.starts_with("~/") || text.starts_with('/') || WINDOWS_PATH.is_match(text) {
         return Some((
@@ -71,8 +63,6 @@ fn classify(text: &str) -> Option<(&'static str, String)> {
     Some(("title_contains", text.to_string()))
 }
 
-/// Splits hint text on commas, semicolons, and newlines, dropping blanks and
-/// case-insensitive repeats.
 pub fn parse_hints(text: &str) -> Vec<Hint> {
     let mut seen = HashSet::new();
     text.split([',', ';', '\n'])
@@ -86,16 +76,13 @@ pub fn parse_hints(text: &str) -> Vec<Hint> {
         .collect()
 }
 
-/// What a hint rule assigns: a project, or a category (the Categories
-/// page's "Apps & sites" are hints too).
 #[derive(Debug, Clone, Copy)]
 pub enum HintOwner<'a> {
     Project(&'a str),
     Category(&'a str),
 }
 
-/// Replaces an owner's hint rules with the ones its hints describe. `None`
-/// (a cleared field, or a deleted project) just removes them.
+/// `None` (a cleared field, or a deleted project) just removes the rules.
 pub fn sync_hint_rules(
     conn: &Connection,
     owner: HintOwner<'_>,
@@ -144,7 +131,6 @@ pub struct HintMatch {
 #[serde(rename_all = "camelCase")]
 pub struct HintPreview {
     pub hints: Vec<HintMatch>,
-    /// Time any hint matched, counted once ("would have matched 14h").
     pub total_ms: u64,
 }
 
@@ -227,9 +213,7 @@ pub struct ProjectStats {
     pub project_id: String,
     pub entries: u32,
     pub total_ms: u64,
-    /// Time in the page's selected range (the Time column).
     pub range_ms: u64,
-    /// Time since the start of this month, for monthly budgets.
     pub month_ms: u64,
     pub billable_ms: u64,
     pub billable_month_ms: u64,
@@ -239,7 +223,6 @@ pub struct ProjectStats {
     pub last_activity: Option<u64>,
 }
 
-/// Totals for every project with at least one entry.
 pub fn project_stats(
     conn: &Connection,
     range_start: u64,
@@ -288,7 +271,6 @@ pub fn project_stats(
     rows.collect::<rusqlite::Result<_>>().map_err(err)
 }
 
-/// A rule (or an Apps-page default) that assigns time to a project.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectRule {
@@ -323,8 +305,6 @@ pub fn project_rules(conn: &Connection, project_id: &str) -> Result<Vec<ProjectR
     rows.collect::<rusqlite::Result<_>>().map_err(err)
 }
 
-/// "Create project pantry-tracker? (6h 10m, matched by ~/Code/pantry-tracker,
-/// github.com/…/pantry-tracker)".
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectSuggestion {
@@ -334,7 +314,6 @@ pub struct ProjectSuggestion {
     pub evidence: Vec<String>,
 }
 
-/// Folders people keep repositories in.
 const CODE_ROOTS: &str = "Code|code|Projects|projects|src|dev|Developer|developer|repos|git|workspace|Workspace|Sites|work";
 
 /// A repository path in a window title: under the home folder (`~`, a macOS/Linux home, a Windows
@@ -348,7 +327,6 @@ static TITLE_PATH: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 const FORGES: [&str; 4] = ["github.com", "gitlab.com", "bitbucket.org", "codeberg.org"];
-/// First path segments on a forge that are pages, not owners.
 const FORGE_PAGES: [&str; 18] = [
     "settings",
     "notifications",
@@ -370,7 +348,6 @@ const FORGE_PAGES: [&str; 18] = [
     "dashboard",
 ];
 
-/// Editors whose window titles name the open folder.
 const EDITORS: [&str; 12] = [
     "Code",
     "Visual Studio Code",
@@ -389,7 +366,6 @@ const EDITORS: [&str; 12] = [
 static FOLDER_NAME: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z0-9][A-Za-z0-9_-]{1,59}$").expect("folder regex"));
 
-/// Title parts an editor shows that are never a project.
 const GENERIC_TITLES: [&str; 8] = [
     "welcome",
     "untitled",
@@ -500,7 +476,7 @@ struct Cluster {
     evidence: HashMap<String, u64>,
 }
 
-/// How discovery compares names: "Acme Web", "acme-web" and "acme_web" are one project.
+/// "Acme Web", "acme-web" and "acme_web" are one project.
 fn name_key(name: &str) -> String {
     name.chars()
         .filter(|c| c.is_alphanumeric())
@@ -508,8 +484,6 @@ fn name_key(name: &str) -> String {
         .collect()
 }
 
-/// Proposes projects from recurring repo, folder and forge names in the capture since `since_ms`,
-/// skipping existing projects, their hints and dismissed names. Runs over local data only.
 pub fn discover(conn: &Connection, since_ms: u64) -> Result<Vec<ProjectSuggestion>, String> {
     let mut known: HashSet<String> = HashSet::new();
     {
@@ -671,8 +645,6 @@ pub struct ImportSummary {
     pub skipped: Vec<String>,
 }
 
-/// Imports `name, client, budget, due date` rows (header required, any column order). Clients are
-/// matched by name or created; existing project names are skipped.
 pub fn import_csv(
     store: &mut ActivityStore,
     text: &str,

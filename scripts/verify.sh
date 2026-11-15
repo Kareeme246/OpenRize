@@ -42,7 +42,8 @@ echo "==> cargo clippy (backend)"
 if $FIX; then
   cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets --fix --allow-dirty --allow-staged -- -D warnings
 else
-  cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
+  # --locked: a Cargo.lock that is out of step with a Cargo.toml fails here, not at release time.
+  cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets --locked -- -D warnings
 fi
 
 echo "verify: all checks passed"

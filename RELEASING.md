@@ -9,6 +9,17 @@ Before tagging, run a maintenance pass of the verification skill
 (`.agents/skills/drive-app/references/maintenance.md`) and keep its coverage table with the
 release notes handoff.
 
+Also check both lockfiles for known advisories. This is a manual step because the project keeps
+its checks to `pnpm verify` and adds no extra CI workflows:
+
+```sh
+cargo install cargo-audit --locked   # once
+cargo audit --file src-tauri/Cargo.lock
+pnpm audit --prod
+```
+
+Fix or consciously accept each finding before going on.
+
 To cut a release:
 
 1. On `main`, regenerate and commit the changelog:
@@ -19,7 +30,8 @@ To cut a release:
    ```
    `CHANGELOG.md` is generated from git history; do not edit it by hand.
 2. Push the release commit to `main`. In GitHub Actions, run the `Release`
-   workflow on that commit with `version` set to `X.Y.Z` (without `v`). It must
+   workflow on `main` with `version` set to `X.Y.Z` (without `v`). Dispatched
+   from any other branch or tag, it skips every job and releases nothing. It must
    match `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`,
    `src-tauri/cli/Cargo.toml`, and `src-tauri/core/Cargo.toml`
    (`./scripts/bump-version.sh` updates them all). The workflow creates the tag
@@ -111,11 +123,45 @@ operator action with `--promote` (or a fresh `--no-current` stage) from `scripts
 
 [r2-tokens]: https://developers.cloudflare.com/r2/api/tokens/#permissions
 
+## Build inputs
+
+Releases build from locked inputs: `pnpm install --frozen-lockfile`, `cargo --locked` (a stale
+`Cargo.lock` fails `pnpm verify` and the release build), and the Rust version in
+`rust-toolchain.toml`, which rustup installs on the runners and on your machine. Bump that version
+on purpose, in its own change. Release notes come from a git-cliff archive that `release.yml`
+checks against a committed SHA-256; to upgrade git-cliff, change the version and the digest together.
+
+Each build job compiles first with no secrets (`pnpm tauri build --no-bundle`) and only then runs
+`pnpm tauri bundle` with the signing keys, so dependency build scripts never see them. Keep it that
+way when editing the workflow.
+
+## Repository settings
+
+These protect the release pipeline and cannot be set from a pull request. The owner sets them once
+in the repository's Settings:
+
+- [ ] **Environment `release`** (Environments). The macOS and Windows build jobs already run in
+      it; GitHub creates it empty on the first run. Limit its deployment branches to `main`, then
+      move the eight signing secrets below from repository secrets into it and delete the repository
+      copies. Until then any workflow file on any branch can read them. If R2 publishing is set up,
+      its two Cloudflare secrets are still repository secrets; moving them needs `publish-r2.yml`
+      to name the environment too.
+- [ ] **Ruleset for `main`** (Rules > Rulesets): require a pull request, block force pushes and
+      deletion.
+- [ ] **Ruleset for `v*` tags**: block updates and deletion, so a release tag cannot be moved. Leave
+      creation open, because the `Release` workflow creates the tag with its own token.
+- [ ] **Immutable releases** (General > Releases), so published assets and `latest.json` cannot be
+      replaced. The pinned release action uploads the assets before it publishes, so the
+      workflow needs no change.
+- [ ] **Require actions to be pinned to a full-length commit SHA** (Actions > General). Every
+      workflow here already complies.
+
 ## Signing and notarization secrets
 
 The release workflow signs with a Developer ID Application certificate and
-notarizes with an App Store Connect API key. It needs these repository secrets
-(Settings > Secrets and variables > Actions):
+notarizes with an App Store Connect API key. It needs these secrets, as repository
+secrets (Settings > Secrets and variables > Actions) or, better, in the `release`
+environment (see above):
 
 | Secret | Value |
 | --- | --- |

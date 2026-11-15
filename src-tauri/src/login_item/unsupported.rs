@@ -1,5 +1,3 @@
-//! No launch-at-login implementation on this platform yet.
-
 use super::LoginItemState;
 
 pub fn state() -> LoginItemState {

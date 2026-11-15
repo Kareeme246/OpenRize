@@ -247,10 +247,7 @@ function SettingsSectionHeading({
 const LOGIN_ITEMS_SETTINGS =
   "x-apple.systempreferences:com.apple.LoginItems-Settings.extension";
 
-/**
- * Mirrors macOS's login item, re-read on window focus because the user can
- * switch it off in System Settings behind the app's back.
- */
+/** Re-read on window focus: the user can switch it off in System Settings behind our back. */
 function LaunchAtLoginRow({
   onError,
 }: {
@@ -434,7 +431,6 @@ function reviewedLabel(status: AiStatus | null): string {
     : `learning · ${status.outcomes}/50 reviewed`;
 }
 
-/** Stands in for every on-device-model control when the build has no model. */
 function RulesOnlyRow({ status }: { status: AiStatus | null }) {
   return (
     <SettingRow
@@ -743,7 +739,6 @@ function updateSummary(status: UpdateStatus): string {
   return `Up to date · ${status.currentVersion}`;
 }
 
-/** git-cliff Markdown shown as plain text, minus heading and bold markers. */
 function plainNotes(notes: string): string {
   return (
     notes
@@ -794,10 +789,6 @@ type InstalledNotes =
   | { kind: "loaded"; releases: ReleaseNotes[] }
   | { kind: "failed"; error: string };
 
-/**
- * The Rust side checks on its own schedule (updater.rs); this only shows the
- * result.
- */
 function UpdatesSetting({ status }: { status: UpdateStatus | null }) {
   const [requestError, setRequestError] = useState<string | null>(null);
   const [changelogOpen, setChangelogOpen] = useState(false);
@@ -823,7 +814,6 @@ function UpdatesSetting({ status }: { status: UpdateStatus | null }) {
   const available = status?.available ?? null;
 
   const toggleChangelog = (): void => {
-    // Reopening retries a fetch that failed.
     if (!changelogOpen && installedNotes.kind === "failed") {
       setInstalledNotes({ kind: "idle" });
     }

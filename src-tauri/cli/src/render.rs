@@ -270,8 +270,6 @@ pub fn show(command: Option<&Command>, data: &Value, full: bool) {
     }
 }
 
-/// A `--dry-run` answer: what the command would change, then the refusal the
-/// real command would meet, if any.
 pub fn dry_run(data: &Value) {
     let names = &data["names"];
     let target = |kind: &str| format!("{kind} {}", name(names, &data["id"]));
@@ -337,8 +335,6 @@ pub fn dry_run(data: &Value) {
     }
 }
 
-/// The lines for one staged deletion. `owner` is the project or category
-/// being deleted, which the entries it still links to lose.
 fn deletion(deletion: &Value, owner: Option<&str>) {
     let list = |key: &str| deletion[key].as_array().cloned().unwrap_or_default();
     let ids = |key: &str| list(key).iter().map(short).collect::<Vec<_>>().join(", ");
@@ -720,7 +716,6 @@ fn report(data: &Value, per: Per, by: Group) {
         .filter_map(Value::as_u64)
         .collect();
     let buckets = boundaries.len().saturating_sub(1);
-    // group key -> (per-bucket ms, entries, billable ms)
     let mut groups: Vec<(String, Vec<u64>, u64, u64)> = Vec::new();
     for cell in data["cells"].as_array().into_iter().flatten() {
         let label = match cell["key"].as_str() {
@@ -949,7 +944,6 @@ fn flatten(prefix: &str, value: &Value, out: &mut Vec<(String, String)>) {
     }
 }
 
-/// Columns padded to their widest cell; the last column is not padded.
 fn table(headers: &[&str], rows: Vec<Vec<String>>) {
     let mut widths: Vec<usize> = headers
         .iter()
@@ -981,7 +975,6 @@ fn table(headers: &[&str], rows: Vec<Vec<String>>) {
     }
 }
 
-/// One `Label:  value` line of a detail view; empty values are left out.
 fn field(label: &str, value: &Value) {
     if !value.is_null() && value != "" {
         println!("  {:<13}{}", format!("{label}:"), text(value));
@@ -1012,7 +1005,6 @@ fn yes_no(value: &Value) -> String {
     .into()
 }
 
-/// The last eight characters of an id, which `rize entries` accepts back.
 fn short(value: &Value) -> String {
     let id = value
         .as_str()
@@ -1098,7 +1090,6 @@ mod tests {
 
     #[test]
     fn colors_match_the_frontend_palette() {
-        // What slotFor picks in src/lib/palette.ts for the same names.
         assert_eq!(color_for("Acme"), "#9aa6b4");
         assert_eq!(color_for("Deep work"), "#e4817d");
     }

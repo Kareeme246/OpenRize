@@ -9,8 +9,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use super::Kind;
 
-/// Nothing to convert: windows have no panel class, and tao ignores
-/// `set_visible_on_all_workspaces` here.
 pub fn make_panel(_window: &WebviewWindow, _kind: Kind) {}
 
 /// Puts the window back at the top of the topmost band: it can drop below another topmost window

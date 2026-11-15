@@ -214,7 +214,6 @@ function pathWithCargo() {
   return existsSync(cargoBin) ? `${cargoBin}${delimiter}${current}` : current;
 }
 
-/** Absolute path of cargo: on PATH, else in %USERPROFILE%\\.cargo\\bin. Null when missing. */
 function findCargo() {
   const names = process.platform === "win32" ? ["cargo.exe"] : ["cargo", "cargo.exe"];
   for (const dir of pathWithCargo().split(delimiter)) {
@@ -403,7 +402,6 @@ async function withPage(options, action) {
   }
 }
 
-// Roles a user can act on, compared lowercased.
 const ACTIONABLE = new Set([
   "button",
   "checkbox",
@@ -751,7 +749,6 @@ async function waitUntilDrivable(meta, logPath) {
       if (pages.length > 0) {
         const cdp = await Cdp.connect((await pickTarget(meta, {})).webSocketDebuggerUrl);
         try {
-          // The target exists before React has painted; wait for real controls.
           const ready = renderTree(await axNodes(cdp), false).includes("[Button]");
           if (ready) return;
         } finally {

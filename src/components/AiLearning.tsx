@@ -1,8 +1,3 @@
-/**
- * Settings → Categories & AI, learning-loop half. Renders a snapshot Rust
- * computed (`ai_metrics`).
- */
-
 import { useEffect, useId, useState } from "react";
 import { percent } from "../lib/confidence";
 import { plural } from "../lib/format";
@@ -59,7 +54,6 @@ function previewText(
   return `At ${value}%, ${share(row.autoApproved, metrics.entries)} of ${period}' entries (${row.autoApproved} of ${metrics.entries}) would have auto-approved${wrong}.${capped}`;
 }
 
-/** The preview follows the thumb; the setting saves once dragging settles. */
 export function ThresholdSlider({
   value,
   disabled,
@@ -259,9 +253,6 @@ const CHART = {
   bottom: 28,
 };
 
-/**
- * Reliability diagram: x is promised confidence, y how often it was accepted.
- */
 function CalibrationChart({ bins }: { bins: ReliabilityBin[] }) {
   const [hover, setHover] = useState<number | null>(null);
   const plotW = CHART.width - CHART.left - CHART.right;

@@ -72,10 +72,7 @@ function checkInstaller(
   }
 }
 
-/**
- * Order matters: installers first, then the manifest, `current.json` last, so
- * no visitor sees a missing build.
- */
+/** Order matters: installers first, then the manifest, `current.json` last, so no visitor sees a missing build. */
 export async function publishRelease(
   store: ObjectStore,
   options: PublishOptions,

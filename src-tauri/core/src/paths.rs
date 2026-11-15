@@ -11,10 +11,8 @@ pub const DATABASE_FILE: &str = "activity.db";
 /// its whole life, or `rize` while it edits them with the app closed.
 pub const LOCK_FILE: &str = "app.lock";
 
-/// Local accounts, beside the data of No account (the data directory itself); see `accounts.rs`.
 pub const ACCOUNTS_FILE: &str = "accounts.json";
 
-/// The restart handoff a switch leaves for the next launch; deleted once read.
 pub const SWITCH_FILE: &str = "switch.json";
 
 /// Where Windows keeps settings (`settings.rs`), inside the data directory. It

@@ -9,7 +9,6 @@ use crate::capture::PRIVATE_TITLE;
 
 pub const BACKSTOP_MS: u64 = REBUILD_WINDOW_MS;
 
-/// Erases the detail of every private segment that is due; truncates the WAL if any row changed.
 pub fn redact_private_detail(conn: &Connection, now: u64) -> Result<usize, String> {
     // The literals below are the ones in the `idx_segments_private_detail`
     // partial index, which is what keeps this cheap when nothing is due:

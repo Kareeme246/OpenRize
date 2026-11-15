@@ -52,7 +52,6 @@ function ReminderPanel() {
   const currentId = state.current ? String(state.current.startedAt) : null;
   const compact = collapsed.id === currentId && collapsed.value;
 
-  // A menu belongs to the reminder that opened it.
   useEffect(() => {
     if (state.phase !== "due") setMenu(null);
   }, [state.phase]);
@@ -60,11 +59,9 @@ function ReminderPanel() {
   const card = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const reported = useRef("");
-  // Report bounds after every state change: the window waits for a measurement.
   // biome-ignore lint/correctness/useExhaustiveDependencies: state, menu and compact are what change the layout
   useLayoutEffect(() => {
     const element = card.current;
-    // No break or stopwatch card means there is nothing to size a window to.
     if (!element || (state.phase === "idle" && !state.stopwatch)) return;
     const measure = (): {
       height: number;
@@ -212,7 +209,6 @@ function StopwatchCard({
   );
 }
 
-/** Fire and forget: Rust answers with a `break-state-changed` event. */
 function act(action: Promise<unknown>): void {
   action.catch((cause: unknown) => console.error("break action failed", cause));
 }
@@ -352,10 +348,6 @@ function tomorrow(): number {
   return date.getTime();
 }
 
-/**
- * A combo button: the main half snoozes for the default length, the chevron
- * offers 5 / 10 / 15 minutes.
- */
 function SnoozeButton({
   minutes,
   open,

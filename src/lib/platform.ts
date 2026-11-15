@@ -54,30 +54,18 @@ export const TRASH = byPlatform({
   linux: "Trash",
 });
 
-/**
- * Whether the OS draws its own caption above the webview; macOS overlays its
- * title bar and Windows has it removed (src-tauri/src/caption.rs).
- */
 export const HAS_NATIVE_CAPTION = byPlatform({
   macos: false,
   windows: false,
   linux: true,
 });
 
-/**
- * Whether the app draws minimize/maximize/close itself; macOS draws traffic
- * lights over the webview.
- */
 export const DRAWS_CAPTION_BUTTONS = byPlatform({
   macos: false,
   windows: true,
   linux: false,
 });
 
-/**
- * Whether right-clicking the top bar opens the system window menu, where the
- * app's bar replaces a removed caption.
- */
 export const BAR_OPENS_WINDOW_MENU = byPlatform({
   macos: false,
   windows: true,
@@ -94,19 +82,12 @@ export const SYNCS_WINDOW_THEME = byPlatform({
   linux: true,
 });
 
-/**
- * Left padding of the top bar; on macOS it clears the overlaid traffic lights.
- */
 export const TOP_BAR_PADDING_LEFT = byPlatform({
   macos: "pl-[84px]",
   windows: "pl-3",
   linux: "pl-3",
 });
 
-/**
- * Right padding of the top bar; Windows' caption buttons run to the window
- * edge.
- */
 export const TOP_BAR_PADDING_RIGHT = byPlatform({
   macos: "pr-3",
   windows: "pr-0",
@@ -126,10 +107,6 @@ export const HAS_ENERGY_MONITOR = byPlatform({
   linux: true,
 });
 
-/**
- * Whether the build is expected to ship the ML sidecar; only a first guess
- * until the AI status loads.
- */
 export const EXPECTS_ON_DEVICE_ML = byPlatform({
   macos: true,
   windows: false,
@@ -160,10 +137,6 @@ export const LOGIN_ITEM_UNAVAILABLE = byPlatform({
   linux: "Not available on Linux yet",
 });
 
-/**
- * Structural, so a `KeyboardEvent` and a plain object both fit without DOM
- * types.
- */
 export interface PrimaryModifierKeys {
   metaKey: boolean;
   ctrlKey: boolean;

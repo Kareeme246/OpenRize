@@ -153,7 +153,6 @@ export interface InvoiceLine {
   amountCents: number;
 }
 
-/** A row of the invoice list. Money is integer USD cents throughout. */
 export interface InvoiceSummary {
   id: string;
   number?: string | null;
@@ -161,7 +160,6 @@ export interface InvoiceSummary {
   clientName: string;
   status: InvoiceStatus;
   currency: string;
-  /** `YYYY-MM-DD`. */
   issueDate?: string | null;
   dueDate?: string | null;
   totalCents: number;
@@ -193,7 +191,6 @@ export interface InvoiceLineInput {
   rateCents?: number;
 }
 
-/** What the editor sends: choices only. Rust prices and validates it. */
 export interface InvoiceDraftInput {
   id?: string;
   clientId: string;
@@ -270,7 +267,6 @@ export interface TimeEntry {
   deletedAt?: number;
   /** Where the description came from; only `template` text is rebuilt. */
   descriptionOrigin: "template" | "ai" | "user" | string;
-  /** Classification state and confidences (list views only). */
   ai?: EntryAi;
   dominantApp?: string;
 }
@@ -366,7 +362,6 @@ export interface AiStatus {
   queued: number;
   /** Verdicts calibration has learned from; the curve starts at 50. */
   outcomes: number;
-  /** A calibration curve is active (otherwise the cold-start 90% cap). */
   calibrated: boolean;
   retrain: "idle" | "queued" | "running";
   retrainNote?: string;
@@ -430,7 +425,6 @@ export interface NewTimeEntry {
   categoryId?: string;
   projectId?: string;
   billable?: boolean;
-  /** Keep a labeled entry pending for review, without AI classification. */
   review?: boolean;
 }
 
@@ -578,7 +572,6 @@ export type Route =
   | {
       name: "calendar";
       scale?: CalendarScale;
-      /** Local `YYYY-MM-DD`; today when absent. */
       date?: string;
       entryId?: string;
       review?: boolean;
@@ -603,7 +596,6 @@ export type Route =
   | {
       name: "entries";
       range?: EntriesRange;
-      /** Local `YYYY-MM-DD` inside the range; today when absent. */
       date?: string;
       view?: EntriesView;
       filters?: EntryFilters;
@@ -613,7 +605,6 @@ export type Route =
   | {
       name: "timesheets";
       scale?: "day" | "week";
-      /** Local `YYYY-MM-DD` inside the day or week; today when absent. */
       date?: string;
       rows?: "project" | "category";
       filters?: TimesheetFilters;

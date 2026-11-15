@@ -41,10 +41,6 @@ const ACCESSIBILITY_SETTINGS =
 const buttonClass =
   "shrink-0 cursor-pointer rounded-md border border-line bg-surface px-2.5 py-1 text-[11.5px] font-medium text-fg-muted transition-colors hover:bg-surface-strong hover:text-fg";
 
-/**
- * Dev-only permission and onboarding controls; statuses are re-read from
- * `dev_tools_info`.
- */
 export function DevToolsSetting() {
   const showToast = useToast();
   const [info, setInfo] = useState<DevToolsInfo | null>(null);

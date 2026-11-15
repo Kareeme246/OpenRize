@@ -15,10 +15,7 @@ interface ProfileSheetProps {
   onSaved: (profile: InvoiceProfile) => void;
 }
 
-/**
- * Finalized invoices keep their own copy of this business, so editing never
- * rewrites an issued document.
- */
+/** Finalized invoices keep their own copy, so editing never rewrites an issued document. */
 export function ProfileSheet({ onClose, onSaved }: ProfileSheetProps) {
   const showToast = useToast();
   const [profile, setProfile] = useState<InvoiceProfile | null>(null);

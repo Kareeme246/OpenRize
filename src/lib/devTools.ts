@@ -47,7 +47,6 @@ export function tccResetCommand(identifier: string): string {
   return `tccutil reset Accessibility ${identifier}`;
 }
 
-/** Whether `identifier` is the installed app's, whose grant a dev build must never touch. */
 export function isReleaseIdentifier(
   identifier: string,
   releaseIdentifier: string,

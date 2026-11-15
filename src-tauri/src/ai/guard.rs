@@ -36,8 +36,6 @@ fn watchdog_request(args: impl IntoIterator<Item = String>) -> Option<(u32, u32)
     args.next().is_none().then_some((app, child))
 }
 
-/// Called first thing in `main`: if this process was started as the watchdog, runs it and returns
-/// the exit code, else `None` and the app starts normally.
 pub fn run_if_requested(args: impl IntoIterator<Item = String>) -> Option<i32> {
     let (app, child) = watchdog_request(args)?;
     Some(platform::run_watchdog(app, child))

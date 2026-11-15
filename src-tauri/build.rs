@@ -64,8 +64,6 @@ fn build_cli_sidecar() {
     }
 }
 
-/// Builds `swift/` (the `openrize-ml` executable) and stages it as `binaries/openrize-ml-<target
-/// triple>`.
 fn build_ml_sidecar() {
     println!("cargo:rerun-if-changed=swift/Package.swift");
     println!("cargo:rerun-if-changed=swift/Sources");
@@ -150,7 +148,6 @@ const LLAMA_WINDOWS_VULKAN_X64: LlamaAsset = LlamaAsset {
     sha256: "55a378aa095b466979d85075234f66d7655c7a7483222af0c006c0e55b4d7bd6",
 };
 
-/// Dylibs `llama-server` needs (`otool -L`, transitively), by install name.
 const LLAMA_MACOS_DYLIBS: [&str; 10] = [
     "libllama-server-impl.dylib",
     "libllama-common.0.dylib",
@@ -245,7 +242,6 @@ fn copy_if_changed(from: &Path, to: &Path) {
     }
 }
 
-/// Returns the verified archive, downloading it into `cache` when missing or corrupt.
 fn fetch_llama_archive(cache: &Path, asset: &LlamaAsset) -> PathBuf {
     let path = cache.join(asset.file);
     if sha256_hex(&path).as_deref() == Some(asset.sha256) {

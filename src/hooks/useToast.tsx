@@ -8,17 +8,11 @@ import {
   useState,
 } from "react";
 
-/**
- * The app's one way to confirm a short-lived result. A toast only informs, with
- * no action buttons; errors that need fixing stay inline.
- */
-
 export type ToastTone = "neutral" | "success" | "error";
 
 export interface ToastOptions {
   message: string;
   tone?: ToastTone;
-  /** Milliseconds on screen while not paused. Defaults depend on the tone. */
   duration?: number;
 }
 
@@ -35,7 +29,6 @@ const ERROR_MS = 7000;
 export type ShowToast = (options: ToastOptions) => void;
 
 interface ToastState {
-  /** Newest first. `<Toaster />` shows the first few; the rest wait their turn. */
   stack: Toast[];
   /**
    * Raised while the stack was held under the pointer or focus; they join the
@@ -47,7 +40,6 @@ interface ToastState {
 export interface ToasterApi {
   toasts: Toast[];
   dismiss: (id: number) => void;
-  /** The pointer is on the stack: don't add to it. */
   hold: (held: boolean) => void;
 }
 

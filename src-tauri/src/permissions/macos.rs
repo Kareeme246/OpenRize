@@ -37,7 +37,6 @@ fn probe() -> Probe {
     }
 }
 
-/// Asks macOS to show its Accessibility prompt, which also lists OpenRize in System Settings.
 pub fn request_accessibility() {
     use core_foundation::boolean::CFBoolean;
     use core_foundation::dictionary::CFDictionary;

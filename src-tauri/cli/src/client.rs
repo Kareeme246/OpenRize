@@ -40,7 +40,6 @@ impl Client {
         let follows_app = data_dir.is_none();
         let data_dir = match data_dir {
             Some(dir) => std::path::absolute(dir).map_err(|e| e.to_string())?,
-            // The account the app remembers, else the data directory (No account).
             None => accounts::resolve(&root.ok_or("no home directory; pass --data-dir")?).dir,
         };
         let endpoint = Endpoint::new(&data_dir)?;
@@ -82,7 +81,6 @@ impl Client {
         self.target().endpoint.connect().is_ok()
     }
 
-    /// An operation that needs the app fails with `APP_NOT_RUNNING` when it is closed.
     pub fn request(&self, operation: Operation) -> Response {
         let request = Request::new(operation);
         let connected = self.target().endpoint.connect();
@@ -132,7 +130,6 @@ impl Client {
         }
     }
 
-    /// Returns whether this call launched the app.
     pub fn start_app(&self, show: bool) -> Result<bool, String> {
         if self.running() {
             return Ok(false);
@@ -150,7 +147,6 @@ impl Client {
         Ok(true)
     }
 
-    /// Returns once the app has let go of the data.
     pub fn quit_app(&self) -> Response {
         let response = self.request(Operation::AppQuit {});
         if !response.ok {
@@ -253,7 +249,6 @@ fn installed_apps() -> Vec<PathBuf> {
 /// older app would only open its window, so rize never launches one.
 const FIRST_RIZE_VERSION: (u64, u64, u64) = (0, 8, 10);
 
-/// Refuses an installed app too old to launch. Only a macOS bundle records its version.
 fn check_version(executable: &Path) -> Result<(), String> {
     let Some(bundle) = bundle(executable).filter(|_| cfg!(target_os = "macos")) else {
         return Ok(());

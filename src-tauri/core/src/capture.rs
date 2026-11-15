@@ -28,7 +28,6 @@ impl WindowSample {
     }
 }
 
-/// The title a private segment carries once its detail has been erased.
 pub const PRIVATE_TITLE: &str = "Private window";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -48,7 +48,6 @@ pub fn dev_tools_info(app: AppHandle) -> Result<DevToolsInfo, String> {
     })
 }
 
-/// `None` shows the real state again.
 #[tauri::command]
 pub fn dev_simulate_accessibility(
     app: AppHandle,
@@ -59,7 +58,6 @@ pub fn dev_simulate_accessibility(
     Ok(())
 }
 
-/// `None` shows the real answer again.
 #[tauri::command]
 pub fn dev_simulate_automation(app: AppHandle, granted: Option<bool>) -> Result<(), String> {
     require(&app)?;
@@ -77,7 +75,6 @@ fn rerun_simulation(current: AccessibilityState) -> Option<AccessibilityState> {
     }
 }
 
-/// Opens the first-run screen again, simulating "not granted" if it would not show.
 #[tauri::command]
 pub fn dev_rerun_onboarding(app: AppHandle) -> Result<(), String> {
     require(&app)?;

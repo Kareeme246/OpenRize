@@ -6,7 +6,6 @@ const RADIUS = (SIZE - STROKE) / 2;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 const CENTRE = SIZE / 2;
 
-/** The dial's cycle: one full turn per tracked hour, then it wraps. */
 const HOUR_MS = 3_600_000;
 
 interface HourRingProps {

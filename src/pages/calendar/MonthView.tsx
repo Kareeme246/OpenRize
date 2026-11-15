@@ -147,7 +147,6 @@ export function MonthView({
                   <Tooltip content={`${total.pending} to review`}>
                     <span className="inline-block max-w-full truncate whitespace-nowrap rounded-full bg-review/15 px-1.5 py-0.5 font-semibold text-[10.5px] text-review">
                       {total.pending}
-                      {/* A narrow cell keeps just the count. */}
                       <span className="hidden @[7.5rem]:inline">
                         {" "}
                         to review

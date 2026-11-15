@@ -32,8 +32,6 @@ pub(super) fn gained(held: &[(u64, u64)], start: u64, end: u64) -> Vec<(u64, u64
 const HELD_END: &str = "(CASE WHEN status = 'building' THEN MAX(ended_at, COALESCE((SELECT MAX(COALESCE(s.ended_at, :now)) FROM segments s WHERE s.entry_id = time_entries.id), 0)) ELSE ended_at END)";
 
 impl ActivityStore {
-    /// Takes the minutes in `ranges` from every entry but `except`; fails, changing nothing, when
-    /// an approved one holds them.
     pub(super) fn claim(
         &mut self,
         except: &[&str],
@@ -97,7 +95,6 @@ impl ActivityStore {
             .map_err(|e| e.to_string())
     }
 
-    /// Makes `id` give up `start..end`: removed if that is all it held, else cut back either side.
     fn displace(&mut self, id: &str, start: u64, end: u64, now: u64) -> Result<(), String> {
         let entry = self.time_entry(id)?;
         let held_end = self.held_end(id, now)?;

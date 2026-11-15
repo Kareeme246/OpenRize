@@ -27,7 +27,6 @@ pub struct ActiveAccount {
     root: PathBuf,
     dir: PathBuf,
     id: Option<String>,
-    /// The account the registry named whose data was gone, until dismissed.
     missing: Mutex<Option<Account>>,
     /// The launch finished moving No account's data into the account. Read once.
     just_adopted: AtomicBool,
@@ -140,7 +139,6 @@ pub fn accounts_state(app: AppHandle) -> AccountsState {
     }
 }
 
-/// `None` when an account is open or there is nothing to move.
 #[tauri::command]
 pub fn existing_data_summary(app: AppHandle) -> Result<Option<DataSummary>, String> {
     if active(&app).id.is_some() {
@@ -207,8 +205,6 @@ fn write_handoff(app: &AppHandle, to: Option<&str>, adopt: bool) -> Result<(), S
     .write(&active(app).root)
 }
 
-/// Waits out [`SWITCH_MIN_MS`] while the frontend keeps the "Switching" screen
-/// up; the command has already returned.
 fn restart_when_due(app: AppHandle, started: Instant, to: Option<String>, adopt: bool) {
     std::thread::spawn(move || {
         if let Some(rest) = Duration::from_millis(SWITCH_MIN_MS).checked_sub(started.elapsed()) {
@@ -241,7 +237,6 @@ fn editable(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Returns at once; the restart follows after the minimum time.
 #[tauri::command]
 pub fn switch_account(app: AppHandle, to: Option<String>) -> Result<(), String> {
     let started = Instant::now();
@@ -311,7 +306,6 @@ pub fn rename_account(app: AppHandle, id: String, name: String) -> Result<Accoun
     Ok(account)
 }
 
-/// Never deletes for good; an account whose folder is gone is only forgotten.
 #[tauri::command]
 pub fn delete_account(app: AppHandle, id: String) -> Result<(), String> {
     let root = active(&app).root.clone();
@@ -340,7 +334,6 @@ pub fn delete_account(app: AppHandle, id: String) -> Result<(), String> {
     Ok(())
 }
 
-/// No fallback to deleting for good.
 fn move_to_trash(path: &Path) -> Result<(), String> {
     #[allow(unused_mut)]
     let mut context = trash::TrashContext::default();
@@ -425,7 +418,6 @@ impl RecordedBreak {
         }
     }
 
-    /// A break ended earlier in the day has run its course by the next.
     fn resumable(&self, now: u64) -> bool {
         self.remaining_ms > 0 && breaks::same_local_day(self.at, now)
     }
@@ -455,8 +447,6 @@ fn write_record(app: &AppHandle, record: &Record) -> Result<(), String> {
     store.write_setting(SWITCH_PAUSED_KEY, &json)
 }
 
-/// Pauses every running stopwatch and ends a live break now (its own
-/// stopwatches stay paused), adding to any record a prior switch left unresumed.
 pub fn pause_for_switch(app: &AppHandle) -> Result<(), String> {
     let now = now_epoch_ms();
     let ended = breaks::pause_for_switch(app);
@@ -486,7 +476,6 @@ pub fn pause_for_switch(app: &AppHandle) -> Result<(), String> {
     write_record(app, &record)
 }
 
-/// Stopwatches started by hand are no longer paused work to take up.
 pub fn forget_paused_stopwatches(app: &AppHandle, ids: &[String]) {
     let Some(mut record) = read_record(app) else {
         return;
@@ -505,8 +494,6 @@ pub fn forget_paused_stopwatches(app: &AppHandle, ids: &[String]) {
     }
 }
 
-/// What is still worth offering: stopwatches that exist and are not running,
-/// and a break only while it can be taken up.
 struct Offer {
     at: u64,
     stopwatches: Vec<Labeled>,
@@ -539,7 +526,6 @@ fn offer(app: &AppHandle) -> Result<Option<Offer>, String> {
         .filter(|recorded| recorded.resumable(now))
         .map(RecordedBreak::into_ended);
     if stopwatches.is_empty() && ended.is_none() {
-        // Nothing left to offer; don't ask again.
         write_record(app, &Record::default())?;
         return Ok(None);
     }
@@ -579,7 +565,6 @@ pub fn resume_paused(app: AppHandle) -> Result<(), String> {
     // Cleared first: whatever happens below, it is not offered twice.
     write_record(&app, &Record::default())?;
     for stopwatch in &offer.stopwatches {
-        // A stopwatch deleted in the meantime is simply gone.
         let _ = commands::start_timer_by_id(&app, &stopwatch.id);
     }
     match &offer.ended {
@@ -661,7 +646,6 @@ mod tests {
         let paused = recorded(at, 8 * 60_000);
         assert!(paused.resumable(at + 1_000));
         assert!(!paused.resumable(at + 48 * hour));
-        // A break with no time left is not offered at all.
         assert!(!recorded(at, 0).resumable(at));
     }
 

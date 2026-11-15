@@ -1,4 +1,3 @@
-/** A local account: a name and its own data folder. No password. */
 export interface Account {
   id: string;
   name: string;
@@ -7,7 +6,6 @@ export interface Account {
 
 export interface AccountView extends Account {
   sizeBytes: number;
-  /** Listed, but its data folder was moved or deleted outside OpenRize. */
   missing: boolean;
 }
 
@@ -18,7 +16,6 @@ export interface AccountsState {
   missing: Account | null;
   /** True once, on the first read after existing data moved into an account. */
   justAdopted: boolean;
-  /** A newer release wrote the accounts: they can be seen but not changed. */
   readOnly: boolean;
 }
 
@@ -47,7 +44,6 @@ export interface SwitchPreview {
   break: BreakPreview | null;
 }
 
-/** Work an account's last switch away paused, offered back on return. */
 export interface PausedOnSwitch {
   at: number;
   stopwatches: Labeled[];

@@ -27,10 +27,7 @@ function timeInside(entry: TimeEntry, value: string): number {
   return date.getTime();
 }
 
-/**
- * Confirms a split. Splitting the live entry closes its first half and keeps
- * recording into the second.
- */
+/** Splitting the live entry closes its first half and keeps recording into the second. */
 export function SplitDialog({
   entry,
   initialAt,

@@ -2,11 +2,7 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-/// Inactivity longer than this ends a session; anything up to it is a short
-/// break inside it.
 pub const SHORT_BREAK_THRESHOLD_MS: u64 = 5 * 60 * 1000;
-/// A finished session shorter than this is not worth tracking on its own (a
-/// nudged mouse, a glance at a notification).
 pub const MIN_SESSION_MS: u64 = 5 * 60 * 1000;
 
 #[derive(Debug, Clone)]
@@ -114,7 +110,6 @@ pub fn build_entries(
         if live {
             let mut entry = create_entry_from_segments(&session, session_end, now, &mut claimed);
             entry.status = "building".to_string();
-            // An ongoing session isn't named after its apps until it closes.
             entry.description = UNTITLED_SESSION.to_string();
             results.push(entry);
         } else {
@@ -178,7 +173,6 @@ fn belongs_to_frozen(
     if seg.entry_id.is_some() {
         return false;
     }
-    // A segment that has only just opened still holds its first instant.
     let seg_end = seg.ended_at.unwrap_or(now).max(seg.started_at + 1);
     // One owner per minute: capture does not start a session inside time an
     // entry already holds, even a manual one dragged over the live session.
@@ -229,8 +223,6 @@ fn create_entry_from_segments(
 
 pub const UNTITLED_SESSION: &str = "Untitled session";
 
-/// The template description a closed session gets: its dominant app and that
-/// app's first few window titles.
 pub fn describe(segments: &[SegmentInput]) -> String {
     let work: Vec<&SegmentInput> = segments.iter().filter(|s| s.kind != "break").collect();
     generate_description(&work)

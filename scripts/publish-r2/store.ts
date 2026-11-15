@@ -40,10 +40,7 @@ async function failure(
   );
 }
 
-/**
- * Cloudflare's REST API with an account token (Workers R2 Storage Edit): the
- * endpoints `wrangler r2 object` uses, no S3 keys.
- */
+/** Cloudflare's REST API with an account token (Workers R2 Storage Edit), no S3 keys. */
 export function cloudflareStore(config: CloudflareStoreConfig): ObjectStore {
   const send = config.fetch ?? fetch;
   const url = (key: string) =>

@@ -21,10 +21,7 @@ const NARROW_DENSITY_CLASSES: Record<Density, string> = {
   sliver: "rounded-xs p-0",
 };
 
-/**
- * Rendered line heights in px, pinned with `leading-[...]` below so the room
- * maths matches layout.
- */
+/** Rendered line heights in px, pinned with `leading-[...]` below so the room maths matches layout. */
 const LINE = {
   title: 18,
   titleCompact: 17.25,
@@ -65,11 +62,7 @@ interface BudgetInput {
   rowGap: number;
 }
 
-/**
- * Splits the room left after one line each: description first, then the chip
- * row, then they alternate. Elements grow only by whole lines, so nothing clips
- * mid-line.
- */
+/** Splits the room left after one line each, growing only by whole lines so nothing clips mid-line. */
 function budgetLines({
   room,
   titleLine,
@@ -236,10 +229,6 @@ interface EntryBlockProps {
   recording?: boolean;
 }
 
-/**
- * One time entry on a Calendar timeline; height follows duration, the state
- * sets the look.
- */
 export function EntryBlock({
   entry,
   top,

@@ -3,9 +3,8 @@ import { useRelaunch } from "../hooks/useRelaunch";
 import { TRAY_PLACE } from "../lib/platform";
 
 /**
- * Held over the window until restart: macOS only gives the process
- * Accessibility on its next launch, so there is no close or "later". `open` is
- * false while the first-run screen asks itself.
+ * macOS only gives the process Accessibility on its next launch, so there is no close or
+ * "later". `open` is false while the first-run screen asks itself.
  */
 export function RelaunchModal({ open }: { open: boolean }) {
   if (!open) return null;

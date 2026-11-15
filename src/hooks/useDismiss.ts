@@ -1,9 +1,5 @@
 import { type RefObject, useEffect } from "react";
 
-/**
- * Closes a popover on an outside press or Escape while `open`; always calls the
- * latest `onClose`.
- */
 export function useDismiss(
   open: boolean,
   ref: RefObject<HTMLElement | null>,

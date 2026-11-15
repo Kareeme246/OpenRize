@@ -10,26 +10,16 @@ import type {
 import { useChangeToast } from "./useChangeToast";
 import { useTauriEvent } from "./useTauriEvent";
 
-/**
- * Where the split flow is: picking the cut on a timeline, or confirming it in
- * the dialog. `at` is the cut so far.
- */
 export interface SplitStage {
   stage: "pick" | "confirm";
   at: number;
 }
 
-/**
- * The entry review panel's state and commands, shared by every view that opens
- * it. Commands go to Rust, re-read the panel, and toast with Undo when they
- * change something.
- */
 export interface EntryReview {
   selectedId?: string;
   detail: EntryDetail | null;
   error: string | null;
   select: (id?: string) => void;
-  /** Resolves true once approved, false when it failed. */
   accept: (id: string) => Promise<boolean>;
   reject: (id: string) => Promise<boolean>;
   unapprove: () => Promise<void>;
@@ -101,7 +91,6 @@ export function useEntryReview(initialId?: string): EntryReview {
     });
   }, [detail]);
 
-  // Suggestions land in the background: patch the open panel.
   useTauriEvent(api.ENTRIES_CHANGED, () => void load(selectedRef.current));
   useTauriEvent<{ entryId: string }>(api.SUGGESTION_READY, (payload) => {
     if (payload.entryId === selectedRef.current) void load(selectedRef.current);

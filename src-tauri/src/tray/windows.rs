@@ -3,7 +3,6 @@
 use tauri::image::Image;
 use tauri::tray::MouseButtonState;
 
-/// The right button opens the menu on release, as the shell's own icons do.
 pub const MENU_BUTTON_STATE: MouseButtonState = MouseButtonState::Up;
 
 /// Windows draws tray icons as they are, so the black template is painted

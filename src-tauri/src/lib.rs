@@ -33,7 +33,6 @@ use settings::CloseBehavior;
 /// The tray can change timer state without the window asking.
 pub const EVENT_TIMERS_CHANGED: &str = "timers-changed";
 
-/// Carries every section.
 pub const EVENT_TIMER_SECTIONS_CHANGED: &str = "timer-sections-changed";
 
 /// Carries the full `ActivitySnapshot`.
@@ -59,11 +58,10 @@ pub const EVENT_OPEN_REVIEW: &str = "open-review";
 
 pub use openrize_core::state::AppState;
 
-/// Run in the menu bar with no window until one is asked for.
 const BACKGROUND_ARG: &str = "--background";
 
-/// When this process was started as the macOS watchdog for a model server (`ai/guard.rs`), runs
-/// it and returns the exit code. `main` calls this before anything else so none of the app starts.
+/// Runs the macOS model-server watchdog (`ai/guard.rs`) when asked. `main` calls this first so
+/// none of the app starts.
 pub fn run_llama_watchdog() -> Option<i32> {
     ai::guard::run_if_requested(std::env::args())
 }
@@ -80,8 +78,6 @@ pub fn run() {
             }
         }))
         .plugin(
-            // Seeds the page's theme/shape hint before its first paint; see
-            // `settings::appearance_init_script`.
             tauri::plugin::Builder::<tauri::Wry>::new("appearance")
                 .js_init_script(settings::appearance_init_script(&settings::config_dir()))
                 .build(),
@@ -143,7 +139,6 @@ pub fn run() {
             capture::register_sleep_listeners(app.handle().clone());
             spawn_retention_sweeper(app.handle().clone());
             updater::spawn_scheduler(app.handle().clone());
-            // One sweep on startup so a dormant install is cleaned before the first wait.
             if let Err(error) = commands::sweep_retention(app.handle()) {
                 eprintln!("retention sweep failed: {error}");
             }

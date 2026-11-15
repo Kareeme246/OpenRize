@@ -27,7 +27,6 @@ pub enum Probe {
 }
 
 impl Probe {
-    /// An `AXError` from asking the system-wide element for the focused app.
     /// "No value" is a working service with nothing focused at that moment.
     pub fn from_ax_error(code: i32) -> Self {
         match code {
@@ -212,7 +211,6 @@ impl Monitor {
         announce(app, state);
     }
 
-    /// Shows a simulated state (dev builds only); `None` shows the real one again.
     pub fn simulate(&self, app: &AppHandle, state: Option<AccessibilityState>) {
         let Some(state) = self
             .observed
@@ -246,8 +244,6 @@ fn announce(app: &AppHandle, state: AccessibilityState) {
     }
 }
 
-/// Reads once now so the state is known before the window asks, then keeps reading;
-/// a revoke and a later re-grant are both worth seeing.
 pub fn spawn_monitor(app: AppHandle) {
     let Some(first) = super::platform::accessibility_reading() else {
         return;

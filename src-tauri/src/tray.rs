@@ -34,7 +34,6 @@ fn glyph(active: bool) -> Image<'static> {
 mod platform;
 
 pub fn init(app: &AppHandle, timers: &[Timer]) -> tauri::Result<()> {
-    // No menu here: see `show_menu`.
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(glyph(any_running(timers)))
         .icon_as_template(true)
@@ -53,7 +52,6 @@ pub fn set_enabled(app: &AppHandle, enabled: bool, timers: &[Timer]) -> tauri::R
         (true, false) => init(app, timers),
         (false, true) => {
             app.remove_tray_by_id(TRAY_ID);
-            // The panel belongs to the icon; it never outlives it.
             crate::pulse::destroy(app);
             Ok(())
         }
@@ -61,7 +59,6 @@ pub fn set_enabled(app: &AppHandle, enabled: bool, timers: &[Timer]) -> tauri::R
     }
 }
 
-/// Repaints the tray from a snapshot, then tells the frontend what changed.
 /// Called on every mutation, never on a timer; the menu is built when it opens.
 pub fn refresh(app: &AppHandle, timers: &[Timer]) -> tauri::Result<()> {
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
@@ -181,7 +178,6 @@ fn on_tray_icon_event(tray: &TrayIcon, event: TrayIconEvent) {
             button: MouseButton::Left,
             ..
         } => {
-            // The first click of the double click opened the panel.
             crate::pulse::hide(app);
             show_main_window(app);
         }
@@ -206,7 +202,6 @@ fn show_menu(tray: &TrayIcon) {
     if tray.set_menu(Some(menu)).is_err() {
         return;
     }
-    // Opens the menu; it tracks the mouse modally and returns once closed.
     let _ = tray.with_inner_tray_icon(|inner| inner.show_menu());
     let _ = tray.set_menu(None::<Menu<Wry>>);
 }

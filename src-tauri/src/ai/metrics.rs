@@ -53,7 +53,6 @@ pub struct CalibrationReport {
 pub struct ModelReport {
     pub category: Vec<ArtifactVersion>,
     pub project: Vec<ArtifactVersion>,
-    /// Labels approved since the category model last trained, toward `retrain_after`.
     pub new_labels: u32,
     pub retrain_after: u32,
 }
@@ -351,7 +350,6 @@ mod tests {
                 model: 0
             }
         );
-        // Rule hits are certain by definition, so they stay off the chart.
         assert_eq!(m.calibration.samples, 0);
     }
 

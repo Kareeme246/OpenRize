@@ -4,10 +4,6 @@ import * as api from "../lib/api";
 import { describeError } from "../lib/api";
 import { ConfirmDialog } from "./ConfirmDialog";
 
-/**
- * Shown once when the remembered account lost its data folder. Cancel keeps it
- * listed; the other button forgets it.
- */
 export function MissingAccountDialog() {
   const { missing, reload } = useAccounts();
   const showToast = useToast();

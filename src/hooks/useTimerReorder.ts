@@ -9,10 +9,8 @@ import {
 import { type TimerInsertion, timerInsertion } from "../lib/timerInsertion";
 import type { TimersApi } from "./useTimers";
 
-/** One list of cards on the page: no section (`key` null) or one section. */
 export interface TimerList {
   key: string | null;
-  /** The section's name, for announcements; null for no section. */
   name: string | null;
   ids: string[];
 }
@@ -21,7 +19,6 @@ export type TimerDropTarget =
   | ({ list: string | null; empty: false } & TimerInsertion)
   | { list: string | null; empty: true; slot: 0 };
 
-/** Lists are keyed by section id; the cards in no section use this key. */
 const LOOSE = "";
 const keyOf = (list: string | null): string => list ?? LOOSE;
 
@@ -32,7 +29,6 @@ export function useTimerReorder(api: TimersApi, lists: TimerList[]) {
   const scrollRef = useRef<HTMLElement>(null);
   const cardElements = useRef(new Map<string, HTMLElement>());
   const listElements = useRef(new Map<string, HTMLElement>());
-  /** Each list's whole area, heading included, that the pointer picks it by. */
   const zoneElements = useRef(new Map<string, HTMLElement>());
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [target, setTarget] = useState<TimerDropTarget | null>(null);
@@ -98,7 +94,6 @@ export function useTimerReorder(api: TimersApi, lists: TimerList[]) {
     };
   }, [clearDrag, clearTarget]);
 
-  // External creation/deletion/reordering invalidates an in-flight drop slot.
   useEffect(() => {
     void order;
     clearDrag();
@@ -290,7 +285,7 @@ export function useTimerReorder(api: TimersApi, lists: TimerList[]) {
     updateTarget(event.clientX, event.clientY);
     const dropped = targetRef.current;
     const payload = event.dataTransfer.getData("text/plain");
-    clearDrag(); // Synchronously disarm before committing, even if drop repeats.
+    clearDrag();
     if (payload !== id || dropped === null) return;
     const from = listOf(id);
     const into = lists.find((list) => list.key === dropped.list);

@@ -1,5 +1,3 @@
-//! `NSPanel` conversion, shared by the Pulse and reminder panels.
-
 use objc2::runtime::{AnyClass, AnyObject};
 use objc2::{define_class, ClassType, MainThreadOnly};
 use objc2_app_kit::{NSPanel, NSWindowCollectionBehavior, NSWindowStyleMask};
@@ -98,7 +96,6 @@ pub fn make_panel(window: &WebviewWindow, kind: Kind) {
     });
 }
 
-/// Only the reminder panel uses this, once it is on screen.
 pub fn prevent_activation(window: &WebviewWindow) {
     let target = window.clone();
     let _ = window.run_on_main_thread(move || {

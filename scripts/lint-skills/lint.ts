@@ -1,7 +1,6 @@
 /**
- * Structural lint for the repo skills and the drive-app feature map. Pure
- * functions only: no exit, print or I/O outside the given root. Catalogs are
- * parsed from the real sources on every run so docs cannot drift.
+ * Structural lint for the repo skills and the drive-app feature map. Pure functions only.
+ * Catalogs are parsed from the real sources on every run so docs cannot drift.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, posix } from "node:path";
@@ -720,7 +719,6 @@ export interface Feature {
   verified: string;
   file: string;
   lines: Record<string, number>;
-  /** Whether each `rize` item was double-quoted. */
   rizeQuoted: boolean[];
 }
 

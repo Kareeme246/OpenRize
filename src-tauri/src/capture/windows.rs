@@ -1,5 +1,4 @@
-//! Windows capture: the foreground window through Win32, its app named from the
-//! executable's version resource (see `identity`), and a browser's URL via UI Automation.
+//! Windows capture: the foreground window through Win32 and a browser's URL via UI Automation.
 //! Sampling runs on the sampler thread; UIA on its own worker; power on its own loop.
 
 use std::cell::RefCell;
@@ -36,8 +35,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use super::{domain_of, WindowSample};
 
-/// Keeps Windows 11 from putting the tray-only process into EcoQoS, which slows its
-/// threads and coalesces its timers.
+/// Keeps Windows 11 from putting the tray-only process into EcoQoS (slow threads, coalesced timers).
 pub struct AppNapAssertion;
 
 impl AppNapAssertion {
@@ -56,7 +54,6 @@ impl Drop for AppNapAssertion {
     }
 }
 
-/// Forces execution speed throttling on or off, or with `None` leaves it to the system.
 fn set_execution_speed_throttling(forced: Option<bool>) -> windows::core::Result<()> {
     let state = PROCESS_POWER_THROTTLING_STATE {
         Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
@@ -101,8 +98,7 @@ fn display_is_off(state: u32) -> bool {
     state == 0
 }
 
-/// Whether a WM_WTSSESSION_CHANGE code settles the lock state. Logon counts
-/// as an unlock so a state left over from a previous session cannot stick.
+/// Logon counts as an unlock so a state left over from a previous session cannot stick.
 fn locked_after(code: u32) -> Option<bool> {
     use windows::Win32::UI::WindowsAndMessaging::{
         WTS_SESSION_LOCK, WTS_SESSION_LOGON, WTS_SESSION_UNLOCK,
@@ -250,8 +246,6 @@ unsafe extern "system" fn power_window_proc(
             return LRESULT(0);
         }
         if message == WM_POWERBROADCAST && wparam.0 as u32 == PBT_POWERSETTINGCHANGE {
-            // lparam points at a POWERBROADCAST_SETTING whose Data is
-            // `DataLength` bytes long; display state is a single DWORD.
             let setting = lparam.0 as *const POWERBROADCAST_SETTING;
             if !setting.is_null()
                 && (*setting).PowerSetting == GUID_SESSION_DISPLAY_STATUS
@@ -278,8 +272,7 @@ unsafe extern "system" fn power_window_proc(
     }
 }
 
-/// Hosts the windows of packaged (UWP) apps; the app itself is a child
-/// window owned by another process.
+/// Hosts packaged (UWP) app windows; the app itself is a child window of another process.
 const FRAME_HOST: &str = "applicationframehost.exe";
 
 const BROWSERS: [&str; 10] = [
@@ -296,13 +289,11 @@ const BROWSERS: [&str; 10] = [
 ];
 
 thread_local! {
-    /// Display names by executable path; version resources never change.
     static APP_NAMES: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
 }
 
-/// Nobody can be at the PC: display off, session locked, or switched to another user or
-/// remote session. Display sleep is not a `PowerEvent`: it ends the segment through this,
-/// while the break engine only hears of real suspends.
+/// Display sleep is not a `PowerEvent`: it ends the segment through this, while the break
+/// engine only hears of real suspends.
 pub fn user_is_away() -> bool {
     if DISPLAY_OFF.load(Ordering::Relaxed) {
         if idle_ms() < DISPLAY_OFF_STALE_MS {
@@ -385,17 +376,14 @@ fn idle_between(now_tick: u32, last_input_tick: u32, uptime_ms: u64) -> u64 {
     }
 }
 
-/// Whether the foreground app is being watched or listened to. Fullscreen counts on its own.
-/// Otherwise the system-wide display request (which any background app can hold) must be backed
-/// by an audio session playing or capturing in the foreground app, its executable or descendants.
+/// Fullscreen counts on its own. Otherwise the system-wide display request (any background app
+/// can hold it) must be backed by an audio session in the foreground app or its descendants.
 fn keeps_display_awake(pid: u32) -> bool {
     watching(display_required, foreground_is_fullscreen, || {
         foreground_is_playing_or_recording(pid)
     })
 }
 
-/// The decision of `keeps_display_awake`, evaluating each signal only if earlier ones did not
-/// settle it.
 fn watching(
     display_required: impl FnOnce() -> bool,
     fullscreen: impl FnOnce() -> bool,
@@ -404,7 +392,6 @@ fn watching(
     fullscreen() || (display_required() && audio())
 }
 
-/// Some process holds the display on (ES_DISPLAY_REQUIRED), as video and call apps do.
 fn display_required() -> bool {
     use windows::Win32::System::Power::{
         CallNtPowerInformation, SystemExecutionState, ES_DISPLAY_REQUIRED,
@@ -424,7 +411,6 @@ fn display_required() -> bool {
     status.is_ok() && state & ES_DISPLAY_REQUIRED.0 != 0
 }
 
-/// The shell's own test for a fullscreen foreground app.
 fn foreground_is_fullscreen() -> bool {
     use windows::Win32::UI::Shell::{
         SHQueryUserNotificationState, QUERY_USER_NOTIFICATION_STATE, QUNS_BUSY,
@@ -442,15 +428,12 @@ fn foreground_is_fullscreen() -> bool {
     unsafe { SHQueryUserNotificationState() }.is_ok_and(fullscreen)
 }
 
-/// Sound level below which a playback session counts as silent (-60 dB).
 const AUDIBLE_PEAK: f32 = 0.001;
 
 thread_local! {
     static AUDIO_DEVICES: RefCell<Option<IMMDeviceEnumerator>> = const { RefCell::new(None) };
 }
 
-/// The foreground app has an active audio session playing sound or capturing (even if muted).
-/// Only the default playback and capture devices are looked at.
 fn foreground_is_playing_or_recording(foreground_pid: u32) -> bool {
     use windows::Win32::Media::Audio::{eCapture, eCommunications, eConsole, eRender};
 
@@ -561,7 +544,6 @@ type ParentMap = HashMap<u32, u32>;
 
 thread_local! {
     static PARENTS: RefCell<Option<(Instant, Rc<ParentMap>)>> = const { RefCell::new(None) };
-    /// The last process whose path could not be opened, and its executable name.
     static PROTECTED_NAMES: RefCell<Option<(u32, String)>> = const { RefCell::new(None) };
 }
 
@@ -588,8 +570,8 @@ fn process_parents() -> ParentMap {
     parents
 }
 
-/// The executable name of a process, read from a snapshot; unlike `process_path` it needs
-/// no access to the process, so it also names SYSTEM, protected and elevated ones.
+/// Unlike `process_path` this needs no access to the process, so it also names SYSTEM,
+/// protected and elevated ones.
 fn process_exe_name(pid: u32) -> Option<String> {
     if let Some(name) = PROTECTED_NAMES.with(|last| {
         last.borrow()
@@ -618,7 +600,6 @@ fn process_exe_name(pid: u32) -> Option<String> {
     name
 }
 
-/// Calls `visit` on each running process of one snapshot until it returns false.
 fn each_process(mut visit: impl FnMut(&PROCESSENTRY32W) -> bool) {
     use windows::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
@@ -824,9 +805,8 @@ struct Process {
     executable: String,
 }
 
-/// Names a process. When its path cannot be opened (SYSTEM, protected or elevated processes
-/// such as LogonUI refuse even limited rights) the name comes from a process snapshot,
-/// so the same app reads the same either way.
+/// When the path cannot be opened (SYSTEM, protected or elevated processes such as LogonUI)
+/// the name comes from a process snapshot, so the same app reads the same either way.
 fn identify(pid: u32) -> Option<Process> {
     if let Some(path) = process_path(pid) {
         return Some(Process {
@@ -878,9 +858,8 @@ fn process_path(pid: u32) -> Option<String> {
 
 const CORE_WINDOW: &str = "Windows.UI.Core.CoreWindow";
 
-/// The process behind a packaged app's frame: the `CORE_WINDOW` child if there is one, else
-/// the first child owned by a process other than the frame host. `None` while the app starts
-/// or is suspended.
+/// Prefers the `CORE_WINDOW` child, else the first child not owned by the frame host.
+/// `None` while the app starts or is suspended.
 fn hosted_app_pid(frame: HWND, host_pid: u32) -> Option<u32> {
     struct Search {
         host_pid: u32,
@@ -932,7 +911,6 @@ fn file_name(path: &str) -> &str {
     path.rsplit(['\\', '/']).next().unwrap_or(path)
 }
 
-/// The version resource's description ("Google Chrome" for chrome.exe), else the executable's name.
 fn app_name(path: &str) -> String {
     if let Some(name) = APP_NAMES.with(|names| names.borrow().get(path).cloned()) {
         return name;

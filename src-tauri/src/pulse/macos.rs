@@ -1,5 +1,3 @@
-//! Pulse placement on macOS: under the menu bar item.
-
 use tauri::{AppHandle, Rect, WebviewWindow};
 
 use super::placement;

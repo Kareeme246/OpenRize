@@ -71,7 +71,6 @@ pub const TIER_RULE: &str = "rule";
 pub const TIER_PERSONAL: &str = "personal";
 pub const TIER_MODEL: &str = "model";
 
-/// Which kind of evidence a distribution came from.
 #[derive(Clone, Copy, PartialEq)]
 enum Source {
     Personal,

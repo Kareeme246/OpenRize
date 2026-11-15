@@ -156,7 +156,6 @@ fn piped_installer_uses_default_path_without_rust_or_gui() {
         fs::metadata(fixture.binary()).unwrap().permissions().mode() & 0o777,
         0o755
     );
-    // Only the CLI comes out of the app archive.
     assert_eq!(
         fs::read_dir(fixture.binary().parent().unwrap())
             .unwrap()

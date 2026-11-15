@@ -1,7 +1,3 @@
-//! Activity capture: every second, samples the foreground window, display-awake
-//! state and idle time, folding samples into the segments
-//! `openrize_core::activity` stores.
-
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -129,8 +125,6 @@ pub fn spawn_sampler(app: AppHandle) {
             match tick_result {
                 Ok(true) => {
                     emit_full(&app);
-                    // A segment opened or closed, so an entry may have just
-                    // closed: let the AI worker rebuild and classify it.
                     crate::ai::nudge(&app);
                     last_push_at = now;
                 }

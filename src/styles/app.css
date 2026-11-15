@@ -1,12 +1,8 @@
 @import "tailwindcss";
 
-/* `sharper:` styles an element only when the root's `data-shape` is sharper. */
 @custom-variant sharper (:where(:root[data-shape="sharper"]) &);
 
-/*
- * Semantic tokens: components use utilities from these, never raw colours.
- * Dark is default; `[data-theme="light"]` overrides; accents set at runtime.
- */
+/* Semantic tokens: components use these, never raw colours. Dark is default; accents set at runtime. */
 :root {
   --ui-scale: 1;
   font-size: calc(16px * var(--ui-scale));
@@ -38,7 +34,6 @@
   --review: #e7b447;
   --danger: #e97e7b;
   --danger-soft: rgba(233, 126, 123, 0.12);
-  /* Fixed green for "good news", independent of the accent. */
   --success: #5bcf8f;
   --success-soft: rgba(91, 207, 143, 0.15);
 
@@ -66,7 +61,6 @@
   --cat-10: #9b87df;
   --cat-11: #e97e7b;
   --cat-12: #64748b;
-  /* Ink for letters on a category colour. */
   --cat-ink: #101312;
 
   --tier-rule: #5f8fd6;
@@ -533,11 +527,7 @@ html.reminder-window body {
   }
 }
 
-/*
- * Sharper shape: panels become edge-to-edge bands split by plain dividers.
- * Pages opt in via the shape-* classes below; unlayered rules win over the
- * panel's own utilities.
- */
+/* Sharper shape: panels become edge-to-edge bands. Unlayered rules win over the panel's utilities. */
 :root {
   --gutter: 1.25rem;
 }

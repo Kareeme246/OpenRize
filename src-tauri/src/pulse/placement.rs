@@ -240,12 +240,10 @@ mod tests {
     #[test]
     fn bottom_taskbar_puts_the_flyout_in_the_bottom_right_corner() {
         let area = rect(0.0, 0.0, 1920.0, 1032.0);
-        // From the overflow flyout, mid-right of the screen.
         assert_eq!(
             flyout_origin(BOUNDS, area, (1760.0, 660.0), (320.0, 400.0), 12.0),
             (1588.0, 620.0)
         );
-        // Pinned beside the clock gives the same corner.
         assert_eq!(
             flyout_origin(BOUNDS, area, (1700.0, 1056.0), (320.0, 400.0), 12.0),
             (1588.0, 620.0)

@@ -61,7 +61,6 @@ pub fn toggle(app: &AppHandle, icon: Rect) {
         match placement.height {
             Some(height) => Toggle::Open(height),
             None => {
-                // The page has not measured itself yet; its resize shows it.
                 placement.show_when_sized = true;
                 Toggle::WaitForSize
             }

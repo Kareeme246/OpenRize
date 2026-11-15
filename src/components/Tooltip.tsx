@@ -213,7 +213,6 @@ export function Tooltip({
       event.stopPropagation();
       close();
     };
-    // Capture, so Escape reaches us before a dialog or panel handler does.
     document.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("scroll", close, { capture: true, passive: true });
     window.addEventListener("resize", close);

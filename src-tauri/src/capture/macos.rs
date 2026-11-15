@@ -1,6 +1,5 @@
-//! macOS capture: the frontmost app through NSWorkspace, its window title
-//! through the Accessibility API (so Screen Recording permission is not
-//! needed), and a browser's URL through AppleScript.
+//! macOS capture: frontmost app via NSWorkspace, window title via the Accessibility API (no
+//! Screen Recording permission needed), browser URL via AppleScript.
 
 use core_foundation::array::CFArray;
 use core_foundation::base::{CFType, TCFType};
@@ -135,7 +134,6 @@ fn failure_log() -> &'static Mutex<FailureLog> {
     LOG.get_or_init(|| Mutex::new(FailureLog::new(FAILURE_LOG_INTERVAL_MS)))
 }
 
-/// The title of `pid`'s frontmost window, or an empty string; why none was found is logged.
 fn window_title(pid: libc::pid_t, bundle_id: Option<&str>) -> String {
     let resolution = resolve_title(pid);
     if let Some(key) = title::failure_to_log(bundle_id, &resolution) {
@@ -242,8 +240,8 @@ fn copy_attribute(element: &CFType, name: &'static str) -> Result<CFType, i32> {
     Ok(unsafe { CFType::wrap_under_create_rule(value) })
 }
 
-/// Whether `pid` holds an active display-sleep assertion, directly or through a system service
-/// acting for it. Only the assertion's type is read; its name is never stored.
+/// Directly or through a system service acting for `pid`. Only the assertion's type is read;
+/// its name is never stored.
 fn keeps_display_awake(pid: libc::pid_t) -> bool {
     use core_foundation::array::CFArray;
     use core_foundation::base::CFType;
@@ -366,7 +364,6 @@ fn get_browser_window(bundle_id: &str, app_name: &str) -> BrowserWindow {
     BrowserWindow::NONE
 }
 
-/// App Nap assertion: prevents OS from throttling background sampler while capture is active.
 pub struct AppNapAssertion {
     activity: Option<
         objc2::rc::Retained<objc2::runtime::ProtocolObject<dyn objc2_foundation::NSObjectProtocol>>,

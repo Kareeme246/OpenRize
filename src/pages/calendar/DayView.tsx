@@ -598,7 +598,6 @@ function LaneBlock({
           color: tone,
         }}
       >
-        {/* Too short for a line: no text (tooltip names it). */}
         {height >= TEXT_MIN_HEIGHT && (
           <span
             className="min-w-0"

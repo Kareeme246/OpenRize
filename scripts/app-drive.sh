@@ -12,7 +12,6 @@ WORKSPACE_KEY="$(printf '%s' "$REPO_ROOT" | shasum 2>/dev/null | cut -c1-10 || t
 SESSION_ROOT="${TMPDIR:-/tmp}/openrize-app-drive/$WORKSPACE_KEY"
 AX_DRIVE_JS="$REPO_ROOT/scripts/ax-drive.js"
 
-# A cold `cargo build` of the dependency tree can take minutes.
 STARTUP_TIMEOUT="${OPENRIZE_DRIVE_TIMEOUT:-300}"
 
 usage() {
@@ -185,7 +184,6 @@ CHECK_STATUS=()
 CHECK_DETAIL=()
 CHECK_FIX=()
 
-# add_check <id> <ok|warn|fail> <detail> [fix]
 add_check() {
   CHECK_IDS+=("$1")
   CHECK_STATUS+=("$2")
@@ -193,7 +191,6 @@ add_check() {
   CHECK_FIX+=("${4:-}")
 }
 
-# Prints the probe's output (or error text); returns 1 when osascript itself failed.
 osa_probe() {
   local out
   if out="$(osascript -l JavaScript -e "$1" 2>&1)"; then
@@ -548,7 +545,6 @@ cmd_rize() {
   exit "$rc"
 }
 
-# Returns 1 when the meta file looks corrupted.
 session_guard() {
   local support="$HOME/Library/Application Support" name
   if [[ -n "$APP_DATA" ]]; then

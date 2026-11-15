@@ -15,7 +15,6 @@ import { useToast } from "./useToast";
 
 const RESTART_PATIENCE_MS = 20_000;
 
-/** Where a switch is headed; a null name is No account (Sign out). */
 export interface Switching {
   name: string | null;
 }
@@ -27,10 +26,6 @@ export interface AccountsApi {
   readOnly: boolean;
   switching: Switching | null;
   switchTo: (account: Account | null) => Promise<void>;
-  /**
-   * Resolves to why it could not (a name already taken, say), or null once
-   * under way.
-   */
   create: (name: string, moveExisting: boolean) => Promise<string | null>;
   reload: () => void;
 }
@@ -50,10 +45,6 @@ export function useAccounts(): AccountsApi {
   return useContext(AccountsContext);
 }
 
-/**
- * One reader of the accounts for the window; the list changes only by a rename
- * or delete, via `accounts-changed`.
- */
 export function AccountsProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AccountsState | null>(null);
   const [switching, setSwitching] = useState<Switching | null>(null);

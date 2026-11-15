@@ -59,7 +59,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       .catch((cause: unknown) => setError(describeError(cause)));
   }, []);
 
-  // Rust owns preferences; adopt whatever it broadcasts.
   useTauriEvent<Settings>(api.SETTINGS_CHANGED, (payload) => {
     setSettings(payload);
     applyAppearance(payload);

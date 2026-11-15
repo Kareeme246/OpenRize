@@ -200,12 +200,10 @@ fn parse_providers(text: &str) -> Result<Vec<Spec>, String> {
     if specs.is_empty() {
         return Err("OPENRIZE_BENCH_PROVIDERS names no providers".to_string());
     }
-    // Apple is the baseline, so it prints first.
     specs.sort_by_key(|spec| !matches!(spec, Spec::Apple));
     Ok(specs)
 }
 
-/// `model-00001-of-00002` is one model: drop the part counter.
 fn strip_split_suffix(stem: &str) -> String {
     let bytes = stem.as_bytes();
     let n = stem.len();
@@ -571,7 +569,6 @@ fn start(spec: &Spec, sidecar: Option<&Path>) -> Result<Started, String> {
                 disable_thinking: !thinking,
             };
             let mut provider = OpenAiProvider::new(Endpoint::Local(Box::new(runtime)), model)?;
-            // Load the model before any entry is timed.
             provider.start()?;
             Ok(Started {
                 provider: Box::new(provider),
@@ -624,7 +621,6 @@ fn run_provider(
     let total: usize = prepared.iter().map(|p| p.cases.len()).sum();
     eprintln!("[{label}] {tag}: {total} cases");
 
-    // One unscored pass so loading the model is not billed to the first case.
     if let Some(first) = prepared.iter().find(|p| !p.cases.is_empty()) {
         let _ = label_one(provider.as_mut(), first, 0);
     }

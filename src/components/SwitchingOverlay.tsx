@@ -1,10 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useAccounts } from "../hooks/useAccounts";
 
-/**
- * Held over the window from an account switch until restart; a modal <dialog>
- * with nothing to cancel.
- */
 export function SwitchingOverlay() {
   const { switching } = useAccounts();
   if (switching === null) return null;

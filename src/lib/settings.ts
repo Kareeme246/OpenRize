@@ -12,7 +12,6 @@ export type Shape = "rounded" | "sharper";
 export type SizeMode = "compact" | "normal" | "relaxed" | "veryRelaxed";
 export type CloseBehavior = "quit" | "hide";
 export type AiSuggest = "category" | "categoryProject";
-/** Which language model suggests; a local model is a file in the models folder. */
 export type AiLlm = "apple" | "local" | "none";
 
 export interface DaySchedule {
@@ -65,7 +64,6 @@ const DAY_KEYS = [
   "saturday",
 ] as const;
 
-/** `"07:30"` -> 450, or undefined when malformed. */
 function minutesOf(clock: string): number | undefined {
   const [hours, minutes] = clock.split(":").map(Number);
   if (hours === undefined || minutes === undefined) return undefined;
@@ -136,7 +134,6 @@ export interface Weekdays {
 export interface ScheduledBreak {
   id: string;
   label: string;
-  /** `HH:MM`, local time. */
   at: string;
   minutes: number;
   days: Weekdays;
@@ -148,7 +145,6 @@ export interface BreakSettings {
   enabled: boolean;
   workMinutes: number;
   breakMinutes: number;
-  /** What the reminder's snooze button snoozes for; 5, 10 or 15. */
   snoozeMinutes: number;
   message: string;
   pauseStopwatches: boolean;
@@ -210,11 +206,9 @@ export interface Settings {
   sizeMode: SizeMode;
   closeBehavior: CloseBehavior;
   trayEnabled: boolean;
-  /** Activity history older than this many days. 0 = keep forever. */
   retentionDays: number;
   aiSuggest: AiSuggest;
   aiLlm: AiLlm;
-  /** File name of a GGUF in the models folder, used when `aiLlm` is `local`. */
   localModel: string | null;
   autoAccept: boolean;
   autoAcceptPercent: number;
@@ -256,10 +250,6 @@ export function weeklyTargetMs(settings: Settings): number {
   return settings.weeklyTargetHours * 3_600_000;
 }
 
-/**
- * Expected work time for a day, week, or month (the weekly target prorated by
- * days).
- */
 export function targetMsFor(
   settings: Settings,
   scale: "day" | "week" | "month",
@@ -280,7 +270,6 @@ export interface AccentPalette {
   base: string;
   dim: string;
   soft: string;
-  /** `r, g, b` - fed to rgba() for glows that need an alpha channel. */
   rgb: string;
   onAccent: string;
 }
@@ -348,7 +337,6 @@ export function resolveTheme(theme: Theme): "light" | "dark" {
     : "dark";
 }
 
-/** The preference last sent to the window, so a repaint is not an IPC. */
 let windowTheme: Theme | null = null;
 
 /**
@@ -391,7 +379,6 @@ export function applyAppearance(settings: Settings): void {
     // Storage can be unavailable; the hint only avoids a startup flash.
   }
   root.dataset.theme = theme;
-  // Renders native widgets for the active scheme.
   root.style.colorScheme = theme;
   root.dataset.shape = settings.shape;
   root.dataset.sizeMode = settings.sizeMode;

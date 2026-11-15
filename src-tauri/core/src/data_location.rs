@@ -136,7 +136,6 @@ impl MoveError {
 fn migrate(legacy: &Path, local: &Path, io: &Io, resuming: bool) -> Result<(), String> {
     fs::create_dir_all(local).map_err(|error| format!("could not create the folder: {error}"))?;
     if resuming && !legacy.is_dir() {
-        // Everything arrived; only the marker was left.
         return finish(local);
     }
     let lock = match lock_stores(legacy, true) {
@@ -172,7 +171,6 @@ fn migrate(legacy: &Path, local: &Path, io: &Io, resuming: bool) -> Result<(), S
     }
 }
 
-/// The last step: with the marker gone the new folder is the whole truth.
 fn finish(local: &Path) -> Result<(), String> {
     fs::remove_file(marker_path(local))
         .or_else(|error| match error.kind() {
@@ -258,7 +256,6 @@ fn move_entries(legacy: &Path, local: &Path, io: &Io, resuming: bool) -> Result<
                     .filter(|name| (io.rename)(&local.join(name), &legacy.join(name)).is_err())
                     .map(|name| name.to_string_lossy().into_owned())
                     .collect();
-                // Everything is back where it was: copy instead.
                 if crosses_devices(&error) && stuck.is_empty() {
                     return copy_entries(legacy, local, &names, io);
                 }
@@ -353,7 +350,6 @@ fn copy_tree(from: &Path, to: &Path, io: &Io) -> Result<(), String> {
         Ok(())
     } else if metadata.is_file() {
         (io.copy)(from, to).map_err(|e| fail("copy", &e))?;
-        // Flushed to disk before the original is ever removed.
         OpenOptions::new()
             .write(true)
             .open(to)
@@ -373,7 +369,6 @@ fn copy_tree(from: &Path, to: &Path, io: &Io) -> Result<(), String> {
     }
 }
 
-/// A fingerprint to compare a copy with its source (not a security hash).
 fn hash_file(path: &Path) -> io::Result<u64> {
     let mut file = File::open(path)?;
     let mut hasher = DefaultHasher::new();
@@ -395,7 +390,6 @@ fn remove_entry_checked(path: &Path) -> io::Result<()> {
     }
 }
 
-/// Removes `path`; whether it is gone (it may never have been there).
 fn remove_entry(path: &Path) -> bool {
     match remove_entry_checked(path) {
         Ok(()) => true,
@@ -458,7 +452,6 @@ mod tests {
         dir
     }
 
-    /// A legacy folder shaped like an install: WAL database, accounts, PDFs.
     fn legacy_install(legacy: &Path) {
         fs::create_dir_all(legacy.join("accounts").join("a1")).unwrap();
         fs::create_dir_all(legacy.join("invoices")).unwrap();
@@ -472,7 +465,6 @@ mod tests {
         fs::write(legacy.join("invoices/1.pdf"), "pdf").unwrap();
     }
 
-    /// Real file system, except for the given rename.
     fn with_rename<'a>(rename: &'a dyn Fn(&Path, &Path) -> io::Result<()>) -> Io<'a> {
         Io { rename, ..REAL_IO }
     }

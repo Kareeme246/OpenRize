@@ -26,7 +26,6 @@ use super::{wide, BROWSERS};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Identity {
-    /// The executable name, qualified where it alone would merge different apps.
     pub id: String,
     pub name: String,
 }
@@ -166,8 +165,6 @@ fn is_generic_app_id(executable: &str, app_id: &str) -> bool {
     id == "electron.app.electron" || id == stem || id == executable
 }
 
-/// The run of letters and digits right after `marker` (any case), lowercased,
-/// if it is long enough to be an app id (Chromium's are 32 letters).
 fn id_after(text: &str, marker: &str) -> Option<String> {
     let start = text.to_ascii_lowercase().find(marker)? + marker.len();
     let id: String = text[start..]
@@ -178,8 +175,6 @@ fn id_after(text: &str, marker: &str) -> Option<String> {
     (16..=64).contains(&id.len()).then_some(id)
 }
 
-/// `<executable>/<qualifier>` with the qualifier folded to lowercase letters, digits and
-/// `._-!+@~()`, at most `QUALIFIER_LIMIT` long.
 fn qualified(executable: &str, qualifier: &str) -> String {
     let key: String = qualifier
         .trim()
@@ -199,8 +194,6 @@ fn qualified(executable: &str, qualifier: &str) -> String {
 
 const QUALIFIER_LIMIT: usize = 96;
 
-/// Splits a command line as the C runtime does: spaces separate, quotes group,
-/// and a backslash escapes a quote only when it comes right before one.
 fn split_command_line(line: &str) -> Vec<String> {
     let mut args = Vec::new();
     let mut current = String::new();
@@ -373,8 +366,6 @@ fn node_name(args: &[String]) -> Option<String> {
     None
 }
 
-/// The last folder or file name of a path argument, without extension or
-/// version: `"C:\apps\Tool-1.4.2.jar"` is `Tool`.
 fn file_stem(arg: &str) -> Option<String> {
     let name = arg.trim().trim_matches('"').trim_end_matches(['\\', '/']);
     let name = name.rsplit(['\\', '/']).next()?;
@@ -385,8 +376,6 @@ fn file_stem(arg: &str) -> Option<String> {
     clean_name(name)
 }
 
-/// A name for the app, without a trailing version (`tool-1.4.2` is `tool`)
-/// and `None` if nothing but punctuation is left.
 fn clean_name(name: &str) -> Option<String> {
     let name = name.trim();
     let mut end = name.len();
@@ -402,7 +391,6 @@ fn clean_name(name: &str) -> Option<String> {
         .then(|| name.to_string())
 }
 
-/// Whether the text starts like a version: `1.2`, `v2.0.1-beta`.
 fn is_version(text: &str) -> bool {
     let text = text.strip_prefix(['v', 'V']).unwrap_or(text);
     let number = text.split(['-', '_', ' ']).next().unwrap_or("");
@@ -467,8 +455,6 @@ fn string_property(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<String> 
     (!text.is_empty()).then(|| text.to_string())
 }
 
-/// The window's own name for its app (jump list, or Chromium's for web apps): text or a `@file,-id`
-/// reference.
 fn relaunch_name(store: Option<&IPropertyStore>) -> Option<String> {
     let text = string_property(store?, &PKEY_AppUserModel_RelaunchDisplayNameResource)?;
     if !text.starts_with('@') {
@@ -513,8 +499,6 @@ fn shell_name_uncached(app_id: &str) -> Option<String> {
     }
 }
 
-/// The application id of a packaged (MSIX/UWP) process, as
-/// `PackageFamilyName!App`. `None` for an ordinary process.
 fn package_app_id(pid: u32) -> Option<String> {
     // SAFETY: the handle is closed before returning; the buffer is as long as
     // the length passed in, which is updated to the units written.
@@ -786,8 +770,6 @@ mod tests {
         assert_eq!(web_app_id(None, None), None);
     }
 
-    /// A real window carrying the properties Chromium sets on an installed web
-    /// app's window, and one carrying a plain browser window's.
     #[test]
     fn a_web_apps_window_is_named_by_its_own_properties() {
         use windows::core::w;

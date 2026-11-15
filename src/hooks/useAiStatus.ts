@@ -56,7 +56,6 @@ export function noOnDeviceMl(status: AiStatus | null): boolean {
   return status.provider === "none" && status.embed === "none";
 }
 
-/** Whether the personal model (the sidecar's embedder and classifier) can run. */
 export function hasPersonalModel(status: AiStatus | null): boolean {
   if (status === null || status.engine === "starting") {
     return EXPECTS_ON_DEVICE_ML;
@@ -64,7 +63,6 @@ export function hasPersonalModel(status: AiStatus | null): boolean {
   return status.provider === "apple" || status.embed === "ready";
 }
 
-/** What names the active language model in sentences. */
 export function llmName(status: AiStatus | null): string {
   return status?.provider === "local"
     ? "a local model on this device"

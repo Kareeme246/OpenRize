@@ -4,19 +4,13 @@ interface ConfirmDialogProps {
   title: string;
   body: string;
   confirmLabel: string;
-  /**
-   * `destructive` (default) makes Cancel primary; `affirmative` makes Confirm
-   * primary.
-   */
+  /** `destructive` (default) makes Cancel primary; `affirmative` makes Confirm primary. */
   tone?: "destructive" | "affirmative";
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-/**
- * A real <dialog> via showModal(): top layer, focus trap and Escape-to-cancel
- * for free.
- */
+/** A real <dialog> via showModal(): top layer, focus trap and Escape-to-cancel for free. */
 export function ConfirmDialog({
   title,
   body,

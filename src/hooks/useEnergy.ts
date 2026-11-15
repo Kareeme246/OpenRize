@@ -12,10 +12,7 @@ export interface EnergyApi {
   adopt: (summary: EnergySummary) => void;
 }
 
-/**
- * Energy and battery telemetry; refetches on interval or `energy-changed`, and
- * never asks Rust when `enabled` is false.
- */
+/** Refetches on interval or `energy-changed`; never asks Rust when `enabled` is false. */
 export function useEnergy(days = 7, enabled = true): EnergyApi {
   const [summary, setSummary] = useState<EnergySummary | null>(null);
   const [error, setError] = useState<string | null>(null);

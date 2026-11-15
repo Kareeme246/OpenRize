@@ -60,10 +60,6 @@ const projectId = (name) => {
   return id;
 };
 
-/**
- * Segments of at most five minutes, always continuing with the app with the
- * most time left; minutes sum to the entry.
- */
 function segmentsFor(entry) {
   const start = at(entry.start);
   const end = at(entry.end);

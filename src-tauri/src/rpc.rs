@@ -1,7 +1,3 @@
-//! Serves `rize` while the app runs, answering from `openrize_core::rpc`. The
-//! app adds what only it can do (`Live`) and emits the events a window command
-//! would, so open windows and the tray update at once.
-
 use std::path::PathBuf;
 use std::time::Duration;
 

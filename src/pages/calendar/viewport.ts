@@ -4,7 +4,6 @@ export interface CalendarViewport {
   hourHeight?: number;
 }
 
-// Session-only viewer state: no activity or user preferences are stored here.
 const viewports = new Map<string, CalendarViewport>();
 export function readViewport(key: string): CalendarViewport | undefined {
   return viewports.get(key);

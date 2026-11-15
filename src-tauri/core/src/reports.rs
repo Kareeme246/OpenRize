@@ -14,7 +14,6 @@ use crate::models::TimeEntry;
 use crate::{err, APP_KEY};
 pub use crate::{EntryFilter, MAX_QUERY_ROWS};
 
-/// Enough for a year by day, plus the closing boundary.
 pub const MAX_BUCKETS: usize = 400;
 
 /// A segment's share of its entry, clamped to the entry's bounds so app
@@ -38,8 +37,6 @@ pub fn query_entries(
     Ok(entries)
 }
 
-/// Entry id -> the app or site with most of its active time, for every entry
-/// overlapping the range.
 pub fn dominant_apps(
     conn: &Connection,
     start_ms: u64,

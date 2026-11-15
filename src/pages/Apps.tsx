@@ -108,7 +108,6 @@ export function Apps() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto bg-base p-6 [--gutter:1.5rem]">
-      {/* Header */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-fg">
@@ -151,7 +150,6 @@ export function Apps() {
       </div>
       {view === "table" ? (
         <>
-          {/* Filter and Search Bar */}
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <div className="relative min-w-[240px] flex-1 max-w-md">
               <input
@@ -177,7 +175,6 @@ export function Apps() {
               </svg>
             </div>
 
-            {/* Kind filter */}
             <div className="flex rounded-lg border border-line bg-surface p-0.5 text-xs">
               <button
                 type="button"
@@ -214,7 +211,6 @@ export function Apps() {
               </button>
             </div>
 
-            {/* Exclusion filter */}
             <div className="flex rounded-lg border border-line bg-surface p-0.5 text-xs">
               <button
                 type="button"
@@ -252,7 +248,6 @@ export function Apps() {
             </div>
           </div>
 
-          {/* Table */}
           <div className="shape-bleed-table flex-1 overflow-hidden rounded-xl border border-line bg-surface">
             <div className="h-full overflow-x-auto">
               <table className="w-full border-collapse text-left text-xs">

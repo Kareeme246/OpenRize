@@ -8,7 +8,6 @@ use serde::Serialize;
 #[serde(rename_all = "camelCase")]
 pub struct Installation {
     pub executable: String,
-    /// The symlink (macOS, Linux) or the folder added to PATH (Windows).
     pub path: String,
     pub unchanged: bool,
 }
@@ -27,7 +26,6 @@ fn executable() -> Result<PathBuf, String> {
     ))
 }
 
-/// Symlinks `<dir>/rize` (default `~/.local/bin`) to this executable.
 #[cfg(unix)]
 pub fn install(dir: Option<PathBuf>) -> Result<Installation, String> {
     let dir = std::path::absolute(match dir {
@@ -81,7 +79,6 @@ pub fn uninstall() -> Result<String, String> {
     Ok(format!("Removed {}", path.display()))
 }
 
-/// Adds this executable's folder to the user's PATH (via `openrize_core::user_path`).
 #[cfg(windows)]
 pub fn install(dir: Option<PathBuf>) -> Result<Installation, String> {
     if dir.is_some() {

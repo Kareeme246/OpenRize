@@ -127,8 +127,6 @@ pub fn on_focus(app: &AppHandle) {
     tauri::async_runtime::spawn(async move { check(&app, false).await });
 }
 
-/// Checks for a newer release. `manual` checks surface their errors in the
-/// status; automatic ones only log them.
 pub async fn check(app: &AppHandle, manual: bool) {
     let state = app.state::<UpdaterState>();
     if let Some(reason) = no_updates_reason() {
@@ -337,7 +335,6 @@ async fn release_notes_between(current: &str, latest: &str) -> Result<Vec<Releas
         .collect())
 }
 
-/// Notes of the newest `limit` releases up to `current`, for the no-update changelog.
 pub async fn recent_release_notes(
     current: &str,
     limit: usize,

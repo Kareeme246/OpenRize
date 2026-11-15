@@ -5,10 +5,6 @@ import { type OnboardingStep, onboardingStep } from "../lib/onboarding";
 import type { AccessibilityState } from "../lib/types";
 import { useTauriEvent } from "./useTauriEvent";
 
-/**
- * Which first-run step is up; kept above the screen so the relaunch screen can
- * ask whether it took the relaunch over.
- */
 export function useOnboarding(accessibility: AccessibilityState | null): {
   step: OnboardingStep;
   finish: () => void;

@@ -119,14 +119,12 @@ pub fn lock_stores(data_dir: &Path, wait: bool) -> io::Result<Option<File>> {
     }
 }
 
-/// Where OpenRize keeps its files, as Settings and `rize paths` show them.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoragePaths {
     pub config_file: String,
     pub data_dir: String,
     pub database_file: String,
-    /// The account whose folder `data_dir` is, or `None` for No account.
     pub account: Option<String>,
 }
 

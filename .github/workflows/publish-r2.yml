@@ -85,6 +85,8 @@ jobs:
             }
             if (process.env.WINDOWS === 'true') {
               names.push(`openrize_${process.env.VERSION}_x64-setup.exe`);
+              // The publisher refuses the installer without the updater key's signature.
+              names.push(`openrize_${process.env.VERSION}_x64-setup.exe.sig`);
             }
             if (!names.length) throw new Error('No installers selected for R2');
             const assets = names.map(name => {

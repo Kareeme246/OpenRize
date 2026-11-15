@@ -24,7 +24,7 @@ export interface PublishOptions {
   noCurrent?: boolean;
   purge?: boolean;
   promote?: boolean;
-  /** Updater public key the Windows installer must be signed by; tauri.conf.json's by default. */
+  /** Updater public key the installers must be signed by; tauri.conf.json's by default. */
   publicKey?: string;
   log?: (line: string) => void;
   warn?: (line: string) => void;
@@ -37,6 +37,8 @@ export interface PublishResult {
 
 const MIN_INSTALLER_BYTES = 1_000_000;
 const IMMUTABLE = "public, max-age=31536000, immutable";
+// Releases up to 0.10.2 were published without a DMG signature; from this version on it is required.
+const DMG_SIGNED_SINCE = "0.10.3";
 
 export function releaseAssetNames(
   version: string,
@@ -52,10 +54,17 @@ const sha256 = (bytes: Uint8Array) =>
 const compare = (a: string, b: string) =>
   a.localeCompare(b, undefined, { numeric: true });
 
-/** Every release asset the publisher reads: the installers and the Windows installer's signature. */
+const isSigned = (target: OpenRizeTarget, version: string) =>
+  target === "windows" || compare(version, DMG_SIGNED_SINCE) >= 0;
+
+/** Every release asset the publisher reads: the installers and the signatures it requires. */
 export function releaseFileNames(version: string): string[] {
   const names = releaseAssetNames(version);
-  return [...Object.values(names), `${names.windows}.sig`];
+  return OPENRIZE_TARGETS.flatMap((target) =>
+    isSigned(target, version)
+      ? [names[target], `${names[target]}.sig`]
+      : [names[target]],
+  );
 }
 
 function updaterPublicKey(): string {
@@ -69,11 +78,12 @@ function updaterPublicKey(): string {
 }
 
 /**
- * The release itself is not trusted: the Windows installer must carry the updater key's signature,
- * made for this version's file. The DMG has no published signature, so it only gets a format check.
+ * The release itself is not trusted: an installer must carry the updater key's signature, made for
+ * this version's file. Only DMGs older than `DMG_SIGNED_SINCE` pass on a format check alone.
  */
 function checkInstaller(
   target: OpenRizeTarget,
+  version: string,
   path: string,
   bytes: Uint8Array,
   publicKey: string,
@@ -94,7 +104,7 @@ function checkInstaller(
   ) {
     throw new PublishError(`${path} is not a DMG`);
   }
-  if (target !== "windows") return;
+  if (!isSigned(target, version)) return;
   let comment: string;
   try {
     comment = verifyMinisign(
@@ -177,7 +187,7 @@ export async function publishRelease(
     const path = join(options.dir, names[target]);
     if (!existsSync(path)) continue;
     const bytes = new Uint8Array(readFileSync(path));
-    checkInstaller(target, path, bytes, publicKey);
+    checkInstaller(target, version, path, bytes, publicKey);
     const { filename, contentType } = installerFor(target, version);
     builds[target] = {
       key: releasePrefix(version) + filename,

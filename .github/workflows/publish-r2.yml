@@ -82,6 +82,10 @@ jobs:
             const names = [];
             if (process.env.MACOS_ARM === 'true') {
               names.push(`openrize_${process.env.VERSION}_aarch64.dmg`);
+              // Older releases have no DMG signature. The publisher, not this step, decides
+              // whether the version needs one and refuses the DMG without it.
+              const signature = `openrize_${process.env.VERSION}_aarch64.dmg.sig`;
+              if (release.assets.some(a => a.name === signature)) names.push(signature);
             }
             if (process.env.WINDOWS === 'true') {
               names.push(`openrize_${process.env.VERSION}_x64-setup.exe`);

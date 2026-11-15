@@ -46,7 +46,8 @@ To cut a release:
    publishes precisely the selected platforms' assets and `latest.json`.
    macOS includes the signed, notarized `.dmg` and updater's
    `openrize.app.tar.gz`; Windows includes the unsigned NSIS installer. Both
-   updater artifacts have minisign signatures. `install.sh` installs the CLI
+   updater artifacts have minisign signatures, and so does the `.dmg` (from
+   0.10.3), signed with the same updater key. `install.sh` installs the CLI
    from that same `openrize.app.tar.gz`, so there is no separate CLI download.
 
 Publishing a release ships it to every installed copy: the app checks
@@ -78,7 +79,9 @@ passes the complete staged directory with `--dir`.
 
 Uploads use the publisher in `scripts/publish-r2/` (`pnpm publish-r2`, or
 `node scripts/publish-r2/cli.ts`), which has no dependencies beyond Node. It
-validates installer formats, uploads under `openrize/releases/<version>/`, and
+validates installer formats and refuses an installer that lacks the updater
+key's minisign signature for that exact version's file (the `.sig` asset beside
+it; required for Windows always and for the DMG from 0.10.3), uploads under `openrize/releases/<version>/`, and
 reads every installer back to verify its size and SHA-256 before publishing the
 version manifest and finally `openrize/current.json`. A failed installer upload
 or verification cannot advance the current pointer. R2 jobs serialize across

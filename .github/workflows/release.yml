@@ -234,6 +234,18 @@ jobs:
           codesign --verify --strict --check-notarization --verbose=2 \
             -R="$requirement" "$cli"
 
+      # The website publisher (scripts/publish-r2) accepts the DMG only with this signature. The
+      # bundle step signs just the updater tarball, so sign the DMG here with the same key.
+      - name: Sign the DMG with the updater key
+        env:
+          VERSION: ${{ inputs.version }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: >-
+            ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          pnpm tauri signer sign \
+            "src-tauri/target/release/bundle/dmg/openrize_${VERSION}_aarch64.dmg"
+
       - name: Zip the .app bundle for upload
         run: |
           cd src-tauri/target/release/bundle/macos
@@ -246,6 +258,7 @@ jobs:
         run: |
           mkdir release-assets
           cp "src-tauri/target/release/bundle/dmg/openrize_${VERSION}_aarch64.dmg" release-assets/
+          cp "src-tauri/target/release/bundle/dmg/openrize_${VERSION}_aarch64.dmg.sig" release-assets/
           cp src-tauri/target/release/bundle/macos/openrize.app.tar.gz release-assets/
           cp src-tauri/target/release/bundle/macos/openrize.app.tar.gz.sig release-assets/
           if [[ "$SCOPE" == comprehensive ]]; then
@@ -379,6 +392,7 @@ jobs:
           }
           if [[ "$MACOS_ARM" == true ]]; then
             printf '%s\n' "openrize_${VERSION}_aarch64.dmg" \
+              "openrize_${VERSION}_aarch64.dmg.sig" \
               openrize.app.tar.gz openrize.app.tar.gz.sig >> "$expected"
             if [[ "$SCOPE" == comprehensive ]]; then
               echo openrize.app.zip >> "$expected"

@@ -11,7 +11,11 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { versionManifestKey } from "./manifest.ts";
 import { verifyMinisign } from "./minisign.ts";
-import { publishRelease, releaseAssetNames } from "./publish.ts";
+import {
+  publishRelease,
+  releaseAssetNames,
+  releaseFileNames,
+} from "./publish.ts";
 import { directoryStore } from "./store.ts";
 
 const wrap = (text: string) => Buffer.from(text).toString("base64");
@@ -143,6 +147,67 @@ test("the Windows installer is published only with the updater key's signature f
     assert.ok(
       await directoryStore(join(dir, "bucket")).get(
         versionManifestKey("1.2.3"),
+      ),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the DMG needs the updater key's signature from 0.10.3 on, and never before", async () => {
+  const key = keyPair();
+  const dmg = Buffer.alloc(1_000_000);
+  dmg.write("koly", dmg.length - 512, "latin1");
+  const dir = mkdtempSync(join(tmpdir(), "openrize-publish-test-"));
+  try {
+    const publish = (version: string) =>
+      publishRelease(directoryStore(join(dir, "bucket")), {
+        version,
+        dir,
+        publicKey: key.publicKey,
+      });
+    const unsigned = releaseAssetNames("0.10.2")["macos-arm64"];
+    writeFileSync(join(dir, unsigned), dmg);
+    await publish("0.10.2");
+    assert.deepEqual(releaseFileNames("0.10.2").sort(), [
+      unsigned,
+      releaseAssetNames("0.10.2").windows,
+      `${releaseAssetNames("0.10.2").windows}.sig`,
+    ]);
+
+    const name = releaseAssetNames("0.10.3")["macos-arm64"];
+    const path = join(dir, name);
+    assert.ok(releaseFileNames("0.10.3").includes(`${name}.sig`));
+    writeFileSync(path, dmg);
+    await assert.rejects(
+      () => publish("0.10.3"),
+      /not signed by the updater key/,
+    );
+
+    writeFileSync(
+      `${path}.sig`,
+      signFile(key, dmg, `timestamp:1\tfile:${name}`),
+    );
+    const tampered = Buffer.from(dmg);
+    tampered[0] = 1;
+    writeFileSync(path, tampered);
+    await assert.rejects(() => publish("0.10.3"), /does not match the file/);
+
+    writeFileSync(path, dmg);
+    writeFileSync(
+      `${path}.sig`,
+      signFile(key, dmg, `timestamp:1\tfile:${unsigned}`),
+    );
+    await assert.rejects(() => publish("0.10.3"), /made for another file/);
+
+    writeFileSync(
+      `${path}.sig`,
+      signFile(key, dmg, `timestamp:1\tfile:${name}`),
+    );
+    await publish("0.10.3");
+    assert.ok(
+      await directoryStore(join(dir, "bucket")).get(
+        versionManifestKey("0.10.3"),
       ),
     );
   } finally {

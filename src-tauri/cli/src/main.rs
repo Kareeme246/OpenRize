@@ -634,9 +634,9 @@ fn main() {
     if args.json {
         print_json(&response, args.full);
     } else if let Some(error) = &response.error {
-        eprintln!("{}", error.message);
+        eprintln!("{}", render::plain(&error.message));
         for candidate in &error.candidates {
-            eprintln!("  {candidate}");
+            eprintln!("  {}", render::plain(candidate));
         }
     } else if let Some(data) = &response.data {
         if args.dry_run {
@@ -1350,7 +1350,7 @@ fn confirm(yes: bool, question: &str) -> Result<(), Response> {
     if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
         return Err(invalid(format!("{question} Pass --yes to confirm.")));
     }
-    eprint!("{question} [y/N] ");
+    eprint!("{} [y/N] ", render::plain(question));
     let _ = std::io::stderr().flush();
     let mut answer = String::new();
     let _ = std::io::stdin().read_line(&mut answer);

@@ -4,9 +4,10 @@
 #[cfg_attr(windows, path = "ipc/windows.rs")]
 mod platform;
 
-use std::io;
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use interprocess::local_socket::prelude::*;
 pub use interprocess::local_socket::Stream;
@@ -14,8 +15,16 @@ pub use interprocess::local_socket::Stream;
 use crate::protocol::{self, Request, Response};
 pub use platform::Service;
 
-/// Bounds each read and write, so a stalled peer cannot hang either side.
+/// Bounds each read and write, so a stalled peer cannot hang either side. The
+/// app also gives a whole request, and a whole answer, no longer than this.
 pub const TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How often the app tries again for an endpoint it could not take.
+const LISTEN_RETRY: Duration = Duration::from_secs(5);
+
+/// Requests the app answers at once. `rize` sends one per run, so more than a
+/// few at a time is a flood; the rest wait to be accepted.
+const MAX_CONNECTIONS: usize = 8;
 
 /// Every data directory (the installed app, a dev instance) gets its own endpoint.
 pub struct Endpoint {
@@ -60,12 +69,104 @@ pub fn exchange(mut stream: Stream, request: &Request) -> Result<Response, Strin
     }
 }
 
-pub fn respond(mut stream: Stream, handle: impl FnOnce(Request) -> Response) {
-    // A client that disconnects mid-setup must not stop the server.
-    if bound(&stream).is_err() {
-        return;
+/// Answers every request to `endpoint` with `handle`, each on its own thread.
+pub fn serve(endpoint: Endpoint, handle: impl Fn(Request) -> Response + Send + Sync + 'static) {
+    serve_retrying(endpoint, LISTEN_RETRY, handle);
+}
+
+fn serve_retrying(
+    endpoint: Endpoint,
+    retry: Duration,
+    handle: impl Fn(Request) -> Response + Send + Sync + 'static,
+) {
+    std::thread::spawn(move || {
+        // A Windows pipe name is anyone's to take first; the app gets its
+        // endpoint back once whoever holds the name lets go.
+        let mut reported = false;
+        let service = loop {
+            match endpoint.listen() {
+                Ok(service) => break service,
+                Err(error) => {
+                    if !std::mem::replace(&mut reported, true) {
+                        eprintln!("rize endpoint unavailable, still trying: {error}");
+                    }
+                    std::thread::sleep(retry);
+                }
+            }
+        };
+        let handle = Arc::new(handle);
+        let slots = Slots::new(MAX_CONNECTIONS);
+        loop {
+            if let Err(error) = admit(&service, &slots, TIMEOUT, &handle) {
+                eprintln!("rize endpoint: {error}");
+                std::thread::sleep(Duration::from_millis(250));
+            }
+        }
+    });
+}
+
+/// Hands the next connection to a thread of its own, once a slot is free.
+fn admit(
+    service: &Service,
+    slots: &Arc<Slots>,
+    timeout: Duration,
+    handle: &Arc<impl Fn(Request) -> Response + Send + Sync + 'static>,
+) -> io::Result<()> {
+    let stream = service.accept()?;
+    let slot = Slot::take(slots);
+    let handle = handle.clone();
+    std::thread::spawn(move || {
+        respond(stream, timeout, |request| handle(request));
+        drop(slot);
+    });
+    Ok(())
+}
+
+struct Slots {
+    free: Mutex<usize>,
+    freed: Condvar,
+}
+
+impl Slots {
+    fn new(free: usize) -> Arc<Self> {
+        Arc::new(Self {
+            free: Mutex::new(free),
+            freed: Condvar::new(),
+        })
     }
-    let response = match protocol::read_frame::<Request>(&mut stream, protocol::MAX_REQUEST) {
+}
+
+/// One of the connections being answered; dropping it, even by a panic in the
+/// handler, lets the next one in.
+struct Slot(Arc<Slots>);
+
+impl Slot {
+    fn take(slots: &Arc<Slots>) -> Self {
+        let mut free = slots.free.lock().unwrap_or_else(PoisonError::into_inner);
+        while *free == 0 {
+            free = slots
+                .freed
+                .wait(free)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+        *free -= 1;
+        Self(slots.clone())
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        *self.0.free.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+        self.0.freed.notify_one();
+    }
+}
+
+fn respond(mut stream: Stream, timeout: Duration, handle: impl FnOnce(Request) -> Response) {
+    let request = protocol::read_frame::<Request>(
+        &mut Timed::new(&mut stream, timeout),
+        protocol::MAX_REQUEST,
+    );
+    let response = match request {
         // Answered, not dropped, so `rize` can say why it got nothing.
         Ok(_) if !platform::client_allowed(&stream) => Response::error(
             protocol::code::FAILED,
@@ -74,20 +175,73 @@ pub fn respond(mut stream: Stream, handle: impl FnOnce(Request) -> Response) {
         Ok(request) => handle(request),
         Err(_) => Response::error("INVALID_REQUEST", "invalid or oversized request"),
     };
-    let _ = protocol::write_frame(&mut stream, &response, protocol::MAX_RESPONSE);
+    let _ = protocol::write_frame(
+        &mut Timed::new(&mut stream, timeout),
+        &response,
+        protocol::MAX_RESPONSE,
+    );
 }
 
-/// Named pipes have no I/O timeouts; there the pipe's current-user-only access
-/// is what keeps a stalled peer out.
+/// A stream whose reads and writes must all finish by one deadline. A timeout
+/// on each read alone lets a peer sending a byte at a time hold its thread
+/// for as long as the largest frame takes.
+struct Timed<'a> {
+    stream: &'a mut Stream,
+    until: Instant,
+}
+
+impl<'a> Timed<'a> {
+    fn new(stream: &'a mut Stream, timeout: Duration) -> Self {
+        Self {
+            stream,
+            until: Instant::now() + timeout,
+        }
+    }
+
+    fn left(&self) -> io::Result<Option<Duration>> {
+        match self.until.saturating_duration_since(Instant::now()) {
+            Duration::ZERO => Err(io::ErrorKind::TimedOut.into()),
+            left => Ok(Some(left)),
+        }
+    }
+}
+
+impl Read for Timed<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        self.stream
+            .set_recv_timeout(self.left()?)
+            .or_else(unsupported)?;
+        self.stream.read(buffer)
+    }
+}
+
+impl Write for Timed<'_> {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.stream
+            .set_send_timeout(self.left()?)
+            .or_else(unsupported)?;
+        self.stream.write(buffer)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.stream.flush()
+    }
+}
+
 fn bound(stream: &Stream) -> io::Result<()> {
-    let unsupported = |e: io::Error| match e.kind() {
-        io::ErrorKind::Unsupported => Ok(()),
-        _ => Err(e),
-    };
     stream
         .set_recv_timeout(Some(TIMEOUT))
         .or_else(unsupported)?;
     stream.set_send_timeout(Some(TIMEOUT)).or_else(unsupported)
+}
+
+/// Named pipes have no I/O timeouts; there the pipe's current-user-only access
+/// is what keeps a stalled peer out, and `MAX_CONNECTIONS` what bounds one.
+fn unsupported(error: io::Error) -> io::Result<()> {
+    match error.kind() {
+        io::ErrorKind::Unsupported => Ok(()),
+        _ => Err(error),
+    }
 }
 
 /// The same directory always names the same endpoint, however it was spelled.
@@ -206,7 +360,7 @@ mod tests {
         let service = endpoint.listen().unwrap();
         let server = std::thread::spawn(move || {
             let stream = service.accept().unwrap();
-            respond(stream, |request| {
+            respond(stream, TIMEOUT, |request| {
                 Response::success(serde_json::json!({ "echo": request.operation }))
             });
         });
@@ -216,5 +370,79 @@ mod tests {
         server.join().unwrap();
         assert!(response.ok);
         assert_eq!(response.data.unwrap()["echo"]["kind"], "timersList");
+    }
+
+    /// Serves `requests` connections as `serve` does, then gives the endpoint up.
+    fn serving(
+        endpoint: &Endpoint,
+        requests: usize,
+        connections: usize,
+        timeout: Duration,
+        handle: impl Fn(Request) -> Response + Send + Sync + 'static,
+    ) -> std::thread::JoinHandle<()> {
+        let service = endpoint.listen().unwrap();
+        std::thread::spawn(move || {
+            let (slots, handle) = (Slots::new(connections), Arc::new(handle));
+            for _ in 0..requests {
+                admit(&service, &slots, timeout, &handle).unwrap();
+            }
+        })
+    }
+
+    #[test]
+    fn requests_beyond_the_limit_wait_their_turn() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let data_dir = std::env::temp_dir().join(format!("rize-ipc-limit-{}", std::process::id()));
+        let endpoint = Arc::new(Endpoint::new(&data_dir).unwrap());
+        let (now, most) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let (counted_now, counted_most) = (now.clone(), most.clone());
+        let server = serving(&endpoint, 6, 2, TIMEOUT, move |_| {
+            counted_most.fetch_max(
+                counted_now.fetch_add(1, Ordering::SeqCst) + 1,
+                Ordering::SeqCst,
+            );
+            std::thread::sleep(Duration::from_millis(100));
+            counted_now.fetch_sub(1, Ordering::SeqCst);
+            Response::success(serde_json::json!({}))
+        });
+        let clients: Vec<_> = (0..6)
+            .map(|_| {
+                let endpoint = endpoint.clone();
+                std::thread::spawn(move || endpoint.call(&Request::new(Operation::TimersList {})))
+            })
+            .collect();
+        for client in clients {
+            assert!(client.join().unwrap().unwrap().ok);
+        }
+        server.join().unwrap();
+        assert_eq!(most.load(Ordering::SeqCst), 2);
+    }
+
+    /// A header promising a megabyte and nothing after it: the per-read
+    /// timeout is far off, the deadline for the whole request is not.
+    #[cfg(unix)]
+    #[test]
+    fn a_request_that_never_completes_is_cut_off_at_the_deadline() {
+        let data_dir = std::env::temp_dir().join(format!("rize-ipc-slow-{}", std::process::id()));
+        let endpoint = Endpoint::new(&data_dir).unwrap();
+        let server = serving(&endpoint, 2, 1, Duration::from_millis(400), |_| {
+            Response::success(serde_json::json!({}))
+        });
+        let mut slow = endpoint.connect().unwrap();
+        slow.write_all(&(protocol::MAX_REQUEST as u32).to_be_bytes())
+            .unwrap();
+        let started = Instant::now();
+        // The only slot is taken, so a second request is answered once it frees.
+        let waiting = endpoint.call(&Request::new(Operation::TimersList {}));
+        let took = started.elapsed();
+        assert!(waiting.unwrap().ok);
+        assert!(
+            took >= Duration::from_millis(350) && took < Duration::from_secs(5),
+            "{took:?}"
+        );
+        let answer = protocol::read_frame::<Response>(&mut slow, protocol::MAX_RESPONSE);
+        assert_eq!(answer.unwrap().code(), Some("INVALID_REQUEST"));
+        server.join().unwrap();
     }
 }

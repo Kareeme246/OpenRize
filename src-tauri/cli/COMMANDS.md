@@ -20,8 +20,16 @@ command, or changes the app command behind one, updates its row here.
 There are two ways to get rize: it comes bundled with the app (the app links it into
 `~/.local/bin` on macOS, or puts its folder on the user PATH on Windows, at every launch;
 `rize install-path` does the same by hand), or the curl installer (`install.sh`) installs it on
-its own. A standalone rize finds the
-installed app only to launch it (`rize app start`, `rize track start`).
+its own. Only an installed app does this (not a dev build, nor on macOS one run from a disk
+image), and on macOS it never replaces a file, or a link that does not point into an OpenRize
+app. A standalone rize finds the
+installed app only to launch it (`rize app start`, `rize app open`, `rize track start`). On macOS
+it launches an app it found this way only if OpenRize's Developer ID signed it; the app next to
+rize and the one `RIZE_APP` names are launched as they are.
+
+Human output shows text from the data (names, descriptions, window titles) with every control
+character replaced, so nothing stored can send escape sequences to the terminal. `--json` is
+exact.
 
 `rize app start` only launches the app (in the background, no window). Tracking is its own
 command: `rize track start`, or `rize app start --track` to do both.
@@ -126,7 +134,7 @@ installed.
 
 These app commands only serve what is on screen, so rize leaves them out:
 `resize_pulse_panel`, `hide_pulse_panel`, `resize_reminder_panel`, `expand_break_reminder`,
-`open_break_settings`, `render_invoice_preview`, `installed_release_notes`, `get_invoice_logo`, `preview_break_chime`,
+`open_break_settings`, `open_data_dir`, `render_invoice_preview`, `installed_release_notes`, `get_invoice_logo`, `preview_break_chime`,
 `dismiss_stopwatch_reminder`, `mark_segment_reviewed` and the debug-only `dev_sample_break_reminder`. Appearance preferences
 stay reachable through `rize settings set`.
 

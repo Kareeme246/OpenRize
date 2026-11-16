@@ -516,3 +516,54 @@ fn data_from_another_app_version_is_left_alone() {
         .unwrap();
     assert_eq!(version, 999);
 }
+
+#[test]
+fn the_human_output_never_carries_control_characters() {
+    let store = Store::new();
+    let payload = "x\u{1b}]0;pwned\u{7}\u{1b}[2J\u{9b}31m\u{7f}y";
+    store.ok(&["clients", "add", payload, "--notes", "one\r\ntwo\u{1b}[1m"]);
+    store.ok(&["projects", "add", payload, "--client", payload]);
+    store.ok(&["timers", "new", payload]);
+    store.ok(&["timers", "start", payload]);
+    let entry = store.ok(&[
+        "entries",
+        "add",
+        "--from",
+        "2026-09-01T09:00",
+        "--to",
+        "2026-09-01T10:30",
+        "-d",
+        payload,
+        "--project",
+        payload,
+    ]);
+    let id = entry["id"].as_str().unwrap();
+    assert_eq!(entry["description"], payload, "stored and JSON stay exact");
+
+    for args in [
+        vec!["status"],
+        vec!["entries", "list", "--from", "2026-09-01"],
+        vec!["entries", "show", id, "--full"],
+        vec!["projects", "list"],
+        vec!["projects", "show", payload],
+        vec!["clients", "list"],
+        vec!["clients", "show", payload],
+        vec!["timers", "list"],
+        vec!["report", "--from", "2026-09-01", "--by", "project"],
+        vec!["clients", "rm", payload, "--dry-run"],
+        vec!["clients", "rm", payload],
+        vec!["projects", "show", "\u{1b}[2Jmissing"],
+    ] {
+        let output = store.rize(&args);
+        let printed = format!(
+            "{}{}",
+            String::from_utf8(output.stdout).unwrap(),
+            String::from_utf8(output.stderr).unwrap()
+        );
+        assert!(printed.contains('\u{fffd}'), "rize {args:?}: {printed:?}");
+        assert!(
+            !printed.chars().any(|c| c.is_control() && c != '\n'),
+            "rize {args:?}: {printed:?}"
+        );
+    }
+}

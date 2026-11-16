@@ -20,7 +20,8 @@ pub mod rpc;
 pub mod settings;
 pub mod state;
 pub mod timers;
-#[cfg(windows)]
+// Compiled for tests everywhere, so its pure parts are checked off Windows too.
+#[cfg(any(windows, test))]
 pub mod user_path;
 
 pub const APP_IDENTIFIER: &str = "com.offlinestudios.openrize";

@@ -13,6 +13,11 @@ mod platform;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod title;
 
+// Compiled for tests everywhere, so the checks are run off Windows too.
+#[cfg(any(windows, test))]
+#[path = "capture/windows/claims.rs"]
+mod window_claims;
+
 pub use platform::{
     idle_ms, read_active_window, register_sleep_listeners, user_is_away, AppNapAssertion,
 };

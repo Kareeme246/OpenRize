@@ -42,11 +42,44 @@ pub fn redact(value: &mut Value) {
     }
 }
 
+/// Stored text (window titles, names, descriptions) can carry terminal escape
+/// sequences, so no control character in it reaches the terminal: line breaks
+/// and tabs become spaces, every other C0, DEL and C1 control a visible mark.
+pub fn plain(text: &str) -> String {
+    text.chars()
+        .map(|character| match character {
+            '\n' | '\t' => ' ',
+            control if control.is_control() => char::REPLACEMENT_CHARACTER,
+            other => other,
+        })
+        .collect()
+}
+
+/// `plain` over every string and key, so each print below is safe whichever
+/// helper it goes through.
+fn sanitize(value: &mut Value) {
+    match value {
+        Value::String(text) => *text = plain(text),
+        Value::Array(items) => items.iter_mut().for_each(sanitize),
+        Value::Object(fields) => {
+            *fields = std::mem::take(fields)
+                .into_iter()
+                .map(|(key, mut value)| {
+                    sanitize(&mut value);
+                    (plain(&key), value)
+                })
+                .collect();
+        }
+        _ => {}
+    }
+}
+
 pub fn show(command: Option<&Command>, data: &Value, full: bool) {
     let mut data = data.clone();
     if !full {
         redact(&mut data);
     }
+    sanitize(&mut data);
     let data = &data;
     match command {
         None | Some(Command::Status) => status(data),
@@ -271,6 +304,9 @@ pub fn show(command: Option<&Command>, data: &Value, full: bool) {
 }
 
 pub fn dry_run(data: &Value) {
+    let mut data = data.clone();
+    sanitize(&mut data);
+    let data = &data;
     let names = &data["names"];
     let target = |kind: &str| format!("{kind} {}", name(names, &data["id"]));
     println!("Dry run: nothing was changed.");
@@ -1021,9 +1057,8 @@ fn count(value: &Value, one: &str, many: &str) -> String {
 }
 
 fn clip(text: &str, max: usize) -> String {
-    let text = text.replace(['\n', '\t'], " ");
     if text.chars().count() <= max {
-        return text;
+        return text.to_string();
     }
     let mut clipped: String = text.chars().take(max.saturating_sub(1)).collect();
     clipped.push('…');
@@ -1086,6 +1121,28 @@ mod tests {
             value,
             json!({ "current": { "app": "Safari" }, "segments": [{ "app": "Code" }] })
         );
+    }
+
+    #[test]
+    fn no_control_character_survives_in_what_is_printed() {
+        let payload = "a\u{1b}]0;pwned\u{7}\u{1b}[2Jb\u{9b}31m\u{7f}\r\nc\td";
+        let cleaned = "a\u{fffd}]0;pwned\u{fffd}\u{fffd}[2Jb\u{fffd}31m\u{fffd}\u{fffd} c d";
+        assert_eq!(plain(payload), cleaned);
+        assert_eq!(plain("Café 日本 …"), "Café 日本 …");
+
+        let mut value = json!({
+            "entries": [{ "description": payload, "ms": 5 }],
+            "names": { payload: payload },
+        });
+        sanitize(&mut value);
+        assert_eq!(
+            value,
+            json!({
+                "entries": [{ "description": cleaned, "ms": 5 }],
+                "names": { cleaned: cleaned },
+            })
+        );
+        assert!(!value.to_string().chars().any(char::is_control));
     }
 
     #[test]

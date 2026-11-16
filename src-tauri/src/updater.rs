@@ -16,6 +16,15 @@ const FIRST_CHECK_DELAY: Duration = Duration::from_secs(10);
 const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const FOCUS_CHECK_MIN_GAP: Duration = Duration::from_secs(5 * 60);
 const PROGRESS_EMIT_GAP: Duration = Duration::from_millis(150);
+/// The whole check request, which the plugin does not carry over to the download. A connection
+/// held open without data would otherwise leave the phase on Checking, refusing every later check.
+const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+/// The longest wait for the response to start, or between two reads of it. The download has
+/// only this, not a total limit, so a large update on a slow link still finishes.
+const STALL_TIMEOUT: Duration = Duration::from_secs(60);
+/// A hundred releases come to well under a megabyte.
+const MAX_RELEASES_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -259,7 +268,14 @@ fn emit(app: &AppHandle, status: &UpdateStatus) {
 }
 
 async fn find_update(app: &AppHandle) -> Result<Option<(Update, Vec<ReleaseNotes>)>, String> {
-    let builder = app.updater_builder();
+    let builder = app
+        .updater_builder()
+        .timeout(CHECK_TIMEOUT)
+        .configure_client(|client| {
+            client
+                .connect_timeout(CONNECT_TIMEOUT)
+                .read_timeout(STALL_TIMEOUT)
+        });
     // The Windows plugin exits the process directly, bypassing RunEvent::Exit.
     // Flush the same activity/break state before handing off to the installer.
     #[cfg(windows)]
@@ -356,7 +372,7 @@ async fn published_releases() -> Result<Vec<(semver::Version, ReleaseNotes)>, St
         .timeout(Duration::from_secs(20))
         .build()
         .map_err(|error| error.to_string())?;
-    let releases: Vec<GithubRelease> = client
+    let mut response = client
         .get(format!(
             "https://api.github.com/repos/{REPOSITORY}/releases?per_page=100"
         ))
@@ -364,10 +380,16 @@ async fn published_releases() -> Result<Vec<(semver::Version, ReleaseNotes)>, St
         .send()
         .await
         .and_then(reqwest::Response::error_for_status)
-        .map_err(|error| error.to_string())?
-        .json()
-        .await
         .map_err(|error| error.to_string())?;
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|error| error.to_string())? {
+        if body.len() + chunk.len() > MAX_RELEASES_BYTES {
+            return Err("the list of releases is too large".to_string());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    let releases: Vec<GithubRelease> =
+        serde_json::from_slice(&body).map_err(|error| error.to_string())?;
 
     let mut notes: Vec<(semver::Version, ReleaseNotes)> = releases
         .into_iter()

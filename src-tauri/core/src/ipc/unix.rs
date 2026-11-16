@@ -136,3 +136,44 @@ fn current_uid() -> u32 {
     // SAFETY: geteuid has no arguments and cannot invalidate Rust memory.
     unsafe { libc::geteuid() }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use crate::ipc::{serve_retrying, Endpoint};
+    use crate::protocol::{Operation, Request, Response};
+
+    #[test]
+    fn an_endpoint_that_cannot_be_taken_yet_is_served_once_it_can() {
+        let data_dir = std::env::temp_dir().join(format!("rize-ipc-retry-{}", std::process::id()));
+        let socket = Endpoint::new(&data_dir).unwrap().address.socket;
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        std::fs::write(&socket, "in the way").unwrap();
+
+        let endpoint = Endpoint::new(&data_dir).unwrap();
+        assert!(endpoint.listen().is_err());
+        serve_retrying(
+            Endpoint::new(&data_dir).unwrap(),
+            Duration::from_millis(50),
+            |_| Response::success(serde_json::json!({})),
+        );
+        std::thread::sleep(Duration::from_millis(150));
+        assert!(endpoint.connect().is_err());
+
+        std::fs::remove_file(&socket).unwrap();
+        let request = Request::new(Operation::TimersList {});
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let answer = loop {
+            match endpoint.call(&request) {
+                Err(_) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20))
+                }
+                answer => break answer,
+            }
+        };
+        assert!(answer.unwrap().ok);
+        // The serving thread never ends, so its socket is removed here.
+        std::fs::remove_file(&socket).unwrap();
+    }
+}

@@ -13,30 +13,16 @@ use crate::{activity, commands, AppState};
 pub struct StoresLock(#[allow(dead_code)] pub std::fs::File);
 
 pub fn serve(app: AppHandle, data_dir: PathBuf) {
-    let service = match Endpoint::new(&data_dir).and_then(|endpoint| endpoint.listen()) {
-        Ok(service) => service,
+    let endpoint = match Endpoint::new(&data_dir) {
+        Ok(endpoint) => endpoint,
         Err(error) => {
             eprintln!("rize endpoint unavailable: {error}");
             return;
         }
     };
-    std::thread::spawn(move || loop {
-        match service.accept() {
-            Ok(stream) => {
-                let app = app.clone();
-                let data_dir = data_dir.clone();
-                std::thread::spawn(move || {
-                    ipc::respond(stream, |request| {
-                        let state = app.state::<AppState>();
-                        rpc::answer(&state, Some(&App(&app)), &data_dir, request)
-                    });
-                });
-            }
-            Err(error) => {
-                eprintln!("rize endpoint: {error}");
-                std::thread::sleep(Duration::from_millis(250));
-            }
-        }
+    ipc::serve(endpoint, move |request| {
+        let state = app.state::<AppState>();
+        rpc::answer(&state, Some(&App(&app)), &data_dir, request)
     });
 }
 

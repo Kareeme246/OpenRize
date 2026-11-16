@@ -389,6 +389,10 @@ jobs:
               --rawfile signature "release-assets/$2.sig" \
               '.version == $version and .platforms[$platform].url == $url and
                .platforms[$platform].signature == $signature' release-assets/latest.json
+            # Installed copies refuse an update whose signature does not name
+            # this version (requireSignedVersion), so fail here, not there.
+            base64 --decode < "release-assets/$2.sig" |
+              grep -q "^trusted comment: .*	version:$VERSION\$"
           }
           if [[ "$MACOS_ARM" == true ]]; then
             printf '%s\n' "openrize_${VERSION}_aarch64.dmg" \

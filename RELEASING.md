@@ -55,6 +55,13 @@ Publishing a release ships it to every installed copy: the app checks
 and offers the update in the sidebar and Settings. Drafts and pre-releases are
 never offered, because `releases/latest` skips them.
 
+`latest.json` is not signed, so the updater ties it to the artifact instead:
+`requireSignedVersion` in `tauri.conf.json` makes the app refuse an update whose
+signature does not name the version `latest.json` announces. `tauri bundle`
+(Tauri CLI 2.12 or newer) writes that version into each updater signature. If
+an updater artifact is ever signed by hand, pass `--app-version <version>` to
+`tauri signer sign`, or installed copies will reject the update.
+
 ## Optional website publishing (R2)
 
 The `r2` dispatch checkbox defaults to **false**. Turning it on publishes to

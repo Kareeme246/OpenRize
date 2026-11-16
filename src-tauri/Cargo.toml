@@ -1,6 +1,6 @@
 [package]
 name = "openrize"
-version = "0.10.2"
+version = "0.10.3"
 description = "Automatic, private, local-first time tracking for your Mac"
 authors = ["Kareem Elgohry <kareemdev52@gmail.com>"]
 edition = "2021"
@@ -22,7 +22,7 @@ tauri-build = { version = "2", features = [] }
 sha2 = "0.10"
 flate2 = "1"
 tar = { version = "0.4", default-features = false }
-zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 
 [dependencies]
 openrize-core = { path = "core" }
@@ -30,12 +30,14 @@ tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-ap
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+rusqlite = { version = "0.41.1", features = ["bundled"] }
 uuid = { version = "1", features = ["v4", "v7", "serde"] }
 url = "2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 regex = "1"
-tauri-plugin-updater = "2"
+# No `zip` feature: releases ship a bare NSIS installer on Windows and an .app.tar.gz on macOS
+# (whose tar and flate2 are unconditional there), so the plugin's zip extraction would be dead code.
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "blocking", "rustls-no-provider", "system-proxy"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 semver = "1"

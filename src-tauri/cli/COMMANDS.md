@@ -84,7 +84,7 @@ installed.
 | `rize entries reject <id>` | Reject an AI suggestion. | `reject_time_entry` | Yes | Shipped |
 | `rize entries split <id> --at <time>` | Split one entry in two. Refused on an approved entry. | `split_time_entry` | Yes | Shipped |
 | `rize entries merge <id> <other-id>` | Merge two neighbouring entries on the same day into one: they must overlap, touch or sit no more than five minutes apart; the merged entry spans the earliest start to the latest end, so a gap becomes tracked time (taken from any pending entry in it; refused when an approved entry is) and an overlap is absorbed. Refused when either is approved. | `merge_time_entries` | Yes | Shipped |
-| `rize entries rm <id...>` | Delete entries (confirmed). Refused when any is approved. | `delete_time_entries` | Yes | Shipped |
+| `rize entries rm <id...>` | Delete entries (confirmed). Refused when any is approved. The app can undo it for a day; after that, or once the app or `rize` next opens the data itself, the entry and everything derived from it are removed for good. | `delete_time_entries` | Yes | Shipped |
 | `rize entries rebuild [range]` | Rebuild entries from recorded activity (confirmed). | `rebuild_time_entries` | Yes | Shipped |
 | `rize entries export --format csv\|json [--out file]` | Export filtered entries to stdout or a file. | `export_time_entries` (`reports::export_body`) | Yes | Shipped |
 | `rize review [range]` | Pending entries, today by default. | `query_time_entries` (pending) | Yes | Shipped |

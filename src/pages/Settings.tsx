@@ -1704,7 +1704,7 @@ export function Settings({
               </SettingBlock>
               <SettingRow
                 title="Keep activity until"
-                description="Delete automatic activity history older than this. Manual trackers are never touched."
+                description="Delete automatic activity history older than this: window titles and addresses, breaks, and what the AI learned from them. Time entries and their descriptions stay. Manual trackers are never touched."
               >
                 <Select
                   label="Keep activity until"

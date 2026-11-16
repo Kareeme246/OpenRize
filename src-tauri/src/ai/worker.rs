@@ -1080,9 +1080,10 @@ impl Worker {
         let active = store::active_artifact(&self.conn, kind)?
             .and_then(|artifact| paths::model_artifact(&self.ml_dir, &artifact.path));
 
-        std::fs::create_dir_all(&self.ml_dir).map_err(|e| e.to_string())?;
+        openrize_core::private_fs::create_dir_all(&self.ml_dir).map_err(|e| e.to_string())?;
         let dataset = self.ml_dir.join(format!("{kind}-train.jsonl"));
-        let mut file = std::fs::File::create(&dataset).map_err(|e| e.to_string())?;
+        let mut file =
+            openrize_core::private_fs::open(&dataset, true).map_err(|e| e.to_string())?;
         let mut holdout: Vec<(&str, &str)> = Vec::new();
         for (entry_id, text, label) in &rows {
             let is_holdout = in_holdout(entry_id);

@@ -1,7 +1,7 @@
 //! The open stores one process works on, and the lock that makes it the only one: the app holds it
 //! for its life, `rize` for one request while the app is closed.
 
-use std::fs::{File, OpenOptions, TryLockError};
+use std::fs::{File, TryLockError};
 use std::io;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
@@ -102,12 +102,7 @@ impl AppState {
 /// Holds the stores for this process. `wait` blocks until a `rize` edit finishes (the app at
 /// launch); otherwise `None` means another process has them. Only the lock file is created.
 pub fn lock_stores(data_dir: &Path, wait: bool) -> io::Result<Option<File>> {
-    let file = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(data_dir.join(paths::LOCK_FILE))?;
+    let file = crate::private_fs::open(&data_dir.join(paths::LOCK_FILE), false)?;
     if wait {
         file.lock()?;
         return Ok(Some(file));
@@ -173,6 +168,87 @@ mod tests {
         let error = AppState::open_existing(&dir).err().unwrap();
         assert_eq!(error.code, code::INCOMPATIBLE);
         assert!(error.message.contains("older"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fresh_store_is_private_whatever_the_umask() {
+        use crate::private_fs::tests::{mode, permissive_umask, temp};
+
+        let _umask = permissive_umask();
+        let root = temp("state-modes");
+        let dir = root.join(paths::ACCOUNTS_DIR).join("a1");
+        let config = root.join("config-home").join("openrize");
+
+        crate::private_fs::create_dir_all(&dir).unwrap();
+        let _lock = lock_stores(&dir, false).unwrap().unwrap();
+        let activity = ActivityStore::load(&dir).unwrap();
+        let timers = TimerStore::load(&dir).unwrap();
+        timers.snapshot().unwrap();
+        accounts::Registry::default().save(&root).unwrap();
+        accounts::Handoff {
+            to: None,
+            adopt: false,
+            show: false,
+            window: None,
+        }
+        .write(&root)
+        .unwrap();
+        let mut settings = SettingsStore::load(&config).unwrap();
+        settings.set(Settings::default()).unwrap();
+
+        for folder in [&root.join(paths::ACCOUNTS_DIR), &dir, &config] {
+            assert_eq!(mode(folder), 0o700, "{folder:?}");
+        }
+        for file in [
+            dir.join(DB_FILE),
+            dir.join(format!("{DB_FILE}-wal")),
+            dir.join(format!("{DB_FILE}-shm")),
+            dir.join(paths::LOCK_FILE),
+            root.join(paths::ACCOUNTS_FILE),
+            root.join(paths::SWITCH_FILE),
+            config.join("settings.json"),
+        ] {
+            assert_eq!(mode(&file), 0o600, "{file:?}");
+        }
+        let leftovers: Vec<_> = std::fs::read_dir(&root)
+            .unwrap()
+            .chain(std::fs::read_dir(&config).unwrap())
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+        drop((activity, timers));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opening_an_older_readable_database_makes_it_and_its_log_private() {
+        use crate::private_fs::tests::{mode, permissive_umask, temp};
+        use std::os::unix::fs::PermissionsExt;
+
+        let _umask = permissive_umask();
+        let dir = temp("state-older");
+        let db = dir.join(DB_FILE);
+        let wal = dir.join(format!("{DB_FILE}-wal"));
+        {
+            let conn = Connection::open(&db).unwrap();
+            conn.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE older (x);")
+                .unwrap();
+            assert_eq!((mode(&db), mode(&wal)), (0o644, 0o644));
+            std::fs::copy(&wal, dir.join("kept-wal")).unwrap();
+        }
+        // The log a crashed older build left behind, still readable by others.
+        std::fs::copy(dir.join("kept-wal"), &wal).unwrap();
+        std::fs::set_permissions(&wal, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        let store = ActivityStore::load(&dir).unwrap();
+        assert_eq!(mode(&db), 0o600);
+        assert_eq!(mode(&wal), 0o600);
+        assert_eq!(mode(&dir.join(format!("{DB_FILE}-shm"))), 0o600);
+        drop(store);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -89,7 +89,7 @@ impl EntryRow {
     }
 }
 
-const DEPENDENTS: [&str; 4] = [
+pub(super) const DEPENDENTS: [&str; 4] = [
     "suggestions",
     "classify_jobs",
     "entry_embeddings",

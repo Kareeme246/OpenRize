@@ -19,8 +19,8 @@ fn is_done_in(dir: &Path) -> bool {
 }
 
 fn mark_done_in(dir: &Path) -> io::Result<()> {
-    std::fs::create_dir_all(dir)?;
-    std::fs::write(marker(dir), b"")
+    openrize_core::private_fs::create_dir_all(dir)?;
+    openrize_core::private_fs::write(&marker(dir), b"")
 }
 
 /// A dev build asked to see the screen again. Kept in memory, never by deleting

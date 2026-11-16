@@ -62,7 +62,13 @@ permissions/onboarding gating, `useTauriEvent` usage, font stacks, shortcut labe
   (#166, 0.9.50).
 - [x] CAP-8 Private windows are tracked; their titles/URLs/domains are erased once the entry is
   classified, or after a day, on both platforms (0.9.51). Edge InPrivate and Zen/Firefox private
-  windows are detected from the title; Chrome-family incognito is unverified; Safari has no signal.
+  windows are detected from the title; Chrome-family incognito is unverified on Windows. On macOS
+  Chrome, Brave, Edge and Arc are asked for the window's mode, and Safari marks a private window
+  in its accessibility title (`<title>, Private Browsing`, localized; read from Safari 27's
+  framework, not yet seen on a live private window). macOS fails closed: a Chromium browser that
+  does not say its window is normal (not asked, or asked and no answer) and a Firefox-family or
+  Safari window with no readable title are recorded as private (`capture::window_is_private`).
+  Windows still reads an unmarked title as normal.
 - [x] PLT-10 / PAR-5 rize's folder is re-ensured on the user PATH at every launch of an installed
   release build (#165, 0.9.49).
 - [ ] Windows wastes work on `embed` jobs: with no embedding model each one fails its three
@@ -88,4 +94,4 @@ permissions/onboarding gating, `useTauriEvent` usage, font stacks, shortcut labe
 ## Deferred (low value or unverified)
 BRK-4 tray bitmap sizing, BRK-7 Pulse foreground-lock guard, BRK-9 auto-hide taskbar inset,
 PLT-5 identical permissions files, PLT-9 pipe squatting, PAR-7 ARM64 updater copy,
-PAR-8 Windows installer test, macOS osascript timeout (CAP-12 note).
+PAR-8 Windows installer test.

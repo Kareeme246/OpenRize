@@ -1,11 +1,16 @@
 //! macOS capture: frontmost app via NSWorkspace, window title via the Accessibility API (no
-//! Screen Recording permission needed), browser URL via AppleScript.
+//! Screen Recording permission needed), browser URL and window mode via AppleScript.
 
 use core_foundation::array::CFArray;
 use core_foundation::base::{CFType, TCFType};
 use core_foundation::string::CFString;
 use core_foundation_sys::base::CFTypeRef;
+use std::io::Read;
+use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
+use openrize_core::capture::BrowserReply;
 
 use super::title::{self, Attempt, FailureLog, Resolution, TitleSource};
 use super::{domain_of, WindowSample};
@@ -96,23 +101,21 @@ pub fn read_active_window() -> Option<WindowSample> {
 
     let title = window_title(pid, bundle_id.as_deref());
 
-    let browser = match bundle_id {
-        Some(ref bid) => get_browser_window(bid, &app_name),
-        None => BrowserWindow::NONE,
-    };
-    // A Chromium window says so when asked; Firefox-family and Edge windows
-    // say so in their title, which is the only signal for those.
-    let private = browser.incognito
-        || bundle_id
-            .as_deref()
-            .is_some_and(|bid| openrize_core::capture::title_marks_private(bid, &title));
+    let reply = bundle_id.as_deref().and_then(ask_browser);
+    // A Chromium window says so when asked; Firefox-family and Safari windows say so in their
+    // title. Whatever cannot be told is private (`window_is_private`).
+    let private = bundle_id.as_deref().is_some_and(|bid| {
+        openrize_core::capture::window_is_private(bid, &title, reply.as_ref().map(|r| r.mode))
+    });
+    let url = reply.and_then(|reply| reply.url);
+    let domain = url.as_deref().and_then(domain_of);
 
     Some(WindowSample {
         app: app_name,
         title,
         bundle_id,
-        url: browser.url,
-        domain: browser.domain,
+        url,
+        domain,
         private,
         keeps_display_awake: keeps_display_awake(pid),
     })
@@ -290,78 +293,88 @@ fn keeps_display_awake(pid: libc::pid_t) -> bool {
     })
 }
 
-struct BrowserWindow {
-    url: Option<String>,
-    domain: Option<String>,
-    incognito: bool,
-}
+/// How long a browser gets to answer before `osascript` is killed, so a hung browser or an
+/// unanswered Automation prompt cannot stall the sampler (the default Apple Event timeout is two
+/// minutes). The script's own `with timeout` normally ends it first.
+const SCRIPT_DEADLINE: Duration = Duration::from_millis(1500);
 
-impl BrowserWindow {
-    const NONE: Self = Self {
-        url: None,
-        domain: None,
-        incognito: false,
-    };
-}
-
-/// The script asking a Chromium browser for its front window's URL and mode, one per line. Only
-/// Chromium has a `mode`; a browser that does not answer is read as normal so the URL is never
-/// lost.
-fn chromium_script(app: &str) -> String {
+/// The script asking a Chromium browser for its front window's URL and mode, one per line. An
+/// error, such as a browser without `mode`, fails the script, which reads as unknown.
+fn chromium_script(bundle_id: &str) -> String {
     format!(
-        r#"tell application "{app}"
-    if (count of windows) > 0 then
-        set windowMode to "normal"
-        try
-            set windowMode to (mode of front window) as text
-        end try
-        return (URL of active tab of front window) & linefeed & windowMode
-    end if
-end tell"#
+        r#"with timeout of 1 second
+    tell application id "{bundle_id}"
+        if (count of windows) = 0 then return linefeed & "normal"
+        return (URL of active tab of front window) & linefeed & ((mode of front window) as text)
+    end tell
+end timeout"#
     )
 }
 
-fn get_browser_window(bundle_id: &str, app_name: &str) -> BrowserWindow {
-    // Safari has no private flag in its scripting dictionary, so a Safari
-    // private window cannot be told from a normal one this way.
-    const SAFARI: &str = r#"tell application "Safari" to if (count of documents) > 0 then return URL of front document"#;
+/// Safari's dictionary has no window mode, so its "normal" only says that it answered: the
+/// window's title is what tells a private one (`capture::title_marks_private`).
+const SAFARI_SCRIPT: &str = r#"with timeout of 1 second
+    tell application id "com.apple.Safari"
+        set pageURL to ""
+        if (count of documents) > 0 then
+            set pageURL to URL of front document
+            if pageURL is missing value then set pageURL to ""
+        end if
+        return pageURL & linefeed & "normal"
+    end tell
+end timeout"#;
+
+/// The browsers that are asked, by exact bundle id: the id is what the script addresses, so an
+/// app merely named like a browser is never scripted and none is launched by name. `None` for
+/// every other app; a browser that does not answer in time gives the unknown reply.
+fn ask_browser(bundle_id: &str) -> Option<BrowserReply> {
     let script = match bundle_id {
-        "com.apple.Safari" => SAFARI.to_string(),
-        "com.google.Chrome" => chromium_script("Google Chrome"),
-        "com.brave.Browser" => chromium_script("Brave Browser"),
-        "com.microsoft.edgemac" => chromium_script("Microsoft Edge"),
-        "company.thebrowser.Browser" => chromium_script("Arc"),
-        _ => {
-            if app_name == "Safari" {
-                SAFARI.to_string()
-            } else if app_name == "Google Chrome" {
-                chromium_script("Google Chrome")
-            } else {
-                return BrowserWindow::NONE;
+        "com.apple.Safari" => SAFARI_SCRIPT.to_string(),
+        "com.google.Chrome"
+        | "com.brave.Browser"
+        | "com.microsoft.edgemac"
+        | "company.thebrowser.Browser" => chromium_script(bundle_id),
+        _ => return None,
+    };
+    Some(
+        run_script(&script, SCRIPT_DEADLINE)
+            .map(|stdout| openrize_core::capture::parse_browser_reply(&stdout))
+            .unwrap_or_default(),
+    )
+}
+
+/// Runs an AppleScript and returns what it printed, or `None` if it failed or outlived `deadline`
+/// (it is then killed). `osascript` is run by absolute path with an empty environment, so neither
+/// `PATH` nor an `OSA*`/`DYLD_*` variable chooses what runs with the app's Automation grants.
+fn run_script(script: &str, deadline: Duration) -> Option<String> {
+    let mut child = Command::new("/usr/bin/osascript")
+        .env_clear()
+        .arg("-e")
+        .arg(script)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
             }
         }
     };
-
-    let output = std::process::Command::new("osascript")
-        .arg("-e")
-        .arg(script)
-        .output()
-        .ok();
-
-    if let Some(out) = output {
-        if out.status.success() {
-            let reply =
-                openrize_core::capture::parse_browser_reply(&String::from_utf8_lossy(&out.stdout));
-            let domain = reply.url.as_deref().and_then(domain_of);
-            return BrowserWindow {
-                url: reply.url,
-                domain,
-                incognito: reply.incognito,
-            };
-        }
-    }
-
-    BrowserWindow::NONE
+    // The reply is two short lines, far below the pipe's buffer, so the child never waited on
+    // this read to exit.
+    let mut stdout = String::new();
+    child.stdout.take()?.read_to_string(&mut stdout).ok()?;
+    status.success().then_some(stdout)
 }
 
 pub struct AppNapAssertion {
@@ -433,8 +446,74 @@ pub fn register_sleep_listeners(app: tauri::AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::keeps_display_awake;
+    use super::{ask_browser, chromium_script, keeps_display_awake, run_script, SAFARI_SCRIPT};
+    use openrize_core::capture::{parse_browser_reply, window_is_private, Mode};
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_script_that_answers_is_read_and_one_that_hangs_is_killed() {
+        let reply = run_script(
+            r#"return "https://example.com/a?token=1#x" & linefeed & "normal""#,
+            Duration::from_secs(10),
+        )
+        .expect("osascript ships with macOS");
+        let reply = parse_browser_reply(&reply);
+        assert_eq!(reply.url.as_deref(), Some("https://example.com/a"));
+        assert_eq!(reply.mode, Mode::Normal);
+
+        let started = Instant::now();
+        assert_eq!(run_script("delay 30", Duration::from_millis(300)), None);
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "the child was not killed"
+        );
+        // A script that errors, as a refused Automation request does, is no answer either.
+        assert_eq!(
+            run_script(r#"error "refused" number -1743"#, Duration::from_secs(10)),
+            None
+        );
+    }
+
+    #[test]
+    fn only_known_bundle_ids_are_asked_and_the_scripts_address_them_by_id() {
+        // None of these runs a script: an app that only shares a browser's name, a browser
+        // that is not scripted, and an id crafted to break out of the script's string.
+        for id in [
+            "com.example.Safari",
+            "com.vivaldi.Vivaldi",
+            "org.mozilla.firefox",
+            "com.google.Chrome\" to quit\ntell application \"Finder",
+        ] {
+            assert!(ask_browser(id).is_none(), "{id}");
+        }
+        // Not asked, so a Chromium browser outside the list is private.
+        assert!(window_is_private(
+            "com.vivaldi.Vivaldi",
+            "Inbox - Vivaldi",
+            None
+        ));
+        // A Chromium browser that is asked and does not answer is private; Safari's title decides.
+        assert!(!window_is_private(
+            "com.apple.Safari",
+            "Page",
+            Some(Mode::Unknown)
+        ));
+        for id in [
+            "com.google.Chrome",
+            "com.brave.Browser",
+            "com.microsoft.edgemac",
+            "company.thebrowser.Browser",
+        ] {
+            assert!(window_is_private(id, "Page", Some(Mode::Unknown)), "{id}");
+        }
+
+        assert!(SAFARI_SCRIPT.contains(r#"tell application id "com.apple.Safari""#));
+        let chrome = chromium_script("com.google.Chrome");
+        assert!(chrome.contains(r#"tell application id "com.google.Chrome""#));
+        for script in [SAFARI_SCRIPT, chrome.as_str()] {
+            assert!(script.starts_with("with timeout of 1 second"));
+        }
+    }
 
     #[test]
     fn a_display_assertion_is_attributed_to_the_process_holding_it() {

@@ -2,7 +2,6 @@
 //! epoch ms from `now_epoch_ms` (a monotonic `Instant` stops ticking while a Mac sleeps). A timer's
 //! time is its segments plus the run in progress (`run_span`); timers live in `activity.db`.
 
-use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -113,8 +112,11 @@ pub struct TimerStore {
 
 impl TimerStore {
     pub fn load(dir: &Path) -> Result<Self, String> {
-        fs::create_dir_all(dir).map_err(|error| format!("could not create data dir: {error}"))?;
+        crate::private_fs::create_dir_all(dir)
+            .map_err(|error| format!("could not create data dir: {error}"))?;
         let path = dir.join(DB_FILE);
+        crate::private_fs::prepare_database(&path)
+            .map_err(|error| format!("could not create the database: {error}"))?;
         let mut conn = Connection::open(&path).map_err(|error| error.to_string())?;
         conn.busy_timeout(std::time::Duration::from_secs(5))
             .map_err(|error| error.to_string())?;
@@ -813,7 +815,7 @@ mod tests {
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("openrize-{name}-{}", now_epoch_ms()));
-        fs::create_dir_all(&dir).expect("temp dir");
+        std::fs::create_dir_all(&dir).expect("temp dir");
         dir
     }
 

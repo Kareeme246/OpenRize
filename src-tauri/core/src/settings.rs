@@ -11,6 +11,7 @@ use std::sync::Once;
 use serde::{Deserialize, Serialize};
 
 use crate::paths;
+use crate::private_fs;
 use crate::timers::now_epoch_ms;
 use crate::APP_IDENTIFIER;
 
@@ -716,7 +717,8 @@ pub fn appearance_init_script(dir: &Path) -> String {
 
 impl SettingsStore {
     pub fn load(dir: &Path) -> Result<Self, String> {
-        fs::create_dir_all(dir).map_err(|error| format!("could not create config dir: {error}"))?;
+        private_fs::create_dir_all(dir)
+            .map_err(|error| format!("could not create config dir: {error}"))?;
         let path = dir.join(FILE_NAME);
 
         let settings = fs::read(&path)
@@ -779,7 +781,8 @@ impl SettingsStore {
     fn persist(&self) -> Result<(), String> {
         let json = serde_json::to_vec_pretty(&self.settings).map_err(|e| e.to_string())?;
         let temp = self.path.with_extension("json.tmp");
-        fs::write(&temp, json).map_err(|error| format!("could not write settings: {error}"))?;
+        private_fs::write(&temp, &json)
+            .map_err(|error| format!("could not write settings: {error}"))?;
         fs::rename(&temp, &self.path)
             .map_err(|error| format!("could not replace settings: {error}"))
     }

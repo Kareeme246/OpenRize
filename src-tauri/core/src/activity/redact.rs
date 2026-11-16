@@ -164,6 +164,36 @@ mod tests {
     }
 
     #[test]
+    fn a_normal_window_is_stored_without_its_query_and_a_new_query_is_the_same_page() {
+        let mut store = store();
+        let page = |query: &str| {
+            sample(
+                "browser",
+                "results",
+                Some(&format!("https://shop.example/search{query}")),
+                false,
+            )
+        };
+        for (step, query) in ["?q=shoes", "?q=boots&page=2", "#reviews", ""]
+            .into_iter()
+            .enumerate()
+        {
+            store.tick(page(query), 0, step as u64 * 5_000).unwrap();
+        }
+        store.close_active_segment(60_000).unwrap();
+
+        let urls: Vec<Option<String>> = store
+            .conn
+            .prepare("SELECT url FROM segments ORDER BY id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(urls, vec![Some("https://shop.example/search".to_string())]);
+    }
+
+    #[test]
     fn switching_between_private_and_normal_in_one_browser_makes_new_segments() {
         let mut store = store();
         let normal = sample("browser", "same page", Some("https://a.example/p"), false);

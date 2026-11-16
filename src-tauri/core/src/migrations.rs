@@ -1,6 +1,6 @@
 use rusqlite::{params, Connection, Result};
 
-pub const SCHEMA_VERSION: i32 = 15;
+pub const SCHEMA_VERSION: i32 = 16;
 
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     let current_version: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
@@ -485,6 +485,17 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
     }
 
+    // v16: no stored address keeps its query or fragment, and the title index drops a title's
+    // trigrams when the title goes instead of keeping them until a later merge.
+    if current_version < 16 {
+        // So the rewritten rows and merged index pages are zeroed, whichever store got here first.
+        conn.execute_batch("PRAGMA secure_delete=ON;")?;
+        let tx = conn.transaction()?;
+        tx.execute_batch(STRIP_URLS_V16)?;
+        tx.execute("PRAGMA user_version = 16;", [])?;
+        tx.commit()?;
+    }
+
     Ok(())
 }
 
@@ -493,6 +504,17 @@ fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool
     let mut cols = stmt.query_map([], |row| row.get::<_, String>(1))?;
     Ok(cols.any(|col| col.as_deref() == Ok(column)))
 }
+
+/// Cuts every stored address at its first `?` or `#` (the two statements together cut at
+/// whichever comes first), as capture now does (`WindowSample::for_storage`). FTS5's
+/// `secure-delete` makes a delete remove the entry from the index instead of adding a marker
+/// beside it, and `optimize` merges away the markers and dead entries already there.
+const STRIP_URLS_V16: &str = "
+UPDATE segments SET url = substr(url, 1, instr(url, '?') - 1) WHERE instr(url, '?') > 0;
+UPDATE segments SET url = substr(url, 1, instr(url, '#') - 1) WHERE instr(url, '#') > 0;
+INSERT INTO segments_fts (segments_fts, rank) VALUES ('secure-delete', 1);
+INSERT INTO segments_fts (segments_fts) VALUES ('optimize');
+";
 
 /// Private segments stay out of `segments_fts`: the index keeps trigrams of every title until
 /// merged, so erasing a title from `segments` would not erase it there. Segments are indexed only
@@ -2188,5 +2210,157 @@ mod private_segments_tests {
             .unwrap();
         assert_eq!(indexed(&conn, "budget"), 0);
         assert_eq!(indexed(&conn, "forecast"), 1);
+    }
+}
+
+#[cfg(test)]
+mod strip_urls_tests {
+    use super::*;
+
+    /// Version 15 with rows as it stored them: addresses whole, private or not.
+    fn v15_database() -> Connection {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO segments_fts (segments_fts, rank) VALUES ('secure-delete', 0);
+             INSERT INTO segments (id, app, title, kind, started_at, ended_at, url, domain, private) VALUES
+               (1, 'Chrome', 'Reset password', 'activity', 0, 1, 'https://id.example/reset?token=abc#step', 'id.example', 0),
+               (2, 'Chrome', 'Docs', 'activity', 0, 1, 'https://docs.example/page#anchor?not=query', 'docs.example', 0),
+               (3, 'Chrome', 'Plain', 'activity', 0, 1, 'https://plain.example/a/b', 'plain.example', 0),
+               (4, 'Zen', 'Hidden', 'activity', 0, 1, 'https://private.example/x?q=search', 'private.example', 1),
+               (5, 'Zen', 'Private window', 'activity', 0, 1, NULL, NULL, 1),
+               (6, 'Code', 'main.rs', 'activity', 0, 1, NULL, NULL, 0),
+               (7, 'Chrome', 'Open', 'activity', 0, NULL, 'https://open.example/?', 'open.example', 0);
+             PRAGMA user_version = 15;",
+        )
+        .unwrap();
+        conn
+    }
+
+    /// id, title, url, domain, private.
+    type Stored = (i64, String, Option<String>, Option<String>, i64);
+
+    fn segments(conn: &Connection) -> Vec<Stored> {
+        conn.prepare("SELECT id, title, url, domain, private FROM segments ORDER BY id")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<_>>()
+            .unwrap()
+    }
+
+    fn secure_delete(conn: &Connection) -> i64 {
+        conn.query_row(
+            "SELECT v FROM segments_fts_config WHERE k = 'secure-delete'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn v16_cuts_every_address_at_its_query_or_fragment_and_changes_nothing_else() {
+        let mut conn = v15_database();
+        assert_eq!(secure_delete(&conn), 0);
+        run_migrations(&mut conn).unwrap();
+
+        let version: i32 = conn
+            .query_row("PRAGMA user_version;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        let row = |id, title: &str, url: Option<&str>, domain: Option<&str>, private| {
+            (
+                id,
+                title.to_string(),
+                url.map(str::to_string),
+                domain.map(str::to_string),
+                private,
+            )
+        };
+        let expected = vec![
+            row(
+                1,
+                "Reset password",
+                Some("https://id.example/reset"),
+                Some("id.example"),
+                0,
+            ),
+            row(
+                2,
+                "Docs",
+                Some("https://docs.example/page"),
+                Some("docs.example"),
+                0,
+            ),
+            row(
+                3,
+                "Plain",
+                Some("https://plain.example/a/b"),
+                Some("plain.example"),
+                0,
+            ),
+            row(
+                4,
+                "Hidden",
+                Some("https://private.example/x"),
+                Some("private.example"),
+                1,
+            ),
+            row(5, "Private window", None, None, 1),
+            row(6, "main.rs", None, None, 0),
+            row(
+                7,
+                "Open",
+                Some("https://open.example/"),
+                Some("open.example"),
+                0,
+            ),
+        ];
+        assert_eq!(segments(&conn), expected);
+        assert_eq!(secure_delete(&conn), 1);
+
+        // Normal titles stay searchable, private ones stay out, and the index is whole.
+        let indexed = |word: &str| -> i64 {
+            conn.query_row(
+                "SELECT COUNT(*) FROM segments_fts WHERE segments_fts MATCH ?1",
+                [word],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(indexed("password"), 1);
+        assert_eq!(indexed("hidden"), 0);
+        conn.execute(
+            "INSERT INTO segments_fts(segments_fts) VALUES('integrity-check')",
+            [],
+        )
+        .unwrap();
+
+        // Running again, as every launch does, changes nothing.
+        let changes = conn.total_changes();
+        run_migrations(&mut conn).unwrap();
+        assert_eq!(conn.total_changes(), changes);
+        assert_eq!(segments(&conn), expected);
+    }
+
+    #[test]
+    fn a_fresh_database_starts_with_the_index_set_to_remove_deleted_titles() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        assert_eq!(secure_delete(&conn), 1);
+        conn.execute_batch(
+            "INSERT INTO segments (app, title, kind, started_at, ended_at) VALUES ('Code', 'budget', 'activity', 0, 1);
+             DELETE FROM segments;
+             INSERT INTO segments_fts(segments_fts) VALUES('integrity-check');",
+        )
+        .unwrap();
     }
 }

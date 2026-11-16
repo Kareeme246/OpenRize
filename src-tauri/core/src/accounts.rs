@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::activity::ActivityStore;
 use crate::paths::{ACCOUNTS_DIR, ACCOUNTS_FILE, DATABASE_FILE, ML_DIR, SWITCH_FILE};
+use crate::private_fs;
 use crate::state::lock_stores;
 use crate::timers::{now_epoch_ms, TimerStore};
 
@@ -113,13 +114,15 @@ impl Registry {
                     .to_string(),
             );
         }
-        fs::create_dir_all(root).map_err(|error| format!("could not create data dir: {error}"))?;
+        private_fs::create_dir_all(root)
+            .map_err(|error| format!("could not create data dir: {error}"))?;
         let mut document = self.clone();
         document.version = REGISTRY_VERSION;
         let json = serde_json::to_vec_pretty(&document).map_err(|error| error.to_string())?;
         let path = root.join(ACCOUNTS_FILE);
         let temp = path.with_extension("json.tmp");
-        fs::write(&temp, json).map_err(|error| format!("could not write accounts: {error}"))?;
+        private_fs::write(&temp, &json)
+            .map_err(|error| format!("could not write accounts: {error}"))?;
         fs::rename(&temp, &path).map_err(|error| format!("could not replace accounts: {error}"))
     }
 
@@ -409,7 +412,8 @@ impl Handoff {
         let json = serde_json::to_vec_pretty(self).map_err(|error| error.to_string())?;
         let path = root.join(SWITCH_FILE);
         let temp = path.with_extension("json.tmp");
-        fs::write(&temp, json).map_err(|error| format!("could not write the handoff: {error}"))?;
+        private_fs::write(&temp, &json)
+            .map_err(|error| format!("could not write the handoff: {error}"))?;
         fs::rename(&temp, &path).map_err(|error| format!("could not replace the handoff: {error}"))
     }
 
@@ -496,7 +500,7 @@ pub fn adopt(root: &Path, id: &str) -> Result<Adopted, String> {
         return Err(unknown(id));
     }
     let target = data_dir(root, Some(id));
-    fs::create_dir_all(&target)
+    private_fs::create_dir_all(&target)
         .map_err(|error| format!("could not create the account: {error}"))?;
     // No account's lock, then the account's: the data is owned by neither
     // process while it moves.

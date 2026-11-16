@@ -98,7 +98,11 @@ pub fn run() {
                 &app.path().app_data_dir()?,
                 &app.path().app_local_data_dir()?,
             );
-            std::fs::create_dir_all(&root)?;
+            openrize_core::private_fs::create_dir_all(&root)?;
+            // Installs from before the data was made private; before SQLite opens anything, as
+            // it hands the database's mode to the files it creates beside it.
+            openrize_core::private_fs::repair(&root);
+            openrize_core::private_fs::repair(&settings::config_dir());
             // Before any store opens: repairs the account list and finishes a requested move.
             let launch = openrize_core::accounts::launch(&root);
             let dir = launch.resolved.dir.clone();
@@ -106,7 +110,7 @@ pub fn run() {
             app.manage(accounts::ActiveAccount::new(root, &launch));
             // Waits out a `rize` edit made while the app was closed, then
             // keeps the stores for as long as the app runs.
-            std::fs::create_dir_all(&dir)?;
+            openrize_core::private_fs::create_dir_all(&dir)?;
             let lock = openrize_core::state::lock_stores(&dir, true)?.expect("a blocking lock");
             app.manage(rpc::StoresLock(lock));
 

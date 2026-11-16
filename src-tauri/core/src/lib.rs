@@ -12,6 +12,7 @@ pub mod ipc;
 pub mod migrations;
 pub mod models;
 pub mod paths;
+pub mod private_fs;
 pub mod projects;
 pub mod protocol;
 pub mod reports;

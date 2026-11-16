@@ -194,14 +194,73 @@ pub fn app_executable() -> Result<PathBuf, String> {
     let sibling = std::env::current_exe()
         .and_then(|path| path.canonicalize())
         .map(|rize| rize.with_file_name(&name));
-    sibling
-        .into_iter()
-        .chain(installed_apps())
-        .find(|candidate| candidate.is_file())
-        .ok_or_else(|| {
-            "Could not find the OpenRize app. Install it, or set RIZE_APP to its executable."
-                .to_string()
-        })
+    choose(
+        sibling.ok(),
+        installed_apps(),
+        |candidate| candidate.is_file(),
+        signed_by_openrize,
+    )
+}
+
+/// The app next to rize is as trusted as rize itself (a dev build is found this
+/// way, unsigned). An app found by looking around the machine is only one
+/// OpenRize signed: anything can sit at a known path or claim the identifier.
+fn choose(
+    sibling: Option<PathBuf>,
+    installed: Vec<PathBuf>,
+    exists: impl Fn(&Path) -> bool,
+    signed: impl Fn(&Path) -> bool,
+) -> Result<PathBuf, String> {
+    if let Some(sibling) = sibling.filter(|sibling| exists(sibling)) {
+        return Ok(sibling);
+    }
+    let mut refused = None;
+    for candidate in installed {
+        if !exists(&candidate) {
+            continue;
+        }
+        if signed(&candidate) {
+            return Ok(candidate);
+        }
+        refused.get_or_insert(candidate);
+    }
+    Err(match refused {
+        Some(app) => format!(
+            "{} is not signed by OpenRize, so rize will not launch it. \
+             Reinstall the app, or set RIZE_APP to the executable of a build you trust.",
+            app.display()
+        ),
+        None => {
+            "Could not find the OpenRize app. Install it, or set RIZE_APP to its executable.".into()
+        }
+    })
+}
+
+/// Whether the bundle holding `executable` is the OpenRize app signed with
+/// OpenRize's Developer ID, the team `install.sh` requires of the CLI.
+#[cfg(target_os = "macos")]
+fn signed_by_openrize(executable: &Path) -> bool {
+    let Some(bundle) = bundle(executable) else {
+        return false;
+    };
+    Command::new("/usr/bin/codesign")
+        .args(["--verify", "--strict"])
+        .arg(format!(
+            "-R=identifier \"{}\" and anchor apple generic and certificate leaf[subject.OU] = \"Z899WY5Y94\"",
+            openrize_core::APP_IDENTIFIER
+        ))
+        .arg(bundle)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+/// Only its own installer's folders are searched here, and nothing is checked.
+#[cfg(not(target_os = "macos"))]
+fn signed_by_openrize(_: &Path) -> bool {
+    true
 }
 
 #[cfg(target_os = "macos")]
@@ -374,6 +433,102 @@ mod tests {
         let other = root.join("elsewhere");
         let explicit = Client::in_root(Some(&other), Some(root.clone())).unwrap();
         assert_eq!(explicit.data_dir(), other);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn chosen(
+        sibling: Option<&str>,
+        installed: &[&str],
+        present: &[&str],
+        signed: &[&str],
+    ) -> Result<PathBuf, String> {
+        choose(
+            sibling.map(PathBuf::from),
+            installed.iter().map(PathBuf::from).collect(),
+            |path| present.iter().any(|known| Path::new(known) == path),
+            |path| signed.iter().any(|known| Path::new(known) == path),
+        )
+    }
+
+    #[test]
+    fn only_an_app_openrize_signed_is_launched_from_where_rize_looked() {
+        let (sibling, fixed, planted, moved) = ("/dev/openrize", "/fixed", "/planted", "/moved");
+        let found = [fixed, planted, moved];
+
+        // The build next to rize needs no signature, and is never checked.
+        assert_eq!(
+            chosen(Some(sibling), &found, &[sibling, fixed], &[]),
+            Ok(sibling.into())
+        );
+        // A missing sibling falls through to the first signed app that exists.
+        assert_eq!(
+            chosen(
+                Some(sibling),
+                &found,
+                &[fixed, planted, moved],
+                &[fixed, moved]
+            ),
+            Ok(fixed.into())
+        );
+        assert_eq!(
+            chosen(None, &found, &[fixed, planted, moved], &[moved]),
+            Ok(moved.into())
+        );
+        assert_eq!(
+            chosen(None, &found, &[moved], &[fixed, moved]),
+            Ok(moved.into())
+        );
+
+        // Unsigned apps are refused by name, at a fixed path or from Spotlight.
+        let refused = chosen(None, &found, &[fixed, planted], &[]).unwrap_err();
+        assert!(
+            refused.contains("/fixed is not signed by OpenRize"),
+            "{refused}"
+        );
+        let refused = chosen(None, &found, &[planted], &[fixed]).unwrap_err();
+        assert!(
+            refused.contains("/planted is not signed by OpenRize"),
+            "{refused}"
+        );
+        assert!(chosen(None, &found, &[], &found)
+            .unwrap_err()
+            .contains("Could not find the OpenRize app"));
+    }
+
+    /// The real `codesign`, on a bundle that claims OpenRize's identifier
+    /// under an ad-hoc signature, as a planted one would.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_bundle_that_only_claims_the_identifier_is_not_openrize() {
+        let root = std::env::temp_dir().join(format!("rize-client-sign-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let bundle = root.join("openrize.app");
+        let executable = bundle.join("Contents/MacOS/openrize");
+        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        std::fs::copy("/usr/bin/true", &executable).unwrap();
+        std::fs::write(
+            bundle.join("Contents/Info.plist"),
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>{}</string>
+<key>CFBundleExecutable</key><string>openrize</string>
+<key>CFBundleShortVersionString</key><string>99.0.0</string>
+</dict></plist>"#,
+                openrize_core::APP_IDENTIFIER
+            ),
+        )
+        .unwrap();
+        assert!(!signed_by_openrize(&executable), "unsigned");
+        let signed = Command::new("/usr/bin/codesign")
+            .args(["--force", "--sign", "-", "--identifier"])
+            .arg(openrize_core::APP_IDENTIFIER)
+            .arg(&bundle)
+            .output()
+            .unwrap();
+        assert!(signed.status.success(), "{signed:?}");
+        assert!(!signed_by_openrize(&executable), "ad-hoc signed");
+        assert!(!signed_by_openrize(&root.join("openrize")), "no bundle");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -1,0 +1,6 @@
+# One Rust for local work, CI and signed releases. rustup reads this from the repo root and from
+# src-tauri alike, and installs it on first use. Bump the version on purpose, in its own change.
+[toolchain]
+channel = "1.98.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

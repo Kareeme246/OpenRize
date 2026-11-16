@@ -25,6 +25,9 @@ pub const ACCOUNTS_DIR: &str = "accounts";
 /// is not data: `data_location` never counts, moves or removes it, and no export includes it.
 pub const MODELS_DIR: &str = "models";
 
+/// An account's trained personal models, inside its data directory.
+pub const ML_DIR: &str = "ml";
+
 /// The installed app's data directory, or `None` when the OS has no home. Never creates or moves
 /// anything: until older Windows data leaves the roaming folder, that is the answer
 /// (`data_location::choose`).
@@ -49,6 +52,23 @@ pub fn model_file(models_dir: &Path, name: &str) -> Option<PathBuf> {
         (Some(std::path::Component::Normal(part)), None) if part == name
     );
     plain.then(|| models_dir.join(name))
+}
+
+/// The personal model a `model_artifacts` row names, or `None` (logged) unless it resolves to a
+/// `.mlmodelc` directly inside `ml_dir`: a row must never choose what gets deleted or loaded.
+pub fn model_artifact(ml_dir: &Path, stored: &str) -> Option<PathBuf> {
+    let artifact = Path::new(stored)
+        .canonicalize()
+        .ok()
+        .zip(ml_dir.canonicalize().ok())
+        .filter(|(path, ml_dir)| {
+            path.parent() == Some(ml_dir) && path.extension().is_some_and(|ext| ext == "mlmodelc")
+        })
+        .map(|(path, _)| path);
+    if artifact.is_none() {
+        eprintln!("ignoring a model path that is not a model in {ml_dir:?}: {stored}");
+    }
+    artifact
 }
 
 /// The roaming folder earlier Windows builds kept the data in (Tauri's
@@ -76,5 +96,44 @@ mod tests {
         for name in ["", ".", "..", "../x.gguf", "a/b.gguf", "/etc/passwd"] {
             assert_eq!(model_file(dir, name), None, "{name}");
         }
+    }
+
+    #[test]
+    fn a_stored_model_path_must_be_a_model_directly_inside_the_ml_folder() {
+        let root = std::env::temp_dir().join(format!("openrize-paths-{}", std::process::id()));
+        let ml = root.join(ML_DIR);
+        let model = ml.join("category-1.mlmodelc");
+        let nested = ml.join("deeper").join("project-1.mlmodelc");
+        let outside = root.join("victim.mlmodelc");
+        for dir in [&model, &nested, &outside, &ml.join("notes")] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let stored = |path: &Path| path.to_string_lossy().to_string();
+
+        assert_eq!(
+            model_artifact(&ml, &stored(&model)),
+            Some(model.canonicalize().unwrap())
+        );
+        let rejected = [
+            stored(&root),
+            stored(&ml),
+            stored(&outside),
+            stored(&nested),
+            stored(&ml.join("notes")),
+            stored(&ml.join("missing.mlmodelc")),
+            stored(&ml.join("..").join("victim.mlmodelc")),
+            "category-1.mlmodelc".to_string(),
+            String::new(),
+        ];
+        for path in &rejected {
+            assert_eq!(model_artifact(&ml, path), None, "{path}");
+        }
+        #[cfg(unix)]
+        {
+            let link = ml.join("link.mlmodelc");
+            std::os::unix::fs::symlink(&outside, &link).unwrap();
+            assert_eq!(model_artifact(&ml, &stored(&link)), None);
+        }
+        let _ = std::fs::remove_dir_all(root);
     }
 }

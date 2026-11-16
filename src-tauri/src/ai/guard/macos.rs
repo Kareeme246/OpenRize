@@ -4,6 +4,7 @@
 use std::process::{Child, Command, Stdio};
 
 use super::WATCHDOG_FLAG;
+use crate::ai::spawn;
 
 pub struct LifetimeGuard {
     watchdog: Child,
@@ -24,7 +25,7 @@ pub fn attach(child: &Child) -> Result<LifetimeGuard, String> {
         libc::setpriority(libc::PRIO_PROCESS, child.id() as libc::id_t, 10);
     }
     let exe = std::env::current_exe().map_err(|error| format!("no path to self: {error}"))?;
-    let watchdog = Command::new(exe)
+    let watchdog = spawn::command(exe)
         .arg(WATCHDOG_FLAG)
         .arg(std::process::id().to_string())
         .arg(child.id().to_string())

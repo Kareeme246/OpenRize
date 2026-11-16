@@ -2,7 +2,7 @@
 //! captured, so restoring a catalog link never overwrites later descriptions.
 use std::collections::{BTreeMap, BTreeSet};
 
-use rusqlite::{params, Connection, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::Serialize;
 
 use super::{history::Command, segment_from_row, ActivityStore, LOCKED};
@@ -330,7 +330,10 @@ impl Deletion {
                         [&entry.id],
                         |row| row.get::<_, bool>(0),
                     )
+                    .optional()
                     .map_err(|error| error.to_string())?
+                    // Removed for good since (`purge_deleted_entries`).
+                    .ok_or(conflict)?
             {
                 return Err(LOCKED.to_string());
             }

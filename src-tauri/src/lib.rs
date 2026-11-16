@@ -98,7 +98,11 @@ pub fn run() {
                 &app.path().app_data_dir()?,
                 &app.path().app_local_data_dir()?,
             );
-            std::fs::create_dir_all(&root)?;
+            openrize_core::private_fs::create_dir_all(&root)?;
+            // Installs from before the data was made private; before SQLite opens anything, as
+            // it hands the database's mode to the files it creates beside it.
+            openrize_core::private_fs::repair(&root);
+            openrize_core::private_fs::repair(&settings::config_dir());
             // Before any store opens: repairs the account list and finishes a requested move.
             let launch = openrize_core::accounts::launch(&root);
             let dir = launch.resolved.dir.clone();
@@ -106,7 +110,7 @@ pub fn run() {
             app.manage(accounts::ActiveAccount::new(root, &launch));
             // Waits out a `rize` edit made while the app was closed, then
             // keeps the stores for as long as the app runs.
-            std::fs::create_dir_all(&dir)?;
+            openrize_core::private_fs::create_dir_all(&dir)?;
             let lock = openrize_core::state::lock_stores(&dir, true)?.expect("a blocking lock");
             app.manage(rpc::StoresLock(lock));
 
@@ -132,7 +136,7 @@ pub fn run() {
             ai::worker::spawn(
                 app.handle().clone(),
                 dir.join(activity::DB_FILE),
-                dir.join("ml"),
+                dir.join(paths::ML_DIR),
                 app.path().app_local_data_dir()?.join(paths::MODELS_DIR),
                 // The bundled embedder is a resource beside the app, not a download; a build
                 // without it simply has no embedder of its own.
@@ -242,6 +246,7 @@ pub fn run() {
             commands::get_settings,
             commands::update_settings,
             commands::storage_paths,
+            commands::open_data_dir,
             commands::launch_at_login,
             commands::set_launch_at_login,
             commands::check_permissions,
@@ -396,5 +401,64 @@ mod cli_tests {
         let config: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         assert_eq!(config["identifier"], openrize_core::APP_IDENTIFIER);
+    }
+}
+
+#[cfg(test)]
+mod acl_tests {
+    use std::collections::BTreeSet;
+
+    /// Registered, but nothing in the frontend calls them, so no window may.
+    const UNGRANTED: [&str; 6] = [
+        "mark_segment_reviewed",
+        "move_timer",
+        "query_energy_history",
+        "set_idle_threshold",
+        "start_session",
+        "stop_session",
+    ];
+
+    /// A command missing from `permissions/*.toml` is rejected at runtime, and one listed there
+    /// but not registered is a typo, so the two lists have to match exactly.
+    #[test]
+    fn every_registered_command_is_granted_or_listed_as_ungranted() {
+        let (_, list) = include_str!("lib.rs")
+            .split_once("generate_handler![")
+            .unwrap();
+        let registered: BTreeSet<&str> = list
+            .split_once("])")
+            .unwrap()
+            .0
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.starts_with('#'))
+            .filter_map(|line| line.trim_end_matches(',').rsplit("::").next())
+            .filter(|name| !name.is_empty())
+            .collect();
+
+        // What tauri-build resolved from `permissions/`, so this is the list Tauri enforces.
+        let manifests: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("OUT_DIR"),
+            "/acl-manifests.json"
+        )))
+        .unwrap();
+        let permissions = manifests[tauri::utils::acl::APP_ACL_KEY]["permissions"]
+            .as_object()
+            .unwrap();
+        let mut listed: BTreeSet<&str> = permissions
+            .values()
+            .flat_map(|permission| permission["commands"]["allow"].as_array().unwrap())
+            .map(|command| command.as_str().unwrap())
+            .collect();
+        for command in UNGRANTED {
+            assert!(listed.insert(command), "{command} is granted to a window");
+        }
+
+        let unlisted: Vec<_> = registered.difference(&listed).collect();
+        let unregistered: Vec<_> = listed.difference(&registered).collect();
+        assert!(
+            unlisted.is_empty() && unregistered.is_empty(),
+            "in no permission: {unlisted:?}; not registered: {unregistered:?}"
+        );
     }
 }

@@ -12,6 +12,7 @@ pub mod ipc;
 pub mod migrations;
 pub mod models;
 pub mod paths;
+pub mod private_fs;
 pub mod projects;
 pub mod protocol;
 pub mod reports;
@@ -19,7 +20,8 @@ pub mod rpc;
 pub mod settings;
 pub mod state;
 pub mod timers;
-#[cfg(windows)]
+// Compiled for tests everywhere, so its pure parts are checked off Windows too.
+#[cfg(any(windows, test))]
 pub mod user_path;
 
 pub const APP_IDENTIFIER: &str = "com.offlinestudios.openrize";

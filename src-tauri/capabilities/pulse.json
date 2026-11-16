@@ -3,5 +3,5 @@
   "identifier": "pulse",
   "description": "Capability for the menu-bar Pulse panel",
   "windows": ["pulse"],
-  "permissions": ["core:default"]
+  "permissions": ["pulse-panel", "core:event:allow-listen", "core:event:allow-unlisten"]
 }

@@ -23,6 +23,7 @@ use windows::Win32::UI::Shell::{
 };
 
 use super::{wide, BROWSERS};
+use crate::capture::window_claims;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Identity {
@@ -458,18 +459,33 @@ fn string_property(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<String> 
 fn relaunch_name(store: Option<&IPropertyStore>) -> Option<String> {
     let text = string_property(store?, &PKEY_AppUserModel_RelaunchDisplayNameResource)?;
     if !text.starts_with('@') {
-        return Some(text);
+        return window_claims::display_name(&text);
+    }
+    // The window's owner chose this string, and loading it opens the file it names.
+    let roots: Vec<String> = [
+        "SystemRoot",
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+        "ProgramW6432",
+    ]
+    .iter()
+    .filter_map(|variable| std::env::var(variable).ok())
+    .collect();
+    if !window_claims::is_safe_indirect(&text, &roots) {
+        return None;
     }
     let source = wide(&text);
     let mut buffer = [0u16; 256];
     // SAFETY: `source` is NUL terminated and the output buffer is writable.
     unsafe { SHLoadIndirectString(PCWSTR(source.as_ptr()), &mut buffer, None) }.ok()?;
     let length = buffer.iter().position(|&unit| unit == 0)?;
-    let name = String::from_utf16_lossy(&buffer[..length]);
-    (!name.trim().is_empty()).then(|| name.trim().to_string())
+    window_claims::display_name(&String::from_utf16_lossy(&buffer[..length]))
 }
 
 fn shell_name(app_id: &str) -> Option<String> {
+    if !window_claims::is_shell_app_id(app_id) {
+        return None;
+    }
     if let Some(known) = SHELL_NAMES.with(|names| names.borrow().get(app_id).cloned()) {
         return known;
     }

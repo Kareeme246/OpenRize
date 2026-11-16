@@ -72,7 +72,7 @@ to your rules and a personal model it trains on your own reviews and keeps categ
 | **Projects** (with Clients) | ✅ Working | Active, Completed, Archived, and Clients tabs. Budgets, due dates, a per-project detail page, AI hints that become rules, and project discovery from repo paths, forge URLs, and editor titles. CSV import. |
 | **Invoices** | ✅ Working | Draft, sent, and paid invoices per client from approved billable project time. |
 | **Settings** | ✅ Working | Theme and accent, menu bar and close behavior, storage location, activity retention, expected hours per week, and Categories & AI (engine status, auto-accept threshold, custom instructions, AI effectiveness, personal model versions, Retrain now, Reset learned data). |
-| **Automatic capture** | ✅ Working | A background sampler records the foreground app, its window title (via Accessibility, not Screen Recording), and the URL in Safari and Chromium browsers. Idle and sleep time are not counted as work; watching a video in the app in front is not idle. |
+| **Automatic capture** | ✅ Working | A background sampler records the foreground app, its window title (via Accessibility, not Screen Recording), and the page address (never its query string) in Safari and Chromium browsers. Idle and sleep time are not counted as work; watching a video in the app in front is not idle. |
 | **AI categorization & review** | ✅ Working | Each entry gets a category and project suggestion with a confidence meter, a "Why" line, and pickable alternatives. Keyboard review mode, and auto-approve only when both fields clear your threshold. |
 | **Learning loop & calibration** | ✅ Working | Your accepts and corrections feed the personal model, offer a rule after 3 consistent corrections, trigger background retraining, and calibrate the confidence you see against how often you actually agree. |
 | **Menu-bar tray** | ✅ Working | A menu-bar glyph. Closing the window can hide OpenRize there so capture keeps running. |
@@ -81,7 +81,9 @@ to your rules and a personal model it trains on your own reviews and keeps categ
 ## Privacy
 
 - **No account.** There is nothing to sign up for and nobody to sign up with.
-- **No telemetry.** OpenRize makes no network calls.
+- **No telemetry.** No activity data ever leaves your device. The only network requests are
+  update checks to GitHub in release builds: version metadata, the signed update download, and
+  release notes.
 - **On-device AI.** Categorization runs on your Mac through Apple's Foundation Models,
   NaturalLanguage, and Create ML. Your activity never leaves the machine to be classified.
 - **No keystroke logging, no screenshots, no screen recording.** Tracking is metadata about
@@ -184,6 +186,16 @@ There are two ways to get it, both from **v0.8.10** on:
   It takes `rize` out of the latest release's app bundle, requires OpenRize's Developer ID
   signature and Apple notarization, and installs into `~/.local/bin` (add that to PATH if
   needed). It never replaces existing files or edits shell profiles.
+
+  To read the script before running it, or to pin a release, download it first:
+
+  ```sh
+  curl -fsSLO https://raw.githubusercontent.com/Kareeme246/OpenRize/main/install.sh
+  less install.sh
+  bash install.sh --version X.Y.Z
+  ```
+
+  With `--version`, it refuses a download that reports any other version.
 
 rize reads and edits the data the app records, with or without the app installed, but only the
 app tracks and only the app creates that data: on a machine where it never ran, rize reports that

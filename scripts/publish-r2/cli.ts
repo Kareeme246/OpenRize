@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { normalizeVersion } from "./manifest.ts";
-import { PublishError, publishRelease, releaseAssetNames } from "./publish.ts";
+import { PublishError, publishRelease, releaseFileNames } from "./publish.ts";
 import { cloudflareStore, directoryStore, type ObjectStore } from "./store.ts";
 
 const { values } = parseArgs({
@@ -37,7 +37,7 @@ function remoteStore(bucket: string): ObjectStore {
 }
 
 async function downloadFromGitHub(version: string): Promise<string> {
-  for (const name of Object.values(releaseAssetNames(version))) {
+  for (const name of releaseFileNames(version)) {
     const response = await fetch(
       `https://github.com/Kareeme246/OpenRize/releases/download/v${version}/${name}`,
     );

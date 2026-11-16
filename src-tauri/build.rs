@@ -445,7 +445,7 @@ fn stage_llama_windows(archive: &Path, runtime: &Path, server: &Path) {
     let mut found = Vec::new();
     for index in 0..zip.len() {
         let mut file = zip.by_index(index).expect("llama archive entry");
-        let name = file.name().to_string();
+        let name = file.name().expect("llama archive entry name").into_owned();
         let is_backend = name.starts_with("ggml-")
             && name.ends_with(".dll")
             && (name == "ggml-base.dll"

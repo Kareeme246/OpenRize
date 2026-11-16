@@ -138,7 +138,7 @@ pub fn check_permissions(accessibility: AccessibilityState) -> Vec<PermissionInf
         PermissionInfo {
             id: "automation".to_string(),
             name: "Automation".to_string(),
-            description: "Allows OpenRize to read active tab URLs from supported web browsers to categorize time spent on websites.".to_string(),
+            description: "Allows OpenRize to read active tab URLs from supported web browsers to categorize time spent on websites, and to tell a private window from a normal one. Without it, Chromium browsers are treated as private windows: their titles are erased once the time is categorized.".to_string(),
             required: false,
             state: if automation {
                 AccessibilityState::Working

@@ -1,11 +1,10 @@
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::Serialize;
 
-use crate::capture::{strip_url_detail, WindowSample};
+use crate::capture::WindowSample;
 use crate::models::{
     AppContribution, AppRecord, Category, CategoryRemoval, Client, EntryDetail, EntryEvent,
     NewCategory, NewClient, NewProject, NewTimeEntry, Project, TimeEntry, TitleItem,
@@ -103,6 +102,10 @@ fn ensure_no_approved_overlap(
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub const REBUILD_WINDOW_MS: u64 = ONE_DAY_MS;
+
+/// How long a deleted entry stays in the database, hidden, so undo can bring it back. The undo
+/// history is kept in memory only, so a restart ends the window early (`from_conn`).
+pub const DELETED_ENTRY_GRACE_MS: u64 = ONE_DAY_MS;
 
 pub use crate::models::ActivitySegment;
 
@@ -239,7 +242,63 @@ mod merge_regressions;
 #[cfg(test)]
 mod overlap_claim;
 #[cfg(test)]
+mod retention;
+#[cfg(test)]
 mod split_regressions;
+
+/// What else goes with history older than `?1`, each statement touching nothing on a second run:
+/// - the feature text (titles, domains) and vector the AI kept per entry, its few-shot examples;
+/// - the "Why" of a suggestion, which quotes what was on screen. The verdict and confidence
+///   stay: calibration and the AI metrics count them and they hold no detail;
+/// - event payloads, which hold a description before and after an edit (an undo's only names
+///   the action);
+/// - apps and sites not seen since, unless a default or an exclusion was set on them.
+const PURGE_DERIVED: [&str; 5] = [
+    "DELETE FROM breaks WHERE created_at < ?1",
+    "DELETE FROM entry_embeddings
+     WHERE entry_id IN (SELECT id FROM time_entries WHERE ended_at < ?1)",
+    "UPDATE suggestions SET signals = NULL, rationale = NULL
+     WHERE (signals IS NOT NULL OR rationale IS NOT NULL)
+       AND entry_id IN (SELECT id FROM time_entries WHERE ended_at < ?1)",
+    "UPDATE entry_events SET payload = NULL
+     WHERE payload IS NOT NULL AND kind NOT IN ('undone', 'redone')
+       AND entry_id IN (SELECT id FROM time_entries WHERE ended_at < ?1)",
+    "DELETE FROM apps
+     WHERE last_seen < ?1 AND deleted_at IS NULL AND excluded = 0
+       AND default_category_id IS NULL AND default_project_id IS NULL",
+];
+
+/// Removes for good the entries deleted before `before`, with their suggestions, jobs, vectors
+/// and events. Deleting an entry only hides it, so that undo can restore it; once that window
+/// has closed nothing of it is kept, and an undo that comes later reports a conflict.
+fn purge_deleted_entries(conn: &Connection, before: u64) -> Result<(), String> {
+    const GONE: &str = "SELECT id FROM time_entries WHERE deleted_at < ?1 AND invoice_id IS NULL";
+    let before = before.min(i64::MAX as u64) as i64;
+    let transaction = conn
+        .unchecked_transaction()
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            &format!("UPDATE segments SET entry_id = NULL WHERE entry_id IN ({GONE})"),
+            params![before],
+        )
+        .map_err(|error| error.to_string())?;
+    for table in history::DEPENDENTS {
+        transaction
+            .execute(
+                &format!("DELETE FROM {table} WHERE entry_id IN ({GONE})"),
+                params![before],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    transaction
+        .execute(
+            "DELETE FROM time_entries WHERE deleted_at < ?1 AND invoice_id IS NULL",
+            params![before],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
+}
 
 #[derive(Debug)]
 pub enum CategoryRemovalPreview {
@@ -274,8 +333,11 @@ pub struct ActivityStore {
 
 impl ActivityStore {
     pub fn load(dir: &Path) -> Result<Self, String> {
-        fs::create_dir_all(dir).map_err(|error| format!("could not create data dir: {error}"))?;
+        crate::private_fs::create_dir_all(dir)
+            .map_err(|error| format!("could not create data dir: {error}"))?;
         let path: PathBuf = dir.join(DB_FILE);
+        crate::private_fs::prepare_database(&path)
+            .map_err(|error| format!("could not create the database: {error}"))?;
         let conn = Connection::open(&path).map_err(|error| error.to_string())?;
         Self::from_conn(conn)
     }
@@ -294,7 +356,14 @@ impl ActivityStore {
         conn.busy_timeout(BUSY_TIMEOUT)
             .map_err(|error| error.to_string())?;
 
+        let before = conn.total_changes();
         crate::migrations::run_migrations(&mut conn).map_err(|error| error.to_string())?;
+        // No undo history survives a restart, so nothing can restore these any more.
+        purge_deleted_entries(&conn, u64::MAX)?;
+        if conn.total_changes() != before {
+            // A migration that erases stored detail must not leave it in the log.
+            redact::scrub_wal(&conn);
+        }
 
         let mut store = Self {
             conn,
@@ -756,32 +825,43 @@ impl ActivityStore {
         Ok(())
     }
 
+    /// The hourly sweep. Whatever `days` is, it erases private-window detail that is due and
+    /// entries deleted more than [`DELETED_ENTRY_GRACE_MS`] ago. With "Keep activity until" set
+    /// (`days` > 0) it also removes the captured history older than that and what was derived
+    /// from it. Time entries themselves stay, with their descriptions: they are the timesheet
+    /// and what invoices are built from. Returns the segments removed.
     pub fn purge_older_than(&mut self, days: u32, now: u64) -> Result<u64, String> {
         redact::redact_private_detail(&self.conn, now)?;
-        if days == 0 {
-            return Ok(0);
+        let before = self.conn.total_changes();
+        purge_deleted_entries(&self.conn, now.saturating_sub(DELETED_ENTRY_GRACE_MS))?;
+        let removed = if days == 0 {
+            0
+        } else {
+            let cutoff = now.saturating_sub(u64::from(days) * ONE_DAY_MS);
+            let transaction = self.conn.transaction().map_err(|error| error.to_string())?;
+            let removed = transaction
+                .execute(
+                    "DELETE FROM segments WHERE ended_at IS NOT NULL AND ended_at < ?1",
+                    params![cutoff as i64],
+                )
+                .map_err(|error| error.to_string())?;
+            transaction
+                .execute(
+                    "DELETE FROM daily_rollups WHERE day_epoch < ?1",
+                    params![(cutoff / ONE_DAY_MS) as i64],
+                )
+                .map_err(|error| error.to_string())?;
+            for statement in PURGE_DERIVED {
+                transaction
+                    .execute(statement, params![cutoff as i64])
+                    .map_err(|error| error.to_string())?;
+            }
+            transaction.commit().map_err(|error| error.to_string())?;
+            removed
+        };
+        if self.conn.total_changes() != before {
+            redact::scrub_wal(&self.conn);
         }
-        let cutoff = now.saturating_sub(u64::from(days) * ONE_DAY_MS);
-        let transaction = self.conn.transaction().map_err(|error| error.to_string())?;
-        let removed = transaction
-            .execute(
-                "DELETE FROM segments WHERE ended_at IS NOT NULL AND ended_at < ?1",
-                params![cutoff as i64],
-            )
-            .map_err(|error| error.to_string())?;
-        transaction
-            .execute(
-                "DELETE FROM breaks WHERE created_at < ?1",
-                params![cutoff as i64],
-            )
-            .map_err(|error| error.to_string())?;
-        transaction
-            .execute(
-                "DELETE FROM daily_rollups WHERE day_epoch < ?1",
-                params![(cutoff / ONE_DAY_MS) as i64],
-            )
-            .map_err(|error| error.to_string())?;
-        transaction.commit().map_err(|error| error.to_string())?;
         Ok(removed as u64)
     }
 
@@ -876,15 +956,21 @@ impl ActivityStore {
         let Some(current) = self.current.as_mut() else {
             return Ok(());
         };
-        let url = current.url.as_deref().map(strip_url_detail);
         self.conn
             .execute(
-                "UPDATE segments SET private = 1, url = ?1 WHERE id = ?2",
-                params![url, current.id],
+                "UPDATE segments SET private = 1 WHERE id = ?1",
+                params![current.id],
+            )
+            .map_err(|error| error.to_string())?;
+        // Opened as a normal window, it listed its site; a site first seen by this very
+        // segment is known only from the private window.
+        self.conn
+            .execute(
+                "DELETE FROM apps WHERE kind = 'site' AND identifier = ?1 AND first_seen = ?2",
+                params![current.domain, current.started_at as i64],
             )
             .map_err(|error| error.to_string())?;
         current.private = true;
-        current.url = url;
         Ok(())
     }
 
@@ -2935,7 +3021,7 @@ mod tests {
     #[test]
     fn an_unclean_shutdown_does_not_leave_a_segment_running_forever() {
         let dir = std::env::temp_dir().join(format!("openrize-activity-{}", now_epoch_ms()));
-        fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
         {
             let mut store = ActivityStore::load(&dir).unwrap();
             store.tick(sample("Code", "main.rs"), 0, 1_000).unwrap();

@@ -89,7 +89,7 @@ impl EntryRow {
     }
 }
 
-const DEPENDENTS: [&str; 4] = [
+pub(super) const DEPENDENTS: [&str; 4] = [
     "suggestions",
     "classify_jobs",
     "entry_embeddings",
@@ -155,11 +155,7 @@ fn select_all(
     let mut statement = conn
         .prepare(&format!("SELECT * FROM {table} WHERE {key} = ?1;"))
         .map_err(|e| e.to_string())?;
-    let columns: Vec<String> = statement
-        .column_names()
-        .into_iter()
-        .map(str::to_string)
-        .collect();
+    let columns: Vec<String> = statement.column_names().map(str::to_string).collect();
     let rows = statement
         .query_map([id], |row| {
             (0..columns.len())

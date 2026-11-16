@@ -20,8 +20,16 @@ command, or changes the app command behind one, updates its row here.
 There are two ways to get rize: it comes bundled with the app (the app links it into
 `~/.local/bin` on macOS, or puts its folder on the user PATH on Windows, at every launch;
 `rize install-path` does the same by hand), or the curl installer (`install.sh`) installs it on
-its own. A standalone rize finds the
-installed app only to launch it (`rize app start`, `rize track start`).
+its own. Only an installed app does this (not a dev build, nor on macOS one run from a disk
+image), and on macOS it never replaces a file, or a link that does not point into an OpenRize
+app. A standalone rize finds the
+installed app only to launch it (`rize app start`, `rize app open`, `rize track start`). On macOS
+it launches an app it found this way only if OpenRize's Developer ID signed it; the app next to
+rize and the one `RIZE_APP` names are launched as they are.
+
+Human output shows text from the data (names, descriptions, window titles) with every control
+character replaced, so nothing stored can send escape sequences to the terminal. `--json` is
+exact.
 
 `rize app start` only launches the app (in the background, no window). Tracking is its own
 command: `rize track start`, or `rize app start --track` to do both.
@@ -84,7 +92,7 @@ installed.
 | `rize entries reject <id>` | Reject an AI suggestion. | `reject_time_entry` | Yes | Shipped |
 | `rize entries split <id> --at <time>` | Split one entry in two. Refused on an approved entry. | `split_time_entry` | Yes | Shipped |
 | `rize entries merge <id> <other-id>` | Merge two neighbouring entries on the same day into one: they must overlap, touch or sit no more than five minutes apart; the merged entry spans the earliest start to the latest end, so a gap becomes tracked time (taken from any pending entry in it; refused when an approved entry is) and an overlap is absorbed. Refused when either is approved. | `merge_time_entries` | Yes | Shipped |
-| `rize entries rm <id...>` | Delete entries (confirmed). Refused when any is approved. | `delete_time_entries` | Yes | Shipped |
+| `rize entries rm <id...>` | Delete entries (confirmed). Refused when any is approved. The app can undo it for a day; after that, or once the app or `rize` next opens the data itself, the entry and everything derived from it are removed for good. | `delete_time_entries` | Yes | Shipped |
 | `rize entries rebuild [range]` | Rebuild entries from recorded activity (confirmed). | `rebuild_time_entries` | Yes | Shipped |
 | `rize entries export --format csv\|json [--out file]` | Export filtered entries to stdout or a file. | `export_time_entries` (`reports::export_body`) | Yes | Shipped |
 | `rize review [range]` | Pending entries, today by default. | `query_time_entries` (pending) | Yes | Shipped |
@@ -94,7 +102,7 @@ installed.
 | `rize clients list` / `show` / `add` / `edit` / `rm` | Manage clients; show lists their projects; rm is confirmed. | `list_clients`, `create_client`, `update_client`, `delete_client` | Yes | Shipped |
 | `rize categories list` / `add` / `edit` / `rm` | Manage categories; rm is confirmed and archives a category that has entries or deletes an unused one. | `list_categories`, `create_category`, `update_category`, `delete_category`, `remove_category` | Yes | Shipped |
 | Category reordering (CLI not yet exposed) | Persist the complete category order; available on the Categories page. | `reorder_categories` | Not yet exposed by CLI | Planned |
-| `rize settings list` / `get <key>` / `set <key> <value>` | Every preference by dotted key, such as `tracking-hours.start` or `breaks.enabled`. Writes one field at a time. `ai-llm` (`apple`, `local` or `none`) picks the language model and `local-model` names a GGUF file in the models folder (`null` clears it); the running app switches on its next job. | `get_settings`, `SettingsStore::patch` | Yes (applies on next launch) | Shipped |
+| `rize settings list` / `get <key>` / `set <key> <value>` | Every preference by dotted key, such as `tracking-hours.start` or `breaks.enabled`. Writes one field at a time. `ai-llm` (`apple`, `local` or `none`) picks the language model and `local-model` names a GGUF file in the models folder (`null` clears it); the running app switches on its next job. A model file is read by a native parser, so only use one from a source you trust. | `get_settings`, `SettingsStore::patch` | Yes (applies on next launch) | Shipped |
 | `rize paths` | The open account, the settings file, the data directory and the database path. | `storage_paths` | Yes | Shipped |
 | `rize account` / `rize account list` | The account the app opens (or No account) and every account. Switching accounts stays in the app. | `accounts_state` | Yes | Planned |
 | `rize install-path` | Put `rize` on PATH: a symlink on macOS, the user PATH on Windows. | client only | Yes | Shipped |
@@ -126,7 +134,7 @@ installed.
 
 These app commands only serve what is on screen, so rize leaves them out:
 `resize_pulse_panel`, `hide_pulse_panel`, `resize_reminder_panel`, `expand_break_reminder`,
-`open_break_settings`, `render_invoice_preview`, `installed_release_notes`, `get_invoice_logo`, `preview_break_chime`,
+`open_break_settings`, `open_data_dir`, `render_invoice_preview`, `installed_release_notes`, `get_invoice_logo`, `preview_break_chime`,
 `dismiss_stopwatch_reminder`, `mark_segment_reviewed` and the debug-only `dev_sample_break_reminder`. Appearance preferences
 stay reachable through `rize settings set`.
 

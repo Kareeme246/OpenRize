@@ -100,6 +100,10 @@ export async function storagePaths(): Promise<StoragePaths> {
   return await invoke<StoragePaths>("storage_paths");
 }
 
+export async function openDataDir(): Promise<void> {
+  await invoke("open_data_dir");
+}
+
 export async function launchAtLogin(): Promise<LoginItemState> {
   return await invoke<LoginItemState>("launch_at_login");
 }

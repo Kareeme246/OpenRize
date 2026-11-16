@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -731,13 +731,14 @@ impl Worker {
 
     fn personal_predict(&mut self, field: Field, text: &str) -> Option<HashMap<Label, f64>> {
         let artifact = store::active_artifact(&self.conn, field.as_str()).ok()??;
+        let model = paths::model_artifact(&self.ml_dir, &artifact.path)?;
         #[derive(Deserialize)]
         struct Predicted {
             hypotheses: Vec<HashMap<String, f64>>,
         }
         let reply: Result<Predicted, String> = self.apple.sidecar_mut().call(
             "personal_predict",
-            json!({ "model": artifact.path, "texts": [text] }),
+            json!({ "model": model, "texts": [text] }),
             sidecar::TIMEOUT_QUICK,
         );
         match reply {
@@ -1076,11 +1077,13 @@ impl Worker {
                 "needs reviewed entries in {what}"
             )));
         }
-        let active = store::active_artifact(&self.conn, kind)?;
+        let active = store::active_artifact(&self.conn, kind)?
+            .and_then(|artifact| paths::model_artifact(&self.ml_dir, &artifact.path));
 
-        std::fs::create_dir_all(&self.ml_dir).map_err(|e| e.to_string())?;
+        openrize_core::private_fs::create_dir_all(&self.ml_dir).map_err(|e| e.to_string())?;
         let dataset = self.ml_dir.join(format!("{kind}-train.jsonl"));
-        let mut file = std::fs::File::create(&dataset).map_err(|e| e.to_string())?;
+        let mut file =
+            openrize_core::private_fs::open(&dataset, true).map_err(|e| e.to_string())?;
         let mut holdout: Vec<(&str, &str)> = Vec::new();
         for (entry_id, text, label) in &rows {
             let is_holdout = in_holdout(entry_id);
@@ -1111,9 +1114,7 @@ impl Worker {
         let trained = trained?;
 
         let old_accuracy = match &active {
-            Some(artifact) if !holdout.is_empty() => {
-                self.holdout_accuracy(&artifact.path, &holdout)
-            }
+            Some(model) if !holdout.is_empty() => self.holdout_accuracy(model, &holdout),
             _ => None,
         };
         let better = match (trained.holdout_accuracy, old_accuracy) {
@@ -1143,9 +1144,9 @@ impl Worker {
             return Ok(Retrained::Skipped("learned data was reset".to_string()));
         }
         let retired = if better {
-            active.map(|a| a.path)
+            active
         } else {
-            Some(trained.path)
+            Some(PathBuf::from(trained.path))
         };
         if let Some(path) = retired {
             let _ = std::fs::remove_dir_all(path);
@@ -1202,7 +1203,7 @@ impl Worker {
         Ok(())
     }
 
-    fn holdout_accuracy(&mut self, model: &str, holdout: &[(&str, &str)]) -> Option<f64> {
+    fn holdout_accuracy(&mut self, model: &Path, holdout: &[(&str, &str)]) -> Option<f64> {
         #[derive(Deserialize)]
         struct Predicted {
             hypotheses: Vec<HashMap<String, f64>>,

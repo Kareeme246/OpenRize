@@ -1,13 +1,13 @@
 [package]
 name = "openrize-core"
-version = "0.10.2"
+version = "0.10.3"
 edition = "2021"
 license = "AGPL-3.0-only"
 
 [dependencies]
 dirs = "6"
 serde = { version = "1", features = ["derive"] }
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+rusqlite = { version = "0.41.1", features = ["bundled"] }
 serde_json = "1"
 interprocess = "2"
 uuid = { version = "1", features = ["v7", "serde"] }

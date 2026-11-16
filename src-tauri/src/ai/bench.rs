@@ -4,7 +4,6 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Instant;
 
 use chrono::{DateTime, Local};
@@ -596,7 +595,7 @@ fn start(spec: &Spec, sidecar: Option<&Path>) -> Result<Started, String> {
 }
 
 fn llama_version(binary: &str) -> String {
-    let Ok(output) = Command::new(binary).arg("--version").output() else {
+    let Ok(output) = super::spawn::command(binary).arg("--version").output() else {
         return "unknown".to_string();
     };
     let text = format!(

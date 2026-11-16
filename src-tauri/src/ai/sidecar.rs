@@ -4,13 +4,15 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
+
+use super::spawn;
 
 /// Must match `protocolVersion` in the sidecar's Entry.swift.
 const PROTOCOL_VERSION: &str = "1";
@@ -140,7 +142,7 @@ impl Sidecar {
             }
         }
 
-        let mut child = Command::new(&path)
+        let mut child = spawn::command(&path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

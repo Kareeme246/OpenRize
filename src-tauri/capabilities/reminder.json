@@ -3,5 +3,5 @@
   "identifier": "reminder",
   "description": "Capability for the top-right break reminder panel",
   "windows": ["reminder"],
-  "permissions": ["core:default"]
+  "permissions": ["reminder-panel", "core:event:allow-listen", "core:event:allow-unlisten"]
 }

@@ -246,6 +246,7 @@ pub fn run() {
             commands::get_settings,
             commands::update_settings,
             commands::storage_paths,
+            commands::open_data_dir,
             commands::launch_at_login,
             commands::set_launch_at_login,
             commands::check_permissions,
@@ -400,5 +401,64 @@ mod cli_tests {
         let config: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         assert_eq!(config["identifier"], openrize_core::APP_IDENTIFIER);
+    }
+}
+
+#[cfg(test)]
+mod acl_tests {
+    use std::collections::BTreeSet;
+
+    /// Registered, but nothing in the frontend calls them, so no window may.
+    const UNGRANTED: [&str; 6] = [
+        "mark_segment_reviewed",
+        "move_timer",
+        "query_energy_history",
+        "set_idle_threshold",
+        "start_session",
+        "stop_session",
+    ];
+
+    /// A command missing from `permissions/*.toml` is rejected at runtime, and one listed there
+    /// but not registered is a typo, so the two lists have to match exactly.
+    #[test]
+    fn every_registered_command_is_granted_or_listed_as_ungranted() {
+        let (_, list) = include_str!("lib.rs")
+            .split_once("generate_handler![")
+            .unwrap();
+        let registered: BTreeSet<&str> = list
+            .split_once("])")
+            .unwrap()
+            .0
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.starts_with('#'))
+            .filter_map(|line| line.trim_end_matches(',').rsplit("::").next())
+            .filter(|name| !name.is_empty())
+            .collect();
+
+        // What tauri-build resolved from `permissions/`, so this is the list Tauri enforces.
+        let manifests: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("OUT_DIR"),
+            "/acl-manifests.json"
+        )))
+        .unwrap();
+        let permissions = manifests[tauri::utils::acl::APP_ACL_KEY]["permissions"]
+            .as_object()
+            .unwrap();
+        let mut listed: BTreeSet<&str> = permissions
+            .values()
+            .flat_map(|permission| permission["commands"]["allow"].as_array().unwrap())
+            .map(|command| command.as_str().unwrap())
+            .collect();
+        for command in UNGRANTED {
+            assert!(listed.insert(command), "{command} is granted to a window");
+        }
+
+        let unlisted: Vec<_> = registered.difference(&listed).collect();
+        let unregistered: Vec<_> = listed.difference(&registered).collect();
+        assert!(
+            unlisted.is_empty() && unregistered.is_empty(),
+            "in no permission: {unlisted:?}; not registered: {unregistered:?}"
+        );
     }
 }

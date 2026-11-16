@@ -1,4 +1,4 @@
-import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AiEffectiveness,
@@ -1144,9 +1144,9 @@ export function Settings({
   const openStorage = (): void => {
     if (storage === null) return;
     setOpenError(null);
-    openPath(storage.dataDir).catch((cause: unknown) =>
-      setOpenError(describeError(cause)),
-    );
+    api
+      .openDataDir()
+      .catch((cause: unknown) => setOpenError(describeError(cause)));
   };
 
   const aiStatus = useAiStatus();

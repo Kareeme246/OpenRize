@@ -1,6 +1,7 @@
 use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_opener::OpenerExt;
 
 use crate::activity::{self, ActivitySnapshot};
 use crate::ai::metrics::AiMetrics;
@@ -1236,6 +1237,18 @@ pub fn relaunch_app(app: AppHandle) {
 pub fn storage_paths(app: AppHandle) -> Result<StoragePaths, String> {
     // The open account's folder, not always the app's data directory.
     Ok(StoragePaths::new(&crate::accounts::data_dir(&app)))
+}
+
+/// Opens the open account's folder in the file manager. It takes no path, so the webview cannot
+/// point it anywhere else.
+#[tauri::command]
+pub fn open_data_dir(app: AppHandle) -> Result<(), String> {
+    app.opener()
+        .open_path(
+            crate::accounts::data_dir(&app).to_string_lossy(),
+            None::<&str>,
+        )
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

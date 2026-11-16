@@ -1,0 +1,23 @@
+[[permission]]
+identifier = "pulse-panel"
+description = "The app commands the menu-bar Pulse panel calls."
+commands.allow = [
+  "get_settings",
+  "storage_paths",
+  "list_categories",
+  "list_projects",
+  "list_clients",
+  "list_timers",
+  "start_timer",
+  "pause_timer",
+  "activity_snapshot",
+  "list_time_entries",
+  "set_capture_enabled",
+  "break_state",
+  "start_break",
+  "end_break",
+  "pause_break_reminders",
+  "resize_pulse_panel",
+  "hide_pulse_panel",
+  "open_main_window",
+]

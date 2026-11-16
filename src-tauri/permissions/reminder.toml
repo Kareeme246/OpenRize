@@ -1,0 +1,19 @@
+[[permission]]
+identifier = "reminder-panel"
+description = "The app commands the break reminder panel calls."
+commands.allow = [
+  "get_settings",
+  "storage_paths",
+  "break_state",
+  "start_break",
+  "end_break",
+  "snooze_break",
+  "skip_break",
+  "extend_break",
+  "pause_break_reminders",
+  "expand_break_reminder",
+  "dismiss_stopwatch_reminder",
+  "pause_timer",
+  "resize_reminder_panel",
+  "open_break_settings",
+]

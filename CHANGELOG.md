@@ -5,226 +5,36 @@ All notable changes are documented here. Entries are generated from commit histo
 ## [unreleased]
 
 ### Features
-- **timers:** Group manual stopwatches (#161)
-- **privacy:** Erase what private browser windows showed once their time is classified (#168)
-- **windows:** Put the window controls in our own top bar (#170)
+- **settings:** Add a View changelog toggle to the Updates section (#172)
+- **stopwatches:** Add sections and turn groups into linked tags (#173)
+- **ai:** Report AI status by provider and stop queueing embed jobs without an embedder (#175)
+- **ai:** Run local models on a bundled llama-server (#176)
+- **settings:** Add Advanced Developer Mode toggle for dev builds (#177)
+- **ai:** Embed through a bundled embedder and re-embed on change (#179)
 
 ### Bug Fixes
-- **windows:** Close parity gaps in capture, browser URLs, tray, reminders and UI (#162)
-- **tooling:** Skip build output in the skills path lint (#163)
-- **windows:** Keep all data and settings in Local AppData (#164)
-- **windows:** Put rize back on the user PATH at every launch (#165)
-- **windows:** Tell apart web apps and apps that share a runtime (#166)
-- **tooling:** Keep Windows drive sessions alive across app restarts (#169)
-
-### Documentation
-- **ai:** Design local AI models (#167)
-## [0.9.45] - 2026-10-29
-
-### Features
-- Verification skill, feature map, skill lint and dry-run levers (#159)
-
-### Bug Fixes
-- **timers:** Stamp Start from the wall clock and store segments as a start and an end (#160)
-
-### Documentation
-- Update changelog for v0.9.45
-## [0.9.43] - 2026-10-27
-
-### Features
-- **permissions:** Require a relaunch after Accessibility is allowed in a running app (#150)
-- **permissions:** Ask for Accessibility on first run and show its real state in Settings (#151)
-- **settings:** Add dev-only tools to simulate permissions and re-run onboarding (#155)
-- **entries:** Give every minute one owner so totals and invoices are true (#157)
-- **onboarding:** Turn Continue into Restart required once a grant needs a restart (#158)
-
-### Bug Fixes
-- **calendar:** Merge entries that sit a few minutes apart (#148)
-- **capture:** Read window titles when the focused window is missing or untitled (#149)
-- **permissions:** Shorten the relaunch prompt to one line (#152)
-- **permissions:** Name the real permissions on the first-run screen (#153)
-- **merge:** Always show merge up and down, drop the merge shortcut, and merge overlaps (#154)
-- **permissions:** Show Granted or Not granted on the onboarding cards and offer Grant only until granted (#156)
-
-### Documentation
-- Update changelog for v0.9.43
-
-### Maintenance
-- **release:** Bump actions to Node 24 majors and pin Ubuntu LTS runner (#147)
-## [0.9.34] - 2026-10-27
-
-### Features
-- Manage custom categories with smart delete and ordering (#133)
-- Improve session title generation and capture title edits (#134)
-- Move accounts button to menubar (#136)
-- **tooling:** Windows drive-app skill and CDP driver (#142)
-
-### Bug Fixes
-- Give every toast the same fixed width and wrap long messages (#130)
-- **toast:** Narrow toasts to 16rem, just under the day summary column (#131)
-- **capture:** Read browser URLs off the sampler thread and support Firefox-family (#137)
-- **capture:** Detect video and calls, display-off and lock, and idle wrap on Windows (#138)
-- **windows:** Settings in AppData, Windows paths, elevated rize, and adopt retries (#139)
-- **ui:** Windows-honest AI copy, no energy monitor, single title bar (#140)
-- **windows:** Build without a signing key, OpenRize branding, rize on PATH, background login item (#143)
-- **pulse:** Anchor Pulse to the taskbar corner and size panels per monitor on Windows (#141)
-- **windows:** Stop the installer smoke test hanging without a word (#146)
-
-### Documentation
-- **agents:** Never attribute agents in git history or on GitHub (#144)
-- Update changelog for v0.9.33
-
-### Other Changes
-- Update readme
-## [0.9.23] - 2026-10-25
-
-### Features
-- Add local accounts with separate data per name (#126)
-
-### Bug Fixes
-- Draw timer drop indicator in the gap between cards (#123)
-- Polish timer drag reorder geometry, a11y announcements, and arrow containment (#125)
-- Preserve manual timers across upgrades with versioned migration (#124)
-- Keep toasts in the corner, add a close button, and stop review actions overlapping (#129)
-
-### Documentation
-- Update changelog for v0.9.23
-
-### Maintenance
-- **release:** Add opt-in verified R2 publishing (#127)
-- **release:** Publish website installers from an in-repo script (#128)
-## [0.9.20] - 2026-10-20
-
-### Features
-- Timer card menu with editable time segments and add to calendar (#114)
-- Save a timer's state on demand and browse saved states (#119)
-- App-wide compact toast on Radix primitives (#120)
-- Reorder stopwatches with native dragging and animated menu moves (#121)
-
-### Bug Fixes
-- Deleting an entry no longer deletes its category, project, rules or app defaults (#111)
-- Offer unapprove in one tap where deleting an approved entry is refused (#112)
-- Keep single-row timesheet menu visible (#113)
-- Soften shared donut segment corners (#115)
-- **breaks:** Let the welcome card collapse to the corner pill (#118)
-- Preserve breaks across sleep on macOS and Windows (#117)
-
-### Documentation
-- Correct Windows release and updater status in AGENTS.md (#122)
-## [0.9.12] - 2026-10-13
-
-### Features
-- Freeze approved time entries until they are unapproved (#104)
-- **release:** Opt-in platforms and artifact scope, and Windows in-app updates (#109)
-
-### Bug Fixes
-- Check frontend files from Claude worktrees (#105)
-- Require unapproval before changing approved time (#106)
-- **release:** Detect missing tags via refs API (#110)
-
-### Documentation
-- Add a seeded day and capture script for the website screenshots (#107)
-
-### Maintenance
-- Sync Klock by porting through inboxes instead of merging (#103)
-## [0.9.10] - 2026-10-12
-
-### Bug Fixes
-- Keep the menu bar panel out of tiling window managers and open reminder menus upward (#98)
-- **settings:** Show the app version next to up to date (#99)
-- **settings:** Show the installed version when up to date (#100)
-- Keep the live entry's second half after a split, and make every entry change undoable (#101)
-
-### Documentation
-- Update changelog for v0.9.10
-
-### Maintenance
-- Add the sync-klock skill and expose agent skills to Claude Code (#102)
-## [0.9.7] - 2026-10-09
-
-### Features
-- Add long-running stopwatch reminders and notification placement options (#97)
-
-### Bug Fixes
-- **calendar:** Keep the open tracking entry running when a manual session overlaps it (#92)
+- **security:** Fix the local security audit findings (0.10.3) (#181)
 
 ### Refactoring
-- Remove dead activity UI layer and duplicate IPC types (#94)
-- Use shared isTyping, plural and Glyph helpers (#95)
-- Share the SQLite error converter and APP_KEY (#96)
-- Remove unreachable NotImplemented dialog (#93)
-
-### Documentation
-- Update changelog for v0.9.7
-## [0.9.6] - 2026-10-07
-
-### Bug Fixes
-- **review:** Place merge buttons on a row under action buttons (#91)
-
-### Documentation
-- Update changelog for v0.9.6
-## [0.9.5] - 2026-10-07
+- Slim code comments to the non-obvious why (#174)
+- **ai:** Put Apple's model behind a provider layer and add the golden-set benchmark (#171)
+- Second comment audit, drop comments that restate code (#178)
+## [0.9.52] - 2026-11-05
 
 ### Features
-- **calendar:** Support keyboard deletion with Command-Z undo (#86)
-- **invoices:** Allow admin deletion of voided invoices (#87)
-- **settings:** Add permission cards and Apple Intelligence status indicator (#88)
-- **calendar:** Support entry merging, full undo/redo, and UI refinements (#90)
-
-### Refactoring
-- Remove AI workflow tracking (#89)
-
-### Documentation
-- Update changelog for v0.9.5
-## [0.9.0] - 2026-10-04
-
-### Features
-- Polish calendar and AI workflow tracking (#85)
-- **cli:** Sync bundled CLI installs for 0.9.0 (#83)
-
-### Documentation
-- Update changelog for v0.9.0
-## [0.8.14] - 2026-10-02
-
-### Features
-- **timesheets:** Rebuild Analyze > Timesheets as Rise's Day and Week matrix (#61)
-- **invoices:** Generate real invoice PDFs with live preview and auto-populated time (#60)
-- **clients:** Add a Clients page with archive, delete, and project assignment (#63)
-- **breaks:** Add break reminders with a top-right panel, scheduled breaks, and break history (#64)
-- **ui:** Rounded/sharper shape, custom tooltips, dark default, tab baselines (#72)
-- **ui:** Restore sharper gutters, break out ai settings, calendar tooltips and today indicator (#76)
-- **activity:** Add 20-second app-switch grace period to debounce activity fragmentation (#75)
-- **platform:** Add experimental Windows support, built from source (#78)
-- **agents:** Track coding agents as jobs, bill guarded loop time, and add threads (#74)
-- **cli:** Rize drives OpenRize from the terminal, with the app open or closed (#67)
-- **ui:** Category and break cleanups, autosaving title editor, condensed summaries (#80)
-- **agents:** Gate agent tracking behind Advanced workflow tracking setting (#81)
-
-### Bug Fixes
-- **calendar:** Wrap entry text when the block has vertical room instead of truncating (#62)
-- **tracking:** Run a single app instance so an orphaned segment cannot extend a session forever (#65)
-- **timesheet:** Prevent approved actions overlapping duration (#66)
-- **breaks:** Anchor reminder menus and isolate dev identity (#68)
-- **calendar:** Show breaks as gray entries and drop the day summary placeholder (#69)
-- **calendar:** Draw only official breaks (#71)
-- **calendar:** Stop clipped lane chips and label the break band in the day view (#77)
-- **calendar:** Expand review widget hit targets (#82)
-- **calendar:** Restore review save action (#84)
-
-### Documentation
-- Update changelog for v0.8.0
-- Update changelog for v0.8.3 (#70)
-- Update changelog for v0.8.5
-- **cli:** Add rize man page (#79)
-- Update changelog for v0.8.13
-- Update changelog for v0.8.14
-
-### Maintenance
-- Update release doc
-- **release:** Disable dependency and compiler caches for signed releases (#73)
-## [0.4.19] - 2026-09-29
-
-### Features
+- **timers:** Rust timer store with persistence and tests
+- **tray:** Macos menu-bar icon reflecting active timers
+- **ui:** App shell with header and sidebar
+- **trackers:** Concurrent stopwatch widgets
+- **ui:** Settings tab, idle-on-create trackers, hour-dial widgets
+- **ui:** Confirm reset and delete with native OS alerts
+- **ui:** Replace the native alert with an in-app confirm dialog
+- **activity:** Capture active windows; wire dashboard, sessions, focus, breaks
+- Implement P0 foundations and P1 core tracking with Calendar day view (#11)
+- **timers:** Bring back manual multi-timer page and stopwatch widgets (#15)
+- **calendar:** Add drag sessions and zoomable five-to-five day (#28)
+- **apps:** Add interactive daily timeline view (#27)
+- **entries:** Make time entries read-only and handle empty project state (#29)
 - **calendar:** Live-updating recording session and 5-min drag snap (#32)
 - **settings:** Add tracking hours schedule and capture gating (#33)
 - **calendar:** Add panel tabs, a recording now line, and launch at login (#35)
@@ -242,8 +52,50 @@ All notable changes are documented here. Entries are generated from commit histo
 - **calendar:** Remove AI review prompt from the day summary (#56)
 - **calendar:** Accent-colored entries, no left bars, labels under the time row (#57)
 - **ui:** Restrict review yellow-orange color to review call to action (#59)
+- **timesheets:** Rebuild Analyze > Timesheets as Rise's Day and Week matrix (#61)
+- **invoices:** Generate real invoice PDFs with live preview and auto-populated time (#60)
+- **clients:** Add a Clients page with archive, delete, and project assignment (#63)
+- **breaks:** Add break reminders with a top-right panel, scheduled breaks, and break history (#64)
+- **ui:** Rounded/sharper shape, custom tooltips, dark default, tab baselines (#72)
+- **ui:** Restore sharper gutters, break out ai settings, calendar tooltips and today indicator (#76)
+- **activity:** Add 20-second app-switch grace period to debounce activity fragmentation (#75)
+- **platform:** Add experimental Windows support, built from source (#78)
+- **agents:** Track coding agents as jobs, bill guarded loop time, and add threads (#74)
+- **cli:** Rize drives OpenRize from the terminal, with the app open or closed (#67)
+- **ui:** Category and break cleanups, autosaving title editor, condensed summaries (#80)
+- **agents:** Gate agent tracking behind Advanced workflow tracking setting (#81)
+- Polish calendar and AI workflow tracking (#85)
+- **cli:** Sync bundled CLI installs for 0.9.0 (#83)
+- **calendar:** Support keyboard deletion with Command-Z undo (#86)
+- **invoices:** Allow admin deletion of voided invoices (#87)
+- **settings:** Add permission cards and Apple Intelligence status indicator (#88)
+- **calendar:** Support entry merging, full undo/redo, and UI refinements (#90)
+- Add long-running stopwatch reminders and notification placement options (#97)
+- Freeze approved time entries until they are unapproved (#104)
+- **release:** Opt-in platforms and artifact scope, and Windows in-app updates (#109)
+- Timer card menu with editable time segments and add to calendar (#114)
+- Save a timer's state on demand and browse saved states (#119)
+- App-wide compact toast on Radix primitives (#120)
+- Reorder stopwatches with native dragging and animated menu moves (#121)
+- Add local accounts with separate data per name (#126)
+- Manage custom categories with smart delete and ordering (#133)
+- Improve session title generation and capture title edits (#134)
+- Move accounts button to menubar (#136)
+- **tooling:** Windows drive-app skill and CDP driver (#142)
+- **permissions:** Require a relaunch after Accessibility is allowed in a running app (#150)
+- **permissions:** Ask for Accessibility on first run and show its real state in Settings (#151)
+- **settings:** Add dev-only tools to simulate permissions and re-run onboarding (#155)
+- **entries:** Give every minute one owner so totals and invoices are true (#157)
+- **onboarding:** Turn Continue into Restart required once a grant needs a restart (#158)
+- Verification skill, feature map, skill lint and dry-run levers (#159)
+- **timers:** Group manual stopwatches (#161)
+- **privacy:** Erase what private browser windows showed once their time is classified (#168)
+- **windows:** Put the window controls in our own top bar (#170)
 
 ### Bug Fixes
+- **ui:** Scroll sidebar on its own, standardise nav rows, retarget dial
+- **ui:** Preselect neither confirm button, and colour Cancel
+- **icons:** Correct macOS app-icon margin and regenerate menu-bar glyphs
 - **capture:** Count foreground video as presence and keep sessions continuous (#34)
 - Resolve invoice picker, project due date, timesheet flicker, app scroll, and session defaults (#39)
 - Editable entry times, unapprove flow, pending drag sessions, untitled live sessions (#41)
@@ -253,52 +105,106 @@ All notable changes are documented here. Entries are generated from commit histo
 - **sidebar:** Use muted accent-soft for the selected nav item (#49)
 - **calendar:** Move billable toggle below project in entry review sidebar (#51)
 - **apps:** Fix timeline clipping, restore palette, and default to timeline tab (#58)
+- **calendar:** Wrap entry text when the block has vertical room instead of truncating (#62)
+- **tracking:** Run a single app instance so an orphaned segment cannot extend a session forever (#65)
+- **timesheet:** Prevent approved actions overlapping duration (#66)
+- **breaks:** Anchor reminder menus and isolate dev identity (#68)
+- **calendar:** Show breaks as gray entries and drop the day summary placeholder (#69)
+- **calendar:** Draw only official breaks (#71)
+- **calendar:** Stop clipped lane chips and label the break band in the day view (#77)
+- **calendar:** Expand review widget hit targets (#82)
+- **calendar:** Restore review save action (#84)
+- **review:** Place merge buttons on a row under action buttons (#91)
+- **calendar:** Keep the open tracking entry running when a manual session overlaps it (#92)
+- Keep the menu bar panel out of tiling window managers and open reminder menus upward (#98)
+- **settings:** Show the app version next to up to date (#99)
+- **settings:** Show the installed version when up to date (#100)
+- Keep the live entry's second half after a split, and make every entry change undoable (#101)
+- Check frontend files from Claude worktrees (#105)
+- Require unapproval before changing approved time (#106)
+- **release:** Detect missing tags via refs API (#110)
+- Deleting an entry no longer deletes its category, project, rules or app defaults (#111)
+- Offer unapprove in one tap where deleting an approved entry is refused (#112)
+- Keep single-row timesheet menu visible (#113)
+- Soften shared donut segment corners (#115)
+- **breaks:** Let the welcome card collapse to the corner pill (#118)
+- Preserve breaks across sleep on macOS and Windows (#117)
+- Draw timer drop indicator in the gap between cards (#123)
+- Polish timer drag reorder geometry, a11y announcements, and arrow containment (#125)
+- Preserve manual timers across upgrades with versioned migration (#124)
+- Keep toasts in the corner, add a close button, and stop review actions overlapping (#129)
+- Give every toast the same fixed width and wrap long messages (#130)
+- **toast:** Narrow toasts to 16rem, just under the day summary column (#131)
+- **capture:** Read browser URLs off the sampler thread and support Firefox-family (#137)
+- **capture:** Detect video and calls, display-off and lock, and idle wrap on Windows (#138)
+- **windows:** Settings in AppData, Windows paths, elevated rize, and adopt retries (#139)
+- **ui:** Windows-honest AI copy, no energy monitor, single title bar (#140)
+- **windows:** Build without a signing key, OpenRize branding, rize on PATH, background login item (#143)
+- **pulse:** Anchor Pulse to the taskbar corner and size panels per monitor on Windows (#141)
+- **windows:** Stop the installer smoke test hanging without a word (#146)
+- **calendar:** Merge entries that sit a few minutes apart (#148)
+- **capture:** Read window titles when the focused window is missing or untitled (#149)
+- **permissions:** Shorten the relaunch prompt to one line (#152)
+- **permissions:** Name the real permissions on the first-run screen (#153)
+- **merge:** Always show merge up and down, drop the merge shortcut, and merge overlaps (#154)
+- **permissions:** Show Granted or Not granted on the onboarding cards and offer Grant only until granted (#156)
+- **timers:** Stamp Start from the wall clock and store segments as a start and an end (#160)
+- **windows:** Close parity gaps in capture, browser URLs, tray, reminders and UI (#162)
+- **tooling:** Skip build output in the skills path lint (#163)
+- **windows:** Keep all data and settings in Local AppData (#164)
+- **windows:** Put rize back on the user PATH at every launch (#165)
+- **windows:** Tell apart web apps and apps that share a runtime (#166)
+- **tooling:** Keep Windows drive sessions alive across app restarts (#169)
+
+### Refactoring
+- Remove AI workflow tracking (#89)
+- Remove dead activity UI layer and duplicate IPC types (#94)
+- Use shared isTyping, plural and Glyph helpers (#95)
+- Share the SQLite error converter and APP_KEY (#96)
+- Remove unreachable NotImplemented dialog (#93)
 
 ### Documentation
+- Rewrite README for the shipped P0-P4 core (#16)
+- Update changelog for v0.3.6
 - **readme:** Centered header with logo, tagline, nav links, and badges (#40)
 - Update changelog for v0.4.2
 - Update changelog for v0.4.5
 - Update changelog for v0.4.7
 - Update changelog for v0.4.15
 - Update changelog for v0.4.19
-
-### Maintenance
-- **release:** Bump version to 0.4.15 (#55)
-
-### Other Changes
-- Remove local skill
-- Update README.md
-- Update OpenRize description for clarity
-## [0.3.6] - 2026-09-25
-
-### Features
-- **timers:** Rust timer store with persistence and tests
-- **tray:** Macos menu-bar icon reflecting active timers
-- **ui:** App shell with header and sidebar
-- **trackers:** Concurrent stopwatch widgets
-- **ui:** Settings tab, idle-on-create trackers, hour-dial widgets
-- **ui:** Confirm reset and delete with native OS alerts
-- **ui:** Replace the native alert with an in-app confirm dialog
-- **activity:** Capture active windows; wire dashboard, sessions, focus, breaks
-- Implement P0 foundations and P1 core tracking with Calendar day view (#11)
-- **timers:** Bring back manual multi-timer page and stopwatch widgets (#15)
-- **calendar:** Add drag sessions and zoomable five-to-five day (#28)
-- **apps:** Add interactive daily timeline view (#27)
-- **entries:** Make time entries read-only and handle empty project state (#29)
-
-### Bug Fixes
-- **ui:** Scroll sidebar on its own, standardise nav rows, retarget dial
-- **ui:** Preselect neither confirm button, and colour Cancel
-- **icons:** Correct macOS app-icon margin and regenerate menu-bar glyphs
-
-### Documentation
-- Rewrite README for the shipped P0-P4 core (#16)
-- Update changelog for v0.3.6
+- Update changelog for v0.8.0
+- Update changelog for v0.8.3 (#70)
+- Update changelog for v0.8.5
+- **cli:** Add rize man page (#79)
+- Update changelog for v0.8.13
+- Update changelog for v0.8.14
+- Update changelog for v0.9.0
+- Update changelog for v0.9.5
+- Update changelog for v0.9.6
+- Update changelog for v0.9.7
+- Update changelog for v0.9.10
+- Add a seeded day and capture script for the website screenshots (#107)
+- Correct Windows release and updater status in AGENTS.md (#122)
+- Update changelog for v0.9.23
+- **agents:** Never attribute agents in git history or on GitHub (#144)
+- Update changelog for v0.9.33
+- Update changelog for v0.9.43
+- Update changelog for v0.9.45
+- **ai:** Design local AI models (#167)
+- Update changelog for v0.9.52
 
 ### Maintenance
 - Add generated changelog and release version guard (#26)
 - Pin git-cliff to v2.14.2 in release workflow (#30)
 - Bump git-cliff-action to v4.9.1 (#31)
+- **release:** Bump version to 0.4.15 (#55)
+- Update release doc
+- **release:** Disable dependency and compiler caches for signed releases (#73)
+- Add the sync-klock skill and expose agent skills to Claude Code (#102)
+- Sync Klock by porting through inboxes instead of merging (#103)
+- **release:** Add opt-in verified R2 publishing (#127)
+- **release:** Publish website installers from an in-repo script (#128)
+- **release:** Bump actions to Node 24 majors and pin Ubuntu LTS runner (#147)
 
 ### Other Changes
 - Init create tauri app
@@ -337,3 +243,7 @@ All notable changes are documented here. Entries are generated from commit histo
 - Move timers into Manual sidebar section (#23)
 - Add bulk timesheet entry deletion (#22)
 - Add calendar manual time entry support (#24)
+- Remove local skill
+- Update README.md
+- Update OpenRize description for clarity
+- Update readme

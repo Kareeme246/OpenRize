@@ -9,17 +9,6 @@ Before tagging, run a maintenance pass of the verification skill
 (`.agents/skills/drive-app/references/maintenance.md`) and keep its coverage table with the
 release notes handoff.
 
-Also check both lockfiles for known advisories. This is a manual step because the project keeps
-its checks to `pnpm verify` and adds no extra CI workflows:
-
-```sh
-cargo install cargo-audit --locked   # once
-cargo audit --file src-tauri/Cargo.lock
-pnpm audit --prod
-```
-
-Fix or consciously accept each finding before going on.
-
 To cut a release:
 
 1. On `main`, regenerate and commit the changelog:
